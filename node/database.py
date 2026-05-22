@@ -1693,6 +1693,10 @@ def _migrate():
             con.execute("ALTER TABLE users ADD COLUMN identity_pubkey TEXT")
         if "account_home_server_id" not in cols:
             con.execute("ALTER TABLE users ADD COLUMN account_home_server_id TEXT DEFAULT ''")
+        if "federation_sync_room_allowlist" not in cols:
+            con.execute("ALTER TABLE users ADD COLUMN federation_sync_room_allowlist TEXT DEFAULT ''")
+        if "federation_sync_room_allowlist_at" not in cols:
+            con.execute("ALTER TABLE users ADD COLUMN federation_sync_room_allowlist_at INTEGER DEFAULT 0")
         # Identity split: `nickname` is the unique handle (UI label
         # "Username"), `display_name` is the freeform display label
         # (UI label "Nickname") that defaults to nickname when NULL.
@@ -2230,6 +2234,31 @@ def _migrate():
                 last_origin_created_at TEXT DEFAULT '',
                 updated_at       TEXT DEFAULT (datetime('now')),
                 PRIMARY KEY (room_name, origin_server_id)
+            )
+            """
+        )
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS user_federation_sync_state (
+                user_id INTEGER PRIMARY KEY,
+                source_server_id TEXT NOT NULL DEFAULT '',
+                source_public_url TEXT NOT NULL DEFAULT '',
+                in_progress INTEGER NOT NULL DEFAULT 0,
+                done INTEGER NOT NULL DEFAULT 0,
+                error TEXT NOT NULL DEFAULT '',
+                progress_pct INTEGER NOT NULL DEFAULT 0,
+                phase TEXT NOT NULL DEFAULT '',
+                hint TEXT NOT NULL DEFAULT '',
+                social_posts_total INTEGER NOT NULL DEFAULT 0,
+                social_posts_imported INTEGER NOT NULL DEFAULT 0,
+                social_posts_cursor TEXT NOT NULL DEFAULT '',
+                social_posts_omitted_at_export INTEGER NOT NULL DEFAULT 0,
+                rooms_joined INTEGER NOT NULL DEFAULT 0,
+                dm_linked INTEGER NOT NULL DEFAULT 0,
+                counters_json TEXT NOT NULL DEFAULT '{}',
+                started_at INTEGER NOT NULL DEFAULT 0,
+                finished_at INTEGER NOT NULL DEFAULT 0,
+                updated_at INTEGER NOT NULL DEFAULT 0
             )
             """
         )
@@ -4440,6 +4469,281 @@ def get_user_account_home_server_id(user_id: int) -> str:
     return ""
 
 
+def clear_user_federation_sync_state(user_id: int) -> None:
+    """Remove persisted federation account-sync progress for a user."""
+    uid = int(user_id or 0)
+    if uid <= 0:
+        return
+    try:
+        with _conn() as con:
+            con.execute("DELETE FROM user_federation_sync_state WHERE user_id=?", (uid,))
+            con.commit()
+    except Exception:
+        pass
+
+
+def get_user_federation_sync_state(user_id: int) -> dict:
+    """Load persisted sync overlay state (empty dict if none)."""
+    uid = int(user_id or 0)
+    if uid <= 0:
+        return {}
+    try:
+        with _conn() as con:
+            row = con.execute(
+                "SELECT * FROM user_federation_sync_state WHERE user_id=?",
+                (uid,),
+            ).fetchone()
+        if not row:
+            return {}
+        d = dict(row)
+        extra: dict = {}
+        try:
+            raw = str(d.get("counters_json") or "").strip()
+            if raw:
+                parsed = json.loads(raw)
+                if isinstance(parsed, dict):
+                    extra = parsed
+        except Exception:
+            extra = {}
+        out = {
+            "source_server_id": str(d.get("source_server_id") or "").strip(),
+            "source_base": str(d.get("source_public_url") or "").strip(),
+            "source_public_url": str(d.get("source_public_url") or "").strip(),
+            "in_progress": bool(int(d.get("in_progress") or 0)),
+            "done": bool(int(d.get("done") or 0)),
+            "error": str(d.get("error") or "").strip(),
+            "progress_pct": int(d.get("progress_pct") or 0),
+            "phase": str(d.get("phase") or "").strip(),
+            "hint": str(d.get("hint") or "").strip(),
+            "social_posts_total": int(d.get("social_posts_total") or 0),
+            "social_posts_imported": int(d.get("social_posts_imported") or 0),
+            "social_posts_cursor": str(d.get("social_posts_cursor") or "").strip(),
+            "social_posts_omitted_at_export": int(d.get("social_posts_omitted_at_export") or 0),
+            "rooms_joined": int(d.get("rooms_joined") or 0),
+            "dm_linked": int(d.get("dm_linked") or 0),
+            "started_at": int(d.get("started_at") or 0),
+            "finished_at": int(d.get("finished_at") or 0),
+            "updated_at": int(d.get("updated_at") or 0),
+        }
+        if isinstance(extra.get("counters"), dict):
+            out["counters"] = {k: int(v or 0) for k, v in extra["counters"].items()}
+        if isinstance(extra.get("totals"), dict):
+            out["totals"] = {k: int(v or 0) for k, v in extra["totals"].items()}
+        for k, v in extra.items():
+            if k in ("counters", "totals"):
+                continue
+            if k not in out:
+                out[k] = v
+        return out
+    except Exception:
+        return {}
+
+
+def upsert_user_federation_sync_state(user_id: int, patch: dict) -> None:
+    """Merge sync progress into SQLite (used by account-sync overlay)."""
+    uid = int(user_id or 0)
+    if uid <= 0:
+        return
+    cur = get_user_federation_sync_state(uid)
+    now = int(time.time())
+    merged = dict(cur)
+    merged.update(patch or {})
+    merged["updated_at"] = now
+    if "started_at" not in merged or not int(merged.get("started_at") or 0):
+        merged["started_at"] = now
+    source_base = str(merged.get("source_base") or merged.get("source_public_url") or "").strip()[:512]
+    if source_base:
+        merged["source_public_url"] = source_base
+    extra: dict = {}
+    if isinstance(cur.get("counters"), dict):
+        extra["counters"] = dict(cur["counters"])
+    if isinstance(cur.get("totals"), dict):
+        extra["totals"] = dict(cur["totals"])
+    if isinstance(merged.get("counters"), dict):
+        c = dict(extra.get("counters") or {})
+        c.update({k: int(v or 0) for k, v in merged["counters"].items()})
+        extra["counters"] = c
+    if isinstance(merged.get("totals"), dict):
+        t = dict(extra.get("totals") or {})
+        t.update({k: int(v or 0) for k, v in merged["totals"].items()})
+        extra["totals"] = t
+    counters_json = json.dumps(extra, separators=(",", ":"))
+    try:
+        with _conn() as con:
+            con.execute(
+                """
+                INSERT INTO user_federation_sync_state (
+                    user_id, source_server_id, source_public_url,
+                    in_progress, done, error, progress_pct, phase, hint,
+                    social_posts_total, social_posts_imported, social_posts_cursor,
+                    social_posts_omitted_at_export, rooms_joined, dm_linked,
+                    counters_json, started_at, finished_at, updated_at
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                ON CONFLICT(user_id) DO UPDATE SET
+                    source_server_id=excluded.source_server_id,
+                    source_public_url=excluded.source_public_url,
+                    in_progress=excluded.in_progress,
+                    done=excluded.done,
+                    error=excluded.error,
+                    progress_pct=excluded.progress_pct,
+                    phase=excluded.phase,
+                    hint=excluded.hint,
+                    social_posts_total=excluded.social_posts_total,
+                    social_posts_imported=excluded.social_posts_imported,
+                    social_posts_cursor=excluded.social_posts_cursor,
+                    social_posts_omitted_at_export=excluded.social_posts_omitted_at_export,
+                    rooms_joined=excluded.rooms_joined,
+                    dm_linked=excluded.dm_linked,
+                    counters_json=excluded.counters_json,
+                    started_at=CASE WHEN user_federation_sync_state.started_at > 0
+                        THEN user_federation_sync_state.started_at ELSE excluded.started_at END,
+                    finished_at=excluded.finished_at,
+                    updated_at=excluded.updated_at
+                """,
+                (
+                    uid,
+                    str(merged.get("source_server_id") or "").strip()[:128],
+                    str(merged.get("source_public_url") or source_base or "").strip()[:512],
+                    1 if merged.get("in_progress") else 0,
+                    1 if merged.get("done") else 0,
+                    str(merged.get("error") or "")[:500],
+                    max(0, min(100, int(merged.get("progress_pct") or 0))),
+                    str(merged.get("phase") or "")[:64],
+                    str(merged.get("hint") or "")[:220],
+                    int(merged.get("social_posts_total") or 0),
+                    int(merged.get("social_posts_imported") or 0),
+                    str(merged.get("social_posts_cursor") or "")[:256],
+                    int(merged.get("social_posts_omitted_at_export") or 0),
+                    int(merged.get("rooms_joined") or 0),
+                    int(merged.get("dm_linked") or 0),
+                    counters_json[:200_000],
+                    int(merged.get("started_at") or now),
+                    int(merged.get("finished_at") or 0),
+                    now,
+                ),
+            )
+            con.commit()
+    except Exception:
+        pass
+
+
+def get_user_sync_room_allowlist(user_id: int) -> set:
+    """Joined channel names last imported from the user's home node."""
+    uid = int(user_id or 0)
+    if uid <= 0:
+        return set()
+    try:
+        with _conn() as con:
+            row = con.execute(
+                "SELECT federation_sync_room_allowlist FROM users WHERE id=?",
+                (uid,),
+            ).fetchone()
+        if not row:
+            return set()
+        raw = str(row["federation_sync_room_allowlist"] or "").strip()
+        if not raw:
+            return set()
+        arr = json.loads(raw)
+        if not isinstance(arr, list):
+            return set()
+        out: set = set()
+        for item in arr:
+            if not isinstance(item, str):
+                continue
+            nm = item.strip().lower()
+            if nm:
+                out.add(nm)
+        return out
+    except Exception:
+        return set()
+
+
+def get_user_sync_room_allowlist_at(user_id: int) -> float:
+    uid = int(user_id or 0)
+    if uid <= 0:
+        return 0.0
+    try:
+        with _conn() as con:
+            row = con.execute(
+                "SELECT federation_sync_room_allowlist_at FROM users WHERE id=?",
+                (uid,),
+            ).fetchone()
+        if row:
+            return float(row["federation_sync_room_allowlist_at"] or 0)
+    except Exception:
+        pass
+    return 0.0
+
+
+def set_user_sync_room_allowlist(user_id: int, names) -> bool:
+    """Persist authoritative joined-room names from home-node sync."""
+    uid = int(user_id or 0)
+    if uid <= 0:
+        return False
+    cleaned: list[str] = []
+    seen: set = set()
+    for raw in names or []:
+        nm = str(raw or "").strip().lower()
+        if not nm or nm in seen:
+            continue
+        seen.add(nm)
+        cleaned.append(nm)
+    try:
+        with _conn() as con:
+            con.execute(
+                """
+                UPDATE users
+                SET federation_sync_room_allowlist=?,
+                    federation_sync_room_allowlist_at=?
+                WHERE id=?
+                """,
+                (json.dumps(cleaned), int(time.time()), uid),
+            )
+            con.commit()
+        return True
+    except Exception:
+        return False
+
+
+def remove_room_from_sync_allowlist(user_id: int, room_name: str) -> None:
+    """Drop one channel from the home-node sidebar allowlist (remote leave)."""
+    uid = int(user_id or 0)
+    nm = str(room_name or "").strip().lower()
+    if uid <= 0 or not nm:
+        return
+    allowlist = get_user_sync_room_allowlist(uid)
+    if nm not in allowlist:
+        return
+    allowlist.discard(nm)
+    try:
+        set_user_sync_room_allowlist(uid, sorted(allowlist))
+        prune_room_order_for_user(uid, allowlist)
+    except Exception:
+        pass
+
+
+def apply_sync_room_allowlist(user_id: int, keep_names: set) -> int:
+    """Reconcile local joins + sidebar order to the home-node allowlist."""
+    uid = int(user_id or 0)
+    if uid <= 0:
+        return 0
+    keep = {str(n or "").strip().lower() for n in (keep_names or set()) if n}
+    try:
+        set_user_sync_room_allowlist(uid, sorted(keep))
+    except Exception:
+        pass
+    pruned = 0
+    try:
+        pruned = int(reconcile_user_room_memberships(uid, keep) or 0)
+    except Exception:
+        pruned = 0
+    try:
+        prune_room_order_for_user(uid, keep)
+    except Exception:
+        pass
+    return pruned
+
+
 def set_user_account_home_server_id(user_id: int, server_id: str, *, force: bool = False) -> bool:
     """Pin which federation server owns this account for sync gating."""
     uid = int(user_id or 0)
@@ -4709,6 +5013,38 @@ def _apply_synced_plaintext_for_author(
     return int(local_id)
 
 
+def relink_wall_posts_to_account(user_id: int) -> int:
+    """Move synced wall posts off duplicate mirror rows onto the signed-in account."""
+    uid = int(user_id or 0)
+    if uid <= 0:
+        return 0
+    me = get_user_by_id(uid) or {}
+    gid = str(me.get("global_user_id") or "").strip()
+    if not gid:
+        return 0
+    moved = 0
+    try:
+        with _conn() as con:
+            dupes = con.execute(
+                "SELECT id FROM users WHERE global_user_id=? AND id!=?",
+                (gid, uid),
+            ).fetchall()
+            for row in dupes:
+                oid = int(row["id"] or 0)
+                if oid <= 0:
+                    continue
+                cur = con.execute(
+                    "UPDATE wall_posts SET user_id=? WHERE user_id=?",
+                    (uid, oid),
+                )
+                moved += int(cur.rowcount or 0)
+            if moved:
+                con.commit()
+    except Exception:
+        return moved
+    return moved
+
+
 def apply_synced_social_post(
     payload: Dict,
     origin_server_id: str,
@@ -4725,15 +5061,23 @@ def apply_synced_social_post(
     if existing:
         return int(existing)
 
-    author = _federated_wall_actor(
-        payload,
-        origin,
-        gid_key="author_global_user_id",
-        nick_key="nickname",
-        require_global_id=True,
-    )
+    author_gid = str(payload.get("author_global_user_id") or "").strip()
+    viewer_uid = int(viewer_user_id or 0)
+    author: Optional[Dict] = None
+    if viewer_uid > 0 and author_gid:
+        viewer_row = get_user_by_id(viewer_uid) or {}
+        if str(viewer_row.get("global_user_id") or "").strip() == author_gid:
+            author = viewer_row
     if not author:
-        lookup = _lookup_local_user_by_gid(str(payload.get("author_global_user_id") or ""))
+        author = _federated_wall_actor(
+            payload,
+            origin,
+            gid_key="author_global_user_id",
+            nick_key="nickname",
+            require_global_id=True,
+        )
+    if not author:
+        lookup = _lookup_local_user_by_gid(author_gid)
         if lookup:
             author = lookup
     if not author:
@@ -10804,24 +11148,26 @@ def resolve_global_user_home_server_id(global_user_id: str) -> str:
         return ""
     ident = get_or_create_local_server_identity() or {}
     local_sid = str(ident.get("server_id") or "").strip()
-    # Registered local account always homes on this node. Checking
-    # federation_user_profiles first misclassified same-node friends as
-    # remote (stale origin rows), which routed call_offer through
-    # federation instead of the live WS path — callees on Android/desktop
-    # never saw a direct incoming-call popup.
+    profile_origin = get_federation_profile_origin(gid)
+    # Shadow mirrors (account sync / DM federation) pin a remote origin;
+    # they must not be treated as homed here just because a users row exists.
+    if profile_origin and local_sid and profile_origin != local_sid:
+        return profile_origin
     try:
         with _conn() as con:
             row = con.execute(
-                "SELECT id FROM users WHERE global_user_id=? LIMIT 1",
+                "SELECT id, account_home_server_id FROM users WHERE global_user_id=? LIMIT 1",
                 (gid,),
             ).fetchone()
         if row:
+            account_home = str(row["account_home_server_id"] or "").strip()
+            if account_home:
+                return account_home
             return local_sid
     except Exception:
         pass
-    origin = get_federation_profile_origin(gid)
-    if origin:
-        return origin
+    if profile_origin:
+        return profile_origin
     return ""
 
 
@@ -11730,6 +12076,63 @@ def apply_federated_wall_repost_created(payload: Dict, origin_server_id: str) ->
     return True
 
 
+def disambiguate_federated_nickname(
+    nickname: str,
+    global_user_id: str,
+    origin_server_id: str = "",
+) -> str:
+    """Pick a local nickname when the home-node nick is already taken here.
+
+    Federated mirrors are keyed by ``global_user_id``; the local ``nickname``
+    is display-only and may differ from the home node when this node already
+    has an unrelated account with the same name.
+    """
+    base = (nickname or "").strip()
+    if not base:
+        return ""
+    gid = (global_user_id or "").strip()
+    origin = (origin_server_id or "").strip()
+    tag = ""
+    if origin.startswith("srv_") and len(origin) > 8:
+        tag = origin[4:8].lower()
+    elif gid:
+        tag = gid.replace("-", "")[:4].lower()
+    candidates: list[str] = []
+    if tag:
+        trim = base[:24] if len(base) > 24 else base
+        for fmt in (f"{trim}_{tag}", f"{trim}{tag}"):
+            cand = fmt[:32]
+            if 2 <= len(cand) <= 32:
+                candidates.append(cand)
+    candidates.extend(suggest_available_usernames(base[:20], count=8))
+    seen: set[str] = {base.lower()}
+    for cand in candidates:
+        c = (cand or "").strip()
+        if not c or c.lower() in seen:
+            continue
+        seen.add(c.lower())
+        if is_username_available(c):
+            return c
+    fallback = f"{base[:20]}_{secrets.token_hex(2)}"[:32]
+    return fallback if is_username_available(fallback) else ""
+
+
+def room_blocks_home_sync_mirror(room: Optional[Dict]) -> bool:
+    """True when a local channel name is owned by someone other than the sync shell.
+
+    Prevents account sync from joining a traveler's home channel name that
+    already exists on this node as an unrelated community channel.
+    """
+    if not room:
+        return False
+    try:
+        fed_uid = int(get_or_create_federation_system_user())
+        owner = int(room.get("owner_id") or 0)
+    except Exception:
+        return True
+    return owner != fed_uid
+
+
 def ensure_federated_dm_local_user(
     global_user_id: str,
     nickname: str,
@@ -11782,16 +12185,38 @@ def ensure_federated_dm_local_user(
             ).fetchone()
         other_gid = str((gid_row["global_user_id"] if gid_row else "") or "").strip()
         if other_gid and other_gid != gid:
-            return None
-        if not other_gid:
-            try:
-                with _conn() as con:
-                    con.execute("UPDATE users SET global_user_id=? WHERE id=?", (gid, uid))
-                    con.commit()
-            except Exception:
-                pass
-            return get_user_by_id(uid)
-        return get_user_by_id(uid) if other_gid == gid else None
+            alt = disambiguate_federated_nickname(nick, gid, origin_server_id)
+            if not alt:
+                return None
+            nick = alt
+            existing = None
+        elif not other_gid:
+            # Do not attach a federated gid to an unrelated local account that
+            # happened to register the same nickname on this node first.
+            prof = get_federation_user_profile_row(gid)
+            prof_nick = str((prof or {}).get("nickname") or "").strip().lower()
+            if prof_nick and prof_nick == nick.lower():
+                try:
+                    with _conn() as con:
+                        con.execute("UPDATE users SET global_user_id=? WHERE id=?", (gid, uid))
+                        con.commit()
+                except Exception:
+                    pass
+                upsert_federation_user_profile(
+                    gid,
+                    str((get_user_by_id(uid) or {}).get("nickname") or nick),
+                    display_name=display_name or "",
+                    avatar=avatar or "",
+                    origin_server_id=origin_server_id or "",
+                )
+                return get_user_by_id(uid)
+            alt = disambiguate_federated_nickname(nick, gid, origin_server_id)
+            if not alt:
+                return None
+            nick = alt
+            existing = None
+        else:
+            return get_user_by_id(uid) if other_gid == gid else None
     upsert_federation_user_profile(
         gid,
         nick,
@@ -11801,6 +12226,11 @@ def ensure_federated_dm_local_user(
     )
     pw_hash = _bcrypt.hashpw(secrets.token_urlsafe(32).encode(), _bcrypt.gensalt()).decode()
     uid = create_user_with_hash(nick, pw_hash, gid)
+    if uid is None:
+        alt = disambiguate_federated_nickname(nick, gid, origin_server_id)
+        if alt and alt.lower() != nick.lower():
+            uid = create_user_with_hash(alt, pw_hash, gid)
+            nick = alt
     if uid is None:
         with _conn() as con:
             row = con.execute(
@@ -11812,6 +12242,13 @@ def ensure_federated_dm_local_user(
                 (gid,),
             ).fetchone()
         return dict(row) if row else None
+    upsert_federation_user_profile(
+        gid,
+        nick,
+        display_name=display_name or "",
+        avatar=avatar or "",
+        origin_server_id=origin_server_id or "",
+    )
     return get_user_by_id(int(uid))
 
 
@@ -11828,6 +12265,25 @@ def get_or_create_federation_system_user() -> int:
     with _conn() as con:
         row = con.execute("SELECT id FROM users WHERE nickname=? COLLATE NOCASE", (nick,)).fetchone()
     return int(row["id"]) if row else 1
+
+
+def get_federation_user_profile_row(global_user_id: str) -> dict:
+    """Return federation_user_profiles row for UI enrichment (avatar, display_name)."""
+    gid = (global_user_id or "").strip()
+    if not gid:
+        return {}
+    try:
+        with _conn() as con:
+            row = con.execute(
+                """
+                SELECT global_user_id, nickname, display_name, avatar, bio, origin_server_id
+                FROM federation_user_profiles WHERE global_user_id=? LIMIT 1
+                """,
+                (gid,),
+            ).fetchone()
+        return dict(row) if row else {}
+    except Exception:
+        return {}
 
 
 def get_federation_profile_origin(global_user_id: str) -> str:
@@ -12527,6 +12983,7 @@ def list_room_message_participants(
                   FROM messages m
                   LEFT JOIN users u ON u.nickname = m.nickname COLLATE NOCASE
                  WHERE m.room_name=?
+                   AND COALESCE(TRIM(m.bridge_platform), '') = ''
                  GROUP BY m.nickname
                  ORDER BY MAX(m.created_at) DESC
                  LIMIT ?
@@ -12558,6 +13015,8 @@ def backfill_federation_room_members_from_messages(
     participants = list_room_message_participants(name, limit=limit)
     n = 0
     for row in participants:
+        if str(row.get("bridge_platform") or "").strip():
+            continue
         nick = str(row.get("nickname") or "").strip()
         if not nick:
             continue

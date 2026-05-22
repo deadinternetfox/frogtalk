@@ -175,7 +175,29 @@ def user_home_is_remote(user: dict) -> bool:
     return bool(home and local_sid and home != local_sid)
 
 
+def callee_session_on_local_node(callee_user: dict) -> bool:
+    """True when the callee has an active WebSocket session on this node.
+
+    Travelers homed elsewhere but currently connected here are rung via the
+    local call path so co-located visitors can call each other on a community
+    node without signaling through their home servers.
+    """
+    if not callee_user:
+        return False
+    uid = int(callee_user.get("id") or 0)
+    if uid <= 0:
+        return False
+    try:
+        from ws_manager import manager
+
+        return bool(manager.is_user_online(uid))
+    except Exception:
+        return False
+
+
 def is_remote_peer(callee_user: dict) -> bool:
+    if callee_session_on_local_node(callee_user):
+        return False
     return user_home_is_remote(callee_user)
 
 

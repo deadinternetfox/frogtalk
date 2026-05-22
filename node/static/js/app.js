@@ -97,6 +97,12 @@ const FtSync = {
     if (!s?.in_progress && !s?.done) return '';
     const hint = String(s.hint || fallback).trim();
     const p = this.pct(s);
+    const imported = Number(s.social_posts_imported || 0);
+    const total = Number(s.social_posts_total || 0);
+    if (total > 0 && (s.phase === 'social_posts' || imported < total)) {
+      const postLine = `posts ${imported}/${total}`;
+      return (p != null) ? `${hint} — ${postLine} (${p}%)` : `${hint} — ${postLine}`;
+    }
     return (p != null) ? `${hint} — ${p}%` : hint;
   },
 
@@ -174,7 +180,7 @@ try { window.FtSync = FtSync; } catch {}
 const App = {
   pendingInvite: null,  // Store invite code to process after login
   PENDING_CALL_KEY: 'ft_pending_incoming_call',
-  ASSET_RESET_VERSION: 'federation-sync-v11',
+  ASSET_RESET_VERSION: 'federation-sync-v20',
   easterEgg: null,
   easterTapCount: 0,
   easterTapTimer: null,
@@ -312,10 +318,103 @@ const App = {
   isAtHomeNode() {
     if (State.user && State.user.at_home_node === true) return true;
     if (State.user && State.user.at_home_node === false) return false;
+    return false;
+  },
+
+  async refreshIdentityFromMe() {
+    if (!State.token) return null;
+    try {
+      const res = await fetch('/api/auth/me', {
+        headers: { 'X-Session-Token': State.token },
+      });
+      if (!res.ok) return null;
+      const fresh = await res.json().catch(() => ({}));
+      State.user = Object.assign({}, State.user || {}, fresh);
+      if (fresh.account_home_base_url) {
+        this.rememberSyncSourceBase(fresh.account_home_base_url);
+      }
+      try { State.save(); } catch {}
+      if (fresh.federation_sync) {
+        this.applyFederationSyncMeta(fresh.federation_sync);
+      }
+      return fresh;
+    } catch {
+      return null;
+    }
+  },
+
+  async ensureFederationSyncOnLogin() {
+    if (!State.token || this.isAtHomeNode()) return false;
+    try {
+      const stRes = await fetch('/api/auth/federation-sync-status', {
+        headers: { 'X-Session-Token': State.token },
+      });
+      if (stRes.ok) {
+        const st = await stRes.json().catch(() => ({}));
+        if (st.in_progress) {
+          this.applyFederationSyncMeta(st);
+          this.openSyncOverlay();
+          return true;
+        }
+        const err = String(st.error || '').trim();
+        const syncPosts = Number(st.social_posts_imported || 0);
+        const syncPostsTotal = Number(st.social_posts_total || 0);
+        const socialPending = syncPostsTotal > syncPosts || !!String(st.social_posts_cursor || '').trim();
+        if (!err && st.done && !socialPending) return false;
+        if (!err && (!st.done || socialPending)) {
+          return this._resumeFederationSyncFromHome({ force: false });
+        }
+      }
+    } catch {}
+    return this.probeAccountSyncIfSparse({ force: false });
+  },
+
+  async _resumeFederationSyncFromHome(opts = {}) {
+    const force = !!(opts && opts.force);
+    if (!State.token || this.isAtHomeNode()) return false;
     const here = this._normalizeOrigin(window.location.origin);
-    const source = this._normalizeOrigin(this.getSyncSourceBase());
-    // No switch context, or the remembered source is this node → home session.
-    return !source || source === here;
+    const source = this._normalizeOrigin(
+      (State.user && State.user.account_home_base_url) || this.getSyncSourceBase()
+    );
+    if (!source || source === here) return false;
+    this.applyFederationSyncMeta({
+      in_progress: true,
+      progress_pct: 1,
+      hint: force ? 'Re-syncing your account from your home node…' : 'Resuming account sync from your home node…',
+      phase: 'fetch',
+      source_base: source,
+    });
+    try { sessionStorage.removeItem('ft_sync_overlay_seen'); } catch {}
+    this.openSyncOverlay();
+    try {
+      const res = await fetch('/api/auth/federation-sync-resume', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Session-Token': State.token,
+        },
+        body: JSON.stringify({ source_base: source, force }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        this.applyFederationSyncMeta(data);
+        return true;
+      }
+      if (data?.error) {
+        this.applyFederationSyncMeta({
+          in_progress: false,
+          done: true,
+          error: data.error,
+          hint: `Sync failed: ${String(data.error).slice(0, 120)}`,
+        });
+        if (typeof UI !== 'undefined' && UI.showToast) {
+          UI.showToast(`Account sync failed: ${String(data.error).slice(0, 100)}`, 'error', 8000);
+        }
+      }
+    } catch (e) {
+      console.warn('[App] _resumeFederationSyncFromHome failed', e);
+    }
+    return false;
   },
 
   clearFederationSyncClientState() {
@@ -353,7 +452,9 @@ const App = {
       return false;
     }
     const here = this._normalizeOrigin(window.location.origin);
-    let source = this._normalizeOrigin(this.getSyncSourceBase());
+    let source = this._normalizeOrigin(
+      (State.user && State.user.account_home_base_url) || this.getSyncSourceBase()
+    );
     if (!source || source === here) return false;
 
     let joined = 0;
@@ -363,6 +464,8 @@ const App = {
       joined = 0;
     }
 
+    let syncPosts = -1;
+    let syncPostsTotal = -1;
     try {
       const stRes = await fetch('/api/auth/federation-sync-status', {
         headers: { 'X-Session-Token': State.token },
@@ -375,14 +478,16 @@ const App = {
           return true;
         }
         const err = String(st.error || '').trim();
-        const posts = Number(st.social_posts_imported || 0);
+        syncPosts = Number(st.social_posts_imported || 0);
+        syncPostsTotal = Number(st.social_posts_total || 0);
+        const socialPending = syncPostsTotal > syncPosts;
         const dirN = Number((st.counters && st.counters.directory) || 0);
-        const hadData = Number(st.rooms_joined || 0) > 0 && posts > 0 && dirN > 0;
-        if (!err && st.done && !st.in_progress && hadData && joined >= 1) return false;
+        const hadData = Number(st.rooms_joined || 0) > 0 && dirN > 0;
+        const feedOk = syncPosts > 0 || syncPostsTotal === 0;
+        if (!err && st.done && !st.in_progress && !socialPending && hadData && feedOk && joined >= 1) return false;
+        if (!force && !socialPending && st.done && joined >= 3 && feedOk) return false;
       }
     } catch {}
-
-    if (!force && joined >= 3) return false;
 
     if (force) {
       try {
@@ -393,45 +498,7 @@ const App = {
       } catch {}
     }
 
-    this.applyFederationSyncMeta({
-      in_progress: true,
-      progress_pct: 1,
-      hint: 'Syncing your account from your home node…',
-      phase: 'fetch',
-      source_base: source,
-    });
-    try { sessionStorage.removeItem('ft_sync_overlay_seen'); } catch {}
-    this.openSyncOverlay();
-
-    try {
-      const res = await fetch('/api/auth/federation-sync-resume', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Session-Token': State.token,
-        },
-        body: JSON.stringify({ source_base: source, force: true }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (res.ok) {
-        this.applyFederationSyncMeta(data);
-        return true;
-      }
-      if (data?.error) {
-        this.applyFederationSyncMeta({
-          in_progress: false,
-          done: true,
-          error: data.error,
-          hint: `Sync failed: ${String(data.error).slice(0, 120)}`,
-        });
-        if (typeof UI !== 'undefined' && UI.showToast) {
-          UI.showToast(`Account sync failed: ${String(data.error).slice(0, 100)}`, 'error', 8000);
-        }
-      }
-    } catch (e) {
-      console.warn('[App] probeAccountSyncIfSparse failed', e);
-    }
-    return false;
+    return this._resumeFederationSyncFromHome({ force });
   },
 
   applyFederationSyncMeta(meta) {
@@ -479,7 +546,9 @@ const App = {
         const joined = Number(data.rooms_joined || 0);
         const dms = Number(data.dm_linked || 0);
         const posts = Number(data.social_posts_imported || 0);
-        if (data.done && !data.error && (joined > 0 || dms > 0 || posts > 0)) {
+        const postsTotal = Number(data.social_posts_total || 0);
+        const socialPending = postsTotal > posts;
+        if (data.done && !data.error && !socialPending && (joined > 0 || dms > 0 || posts > 0)) {
           this.applyFederationSyncMeta(data);
           return true;
         }
@@ -862,6 +931,7 @@ const App = {
     } catch {}
 
     // Rooms must load before call recovery or signaling bootstrap (joined-room WS).
+    try { await this.refreshIdentityFromMe(); } catch {}
     const atHomeNode = this.isAtHomeNode();
     if (atHomeNode) {
       this.clearFederationSyncClientState();
@@ -892,9 +962,12 @@ const App = {
       try { State.rooms = []; } catch {}
     }
 
+    if (!atHomeNode) {
+      await this.ensureFederationSyncOnLogin();
+    }
     const sparseAccount = ((State.rooms || []).filter((r) => r.joined).length < 2);
-    if (!atHomeNode && (sparseAccount || justSwitchedNode)) {
-      await this.probeAccountSyncIfSparse({ force: justSwitchedNode });
+    if (!atHomeNode && sparseAccount && justSwitchedNode) {
+      await this.probeAccountSyncIfSparse({ force: true });
     }
 
     let syncApplied = false;
@@ -1470,7 +1543,42 @@ const App = {
     if (!overlay) return;
     const card = overlay.querySelector('#ft-sync-overlay-card');
     if (!card || !window.FtSync) return;
-    card.innerHTML = FtSync.renderOverlayHtml(this.federationSyncState || window.__ftFederationSync || {});
+    const st = this.federationSyncState || window.__ftFederationSync || {};
+    let html = FtSync.renderOverlayHtml(st);
+    const err = String(st.error || '').trim();
+    if (!st.in_progress && st.done) {
+      const summaryParts = [];
+      const joined = Number(st.rooms_joined || 0);
+      const posts = Number(st.social_posts_imported || 0);
+      const postsTotal = Number(st.social_posts_total || 0);
+      const skipped = Number(st.social_posts_skipped || 0);
+      const omitted = Number(st.social_posts_omitted_at_export || 0);
+      if (joined > 0) summaryParts.push(`${joined} channels`);
+      if (posts > 0) summaryParts.push(`${posts} posts`);
+      if (postsTotal > posts) summaryParts.push(`${postsTotal - posts} posts pending`);
+      if (skipped > 0) summaryParts.push(`${skipped} skipped`);
+      if (omitted > 0) summaryParts.push(`${omitted} locked on home`);
+      const roomColl = Number(st.rooms_name_collisions || 0);
+      const vanityColl = Number(st.vanity_collisions || 0);
+      const nickColl = Number(st.users_nick_collisions || 0);
+      if (roomColl > 0) summaryParts.push(`${roomColl} channel name clash`);
+      if (vanityColl > 0) summaryParts.push(`${vanityColl} vanity skipped`);
+      if (nickColl > 0) summaryParts.push(`${nickColl} nick remapped`);
+      const summaryLine = summaryParts.length
+        ? `<div style="font-size:11px;color:#8da59b;margin-top:10px;line-height:1.45">${summaryParts.join(' · ')}</div>`
+        : '';
+      if (err) {
+        html += `${summaryLine}<div style="margin-top:14px;display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">
+          <button type="button" class="modal-btn secondary" onclick="App.closeSyncOverlay()" style="padding:8px 14px">Dismiss</button>
+          <button type="button" class="modal-btn primary" onclick="App.closeSyncOverlay();App.forceFederationResync()" style="padding:8px 14px">↻ Retry sync</button>
+        </div>`;
+      } else {
+        html += `${summaryLine}<div style="margin-top:14px;display:flex;justify-content:flex-end">
+          <button type="button" class="modal-btn primary" onclick="App.closeSyncOverlay()" style="padding:8px 14px">Continue</button>
+        </div>`;
+      }
+    }
+    card.innerHTML = html;
   },
 
   _maybeAutoOpenSyncOverlay(state) {
@@ -1553,6 +1661,8 @@ const App = {
     const pruned = Number(payload?.rooms_pruned || 0);
     const dms = Number(payload?.dm_linked || 0);
     const posts = Number(payload?.social_posts_imported || 0);
+    const postsSkipped = Number(payload?.social_posts_skipped || 0);
+    const postsOmitted = Number(payload?.social_posts_omitted_at_export || 0);
     const msgs = Number(payload?.history_messages_applied || 0);
     const dmMsgs = Number(payload?.dm_history_messages_applied || 0);
     const friendsN = Number(payload?.friends_linked || 0);
@@ -1564,6 +1674,8 @@ const App = {
     if (friendsN > 0) parts.push(`${friendsN} friends`);
     if (membersN > 0) parts.push(`${membersN} member lists`);
     if (posts > 0) parts.push(`${posts} posts`);
+    if (postsSkipped > 0) parts.push(`${postsSkipped} posts skipped`);
+    if (postsOmitted > 0) parts.push(`${postsOmitted} locked on home`);
     if (msgs > 0) parts.push(`${msgs} messages`);
     if (dmMsgs > 0) parts.push(`${dmMsgs} DM messages`);
     if (parts.length && typeof UI !== 'undefined' && UI.showToast) {
@@ -1588,9 +1700,13 @@ const App = {
     this._emitFederationSyncEvent(payload);
     if (wasInProgress && !payload.in_progress && payload.done) {
       void this._onFederationSyncComplete(payload);
-      setTimeout(() => {
-        if (!this.federationSyncState?.in_progress) this.closeSyncOverlay();
-      }, 2200);
+      if (!String(payload.error || '').trim()) {
+        setTimeout(() => {
+          if (!this.federationSyncState?.in_progress) this.closeSyncOverlay();
+        }, 2200);
+      } else {
+        this._refreshSyncOverlay();
+      }
     }
   },
 

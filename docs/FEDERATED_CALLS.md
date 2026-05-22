@@ -45,6 +45,12 @@ Global cap: **8** participants per `global_voice_session_id` (enforced on anchor
 - `federation_call_map(global_call_id, origin_server_id, local_call_id, role)`
 - `calls.global_call_id` column on originating rows
 
+## Co-located travelers (same foreign node)
+
+When a callee is **homed on another server** but has an **active WebSocket session on this node** (typical: two travelers visiting the same community node), outbound calls use the **local** delivery path and ring immediately here. Signaling does not round-trip through their home servers in that case.
+
+Calls still route through home servers when the callee is **not** connected to this node (they must be online at home or another node that receives the federated `call.offer`).
+
 ## Preconditions
 
 - `FROGTALK_FEDERATION_CALLS_ENABLED=1` on both nodes (capability `federation-calls-v1` in directory).

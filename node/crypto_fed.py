@@ -183,6 +183,56 @@ def verify_event(event: dict, peer_pubkey_pem: str) -> bool:
         return False
 
 
+_SYNC_EXPORT_SIG_KEYS = frozenset({
+    "export_sig_b64",
+    "export_signer_fingerprint",
+})
+
+
+def canonical_sync_export_bytes(export: dict) -> bytes:
+    """Canonical bytes for account-sync export attestation (C2)."""
+    body = {
+        k: v
+        for k, v in (export or {}).items()
+        if k not in _SYNC_EXPORT_SIG_KEYS
+    }
+    return json.dumps(body, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
+def sign_sync_export(export: dict) -> tuple[str, str]:
+    """Return (signature_b64, signer_pubkey_fingerprint) for an export blob."""
+    priv, _ = _load_or_create_local_keypair()
+    sig = priv.sign(canonical_sync_export_bytes(export))
+    return (
+        base64.b64encode(sig).decode("ascii"),
+        get_local_public_key_fingerprint(),
+    )
+
+
+def verify_sync_export_signature(export: dict, peer_pubkey_pem: str) -> bool:
+    """Verify home-node Ed25519 signature on a sync export (if present)."""
+    sig_b64 = str((export or {}).get("export_sig_b64") or "").strip()
+    if not sig_b64 or not peer_pubkey_pem:
+        return False
+    try:
+        sig = base64.b64decode(sig_b64.encode("ascii"), validate=True)
+    except Exception:
+        return False
+    try:
+        pub = serialization.load_pem_public_key(peer_pubkey_pem.encode("ascii"))
+    except Exception:
+        return False
+    if not isinstance(pub, Ed25519PublicKey):
+        return False
+    try:
+        pub.verify(sig, canonical_sync_export_bytes(export))
+        return True
+    except InvalidSignature:
+        return False
+    except Exception:
+        return False
+
+
 # ── SECURITY-PASS-2: per-request HTTP signing (replaces shared bearer) ─────
 #
 # Background: the legacy federation auth path uses a single shared bearer

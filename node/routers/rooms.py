@@ -505,8 +505,16 @@ def _sanitize_room_text(value: Optional[str], *, max_len: int, multiline: bool =
 
 @router.get("")
 async def list_rooms(current_user: dict = Depends(get_current_user)):
+    uid = int(current_user["id"])
+    at_remote = False
+    try:
+        from routers.auth import ensure_federated_memberships_current, user_at_account_home
+        at_remote = not user_at_account_home(uid)
+        await asyncio.to_thread(ensure_federated_memberships_current, uid)
+    except Exception:
+        pass
     rooms = db.list_rooms()
-    joined_ids = db.get_user_joined_room_ids(current_user["id"])
+    joined_ids = db.get_user_joined_room_ids(uid)
     is_admin = bool(current_user.get("is_admin"))
     banned_ids = db.get_user_active_room_ban_ids(current_user["id"])
     visible = []
@@ -524,6 +532,11 @@ async def list_rooms(current_user: dict = Depends(get_current_user)):
         if r.get("type") == "private" and not r["joined"] and not is_admin:
             continue
         visible.append(r)
+
+    # Remote-node sidebar: only channels the user is actually joined to on
+    # their home node (Discover / directory is a separate surface).
+    if at_remote:
+        visible = [r for r in visible if r.get("joined")]
 
     # Apply per-user Discord-style drag-to-reorder. Rooms named in the saved
     # order list float to the top in that order; everything else preserves
@@ -1724,11 +1737,33 @@ async def get_channel_members(room_name: str,
             gid = str(row.get("global_user_id") or "").strip()
             if not gid or gid in local_gids:
                 continue
+            avatar = str(row.get("avatar") or "").strip()
+            display_name = str(row.get("display_name") or "").strip()
+            if gid and (not avatar or not display_name):
+                try:
+                    prof = db.get_federation_user_profile_row(gid) or {}
+                    if not avatar:
+                        avatar = str(prof.get("avatar") or "").strip()
+                    if not display_name:
+                        display_name = str(prof.get("display_name") or "").strip()
+                except Exception:
+                    pass
+            if gid and not avatar:
+                try:
+                    from routers.auth import hydrate_federation_profile_from_home
+                    home_sid = str(row.get("home_server_id") or "").strip()
+                    if hydrate_federation_profile_from_home(gid, home_sid):
+                        prof = db.get_federation_user_profile_row(gid) or {}
+                        avatar = str(prof.get("avatar") or "").strip()
+                        if not display_name:
+                            display_name = str(prof.get("display_name") or "").strip()
+                except Exception:
+                    pass
             federated.append({
                 "user_id": None,
                 "nickname": row.get("nickname") or "",
-                "display_name": row.get("display_name") or "",
-                "avatar": row.get("avatar") or "",
+                "display_name": display_name,
+                "avatar": avatar,
                 "global_user_id": gid,
                 "home_server_id": row.get("home_server_id") or "",
                 "role": row.get("role") or "member",
@@ -1752,6 +1787,8 @@ async def get_channel_members(room_name: str,
         ):
             nick = str(part.get("nickname") or "").strip()
             if not nick:
+                continue
+            if str(part.get("bridge_platform") or "").strip():
                 continue
             key = nick.lower()
             if key in seen_nicks:
@@ -1823,6 +1860,12 @@ async def leave_room(room_name: str, current_user: dict = Depends(get_current_us
         return JSONResponse(status_code=404, content={"error": "Room not found"})
     was_owner = room.get("owner_id") == current_user["id"]
     db.leave_room(current_user["id"], room["id"])
+    try:
+        from routers.auth import user_at_account_home
+        if not user_at_account_home(int(current_user["id"])):
+            db.remove_room_from_sync_allowlist(int(current_user["id"]), room_name)
+    except Exception:
+        pass
     try:
         db.insert_federation_outbox_event({
             "event_id": f"evt_{int(time.time() * 1000):016x}_{uuid.uuid4().hex[:8]}",

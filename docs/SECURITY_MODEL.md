@@ -164,6 +164,41 @@ Cross-node friends therefore need: mutual follow/friend graph sync, encrypted po
 wraps, and often a re-wrap after the relationship exists on both sides. Details:
 [API reference](https://frogtalk.xyz/docs/api) (Federation section).
 
+### Account sync (visiting another node)
+
+When you use the same account on a **foreign** node, the app can pull a bounded
+snapshot from your **home** node (`GET/POST /api/auth/federation-sync-*`): joined
+channels, DM peers, follow graph, and FrogSocial posts already visible on home
+(**300 per export page**; paginated resume when `FROGTALK_SYNC_PAGINATION=1`).
+This is separate from live federation inbox traffic; it is a deliberate import for
+UX on node switch.
+
+**Trust model on import:** the foreign node resolves your home URL from
+`account_home_server_id` and the local `federation_servers` directory (client
+`source_base` is not authoritative). Each export chunk is checked
+(`export_version`, `source_server_id`, `global_user_id`, `source_public_url`) before
+apply. When the home node signs exports (`FROGTALK_SYNC_SIGN_EXPORT=1`, default on),
+the foreign node verifies `export_sig_b64` against the pinned home
+`server_pubkey` in the directory (`get_federation_server_pubkey`). Outbound fetches
+use `_ssrf_guard`. Progress is stored in
+`user_federation_sync_state` (SQLite) so restart can resume.
+
+Password login on a foreign node auto-resumes incomplete sync when
+`FROGTALK_SYNC_LOGIN_RESUME=1`. Optional `FROGTALK_SYNC_STALE_HOURS` re-runs sync
+after the TTL when a prior import completed. Roster avatars may be hydrated via
+`POST /api/auth/federation-sync-profile-gid` (federation token, directory-bound home,
+rate-limited). Shadow user mirrors keep their true home in
+`federation_user_profiles.origin_server_id` so ongoing `social.*` events from that
+home still apply after sync. Encrypted posts without key wraps are omitted at export.
+Manual re-sync is under **Settings → Network**.
+
+**Name collisions on foreign nodes:** account sync never overwrites an unrelated
+local account or channel. If a home nickname is already taken locally, the mirror
+user is created under a disambiguated local name (same `global_user_id`). If a
+home channel name is already owned by a local community channel, sync leaves that
+membership alone and lists the home channel via the federation directory only;
+vanity invite slugs are applied only when free on this node.
+
 ### Federated voice and video calls
 
 When `FROGTALK_FEDERATION_CALLS_ENABLED=1`, signed `call.*` events carry WebRTC

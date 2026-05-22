@@ -30,6 +30,7 @@
         <a href="#prereq">Prerequisites</a>
         <a href="#vps">VPS bootstrap</a>
         <a href="#wizard">Setup wizard</a>
+        <a href="#account-sync">Account sync</a>
         <a href="#federation">Federation</a>
         <a href="#board">Frog Channel</a>
         <a href="#https">HTTPS / TLS</a>
@@ -129,6 +130,20 @@ sudo bash node/scripts/install.sh systemd -y --install-dir /opt/frogtalk</code><
       <p class="hint"><strong>Admin:</strong> user <code>admin</code> on first boot. Password is in <code>/opt/frogtalk/.env</code> as <code>ADMIN_PASSWORD</code> (auto-generated if left blank).</p>
     </section>
 
+    <section class="step" id="account-sync">
+      <h2>Account sync (visiting another node)</h2>
+      <p class="hint">Users who log in on a <strong>community node</strong> (not their home) can import channels, DMs, friends, and FrogSocial posts from their home server under <strong>Settings → Network → Re-sync from home</strong>. Sync is automatic on login when incomplete.</p>
+      <pre><code># Optional tuning in /opt/frogtalk/.env (defaults keep features on)
+FROGTALK_SYNC_PERSIST=1
+FROGTALK_SYNC_BIND_HOME=1
+FROGTALK_SYNC_VERIFY_EXPORT=1
+FROGTALK_SYNC_SIGN_EXPORT=1
+FROGTALK_SYNC_LOGIN_RESUME=1
+FROGTALK_SYNC_PAGINATION=1
+# FROGTALK_SYNC_STALE_HOURS=24</code></pre>
+      <p class="hint"><strong>Calls:</strong> DM voice/video between nodes uses home-server signaling. Travelers <em>currently connected</em> to your node are rung locally even when homed elsewhere. Enable <code>FROGTALK_FEDERATION_CALLS_ENABLED=1</code> and publish TURN URLs. See <a href="/docs/api">API docs</a> (Federation) and operator guide in the repo <code>docs/FEDERATED_CALLS.md</code>.</p>
+    </section>
+
     <section class="step" id="federation">
       <h2>3) Federation — join the mesh</h2>
       <pre><code>bash node/scripts/install.sh federation -y --install-dir /opt/frogtalk \
@@ -212,6 +227,9 @@ journalctl -u frogtalk -n 40 --no-pager</code></pre>
         <tr><td>Works on :8080, not on domain</td><td>Align <code>PORT</code> and nginx <code>proxy_pass</code></td></tr>
         <tr><td><code>federation -y</code> ignored flags</td><td>Use current <code>install.sh</code> — flags must follow the subcommand: <code>federation -y --public-url …</code></td></tr>
         <tr><td>Peers listed, no sync</td><td>Re-run <code>federation -y</code> after service is running</td></tr>
+        <tr><td>Traveler empty feed on foreign node</td><td>Settings → Network → Re-sync; check sync status for errors or partial import</td></tr>
+        <tr><td>Call does not ring on foreign node</td><td>Callee may be homed elsewhere — they must be online here or at home; friends-only gate default</td></tr>
+        <tr><td>Channel name clash after sync</td><td>Local channel kept; home channel listed in federated directory only</td></tr>
         <tr><td>Not on frogtalk.xyz directory</td><td>Match <code>FROGTALK_FEDERATION_TOKEN</code> on Main + node; re-run <code>federation -y</code></td></tr>
         <tr><td>CORS errors</td><td>Add your URL to <code>ALLOWED_ORIGINS</code></td></tr>
         <tr><td><code>/board/</code> OK but <code>/app</code> 502</td><td>nginx must not <code>listen 8080</code> when app uses <code>PORT=8080</code> — re-run <code>board-nginx</code> (wizard strips tunnel port by default)</td></tr>

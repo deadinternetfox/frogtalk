@@ -4020,6 +4020,13 @@ async def _handle_room_event(event: dict) -> None:
         gid = str(user.get("global_user_id") or "").strip()
         if gid:
             db.tombstone_federation_room_member(room["name"], gid)
+        try:
+            home_sid = db.resolve_global_user_home_server_id(gid) if gid else ""
+            local_sid = str((db.get_or_create_local_server_identity() or {}).get("server_id") or "").strip()
+            if gid and home_sid and local_sid and home_sid != local_sid:
+                db.remove_room_from_sync_allowlist(int(user["id"]), str(room.get("name") or ""))
+        except Exception:
+            pass
     elif event_type == "room.member.banned":
         await _apply_federated_room_ban(room, user, payload)
     elif event_type == "room.member.unbanned":

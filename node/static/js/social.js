@@ -3210,9 +3210,62 @@ const Social = (() => {
     </div>`;
   }
 
+  function _socialAwayFromHome() {
+    try {
+      return typeof App !== 'undefined' && App.isAtHomeNode && !App.isAtHomeNode();
+    } catch {
+      return false;
+    }
+  }
+
+  function _socialSyncResyncButtonHtml() {
+    if (!_socialAwayFromHome()) return '';
+    return `<button type="button" class="modal-btn primary" style="margin-top:14px" onclick="App.forceFederationResync()">↻ Sync from home node</button>`;
+  }
+
+  function _socialNeverSyncedBannerHtml() {
+    if (!_socialAwayFromHome()) return '';
+    const st = (window.FtSync && FtSync.state) ? FtSync.state() : ((window.App && App.federationSyncState) || {});
+    if (st.in_progress || st.done) return '';
+    const err = String(st.error || '').trim();
+    if (err) return '';
+    return `<div style="margin:0 0 12px;padding:10px 12px;border-radius:10px;background:rgba(246,210,122,.08);border:1px solid rgba(246,210,122,.25);font-size:12px;color:#f6d27a;line-height:1.45">
+      <div>Your FrogSocial data has not been imported from your home node yet.</div>
+      <div style="margin-top:6px;color:#9ec59e">Open <strong>Settings → Network</strong> and tap <strong>Re-sync from home</strong>, or wait for account sync to finish after login.</div>
+      ${_socialSyncResyncButtonHtml()}
+    </div>`;
+  }
+
+  function _socialPartialSyncBannerHtml() {
+    if (!_socialAwayFromHome()) return '';
+    const st = (window.FtSync && FtSync.state) ? FtSync.state() : ((window.App && App.federationSyncState) || {});
+    if (st.in_progress) return '';
+    const imported = Number(st.social_posts_imported || 0);
+    const total = Number(st.social_posts_total || 0);
+    const omitted = Number(st.social_posts_omitted_at_export || 0);
+    const skipped = Number(st.social_posts_skipped || 0);
+    const lines = [];
+    if (total > imported) {
+      lines.push(`FrogSocial backfill is partial (${imported}/${total} posts on this node).`);
+    }
+    if (omitted > 0) {
+      lines.push(`${omitted} encrypted post${omitted === 1 ? '' : 's'} could not be exported without keys — view on your home node or re-sync after mutual follow on both nodes.`);
+    }
+    if (skipped > 0 && !lines.length) {
+      lines.push(`${skipped} post${skipped === 1 ? '' : 's'} skipped during import.`);
+    }
+    if (!lines.length) return '';
+    return `<div style="margin:0 0 12px;padding:10px 12px;border-radius:10px;background:rgba(127,214,162,.08);border:1px solid rgba(127,214,162,.22);font-size:12px;color:#9ec59e;line-height:1.45">
+      ${lines.map((ln) => `<div style="margin-bottom:4px">${esc(ln)}</div>`).join('')}
+      ${_socialSyncResyncButtonHtml()}
+    </div>`;
+  }
+
   // ── FEED ────────────────────────────────────────────────────────────────
   function _renderFeedContent(content, posts, extras = {}) {
     let html = `<div id="social-feed-stories">${extras.storiesHtml || renderStoriesBar()}</div><div id="social-feed-suggest">${extras.suggestedHtml || ''}</div>`;
+    html += _socialNeverSyncedBannerHtml();
+    html += _socialPartialSyncBannerHtml();
 
     if (!posts.length) {
       const syncing = !!(window.FtSync && window.FtSync.state && window.FtSync.state().in_progress);
@@ -3221,6 +3274,13 @@ const Social = (() => {
           <div class="se-icon se-icon--lg">⏳</div>
           <div class="se-title se-title--lg">Catching up on FrogSocial…</div>
           <div style="color:#888;font-size:14px">Posts from people you follow are being backfilled from your home node.</div>
+        </div>`;
+      } else if (_socialAwayFromHome()) {
+        html += `<div class="social-empty">
+          <div class="se-icon se-icon--lg">🐸</div>
+          <div class="se-title se-title--lg">Your feed is empty on this node</div>
+          <div style="color:#888;font-size:14px">Follow graph and posts may live on your home node. Re-sync to import them here, or open <a href="#" onclick="Social.switchTab('explore');return false" style="color:#4caf50">Explore</a>.</div>
+          ${_socialSyncResyncButtonHtml()}
         </div>`;
       } else {
         html += `<div class="social-empty">
@@ -3404,6 +3464,13 @@ const Social = (() => {
           <div class="se-icon se-icon--lg">⏳</div>
           <div style="font-size:16px;font-weight:600">Catching up on Explore…</div>
           <div style="color:#888;font-size:14px;margin-top:6px">Public posts are syncing from your home node.</div>
+        </div>`;
+      } else if (_socialAwayFromHome()) {
+        html += `<div class="social-empty">
+          <div class="se-icon se-icon--lg">🌍</div>
+          <div style="font-size:16px;font-weight:600">Explore is empty on this node</div>
+          <div style="color:#888;font-size:14px;margin-top:6px">Public posts from your home node can be imported with account sync.</div>
+          ${_socialSyncResyncButtonHtml()}
         </div>`;
       } else {
         html += `<div class="social-empty">
@@ -4512,11 +4579,18 @@ const Social = (() => {
       if (posts.length === 0) {
         _updateTabLoadUi(loadUi, 78, 'Rendering reels', 'No reels found for this filter');
         const syncingReels = !!(window.FtSync && window.FtSync.state && window.FtSync.state().in_progress);
+        const awayReels = _socialAwayFromHome();
         content.innerHTML = scopeBar + (syncingReels ? `
           <div class="reels-empty">
             <div class="reels-empty-icon">⏳</div>
             <div class="reels-empty-title">Catching up on reels…</div>
             <div class="reels-empty-sub">Video posts are syncing from your home node.</div>
+          </div>` : (awayReels ? `
+          <div class="reels-empty">
+            <div class="reels-empty-icon">🎞</div>
+            <div class="reels-empty-title">No reels on this node yet</div>
+            <div class="reels-empty-sub">Video posts from your home node can be imported with account sync.</div>
+            ${_socialSyncResyncButtonHtml()}
           </div>` : `
           <div class="reels-empty">
             <div class="reels-empty-icon">🎞</div>
@@ -4524,7 +4598,7 @@ const Social = (() => {
             <div class="reels-empty-sub">${scope === 'friends'
               ? 'Reels posted, reposted, or liked by your friends will appear here.'
               : 'When people share videos they\'ll show up here. Be the first!'}</div>
-          </div>`);
+          </div>`));
         _updateTabLoadUi(loadUi, 92, 'Reels ready', 'Try another scope or sort to discover videos');
         return;
       }
@@ -10035,5 +10109,23 @@ try {
     if (!document.hidden) {
       try { Social.refreshChatStoryCache(true); } catch {}
     }
+  });
+  window.addEventListener('ft:federation-sync', (ev) => {
+    const d = (ev && ev.detail) ? ev.detail : {};
+    try {
+      if (typeof refreshNetworkAccountSyncPanel === 'function') {
+        void refreshNetworkAccountSyncPanel();
+      }
+    } catch {}
+    if (d.in_progress || !d.done) return;
+    try {
+      if (typeof Social !== 'undefined') {
+        if (Social.invalidateAllSocialCaches) Social.invalidateAllSocialCaches();
+        const tab = typeof _currentTab !== 'undefined' ? _currentTab : '';
+        if (tab === 'feed' && Social.loadFeed) void Social.loadFeed({ force: true });
+        if (tab === 'explore' && Social.loadExplore) void Social.loadExplore(undefined, { force: true });
+        if (tab === 'reels' && Social.loadReelsTab) void Social.loadReelsTab();
+      }
+    } catch {}
   });
 } catch {}

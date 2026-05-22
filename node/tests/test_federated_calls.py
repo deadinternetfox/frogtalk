@@ -55,6 +55,17 @@ class FederatedCallsTests(unittest.TestCase):
         mock_home.return_value = "local_srv"
         self.assertFalse(fc.is_remote_peer({"global_user_id": "00000000-0000-4000-8000-000000000001"}))
 
+    @mock.patch("federation_calls.federation_calls_enabled", return_value=True)
+    @mock.patch("federation_calls.callee_session_on_local_node", return_value=True)
+    @mock.patch("database.resolve_global_user_home_server_id", return_value="remote_srv")
+    @mock.patch("database.get_or_create_local_server_identity", return_value={"server_id": "local_srv"})
+    def test_is_remote_peer_false_when_callee_online_locally(self, *_mocks):
+        """Travelers homed elsewhere but connected here use local call delivery."""
+        self.assertFalse(fc.is_remote_peer({
+            "id": 99,
+            "global_user_id": "00000000-0000-4000-8000-000000000002",
+        }))
+
     # ── Hardening regression tests ────────────────────────────────
 
     def test_safe_call_type_allowlist(self):

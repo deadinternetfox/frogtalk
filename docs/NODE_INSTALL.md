@@ -277,6 +277,20 @@ nano /opt/frogtalk/.env
 | `FROGTALK_OFFICIAL_DIRECTORY_REGISTER_URL` | Optional override (default: directory URL + `/register`) |
 | `FROGTALK_AUTO_UPDATE_ENABLED=0` | Opt-in updates only |
 
+**Account sync (travelers on foreign nodes)** — optional rollback flags (defaults keep features on):
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `FROGTALK_SYNC_PERSIST` | `1` | Persist sync progress in SQLite across restarts |
+| `FROGTALK_SYNC_BIND_HOME` | `1` | Resume/export only from pinned home URL in directory |
+| `FROGTALK_SYNC_VERIFY_EXPORT` | `1` | Reject mismatched export gid / home server / URL |
+| `FROGTALK_SYNC_SIGN_EXPORT` | `1` | Home node signs exports; foreign node verifies against directory pubkey |
+| `FROGTALK_SYNC_LOGIN_RESUME` | `1` | Auto-resume incomplete sync on password/ticket login |
+| `FROGTALK_SYNC_PAGINATION` | `1` | Chunk social posts beyond 300 per export page |
+| `FROGTALK_SYNC_STALE_HOURS` | `0` | Re-sync after N hours when prior import completed (`24` recommended on busy foreign nodes) |
+
+See [FEDERATION_SYNC_FULL_POLISH_PLAN.md](FEDERATION_SYNC_FULL_POLISH_PLAN.md) and [SECURITY_MODEL.md](SECURITY_MODEL.md) (Account sync section).
+
 Generate a federation shared secret once on FrogTalk Main, then distribute to operators (never commit):
 
 ```bash

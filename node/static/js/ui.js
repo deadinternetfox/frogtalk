@@ -2529,6 +2529,8 @@ function ensureNetworkPaneContent() {
       </div>
     </div>
 
+    <div id="network-account-sync-panel" style="background:linear-gradient(135deg,#121a16,#0f1411);border:1px solid #2a4a36;border-radius:10px;padding:12px;margin-bottom:12px"></div>
+
     <label class="modal-label" style="margin-top:0">Connection Mode</label>
     <select id="network-mode" class="modal-input" style="color:#e0e0e0;background:#0d0d0d">
       <option value="auto">Auto (recommended)</option>
@@ -2612,6 +2614,7 @@ function switchSettingsTab(tab) {
     ensureNetworkPaneContent();
     loadNetworkSettings();
     loadLocalBuildIntegrity();
+    void refreshNetworkAccountSyncPanel();
   }
   if (tab === 'application') {
     _loadDesktopAppSettingsIntoProfile();
@@ -2922,6 +2925,150 @@ function _renderNetworkSelection() {
   infoEl.textContent = saved ? `Selected: ${_networkAppUrl(saved) || saved}` : 'Selected: current server';
 }
 
+function _networkSyncSourceLabel() {
+  try {
+    const fromMe = (State.user && State.user.account_home_base_url) ? State.user.account_home_base_url : '';
+    const raw = fromMe || ((typeof App !== 'undefined' && App.getSyncSourceBase)
+      ? App.getSyncSourceBase()
+      : (localStorage.getItem('ft_sync_source_base') || ''));
+    return String(raw || '').replace(/^https?:\/\//, '').replace(/\/$/, '');
+  } catch {
+    return '';
+  }
+}
+
+function _networkSyncRelativeTime(ts) {
+  const t = Number(ts || 0);
+  if (!t) return '';
+  const sec = Math.max(0, Math.floor(Date.now() / 1000) - t);
+  if (sec < 60) return 'just now';
+  if (sec < 3600) return `${Math.floor(sec / 60)}m ago`;
+  if (sec < 86400) return `${Math.floor(sec / 3600)}h ago`;
+  return `${Math.floor(sec / 86400)}d ago`;
+}
+
+function _networkSyncErrorHint(err) {
+  const raw = String(err || '').trim();
+  if (!raw) return '';
+  const low = raw.toLowerCase();
+  if (low.includes('export_unavailable') || low.includes('connection') || low.includes('timed out')) {
+    return 'Home node unreachable — check it is online and listed in Federation.';
+  }
+  if (low.includes('missing source') || low.includes('home not in directory')) {
+    return 'Home URL unknown — open Federation settings and ensure your home server is registered.';
+  }
+  if (low.includes('export_source') || low.includes('export_gid')) {
+    return 'Sync rejected — identity did not match your pinned home. Try Re-sync.';
+  }
+  if (low.includes('federation token')) {
+    return 'Federation token misconfigured on this node — contact the operator.';
+  }
+  return raw.slice(0, 200);
+}
+
+function _networkSyncSummaryLine(st) {
+  const s = st || {};
+  const parts = [];
+  const joined = Number(s.rooms_joined || 0);
+  const dms = Number(s.dm_linked || 0);
+  const posts = Number(s.social_posts_imported || 0);
+  const postsTotal = Number(s.social_posts_total || 0);
+  const skipped = Number(s.social_posts_skipped || 0);
+  const omitted = Number(s.social_posts_omitted_at_export || 0);
+  if (joined > 0) parts.push(`${joined} channels`);
+  if (dms > 0) parts.push(`${dms} DMs`);
+  if (postsTotal > 0) {
+    parts.push(`${posts}/${postsTotal} FrogSocial posts`);
+  } else if (posts > 0) {
+    parts.push(`${posts} posts`);
+  }
+  if (skipped > 0) parts.push(`${skipped} skipped on import`);
+  if (omitted > 0) parts.push(`${omitted} locked on home (not exported)`);
+  const roomColl = Number(s.rooms_name_collisions || 0);
+  const vanityColl = Number(s.vanity_collisions || 0);
+  const nickColl = Number(s.users_nick_collisions || 0);
+  if (roomColl > 0) parts.push(`${roomColl} channel name${roomColl === 1 ? '' : 's'} kept federated only (local name taken)`);
+  if (vanityColl > 0) parts.push(`${vanityColl} vanity slug${vanityColl === 1 ? '' : 's'} skipped (already used here)`);
+  if (nickColl > 0) parts.push(`${nickColl} contact${nickColl === 1 ? '' : 's'} mirrored under a different local username`);
+  return parts.join(' · ');
+}
+
+async function refreshNetworkAccountSyncPanel() {
+  const panel = document.getElementById('network-account-sync-panel');
+  if (!panel) return;
+  const atHome = (typeof App !== 'undefined' && App.isAtHomeNode && App.isAtHomeNode());
+  const here = String(window.location.origin || '').replace(/\/$/, '');
+  const home = _networkSyncSourceLabel();
+  let st = (window.App && App.federationSyncState) ? App.federationSyncState : (window.__ftFederationSync || {});
+  if (!atHome && State.token) {
+    try {
+      const res = await fetch('/api/auth/federation-sync-status', {
+        headers: { 'X-Session-Token': State.token },
+      });
+      if (res.ok) {
+        st = await res.json().catch(() => st);
+        if (typeof App !== 'undefined' && App.applyFederationSyncMeta) App.applyFederationSyncMeta(st);
+      }
+    } catch {}
+  }
+  const esc = (t) => (typeof UI !== 'undefined' && UI.escHtml) ? UI.escHtml(t) : String(t || '');
+  if (atHome) {
+    panel.innerHTML = `
+      <div style="font-size:12px;color:#9bd6ab;font-weight:700;margin-bottom:4px">Account sync</div>
+      <div style="font-size:11px;color:#78a187;line-height:1.45">You're on your home node (<span style="color:#b7d9c3">${esc(here.replace(/^https?:\/\//, ''))}</span>). Channels, DMs, and FrogSocial data are authoritative here — no import needed.</div>`;
+    _renderNetworkSyncState(st);
+    return;
+  }
+  const inProgress = !!st.in_progress;
+  const err = String(st.error || '').trim();
+  const summary = _networkSyncSummaryLine(st);
+  const socialPending = Number(st.social_posts_total || 0) > Number(st.social_posts_imported || 0);
+  let statusHtml = '';
+  if (inProgress) {
+    statusHtml = window.FtSync && FtSync.renderInline
+      ? FtSync.renderInline(st, { compact: false, fallback: 'Syncing from your home node…' })
+      : `<div style="color:#8da59b;font-size:11px">⏳ ${esc(st.hint || 'Syncing…')}</div>`;
+  } else if (err) {
+    const hint = _networkSyncErrorHint(err);
+    statusHtml = `<div style="color:#e8a0a0;font-size:11px;line-height:1.4">⚠ ${esc(hint || err.slice(0, 200))}</div>`;
+  } else if (st.done && summary) {
+    const when = _networkSyncRelativeTime(st.finished_at);
+    const whenTxt = when ? ` (${when})` : '';
+    statusHtml = `<div style="color:#7fd6a2;font-size:11px;line-height:1.4">✓ Last sync${whenTxt}: ${esc(summary)}</div>`;
+  } else if (st.done && socialPending) {
+    statusHtml = `<div style="color:#f6d27a;font-size:11px;line-height:1.4">Partial FrogSocial sync — tap Re-sync to import remaining posts.</div>`;
+  } else {
+    statusHtml = `<div style="color:#9ec59e;font-size:11px;line-height:1.4">Import channels, DMs, friends, and FrogSocial posts from your home node.</div>`;
+  }
+  const homeLine = home
+    ? `<div style="font-size:11px;color:#6f8e77;margin-top:6px">Home: <span style="color:#9ec59e">${esc(home)}</span> · Now: <span style="color:#9ec59e">${esc(here.replace(/^https?:\/\//, ''))}</span></div>`
+    : `<div style="font-size:11px;color:#f6d27a;margin-top:6px">Home node URL unknown — switch nodes from login or set sync source, then re-sync.</div>`;
+  panel.innerHTML = `
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;flex-wrap:wrap">
+      <div style="flex:1;min-width:200px">
+        <div style="font-size:12px;color:#9bd6ab;font-weight:700;margin-bottom:4px">Account sync (visiting node)</div>
+        ${statusHtml}
+        ${homeLine}
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px;flex-shrink:0">
+        <button class="modal-btn primary" type="button" onclick="networkResyncFromHome()" style="padding:8px 12px;min-width:148px" ${inProgress ? 'disabled' : ''}>↻ Re-sync from home</button>
+        <button class="modal-btn secondary" type="button" onclick="networkOpenSyncDetails()" style="padding:8px 10px;min-width:148px">Details</button>
+      </div>
+    </div>`;
+  _renderNetworkSyncState(st);
+}
+
+async function networkResyncFromHome() {
+  if (typeof App === 'undefined' || !App.forceFederationResync) return;
+  const ok = await App.forceFederationResync();
+  if (ok && typeof App.startFederationSyncWatcher === 'function') App.startFederationSyncWatcher();
+  await refreshNetworkAccountSyncPanel();
+}
+
+function networkOpenSyncDetails() {
+  if (typeof App !== 'undefined' && App.openSyncOverlay) App.openSyncOverlay();
+}
+
 function _renderNetworkSyncState(state) {
   const el = document.getElementById('network-sync-state');
   if (!el) return;
@@ -2929,20 +3076,38 @@ function _renderNetworkSyncState(state) {
     ? state
     : ((window.App && App.federationSyncState) ? App.federationSyncState : (window.__ftFederationSync || {}));
   const inProgress = !!st?.in_progress;
-  if (!inProgress) {
+  const err = String(st?.error || '').trim();
+  if (!inProgress && !err && !st?.done) {
     el.textContent = '';
     el.style.display = 'none';
     el.innerHTML = '';
     return;
   }
-  if (window.FtSync && typeof FtSync.renderInline === 'function') {
-    el.innerHTML = FtSync.renderInline(st, { compact: true });
+  if (inProgress) {
+    if (window.FtSync && typeof FtSync.renderInline === 'function') {
+      el.innerHTML = FtSync.renderInline(st, { compact: true });
+      el.style.display = '';
+      return;
+    }
+    const hint = String(st?.hint || (window.App && App.federationSyncHint) || 'Syncing node data…').trim();
+    el.textContent = `⏳ ${hint}`;
     el.style.display = '';
     return;
   }
-  const hint = String(st?.hint || (window.App && App.federationSyncHint) || 'Syncing node data…').trim();
-  el.textContent = `⏳ ${hint}`;
-  el.style.display = '';
+  if (err) {
+    el.innerHTML = `<span style="color:#e8a0a0">Sync failed — use Re-sync above.</span>`;
+    el.style.display = '';
+    return;
+  }
+  const summary = _networkSyncSummaryLine(st);
+  if (summary) {
+    el.innerHTML = `<span style="color:#7fd6a2">${(typeof UI !== 'undefined' && UI.escHtml) ? UI.escHtml(summary) : summary}</span>`;
+    el.style.display = '';
+    return;
+  }
+  el.textContent = '';
+  el.style.display = 'none';
+  el.innerHTML = '';
 }
 
 function _renderNetworkServersList() {
@@ -3454,10 +3619,15 @@ async function loadNetworkSettings() {
   _renderNetworkBuildHeader();
   if (!_networkSyncListenerBound) {
     window.addEventListener('ft:federation-sync', (ev) => {
-      _renderNetworkSyncState((ev && ev.detail) ? ev.detail : {});
+      const detail = (ev && ev.detail) ? ev.detail : {};
+      _renderNetworkSyncState(detail);
+      if (document.getElementById('network-account-sync-panel')) {
+        void refreshNetworkAccountSyncPanel();
+      }
     });
     _networkSyncListenerBound = true;
   }
+  void refreshNetworkAccountSyncPanel();
   const saved = localStorage.getItem('ft_network_selected') || '';
   _networkProbeResults = [];
   _renderNetworkServersList();
