@@ -156,6 +156,25 @@ class FederatedCallsTests(unittest.TestCase):
             asyncio.run(fc.apply_call_event(ev))
             save_mock.assert_not_called()
 
+    @mock.patch("federation_calls._enqueue")
+    @mock.patch("federation_calls.callee_home_server", return_value="srv_remote")
+    def test_enqueue_call_renegotiate_sets_flag(self, _home, mock_enqueue):
+        mock_enqueue.return_value = {"ok": True}
+        caller = {"id": 1, "global_user_id": "gid-a", "nickname": "a"}
+        callee = {"id": 2, "global_user_id": "gid-b", "nickname": "b"}
+        fc.enqueue_call_renegotiate(
+            caller,
+            callee,
+            global_call_id="00000000-0000-4000-8000-000000000099",
+            local_call_id=7,
+            call_type="video",
+            sdp="v=0\r\no=-",
+        )
+        self.assertTrue(mock_enqueue.called)
+        _etype, payload, _targets = mock_enqueue.call_args[0]
+        self.assertEqual(_etype, "call.offer")
+        self.assertTrue(payload.get("renegotiate"))
+
     def test_callee_home_server_routes_to_remote_peer(self):
         """``callee_home_server`` returns the remote sid for federated peers."""
         with mock.patch.object(db, "resolve_global_user_home_server_id",

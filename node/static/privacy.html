@@ -85,6 +85,7 @@
       <li><a href="#dont">What we don't collect</a></li>
       <li><a href="#encryption">End-to-end encryption</a></li>
       <li><a href="#bridges">Discord & Telegram bridges</a></li>
+      <li><a href="#federation">Federation & traveling</a></li>
       <li><a href="#cookies">Cookies & local storage</a></li>
       <li><a href="#thirdparty">Third-party services</a></li>
       <li><a href="#retention">Data retention</a></li>
@@ -215,13 +216,25 @@
     <p>Bridges are only ever activated by room operators on public channels, and are clearly indicated in the channel header. Private rooms and DMs are <strong>never</strong> bridged.</p>
   </section>
 
+  <section class="policy" id="federation">
+    <h2>Federation &amp; traveling</h2>
+    <p>If you use the same account on more than one FrogTalk node (“traveling”), the foreign node can request a bounded snapshot from your <strong>home</strong> node after you authenticate. That import is optional, rate-limited, verified against your pinned home server in the federation directory, and (when enabled) protected by an Ed25519 signature from your home node so a third party cannot forge the export.</p>
+    <ul>
+      <li><strong>What travels:</strong> joined channel metadata (themes, banners, moderation settings such as slowmode and forwarding lock), DM thread preferences (disappear timer, forwarding lock, read state), friends/following/block lists, profile and notification preferences, capped client prefs (Tor preference, preferred node URL, notification sounds), and FrogSocial posts already visible on home.</li>
+      <li><strong>What stays encrypted:</strong> DM message bodies remain ciphertext on the wire; the foreign node does not receive your private keys.</li>
+      <li><strong>What is not bulk-copied:</strong> live story media and the social notification inbox — those continue via real-time federation events after you connect.</li>
+      <li><strong>Presentation metadata:</strong> profile/room themes and inline CSS are sanitized server-side and replicated for UX; they are not end-to-end encrypted (same as avatars).</li>
+    </ul>
+    <p>You can trigger or resume sync from <em>Settings → Network</em>. See also our <a href="/docs/api">API reference</a> and <a href="https://github.com/deadinternetfox/frogtalk/blob/master/docs/SECURITY_MODEL.md" target="_blank" rel="noopener noreferrer">security model</a> for technical detail.</p>
+  </section>
+
   <section class="policy" id="cookies">
     <h2>Cookies & local storage</h2>
     <p>We use a small number of strictly-necessary client-side storage items:</p>
     <ul>
       <li><strong>Session token</strong> (HTTP cookie or localStorage) — keeps you logged in.</li>
       <li><strong>Encryption keys & cached messages</strong> (IndexedDB) — required for E2E encryption to work offline.</li>
-      <li><strong>UI preferences</strong> (localStorage) — your theme, mute settings, last-opened room.</li>
+      <li><strong>UI preferences</strong> (localStorage) — your theme, mute settings, last-opened room. Some prefs (Tor routing, preferred node, app notification sounds) are also stored on the server when you save them so they can sync when you travel.</li>
     </ul>
     <p>We do not use any tracking cookies, advertising cookies, or shared third-party cookies.</p>
   </section>

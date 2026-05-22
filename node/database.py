@@ -691,10 +691,10 @@ def get_user_by_token(token: str) -> Optional[Dict]:
                    u.presence, u.status_msg, u.profile_public,
                    u.allow_friend_requests, u.banner,
                    u.global_user_id, u.identity_pubkey,
-                   u.theme, u.notify_sounds, u.notify_desktop,
+                   u.theme, u.custom_theme_json, u.notify_sounds, u.notify_desktop,
                    u.notify_dms, u.notify_mentions, u.allow_dms_from,
                    u.show_last_seen, u.show_read_receipts,
-                   u.hide_active_channels,
+                   u.hide_active_channels, u.mood, u.custom_style, u.room_order,
                    -- PIN privacy: surface only the *flags*, never the hash
                    CASE WHEN u.pin_hash IS NULL OR u.pin_hash='' THEN 0 ELSE 1 END AS has_pin,
                    u.pin_require_on_unlock, u.pin_require_for_admin,
@@ -712,10 +712,10 @@ def get_user_by_token(token: str) -> Optional[Dict]:
                        u.presence, u.status_msg, u.profile_public,
                        u.allow_friend_requests, u.banner,
                        u.global_user_id, u.identity_pubkey,
-                       u.theme, u.notify_sounds, u.notify_desktop,
+                       u.theme, u.custom_theme_json, u.notify_sounds, u.notify_desktop,
                        u.notify_dms, u.notify_mentions, u.allow_dms_from,
                        u.show_last_seen, u.show_read_receipts,
-                       u.hide_active_channels,
+                       u.hide_active_channels, u.mood, u.custom_style, u.room_order,
                        CASE WHEN u.pin_hash IS NULL OR u.pin_hash='' THEN 0 ELSE 1 END AS has_pin,
                        u.pin_require_on_unlock, u.pin_require_for_admin,
                        u.pin_require_after_autologin, u.pin_idle_timeout_sec
@@ -1610,6 +1610,10 @@ def _migrate():
         # User settings columns
         if "theme" not in cols:
             con.execute("ALTER TABLE users ADD COLUMN theme TEXT DEFAULT 'frog'")
+        if "custom_theme_json" not in cols:
+            con.execute("ALTER TABLE users ADD COLUMN custom_theme_json TEXT DEFAULT ''")
+        if "client_prefs_json" not in cols:
+            con.execute("ALTER TABLE users ADD COLUMN client_prefs_json TEXT DEFAULT ''")
         # One-time migration: 'dark' was the old default palette name; it is
         # identical to 'frog'.  Normalise all legacy rows so the theme system
         # only needs to reason about a single canonical name.
@@ -2891,6 +2895,9 @@ def _migrate():
                     con.execute(_ddl)
                 except Exception:
                     pass
+        fci_cols = {r["name"] for r in con.execute("PRAGMA table_info(federation_channel_index)").fetchall()}
+        if fci_cols and "channel_theme" not in fci_cols:
+            con.execute("ALTER TABLE federation_channel_index ADD COLUMN channel_theme TEXT DEFAULT ''")
 
         # ── Denormalized engagement counters on wall_posts ──
         # The /feed, /explore and /reels endpoints used to evaluate three
@@ -5384,6 +5391,10 @@ def get_dm_channels_for_sync(user_id: int) -> List[Dict]:
             SELECT dc.id, dc.user_a, dc.user_b,
                    COALESCE(dc.hidden_by_a, 0) AS hidden_by_a,
                    COALESCE(dc.hidden_by_b, 0) AS hidden_by_b,
+                   COALESCE(dc.disappear_after, 0) AS disappear_after,
+                   COALESCE(dc.forwarding_disabled, 0) AS forwarding_disabled,
+                   COALESCE(dc.last_read_a, 0) AS last_read_a,
+                   COALESCE(dc.last_read_b, 0) AS last_read_b,
                    CASE WHEN dc.user_a=? THEN dc.user_b ELSE dc.user_a END AS other_id
             FROM dm_channels dc
             WHERE dc.user_a=? OR dc.user_b=?
@@ -5857,6 +5868,62 @@ def wipe_dm_messages(channel_id: int, user_id: int) -> bool:
 # ---------------------------------------------------------------------------
 # Disappearing DM messages helpers
 # ---------------------------------------------------------------------------
+
+_SYNC_DM_DISAPPEAR_ALLOWED = frozenset({0, 3600, 86400, 604800, 2592000})
+
+
+def apply_sync_dm_channel_settings(
+    channel_id: int,
+    user_id: int,
+    *,
+    disappear_after: int | None = None,
+    forwarding_disabled: int | None = None,
+    my_last_read: int | None = None,
+    hidden: bool | None = None,
+) -> bool:
+    """Apply per-channel DM prefs from account sync (member-gated)."""
+    cid = int(channel_id or 0)
+    uid = int(user_id or 0)
+    if cid <= 0 or uid <= 0:
+        return False
+    with _conn() as con:
+        row = con.execute(
+            "SELECT user_a, user_b FROM dm_channels WHERE id=? AND (user_a=? OR user_b=?)",
+            (cid, uid, uid),
+        ).fetchone()
+        if not row:
+            return False
+        is_a = int(row["user_a"]) == uid
+        if disappear_after is not None:
+            sec = int(disappear_after or 0)
+            if sec not in _SYNC_DM_DISAPPEAR_ALLOWED:
+                sec = 0
+            con.execute("UPDATE dm_channels SET disappear_after=? WHERE id=?", (sec, cid))
+        if forwarding_disabled is not None:
+            con.execute(
+                "UPDATE dm_channels SET forwarding_disabled=? WHERE id=?",
+                (1 if int(forwarding_disabled) else 0, cid),
+            )
+        if my_last_read is not None:
+            up_to = max(0, int(my_last_read or 0))
+            col = "last_read_a" if is_a else "last_read_b"
+            con.execute(
+                f"UPDATE dm_channels SET {col}=MAX(COALESCE({col},0), ?) WHERE id=?",
+                (up_to, cid),
+            )
+        if hidden is not None:
+            if hidden:
+                if is_a:
+                    con.execute("UPDATE dm_channels SET hidden_by_a=1 WHERE id=?", (cid,))
+                else:
+                    con.execute("UPDATE dm_channels SET hidden_by_b=1 WHERE id=?", (cid,))
+            elif is_a:
+                con.execute("UPDATE dm_channels SET hidden_by_a=0 WHERE id=?", (cid,))
+            else:
+                con.execute("UPDATE dm_channels SET hidden_by_b=0 WHERE id=?", (cid,))
+        con.commit()
+    return True
+
 
 def set_dm_disappear_timer(channel_id: int, user_id: int, seconds: int) -> bool:
     """Set disappearing message timer for a DM channel. 0 = off. Only channel members can set."""
@@ -10920,6 +10987,8 @@ def upsert_federation_server(
     server_pubkey: str = "",
     capabilities: Optional[List[str]] = None,
     turn_urls_json: str = "",
+    *,
+    allow_pubkey_overwrite: bool = False,
 ) -> None:
     caps_json = json.dumps(capabilities or [])
     turn_json = turn_urls_json or "[]"
@@ -10942,6 +11011,11 @@ def upsert_federation_server(
                         WHEN excluded.server_pubkey IS NOT NULL
                              AND TRIM(excluded.server_pubkey) != ''
                              AND excluded.server_pubkey LIKE '%BEGIN PUBLIC KEY%'
+                             AND (
+                                 ? = 1
+                                 OR federation_servers.server_pubkey IS NULL
+                                 OR TRIM(federation_servers.server_pubkey) = ''
+                             )
                         THEN excluded.server_pubkey
                         ELSE federation_servers.server_pubkey
                     END,
@@ -10967,6 +11041,7 @@ def upsert_federation_server(
                     server_pubkey,
                     caps_json,
                     turn_json,
+                    1 if allow_pubkey_overwrite else 0,
                 ),
             )
         except sqlite3.OperationalError:
@@ -10987,6 +11062,11 @@ def upsert_federation_server(
                         WHEN excluded.server_pubkey IS NOT NULL
                              AND TRIM(excluded.server_pubkey) != ''
                              AND excluded.server_pubkey LIKE '%BEGIN PUBLIC KEY%'
+                             AND (
+                                 ? = 1
+                                 OR federation_servers.server_pubkey IS NULL
+                                 OR TRIM(federation_servers.server_pubkey) = ''
+                             )
                         THEN excluded.server_pubkey
                         ELSE federation_servers.server_pubkey
                     END,
@@ -11004,6 +11084,7 @@ def upsert_federation_server(
                     trust_tier,
                     server_pubkey,
                     caps_json,
+                    1 if allow_pubkey_overwrite else 0,
                 ),
             )
         con.commit()
@@ -12644,6 +12725,7 @@ def upsert_federation_channel_index(
     category: str = "",
     tags_json: str = "[]",
     channel_type: str = "text",
+    channel_theme: str = "",
     visibility: str = "public",
     member_count: int = 0,
     owner_nickname: str = "",
@@ -12670,10 +12752,10 @@ def upsert_federation_channel_index(
                 """
                 INSERT INTO federation_channel_index (
                     room_name, home_server_id, display_name, description, directory_description,
-                    icon, category, tags_json, channel_type, visibility,
+                    icon, category, tags_json, channel_type, channel_theme, visibility,
                     member_count, owner_nickname, owner_global_user_id, home_base_url,
                     last_seen_at, last_synced_at, tombstoned
-                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'),datetime('now'),0)
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'),datetime('now'),0)
                 ON CONFLICT(room_name, home_server_id) DO UPDATE SET
                     display_name=excluded.display_name,
                     description=excluded.description,
@@ -12682,6 +12764,7 @@ def upsert_federation_channel_index(
                     category=excluded.category,
                     tags_json=excluded.tags_json,
                     channel_type=excluded.channel_type,
+                    channel_theme=excluded.channel_theme,
                     visibility=excluded.visibility,
                     member_count=excluded.member_count,
                     owner_nickname=excluded.owner_nickname,
@@ -12695,7 +12778,8 @@ def upsert_federation_channel_index(
                     name, sid, display_name[:128], description[:512],
                     directory_description[:1200],
                     icon, category[:32], tags_json[:2000],
-                    channel_type, visibility,
+                    channel_type, str(channel_theme or "")[:20000],
+                    visibility,
                     max(0, int(member_count or 0)),
                     owner_nickname[:64], owner_global_user_id[:64],
                     home_base_url[:256],

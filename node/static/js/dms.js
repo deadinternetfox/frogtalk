@@ -1035,6 +1035,17 @@ async function openDMChannel (id, nickname, avatar) {
       // only mutate state if we're still on the same conversation.
       if (!_activeDM || _activeDM.id !== _openId) return;
       _activeDM.user_id = peerUserId;
+      try {
+        const prof = await withTimeout(
+          apiFetch('/api/users/profile/' + encodeURIComponent(nickname)),
+          5000,
+        );
+        if (prof && prof.ok && _activeDM && _activeDM.id === _openId) {
+          const pu = await prof.json();
+          const sid = String(pu.peer_home_server_id || '').trim();
+          if (sid) _activeDM.peer_home_server_id = sid;
+        }
+      } catch {}
       // Track H cleanup: legacy ECDH pubkey publish/fetch (used to seed
       // STATE.sharedSecret for v1 DM AES-GCM) was retired. Signal
       // Protocol prekey bundles do this job now and are fetched lazily

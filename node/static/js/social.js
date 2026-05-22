@@ -3862,10 +3862,8 @@ const Social = (() => {
 
       // Apply custom style from user if it exists (AFTER HTML is rendered).
       // For self-profile, fall back to local state to avoid transient stale payloads.
-      // Track B: prefer the server-sanitised `custom_style` declaration list;
-      // fall back to the legacy raw `custom_css` field (which the apply
-      // function will extract declarations from on the fly).
-      const _effectiveCss = u.custom_style || u.custom_css || (u.is_self ? (State.user?.custom_style || State.user?.custom_css || '') : '');
+      // Track B: only `custom_style` (sanitised) is applied in the DOM — never raw `custom_css`.
+      const _effectiveCss = u.custom_style || (u.is_self ? (State.user?.custom_style || '') : '');
       if (_effectiveCss && typeof window.applySocialProfileCustomCss === 'function') {
         try { window.applySocialProfileCustomCss(_effectiveCss); } catch (e) { console.warn('CSS apply error:', e); }
       } else if (typeof window.clearSocialProfileCustomCss === 'function') {
@@ -3892,8 +3890,7 @@ const Social = (() => {
         const isSelf = String(nickname || '').toLowerCase() === String(State.user?.nickname || '').toLowerCase();
         const css = String(
           _profileData?.custom_style
-          || _profileData?.custom_css
-          || (isSelf ? (State.user?.custom_style || State.user?.custom_css || '') : '')
+          || (isSelf ? (State.user?.custom_style || '') : '')
           || ''
         );
         if (css && typeof window.applySocialProfileCustomCss === 'function') {
@@ -10121,10 +10118,13 @@ try {
     try {
       if (typeof Social !== 'undefined') {
         if (Social.invalidateAllSocialCaches) Social.invalidateAllSocialCaches();
+        if (Social.refreshChatStoryCache) void Social.refreshChatStoryCache(true);
+        if (Social.loadStoriesBar) void Social.loadStoriesBar();
         const tab = typeof _currentTab !== 'undefined' ? _currentTab : '';
         if (tab === 'feed' && Social.loadFeed) void Social.loadFeed({ force: true });
         if (tab === 'explore' && Social.loadExplore) void Social.loadExplore(undefined, { force: true });
         if (tab === 'reels' && Social.loadReelsTab) void Social.loadReelsTab();
+        if (Social.refreshActivityBadge) void Social.refreshActivityBadge();
       }
     } catch {}
   });

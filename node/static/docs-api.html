@@ -76,6 +76,7 @@ POST   /api/auth/logout
 PATCH  /api/auth/nickname
 GET    /api/auth/me
 PATCH  /api/auth/profile
+PATCH  /api/auth/client-prefs
 DELETE /api/auth/account
 GET    /api/auth/captcha
 POST   /api/auth/register-secure
@@ -95,10 +96,18 @@ POST   /api/auth/federation-sync-export-gid
 POST   /api/auth/federation-sync-memberships-gid
 GET    /api/federation/profile-card</code></pre>
           <p class="muted"><strong>Account sync</strong> (foreign node): home-signed export chunks
-          import joined rooms (with <code>channel_theme</code>), DM peers, friends/following styling,
-          self profile (<code>theme</code>, <code>custom_style</code>), and FrogSocial posts.
+          import joined rooms (settings: <code>channel_theme</code>, banner, about, slowmode,
+          <code>invite_only</code>, <code>who_can_invite</code>, <code>forwarding_disabled</code>,
+          <code>dj_only_queue</code>), DM peers (disappear timer, per-thread forwarding lock,
+          read cursor, hidden), friends/following/block list, self profile
+          (<code>theme</code>, <code>custom_style</code>, <code>client_prefs</code> for Tor/node/sounds,
+          notify flags, PIN policy), and FrogSocial posts (paginated). Live stories and notification
+          inbox are not bulk-imported — they arrive via federation events after login.
+          <code>PATCH /api/auth/client-prefs</code> merges Tor preference, preferred node URL, and
+          capped app notification sounds (stored server-side; included in sync).
           <code>GET /api/federation/profile-card?nickname=&amp;ft_gid=</code> returns a federated user
-          card (sanitized <code>custom_style</code>, optional wall when subject is at home).</p>
+          card (sanitized <code>custom_style</code> only; raw <code>custom_css</code> is self-only;
+          optional wall when subject is at home).</p>
         </article>
 
         <article class="panel" id="users">
@@ -629,9 +638,12 @@ GET    /api/federation/failover/status</code></pre>
 <pre><code>call.offer / call.answer / call.ice / call.end / call.reject
 voice.session.join / voice.session.leave / voice.signal (offer|answer|ice)
 GET  /api/network/ice-config?peer_server_id=&lt;uuid&gt;  (session auth required)</code></pre>
-          <p class="muted">WebRTC media stays P2P/TURN; signaling only crosses federation. See
-          <code>docs/FEDERATED_CALLS.md</code> in the repo. Tor Browser and strict privacy tabs block WebRTC
-          in-page — clients show a toast; use a normal browser window or the mobile app for calls.</p>
+          <p class="muted">WebRTC media stays P2P/TURN; signaling only crosses federation. Mid-call
+          <code>call.offer</code> with <code>renegotiate</code> supports screen share and camera-on after connect.
+          <code>GET /api/network/ice-config</code> merges local TURN with the peer home node when
+          <code>peer_server_id</code> is set. See <code>docs/FEDERATED_CALLS.md</code> in the repo.
+          Tor Browser and strict privacy tabs block WebRTC in-page — clients show a toast; use a normal
+          browser window or the mobile app for calls.</p>
 
           <h3 class="h-mt-14">FrogSocial replication (<code>social.*</code>)</h3>
           <p class="muted">Sensitive prefix — requires pinned origin pubkey + valid Ed25519 signature.

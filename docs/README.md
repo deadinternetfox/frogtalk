@@ -1,6 +1,6 @@
 # FrogTalk documentation (public)
 
-Operator and security docs published with the repo. Internal planning notes live in `docs/internal/` (gitignored).
+Operator and security docs published with the repo (public markdown only — operator planning notes are not shipped in this repository).
 
 | Document | Audience |
 | -------- | -------- |

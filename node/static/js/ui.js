@@ -222,27 +222,7 @@ const UI = (() => {
         if (!res.ok) return;
         const data = await res.json();
         if (!data || !State.user) return;
-        const allowedPresence = new Set(['online', 'away', 'dnd', 'invisible']);
-        if (typeof data.presence === 'string' && allowedPresence.has(data.presence)) {
-          State.user.presence = data.presence;
-        }
-        if ('status_msg' in data) {
-          State.user.status_msg = String(data.status_msg ?? '').slice(0, 128);
-        }
-        if (data.display_name !== undefined) State.user.display_name = data.display_name || null;
-        if (data.avatar !== undefined) State.user.avatar = data.avatar;
-        if (typeof data.at_home_node === 'boolean') State.user.at_home_node = data.at_home_node;
-        if (typeof data.theme === 'string' && data.theme) {
-          State.user.theme = data.theme;
-          try { localStorage.setItem('frogtalk-theme', data.theme); } catch {}
-          if (typeof applyTheme === 'function') {
-            const t = (String(data.theme).toLowerCase() === 'dark') ? 'frog' : data.theme;
-            applyTheme(t);
-          }
-        }
-        if (typeof data.custom_style === 'string' && typeof applyProfileCustomCss === 'function') {
-          applyProfileCustomCss(data.custom_style);
-        }
+        _mergeUserSettingsFromMe(data);
         if (typeof State.save === 'function') State.save();
         _profileRefreshLastAt = Date.now();
         renderSelfStatus();
@@ -2411,7 +2391,14 @@ let _networkBuildTrustByBase = {};
 let _networkLocalBuildInfo = null;
 let _networkCurrentServerInfo = null;
 let _networkProbeLoading = false;
+let _networkProbeCooldownUntil = 0;
+let _networkAutoSelectBusy = false;
+let _networkResyncBusy = false;
+let _networkResyncCooldownUntil = 0;
 let _networkSyncListenerBound = false;
+const _NETWORK_PROBE_COOLDOWN_MS = 8000;
+const _NETWORK_PROBE_CACHE_MS = 120000;
+const _NETWORK_RESYNC_COOLDOWN_MS = 15000;
 const _DESKTOP_CLOSE_TO_TRAY_LS_KEY = 'frogtalk-desktop-close-to-tray';
 
 function _isDesktopSettingsRuntime() {
@@ -2564,15 +2551,16 @@ function ensureNetworkPaneContent() {
     </div>
 
     <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
-      <button class="modal-btn secondary" type="button" onclick="refreshNetworkServers()" style="flex:1;min-width:160px">Probe Nodes</button>
-      <button class="modal-btn secondary" type="button" onclick="runAutoNetworkSelect()" style="flex:1;min-width:160px">Auto Select Best</button>
+      <button id="network-probe-btn" class="modal-btn secondary" type="button" onclick="refreshNetworkServersManual()" style="flex:1;min-width:160px">Probe Nodes</button>
+      <button id="network-auto-select-btn" class="modal-btn secondary" type="button" onclick="runAutoNetworkSelect()" style="flex:1;min-width:160px">Auto Select Best</button>
     </div>
+    <div id="network-probe-hint" style="font-size:11px;color:#6f8e77;margin-top:6px;min-height:14px;line-height:1.4"></div>
 
     <div id="network-current-selection" style="margin-top:10px;font-size:12px;color:#9ec59e"></div>
     <div id="network-sync-state" style="margin-top:6px;font-size:11px;color:#7fbaa0;display:none"></div>
 
     <div style="margin-top:10px;background:#0d0d0d;border:1px solid #1e1e1e;border-radius:8px;padding:8px;max-height:220px;overflow-y:auto" id="network-servers-list">
-      <div style="color:#666;font-size:12px;text-align:center;padding:8px">Open this tab to auto-probe nodes, or tap "Probe Nodes" to refresh availability.</div>
+      <div style="color:#666;font-size:12px;text-align:center;padding:8px">Node list loads from cache when fresh; tap <strong>Probe Nodes</strong> to refresh (8s cooldown).</div>
     </div>
 
     <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
@@ -3084,28 +3072,48 @@ function _networkSyncFullyComplete(st) {
 
 async function networkResyncFromHome() {
   if (typeof App === 'undefined' || !App.forceFederationResync) return;
+  const now = Date.now();
+  if (_networkResyncBusy) {
+    if (typeof UI !== 'undefined' && UI.showToast) {
+      UI.showToast('Re-sync already in progress…', 'info', 3500);
+    }
+    return;
+  }
+  if (now < _networkResyncCooldownUntil) {
+    const sec = Math.ceil((_networkResyncCooldownUntil - now) / 1000);
+    if (typeof UI !== 'undefined' && UI.showToast) {
+      UI.showToast(`Please wait ${sec}s before starting another re-sync.`, 'info', 4000);
+    }
+    return;
+  }
   if (App.isAtHomeNode && App.isAtHomeNode()) {
     if (typeof UI !== 'undefined' && UI.showToast) {
       UI.showToast('You are on your home node — no import needed.', 'info', 5000);
     }
     return;
   }
-  const wasComplete = _networkSyncFullyComplete(
-    (App.federationSyncState) ? App.federationSyncState : (window.__ftFederationSync || {})
-  );
-  const ok = await App.forceFederationResync();
-  if (ok) {
-    if (typeof App.startFederationSyncWatcher === 'function') App.startFederationSyncWatcher();
-    if (typeof UI !== 'undefined' && UI.showToast) {
-      UI.showToast(wasComplete ? 'Re-sync started from your home node…' : 'Sync started…', 'success', 5000);
+  _networkResyncBusy = true;
+  _networkResyncCooldownUntil = now + _NETWORK_RESYNC_COOLDOWN_MS;
+  try {
+    const wasComplete = _networkSyncFullyComplete(
+      (App.federationSyncState) ? App.federationSyncState : (window.__ftFederationSync || {})
+    );
+    const ok = await App.forceFederationResync();
+    if (ok) {
+      if (typeof App.startFederationSyncWatcher === 'function') App.startFederationSyncWatcher();
+      if (typeof UI !== 'undefined' && UI.showToast) {
+        UI.showToast(wasComplete ? 'Re-sync started from your home node…' : 'Sync started…', 'success', 5000);
+      }
+    } else {
+      let msg = 'Could not start re-sync.';
+      const hereHost = String(window.location.origin || '').replace(/^https?:\/\//, '').replace(/\/$/, '');
+      const home = _networkSyncSourceLabel();
+      if (!home) msg = 'Home node URL unknown — re-pin your home in this panel first.';
+      else if (home && hereHost === home) msg = 'Home URL matches this node — re-pin your real home node.';
+      if (typeof UI !== 'undefined' && UI.showToast) UI.showToast(msg, 'error', 7000);
     }
-  } else {
-    let msg = 'Could not start re-sync.';
-    const hereHost = String(window.location.origin || '').replace(/^https?:\/\//, '').replace(/\/$/, '');
-    const home = _networkSyncSourceLabel();
-    if (!home) msg = 'Home node URL unknown — re-pin your home in this panel first.';
-    else if (home && hereHost === home) msg = 'Home URL matches this node — re-pin your real home node.';
-    if (typeof UI !== 'undefined' && UI.showToast) UI.showToast(msg, 'error', 7000);
+  } finally {
+    _networkResyncBusy = false;
   }
   await refreshNetworkAccountSyncPanel();
 }
@@ -3348,17 +3356,113 @@ function selectNetworkServer(serverId) {
   saveNetworkSettings(true);
 }
 
-async function refreshNetworkServers() {
+function _networkProbeCacheAgeMs() {
+  try {
+    const raw = localStorage.getItem('ft_network_probe_cache');
+    if (!raw) return null;
+    const o = JSON.parse(raw);
+    const ts = Number(o.ts || 0);
+    if (!ts || !Array.isArray(o.servers) || !o.servers.length) return null;
+    return Math.max(0, Date.now() - ts);
+  } catch {
+    return null;
+  }
+}
+
+function _networkHydrateProbeFromCache() {
+  const age = _networkProbeCacheAgeMs();
+  if (age == null || age > _NETWORK_PROBE_CACHE_MS) return false;
+  try {
+    const o = JSON.parse(localStorage.getItem('ft_network_probe_cache') || '{}');
+    _networkProbeResults = Array.isArray(o.servers) ? o.servers : [];
+    return _networkProbeResults.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+function _updateNetworkProbeHint(extra) {
+  const el = document.getElementById('network-probe-hint');
+  if (!el) return;
+  if (_networkProbeLoading) {
+    el.textContent = 'Probing federation directory…';
+    el.style.color = '#8da59b';
+    return;
+  }
+  if (extra) {
+    el.textContent = extra;
+    return;
+  }
+  const age = _networkProbeCacheAgeMs();
+  if (age != null && _networkProbeResults.length) {
+    const healthy = _networkProbeResults.filter(s => s && s.healthy).length;
+    const mins = age < 60000 ? `${Math.max(1, Math.round(age / 1000))}s ago` : `${Math.round(age / 60000)}m ago`;
+    el.textContent = `${healthy} of ${_networkProbeResults.length} nodes healthy · last probe ${mins}`;
+    el.style.color = '#6f8e77';
+    return;
+  }
+  el.textContent = '';
+}
+
+function _updateNetworkActionButtons() {
+  const probeBtn = document.getElementById('network-probe-btn');
+  const autoBtn = document.getElementById('network-auto-select-btn');
+  const now = Date.now();
+  const probeWait = Math.max(0, _networkProbeCooldownUntil - now);
+  if (probeBtn) {
+    const busy = _networkProbeLoading;
+    probeBtn.disabled = busy || probeWait > 0;
+    if (busy) probeBtn.textContent = 'Probing…';
+    else if (probeWait > 0) probeBtn.textContent = `Probe (${Math.ceil(probeWait / 1000)}s)`;
+    else probeBtn.textContent = 'Probe Nodes';
+    probeBtn.style.opacity = probeBtn.disabled ? '0.65' : '';
+    probeBtn.style.cursor = probeBtn.disabled ? 'not-allowed' : '';
+  }
+  if (autoBtn) {
+    autoBtn.disabled = _networkProbeLoading || _networkAutoSelectBusy;
+    autoBtn.textContent = _networkAutoSelectBusy ? 'Selecting…' : 'Auto Select Best';
+    autoBtn.style.opacity = autoBtn.disabled ? '0.65' : '';
+    autoBtn.style.cursor = autoBtn.disabled ? 'not-allowed' : '';
+  }
+}
+
+function refreshNetworkServersManual() {
+  return refreshNetworkServers({ manual: true });
+}
+
+async function refreshNetworkServers(opts) {
+  const options = opts && typeof opts === 'object' ? opts : {};
+  const manual = !!options.manual;
+  const quiet = !!options.quiet;
+  const now = Date.now();
+  if (_networkProbeLoading) {
+    if (manual && typeof UI !== 'undefined' && UI.showToast) {
+      UI.showToast('Probe already running…', 'info', 2800);
+    }
+    return;
+  }
+  if (manual && now < _networkProbeCooldownUntil) {
+    const sec = Math.ceil((_networkProbeCooldownUntil - now) / 1000);
+    if (typeof UI !== 'undefined' && UI.showToast) {
+      UI.showToast(`Please wait ${sec}s before probing again.`, 'info', 3200);
+    }
+    _updateNetworkActionButtons();
+    return;
+  }
+  if (manual) _networkProbeCooldownUntil = now + _NETWORK_PROBE_COOLDOWN_MS;
   const mode = document.getElementById('network-mode')?.value || 'auto';
   const officialOnly = mode === 'official' ? 1 : 0;
   _networkProbeLoading = true;
+  _updateNetworkActionButtons();
+  _updateNetworkProbeHint();
   _renderNetworkServersList();
   try {
-    // Always request onion metadata so capability badges remain accurate even when clearnet is preferred.
     const res = await apiFetch(`/api/network/probe?official_only=${officialOnly}&include_onion=1`);
-    const data = await res.json();
+    const data = await res.json().catch(() => ({}));
     if (!res.ok) {
-      UI.showToast(data.error || 'Failed to probe network', 'error');
+      const msg = (data && data.error) ? String(data.error) : 'Failed to probe network';
+      if (manual || !quiet) UI.showToast(msg, 'error', 5000);
+      _updateNetworkProbeHint('Probe failed — try again in a few seconds.');
       return;
     }
     _networkProbeResults = data.servers || [];
@@ -3376,13 +3480,28 @@ async function refreshNetworkServers() {
     if (!_networkSelectedServer && _networkProbeResults.length) {
       _networkSelectedServer = _networkProbeResults.find(s => s.healthy) || _networkProbeResults[0];
     }
+    const healthy = _networkProbeResults.filter(s => s && s.healthy).length;
+    const total = _networkProbeResults.length;
+    if (manual) {
+      UI.showToast(
+        healthy ? `${healthy} of ${total} nodes responded.` : `No healthy nodes (${total} listed).`,
+        healthy ? 'success' : 'warning',
+        4500,
+      );
+    } else if (!quiet && total) {
+      UI.showToast(`Loaded ${total} nodes from directory.`, 'info', 2800);
+    }
     _renderNetworkServersList();
     _renderNetworkSelection();
+    _updateNetworkProbeHint();
   } catch {
-    UI.showToast('Network probe failed', 'error');
+    if (manual || !quiet) UI.showToast('Network probe failed — check your connection.', 'error', 5000);
+    _updateNetworkProbeHint('Probe failed — check connection or try again.');
   } finally {
     _networkProbeLoading = false;
+    _updateNetworkActionButtons();
     _renderNetworkServersList();
+    _updateNetworkProbeHint();
   }
 }
 
@@ -3483,6 +3602,14 @@ async function switchToBestNetworkNode(reason = 'fallback') {
 }
 
 async function runAutoNetworkSelect() {
+  if (_networkProbeLoading || _networkAutoSelectBusy) {
+    if (typeof UI !== 'undefined' && UI.showToast) {
+      UI.showToast('Wait for the current network check to finish.', 'info', 3000);
+    }
+    return;
+  }
+  _networkAutoSelectBusy = true;
+  _updateNetworkActionButtons();
   const mode = document.getElementById('network-mode')?.value || 'auto';
   const preferOnion = document.getElementById('network-prefer-onion')?.checked ? 1 : 0;
   const officialOnly = mode === 'official' ? 1 : 0;
@@ -3502,10 +3629,17 @@ async function runAutoNetworkSelect() {
     _networkSelectedServer = data.selected || _networkSelectedServer;
     _renderNetworkServersList();
     _renderNetworkSelection();
-    if (_networkSelectedServer) UI.showToast('Best node selected', 'success');
-    else UI.showToast('No healthy node found', 'error');
+    if (_networkSelectedServer) {
+      const name = _networkSelectedServer.display_name || _networkSelectedServer.server_id || 'node';
+      UI.showToast(`Selected ${name}`, 'success', 4000);
+    } else {
+      UI.showToast('No healthy node found — try Probe Nodes first.', 'warning', 5500);
+    }
   } catch {
-    UI.showToast('Auto selection failed', 'error');
+    UI.showToast('Auto selection failed — try again.', 'error', 5000);
+  } finally {
+    _networkAutoSelectBusy = false;
+    _updateNetworkActionButtons();
   }
 }
 
@@ -3546,6 +3680,7 @@ function saveNetworkSettings(silent = false) {
     localStorage.setItem('ft_network_selected', selectedAddr);
   }
   if (mode === 'custom' && customUrl) _syncNativeServerUrl(customUrl);
+  void _persistClientPrefsToServer();
   if (!silent) UI.showToast('Network preferences saved', 'success');
 }
 
@@ -3772,12 +3907,22 @@ async function loadNetworkSettings() {
   }
   void refreshNetworkAccountSyncPanel();
   const saved = localStorage.getItem('ft_network_selected') || '';
-  _networkProbeResults = [];
-  _renderNetworkServersList();
-  await refreshNetworkServers();
-  _networkSelectedServer = _networkProbeResults.find(s => _normalizeNetworkUrl(s.onion_url || s.base_url || '') === saved) || _networkSelectedServer;
-  _renderNetworkServersList();
-  _renderNetworkSelection();
+  if (_networkHydrateProbeFromCache()) {
+    _networkSelectedServer = _networkProbeResults.find(s => _normalizeNetworkUrl(s.onion_url || s.base_url || '') === saved)
+      || _networkProbeResults.find(s => s.healthy)
+      || _networkProbeResults[0]
+      || _networkSelectedServer;
+    _renderNetworkServersList();
+    _renderNetworkSelection();
+    _updateNetworkProbeHint();
+    _updateNetworkActionButtons();
+  } else {
+    await refreshNetworkServers({ quiet: true });
+    _networkSelectedServer = _networkProbeResults.find(s => _normalizeNetworkUrl(s.onion_url || s.base_url || '') === saved)
+      || _networkSelectedServer;
+    _renderNetworkServersList();
+    _renderNetworkSelection();
+  }
 }
 
 async function loadBlockedUsers() {
@@ -4096,6 +4241,114 @@ let _themePreviewOriginal = null; // theme before preview started
 function _normalizeThemeKey(theme) {
   const t = String(theme || '').trim().toLowerCase();
   return t || 'frog';
+}
+
+/** Restore network prefs + app custom sounds from server (federation sync /me). */
+function _applyClientPrefsFromSync(prefs) {
+  if (!prefs || typeof prefs !== 'object') return;
+  try {
+    if (prefs.prefer_onion !== undefined) {
+      localStorage.setItem('ft_network_prefer_onion', prefs.prefer_onion ? '1' : '0');
+      const onionEl = document.getElementById('network-prefer-onion');
+      if (onionEl) onionEl.checked = !!prefs.prefer_onion;
+    }
+    if (typeof prefs.preferred_node_url === 'string' && prefs.preferred_node_url) {
+      const url = String(prefs.preferred_node_url).slice(0, 512);
+      localStorage.setItem('ft_network_selected', url);
+    }
+    if (prefs.custom_sounds && typeof prefs.custom_sounds === 'object') {
+      const cur = (() => {
+        try { return JSON.parse(localStorage.getItem('ft_custom_sounds') || '{}') || {}; }
+        catch { return {}; }
+      })();
+      for (const k of ['app:msg', 'app:ring']) {
+        const v = prefs.custom_sounds[k];
+        if (v && String(v).startsWith('data:audio/')) cur[k] = String(v).slice(0, 131072);
+      }
+      localStorage.setItem('ft_custom_sounds', JSON.stringify(cur));
+    }
+  } catch {}
+}
+
+function _collectClientPrefsForServer() {
+  const out = {
+    prefer_onion: localStorage.getItem('ft_network_prefer_onion') === '1',
+    preferred_node_url: String(localStorage.getItem('ft_network_selected') || '').slice(0, 512),
+  };
+  try {
+    const map = JSON.parse(localStorage.getItem('ft_custom_sounds') || '{}') || {};
+    const sounds = {};
+    for (const k of ['app:msg', 'app:ring']) {
+      const v = map[k];
+      if (v && String(v).startsWith('data:audio/')) sounds[k] = String(v).slice(0, 131072);
+    }
+    if (Object.keys(sounds).length) out.custom_sounds = sounds;
+  } catch {}
+  return out;
+}
+
+async function _persistClientPrefsToServer() {
+  if (!State.token) return;
+  try {
+    await apiFetch('/api/auth/client-prefs', 'PATCH', _collectClientPrefsForServer());
+  } catch {}
+}
+try { window._persistClientPrefsToServer = _persistClientPrefsToServer; } catch {}
+
+/** Apply /api/auth/me (or profile PATCH) fields into State + live UI. */
+function _mergeUserSettingsFromMe(data) {
+  if (!data || !State.user) return;
+  const allowedPresence = new Set(['online', 'away', 'dnd', 'invisible']);
+  if (typeof data.presence === 'string' && allowedPresence.has(data.presence)) {
+    State.user.presence = data.presence;
+  }
+  if ('status_msg' in data) State.user.status_msg = String(data.status_msg ?? '').slice(0, 128);
+  if (data.display_name !== undefined) State.user.display_name = data.display_name || null;
+  if (data.avatar !== undefined) State.user.avatar = data.avatar;
+  if (data.banner !== undefined) State.user.banner = data.banner;
+  if (typeof data.at_home_node === 'boolean') State.user.at_home_node = data.at_home_node;
+  if (data.bio !== undefined) State.user.bio = data.bio;
+  if (data.profile_public !== undefined) State.user.profile_public = data.profile_public ? 1 : 0;
+  if (data.allow_friend_requests !== undefined) State.user.allow_friend_requests = data.allow_friend_requests ? 1 : 0;
+  if (data.allow_dms_from !== undefined) State.user.allow_dms_from = data.allow_dms_from;
+  if (data.show_last_seen !== undefined) State.user.show_last_seen = data.show_last_seen;
+  if (data.show_read_receipts !== undefined) State.user.show_read_receipts = data.show_read_receipts ? 1 : 0;
+  if (data.hide_active_channels !== undefined) State.user.hide_active_channels = data.hide_active_channels ? 1 : 0;
+  if (data.notify_sounds !== undefined) State.user.notify_sounds = data.notify_sounds ? 1 : 0;
+  if (data.notify_desktop !== undefined) State.user.notify_desktop = data.notify_desktop ? 1 : 0;
+  if (data.notify_dms !== undefined) State.user.notify_dms = data.notify_dms ? 1 : 0;
+  if (data.notify_mentions !== undefined) State.user.notify_mentions = data.notify_mentions ? 1 : 0;
+  if (data.mood !== undefined) State.user.mood = data.mood || '';
+  if (data.custom_style !== undefined) State.user.custom_style = data.custom_style || '';
+  if (data.custom_theme_json !== undefined) State.user.custom_theme_json = data.custom_theme_json || '';
+  if (typeof data.theme === 'string' && data.theme) {
+    const t = _normalizeThemeKey(data.theme);
+    State.user.theme = t;
+    try { localStorage.setItem('frogtalk-theme', t); } catch {}
+    if (t === 'custom') {
+      applyStoredCustomThemeJson(data.custom_theme_json || State.user.custom_theme_json);
+    } else if (typeof applyTheme === 'function') {
+      applyTheme(t);
+    }
+  }
+  if (typeof data.custom_style === 'string' && typeof applyProfileCustomCss === 'function') {
+    applyProfileCustomCss(data.custom_style);
+  }
+  if (data.custom_css !== undefined) State.user.custom_css = String(data.custom_css || '').slice(0, 10240);
+  if (data.client_prefs) _applyClientPrefsFromSync(data.client_prefs);
+}
+
+function applyStoredCustomThemeJson(raw) {
+  let d = raw;
+  if (typeof raw === 'string' && raw.trim()) {
+    try { d = JSON.parse(raw); } catch { d = null; }
+  }
+  if (!d || typeof d !== 'object') return;
+  try { localStorage.setItem('frogtalk-custom-theme', JSON.stringify(d)); } catch {}
+  try { localStorage.setItem('frogtalk-theme', 'custom'); } catch {}
+  document.body.dataset.theme = 'custom';
+  try { loadCustomThemeIntoInputs(); } catch {}
+  try { updateCustomTheme(); } catch {}
 }
 
 function selectTheme(theme) {
@@ -4434,6 +4687,19 @@ function saveCustomTheme() {
   localStorage.setItem('frogtalk-theme', 'custom');
   document.body.dataset.theme = 'custom';
   updateCustomTheme();
+  (async () => {
+    try {
+      await apiFetch('/api/auth/profile', 'PATCH', {
+        theme: 'custom',
+        custom_theme_json: JSON.stringify(d),
+      });
+      if (State.user) {
+        State.user.theme = 'custom';
+        State.user.custom_theme_json = JSON.stringify(d);
+        if (typeof State.save === 'function') State.save();
+      }
+    } catch {}
+  })();
   if (typeof toast === 'function') toast('Custom theme saved!', 'success');
   else if (typeof UI !== 'undefined' && UI.showToast) UI.showToast('Custom theme saved!', 'success');
 }
@@ -5935,6 +6201,13 @@ async function saveProfile() {
     notify_mentions: notifyMentions,
     theme: currentTheme,
   };
+  if (currentTheme === 'custom') {
+    try {
+      body.custom_theme_json = localStorage.getItem('frogtalk-custom-theme') || State.user?.custom_theme_json || '';
+    } catch {
+      body.custom_theme_json = State.user?.custom_theme_json || '';
+    }
+  }
   if (newAvatar) body.avatar = newAvatar;
   const bannerPrev = document.getElementById('profile-banner-preview');
   if (bannerPrev?.dataset.newBanner) body.banner = bannerPrev.dataset.newBanner;
@@ -5988,6 +6261,7 @@ async function saveProfile() {
     profileSaved = true;
     if (data && data.id && State.user) {
       State.user = { ...State.user, ...data };
+      _mergeUserSettingsFromMe(data);
     }
     // Update local state
     State.user.bio = bio;
@@ -6823,13 +7097,9 @@ function showUserInfo(nickname, userId, bridgePlatform, bridgeSourceName, bridge
             smEl.textContent = [status, mood].filter(Boolean).join(' · ');
           }
         }
-        // Track B: prefer the sanitised inline declaration list, fall
-        // back to the raw `custom_css` field for legacy peers' payloads.
-        const _effectiveCss = (
-          u.custom_style
-          || u.custom_css
-          || (isSelf ? (State.user?.custom_style || State.user?.custom_css || '') : '')
-        );
+        // Track B: only server-sanitised `custom_style` for other users;
+        // self may use local State after sync (editor uses raw custom_css separately).
+        const _effectiveCss = u.custom_style || (isSelf ? (State.user?.custom_style || '') : '');
         applyProfileCustomCss(_effectiveCss);
         if (tagsEl && Array.isArray(u.tags) && u.tags.length > 0) {
           tagsEl.innerHTML = u.tags.map(t =>

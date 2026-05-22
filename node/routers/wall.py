@@ -33,11 +33,10 @@ router = APIRouter(prefix="/wall", tags=["wall"])
 
 
 async def _push_social_notif(recipient_id: int, payload: dict) -> None:
-    """Best-effort WS push for a social-activity event. Never raises."""
-    try:
-        await manager.send_to_user(recipient_id, payload)
-    except Exception:
-        _log.debug("social notif WS push failed", exc_info=True)
+    """Delegate to social router (WS + offline push)."""
+    from routers.social import _push_social_notif as _social_push
+
+    await _social_push(recipient_id, payload)
 
 MAX_POST_CONTENT = 5000
 MAX_MEDIA_BYTES  = 10  * 1024 * 1024   # images
@@ -147,21 +146,16 @@ async def get_user_wall(
     for post in posts:
         post["reactions"] = _rmap.get(post["id"], [])
     
-    return {
-        "posts": posts,
-        "user": {
-            "id": user["id"],
-            "nickname": user["nickname"],
-            "avatar": user.get("avatar"),
-            "mood": user.get("mood", ""),
-            # `custom_css` is the raw user input (for the editor on
-            # "my own profile" only — never used by the renderer).
-            # `custom_style` is the sanitised inline declaration list
-            # the front-end applies via el.style.setProperty().
-            "custom_css": user.get("custom_css", ""),
-            "custom_style": user.get("custom_style", "") or "",
-        }
+    wall_user = {
+        "id": user["id"],
+        "nickname": user["nickname"],
+        "avatar": user.get("avatar"),
+        "mood": user.get("mood", ""),
+        "custom_style": user.get("custom_style", "") or "",
     }
+    if int(current_user["id"]) == int(user["id"]):
+        wall_user["custom_css"] = user.get("custom_css", "")
+    return {"posts": posts, "user": wall_user}
 
 
 @router.post("/posts")

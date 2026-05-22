@@ -446,6 +446,87 @@ class FederationSyncTests(unittest.TestCase):
                 fetch_origin="https://home.example",
             )
 
+    def test_dm_channel_settings_sync_export_apply(self):
+        import routers.auth as auth_mod
+
+        db = self.db
+        traveler = int(db.create_user("dm_prefs_traveler", "secret12"))
+        peer = int(db.create_user("dm_prefs_peer", "secret12"))
+        self.assertTrue(traveler and peer)
+        cid = int(db.get_or_create_dm(traveler, peer))
+        self.assertTrue(cid)
+        db.set_dm_disappear_timer(cid, traveler, 3600)
+        with db._conn() as con:
+            con.execute(
+                "UPDATE dm_channels SET forwarding_disabled=1 WHERE id=?",
+                (cid,),
+            )
+            con.execute(
+                "UPDATE dm_channels SET last_read_a=42, hidden_by_a=1 WHERE id=?",
+                (cid,),
+            )
+            con.commit()
+        export = auth_mod._build_sync_export_for_user(traveler)
+        row = next(
+            (p for p in (export.get("dm_peers") or []) if p.get("nickname") == "dm_prefs_peer"),
+            None,
+        )
+        self.assertIsNotNone(row, export.get("dm_peers"))
+        self.assertEqual(row.get("disappear_after"), 3600)
+        self.assertEqual(row.get("forwarding_disabled"), 1)
+        self.assertEqual(row.get("my_last_read"), 42)
+        self.assertEqual(row.get("hidden"), 1)
+
+        import crypto_fed as cf
+
+        home_sid = "srv_dm_prefs"
+        db.upsert_federation_server(
+            home_sid,
+            "DM Prefs Home",
+            "https://dm-prefs.test",
+            official=True,
+            server_pubkey=cf.get_local_public_key_pem(),
+        )
+        db.set_user_account_home_server_id(traveler, home_sid, force=True)
+        with db._conn() as con:
+            con.execute(
+                "UPDATE dm_channels SET disappear_after=0, forwarding_disabled=0, "
+                "last_read_a=0, last_read_b=0, hidden_by_a=0, hidden_by_b=0 WHERE id=?",
+                (cid,),
+            )
+            con.commit()
+        gid = str((db.get_user_by_id(traveler) or {}).get("global_user_id") or "").strip()
+        payload = auth_mod._attach_sync_export_signature({
+            "export_version": 2,
+            "global_user_id": gid,
+            "source_server_id": home_sid,
+            "source_public_url": "https://dm-prefs.test",
+            "dm_peers": [row],
+            "following": [],
+            "friends": [],
+            "blocked_users": [],
+            "rooms": [],
+            "public_rooms": [],
+            "social_posts": [],
+            "dm_histories": [],
+            "member_snapshots": [],
+            "self_profile": {},
+        })
+        auth_mod._apply_sync_export_to_user(traveler, payload, fetch_origin="https://dm-prefs.test")
+        self.assertEqual(db.get_dm_disappear_timer(cid), 3600)
+        with db._conn() as con:
+            ch = con.execute(
+                "SELECT user_a, user_b, forwarding_disabled, last_read_a, last_read_b, "
+                "hidden_by_a, hidden_by_b FROM dm_channels WHERE id=?",
+                (cid,),
+            ).fetchone()
+        self.assertEqual(int(ch["forwarding_disabled"]), 1)
+        is_a = int(ch["user_a"]) == traveler
+        my_read = int(ch["last_read_a"] if is_a else ch["last_read_b"])
+        hidden = int(ch["hidden_by_a"] if is_a else ch["hidden_by_b"])
+        self.assertGreaterEqual(my_read, 42)
+        self.assertEqual(hidden, 1)
+
     def test_export_pagination_metadata(self):
         import routers.auth as auth_mod
 
@@ -568,6 +649,60 @@ class FederationSyncTests(unittest.TestCase):
         bad = dict(export)
         bad["issued_at"] = 2
         self.assertFalse(cf.verify_sync_export_signature(bad, pem))
+
+    def test_verify_sync_export_rejects_unsigned_when_required(self):
+        import crypto_fed as cf
+        import routers.auth as auth_mod
+
+        db = self.db
+        ident = db.get_or_create_local_server_identity() or {}
+        home_sid = str(ident.get("server_id") or "srv_unsigned_home")
+        db.upsert_federation_server(
+            home_sid,
+            "Unsigned Home",
+            "https://unsigned-home.test",
+            official=True,
+            server_pubkey=cf.get_local_public_key_pem(),
+        )
+        uid = int(db.create_user("unsigned_traveler", "secret12"))
+        db.set_user_account_home_server_id(uid, home_sid, force=True)
+        gid = str((db.get_user_by_id(uid) or {}).get("global_user_id") or "").strip()
+        export = {
+            "export_version": 2,
+            "global_user_id": gid,
+            "source_server_id": home_sid,
+            "source_public_url": "https://unsigned-home.test",
+        }
+        with self.assertRaises(ValueError) as ctx:
+            auth_mod._verify_sync_export(
+                export,
+                user_id=uid,
+                fetch_origin="https://unsigned-home.test",
+            )
+        self.assertIn("export_signature_required", str(ctx.exception))
+
+    def test_federation_register_token_cannot_overwrite_pubkey(self):
+        import crypto_fed as cf
+
+        db = self.db
+        victim_sid = "srv_victim_peer"
+        real_pem = cf.get_local_public_key_pem()
+        db.upsert_federation_server(
+            victim_sid,
+            "Victim",
+            "https://victim.test",
+            server_pubkey=real_pem,
+        )
+        attacker_pem = cf.get_local_public_key_pem()
+        db.upsert_federation_server(
+            victim_sid,
+            "Victim",
+            "https://victim.test",
+            server_pubkey=attacker_pem,
+            allow_pubkey_overwrite=False,
+        )
+        stored = str(db.get_federation_server_pubkey(victim_sid) or "")
+        self.assertEqual(stored.strip(), real_pem.strip())
 
     def test_verify_sync_export_checks_signature_when_present(self):
         import crypto_fed as cf
@@ -1133,6 +1268,101 @@ class FederationDirectoryJoinApiTests(unittest.TestCase):
         self.assertIn("#ff00aa", str(row.get("custom_style") or ""))
         self.assertEqual(str(row.get("mood") or ""), "vibing")
 
+    def test_custom_theme_json_roundtrip_in_sync_export(self):
+        import routers.auth as auth_mod
+
+        db = self.db
+        uid = int(db.create_user("theme_sync_user", "secret12"))
+        with db._conn() as con:
+            con.execute(
+                "UPDATE users SET theme=?, custom_theme_json=? WHERE id=?",
+                (
+                    "custom",
+                    '{"accent":"#aabbcc","bg":"#101010","surface":"#202020"}',
+                    uid,
+                ),
+            )
+            con.commit()
+        export = auth_mod._build_sync_export_for_user(uid)
+        prof = export.get("self_profile") or {}
+        self.assertEqual(prof.get("theme"), "custom")
+        self.assertIn("#aabbcc", str(prof.get("custom_theme_json") or ""))
+
+    def test_directory_index_theme_on_materialize(self):
+        import routers.auth as auth_mod
+
+        db = self.db
+        theme = '{"accent":"#224466","bg":"#0a0a0a"}'
+        db.upsert_federation_channel_index(
+            "dir-theme-room",
+            "srv_dir_home",
+            description="Themed federated room",
+            channel_theme=theme,
+            home_base_url="https://dir-home.test",
+        )
+        room, err = auth_mod.materialize_directory_federated_channel("dir-theme-room")
+        self.assertIsNone(err)
+        self.assertIsNotNone(room)
+        loaded = db.get_room_by_name("dir-theme-room") or {}
+        self.assertIn("#224466", str(loaded.get("channel_theme") or ""))
+
+    def test_client_prefs_onion_url_sanitized(self):
+        import routers.auth as auth_mod
+
+        raw = auth_mod._sanitize_client_prefs_json({
+            "prefer_onion": 1,
+            "preferred_node_url": "abc123def456ghi.onion",
+        })
+        data = json.loads(raw)
+        self.assertEqual(data.get("preferred_node_url"), "abc123def456ghi.onion")
+
+    def test_client_prefs_sync_export_apply(self):
+        import routers.auth as auth_mod
+
+        db = self.db
+        uid = int(db.create_user("prefs_sync_user", "secret12"))
+        prefs = auth_mod._sanitize_client_prefs_json({
+            "prefer_onion": 1,
+            "preferred_node_url": "https://travel.example",
+            "custom_sounds": {
+                "app:msg": "data:audio/wav;base64,UklGRiQAAABXQVZFZm10",
+            },
+        })
+        with db._conn() as con:
+            con.execute(
+                "UPDATE users SET client_prefs_json=? WHERE id=?",
+                (prefs, uid),
+            )
+            con.commit()
+        export = auth_mod._build_sync_export_for_user(uid)
+        prof = export.get("self_profile") or {}
+        cp = prof.get("client_prefs") or {}
+        self.assertEqual(cp.get("prefer_onion"), 1)
+        self.assertEqual(cp.get("preferred_node_url"), "https://travel.example")
+        self.assertTrue(str((cp.get("custom_sounds") or {}).get("app:msg") or "").startswith("data:audio/"))
+
+    def test_users_profile_hides_custom_css_from_viewers(self):
+        owner = int(self.db.create_user("css_owner", "secret12"))
+        viewer = self._login("css_viewer")
+        with self.db._conn() as con:
+            con.execute(
+                "UPDATE users SET custom_css=?, custom_style=? WHERE id=?",
+                (
+                    "body{color:red}",
+                    "color:#00ff00",
+                    owner,
+                ),
+            )
+            con.commit()
+        r = self.client.get(
+            "/api/users/profile/css_owner",
+            headers={"X-Session-Token": viewer},
+        )
+        self.assertEqual(r.status_code, 200, r.text)
+        body = r.json()
+        self.assertNotIn("custom_css", body)
+        self.assertIn("#00ff00", str(body.get("custom_style") or ""))
+
     def test_materialize_applies_channel_theme(self):
         import routers.auth as auth_mod
 
@@ -1148,6 +1378,57 @@ class FederationDirectoryJoinApiTests(unittest.TestCase):
         loaded = db.get_room_by_name("themed-fed-room") or {}
         stored = str(loaded.get("channel_theme") or "")
         self.assertIn("#336699", stored)
+
+    def test_materialize_applies_room_banner(self):
+        import routers.auth as auth_mod
+
+        db = self.db
+        room = auth_mod._materialize_federated_channel({
+            "name": "banner-fed-room",
+            "type": "public",
+            "channel_type": "text",
+            "banner": "https://cdn.example/banner.png",
+        })
+        self.assertIsNotNone(room)
+        loaded = db.get_room_by_name("banner-fed-room") or {}
+        self.assertIn("cdn.example", str(loaded.get("banner") or ""))
+
+    def test_room_channel_settings_sync_export_apply(self):
+        import routers.auth as auth_mod
+
+        db = self.db
+        uid = int(db.create_user("room_prefs_owner", "secret12"))
+        rid = int(db.create_room("room-prefs-ch", "prefs", "public", uid, None))
+        db.join_room(uid, rid)
+        with db._conn() as con:
+            con.execute(
+                "UPDATE rooms SET forwarding_disabled=1, dj_only_queue=1, slowmode=30 WHERE id=?",
+                (rid,),
+            )
+            con.commit()
+        export = auth_mod._build_sync_export_for_user(uid)
+        row = next(
+            (r for r in (export.get("rooms") or []) if r.get("name") == "room-prefs-ch"),
+            None,
+        )
+        self.assertIsNotNone(row, export.get("rooms"))
+        self.assertEqual(row.get("forwarding_disabled"), 1)
+        self.assertEqual(row.get("dj_only_queue"), 1)
+        self.assertEqual(row.get("slowmode"), 30)
+
+        room = auth_mod._materialize_federated_channel({
+            "name": "room-prefs-import",
+            "type": "public",
+            "channel_type": "text",
+            "forwarding_disabled": 1,
+            "dj_only_queue": 1,
+            "slowmode": 30,
+        })
+        self.assertIsNotNone(room)
+        loaded = db.get_room_by_name("room-prefs-import") or {}
+        self.assertEqual(int(loaded.get("forwarding_disabled") or 0), 1)
+        self.assertEqual(int(loaded.get("dj_only_queue") or 0), 1)
+        self.assertEqual(int(loaded.get("slowmode") or 0), 30)
 
 
 if __name__ == "__main__":

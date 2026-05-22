@@ -310,6 +310,13 @@ const Notifications = (() => {
     if (dataUrl) map[key] = dataUrl;
     else delete map[key];
     _saveCustomSounds(map);
+    if (!nick && (kind === 'msg' || kind === 'ring')) {
+      try {
+        if (typeof window._persistClientPrefsToServer === 'function') {
+          void window._persistClientPrefsToServer();
+        }
+      } catch {}
+    }
   }
   let _customAudio = null;
   let _customAudioToken = 0;
@@ -887,11 +894,10 @@ const Notifications = (() => {
             if (xhr.status < 200 || xhr.status >= 300 || !payload?.ok || !payload?.asset?.url) {
               return finish({ ok: false, error: payload?.error || ('Upload failed (' + xhr.status + ')') });
             }
-            const separator = payload.asset.url.includes('?') ? '&' : '?';
-            const authedUrl = payload.asset.url + separator + 'token=' + encodeURIComponent(sessionToken);
-            try { _setCustomSound(nick, safeKind, authedUrl); } catch {}
+            const cleanUrl = _removeTokenQuery(payload.asset.url);
+            try { _setCustomSound(nick, safeKind, cleanUrl); } catch {}
             try { if (onProgress) onProgress(100); } catch {}
-            finish({ ok: true, dataUrl: authedUrl, asset: payload.asset });
+            finish({ ok: true, dataUrl: cleanUrl, asset: payload.asset });
           };
           xhr.onerror = () => finish({ ok: false, error: 'Upload failed' });
           xhr.onabort = () => finish({ ok: false, error: 'Upload timed out' });

@@ -356,10 +356,30 @@ async def send_message(request: Request, channel_id: int, body: DMMessageBody,
         "reactions": {},
         "created_at": datetime.utcnow().isoformat() + "Z",
     }
-    # Notify recipient via WS
+    # Notify recipient via WS; push when offline (same extras as ws.py DMs).
     try:
         if ch and peer_id and peer_id != current_user["id"]:
-            await manager.send_to_user(peer_id, dm_broadcast)
+            delivered = await manager.send_to_user(peer_id, dm_broadcast)
+            if not delivered:
+                try:
+                    from routers.ws import _push_always
+
+                    peer_row = db.get_user_by_id(peer_id) or {}
+                    await _push_always(
+                        peer_id,
+                        current_user.get("nickname") or "DM",
+                        (body.content or "New message")[:180],
+                        "/app",
+                        kind="dm",
+                        tag=f"ft-dm-{channel_id}",
+                        extra={
+                            "sender_name": current_user.get("nickname") or "",
+                            "conversation_id": str(channel_id),
+                            "from_nickname": current_user.get("nickname") or "",
+                        },
+                    )
+                except Exception:
+                    _log.debug("dm REST push failed", exc_info=True)
     except Exception:
         pass
 

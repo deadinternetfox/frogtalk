@@ -1018,19 +1018,24 @@ async def websocket_endpoint(
                     if not _validate_call_participant(int(data.get("call_id") or 0), user["id"], to_id):
                         continue
                     # Don't create a new call row; just forward the SDP to the peer.
+                    try:
+                        _ident_reneg = db.get_or_create_local_server_identity() or {}
+                        _local_sid_reneg = str(_ident_reneg.get("server_id") or "").strip()
+                    except Exception:
+                        _local_sid_reneg = ""
                     reneg_payload = {
                         "type": "call_offer",
                         "from_id": user["id"],
                         "from_nickname": user["nickname"],
                         "call_type": call_type,
                         "sdp": data.get("sdp"),
-                        # Track E: signed DTLS fingerprint envelope. Server
-                        # is opaque transport — it never inspects or
-                        # mutates this field, just forwards verbatim.
                         "fp_sig": data.get("fp_sig") or "",
                         "renegotiate": True,
                         "force_relay": bool(data.get("force_relay")),
                         "call_id": int(data.get("call_id") or 0),
+                        "global_call_id": str(data.get("global_call_id") or "").strip(),
+                        "peer_home_server_id": _local_sid_reneg,
+                        "federated": bool(data.get("global_call_id")),
                     }
                     delivered_reneg = await manager.send_to_user(to_id, reneg_payload)
                     if not delivered_reneg:
@@ -1045,6 +1050,31 @@ async def websocket_endpoint(
                             )
                         except Exception:
                             logger.exception("queue_call_signal(call_offer renegotiate) failed")
+                    try:
+                        import federation_calls as _fc
+                        peer = db.get_user_by_id(to_id) or {}
+                        call_id = int(data.get("call_id") or 0)
+                        gid = str(data.get("global_call_id") or "").strip()
+                        if not gid and call_id:
+                            with db._conn() as con:
+                                crow = con.execute(
+                                    "SELECT global_call_id FROM calls WHERE id=?",
+                                    (call_id,),
+                                ).fetchone()
+                            if crow:
+                                gid = str(crow["global_call_id"] or "").strip()
+                        if gid and _fc.is_remote_peer(peer):
+                            _fc.enqueue_call_renegotiate(
+                                user,
+                                peer,
+                                global_call_id=gid,
+                                local_call_id=call_id,
+                                call_type=call_type,
+                                sdp=data.get("sdp") or "",
+                                fp_sig=data.get("fp_sig") or "",
+                            )
+                    except Exception:
+                        logger.exception("federated call_offer renegotiate enqueue failed")
                     continue
                 # Rate-limit new (non-renegotiate) call_offer per caller so
                 # one user can't ring-bomb their friend list or pump

@@ -524,6 +524,17 @@ async function startCall (type, nick, uid) {
   // peer's TURN as well as ours. Cleared on every fresh startCall so we
   // don't reuse a stale id from a previous call.
   _peerHomeServerId = String(_activeDM?.peer_home_server_id || '');
+  if (_callPeerNick && !_peerHomeServerId) {
+    try {
+      const rp = await apiFetch('/api/users/profile/' + encodeURIComponent(_callPeerNick));
+      if (rp.ok) {
+        const u = await rp.json();
+        const sid = String(u.peer_home_server_id || '').trim();
+        if (sid) _peerHomeServerId = sid;
+        if (u.id && !_callPeerUID) _callPeerUID = u.id;
+      }
+    } catch {}
+  }
   if (!_callPeerNick) {
     // Usually means they tapped call outside a DM. Phrase it so it actually
     // points at the cause instead of confusing "no peer connected" language.
@@ -614,30 +625,36 @@ async function callNick (nick, type) {
 /* ── Receive offer (incoming) ──────────────────────────────────────────────── */
 async function handleCallOffer (data) {
   // Mid-call renegotiation from the same peer (camera turned on, screen-share, etc.)
-  if (data.renegotiate && _callState === 'active' && _pc &&
-      data.from_nickname === _callPeerNick) {
-    try {
-      // If the caller is forcing relay (TURN-only ICE restart), mirror that
-      // on this side too — otherwise the answerer keeps offering host/srflx
-      // candidates that can't pair with the caller's relay-only set, and
-      // the restart never converges.
-      if (data.force_relay) {
-        try { _pc.setConfiguration({ iceServers: ICE_SERVERS, iceTransportPolicy: 'relay' }); } catch {}
-      }
-      await _pc.setRemoteDescription({ type: 'offer', sdp: data.sdp });
-      const ans = await _pc.createAnswer();
-      await _pc.setLocalDescription(ans);
-      const renegFp = await _signCallFp(data.call_id || _callId || 0, _callPeerUID || data.from_id || 0, ans.sdp);
-      _sendCallSignal({
-        type: 'call_answer',
-        to_nickname: _callPeerNick,
-        call_id: data.call_id,
-        sdp: ans.sdp,
-        renegotiate: true,
-        fp_sig: renegFp || undefined,
-      });
-    } catch (e) { console.warn('renegotiate answer failed', e); }
-    return;
+  if (data.renegotiate && _callState === 'active' && _pc) {
+    const okCall = data.call_id && _callId && String(data.call_id) === String(_callId);
+    const okNick = data.from_nickname === _callPeerNick;
+    const okUid = !data.from_id || !_callPeerUID || Number(data.from_id) === Number(_callPeerUID);
+    if ((okCall || okNick) && okUid) {
+      try {
+        const peerHome = String(data.peer_home_server_id || data.origin_server_id || '').trim();
+        if (peerHome) _peerHomeServerId = peerHome;
+        const ice = await buildIceServers(_peerHomeServerId || '');
+        if (data.force_relay) {
+          try { _pc.setConfiguration({ iceServers: ice, iceTransportPolicy: 'relay' }); } catch {}
+        } else {
+          try { _pc.setConfiguration({ iceServers: ice }); } catch {}
+        }
+        await _pc.setRemoteDescription({ type: 'offer', sdp: data.sdp });
+        const ans = await _pc.createAnswer();
+        await _pc.setLocalDescription(ans);
+        const renegFp = await _signCallFp(data.call_id || _callId || 0, _callPeerUID || data.from_id || 0, ans.sdp);
+        _sendCallSignal({
+          type: 'call_answer',
+          to_nickname: _callPeerNick,
+          call_id: data.call_id,
+          sdp: ans.sdp,
+          renegotiate: true,
+          fp_sig: renegFp || undefined,
+        });
+      } catch (e) { console.warn('renegotiate answer failed', e); }
+      return;
+    }
+    if (okCall) return;
   }
   if (_callState !== 'idle') {
     // Same call we're already on: drop silently. The caller's live WS push
@@ -845,6 +862,13 @@ function handleCallCreated (data) {
   const peerHome = String(data.peer_home_server_id || data.callee_home_server_id || '');
   if (peerHome) _peerHomeServerId = peerHome;
   if (data.global_call_id) _callGlobalId = data.global_call_id;
+  if (peerHome && _pc) {
+    try {
+      const ice = await buildIceServers(_peerHomeServerId);
+      const pol = (_pc.getConfiguration && _pc.getConfiguration())?.iceTransportPolicy;
+      _pc.setConfiguration({ iceServers: ice, iceTransportPolicy: pol || 'all' });
+    } catch (e) { console.warn('refresh ICE after call_created failed', e); }
+  }
   if (data.federated) {
     try { toast('Calling peer on another node…', 'info'); } catch {}
   }
@@ -949,7 +973,8 @@ function _armConnectingHardCap () {
       _didRelayRetry = true;
       console.warn('[calls] connecting hard-cap hit — forcing ICE restart (relay)');
       try {
-        try { _pc.setConfiguration({ iceServers: ICE_SERVERS, iceTransportPolicy: 'relay' }); } catch {}
+        const ice = await buildIceServers(_peerHomeServerId || '');
+        try { _pc.setConfiguration({ iceServers: ice, iceTransportPolicy: 'relay' }); } catch {}
         _pc.restartIce();
         const offer = await _pc.createOffer({ iceRestart: true });
         await _pc.setLocalDescription(offer);
@@ -1342,6 +1367,7 @@ async function _renegotiate () {
       type: 'call_offer',
       to_nickname: _callPeerNick,
       call_id: _callId || undefined,
+      global_call_id: _callGlobalId || undefined,
       call_type: _callType,
       sdp: offer.sdp,
       renegotiate: true,

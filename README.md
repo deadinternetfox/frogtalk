@@ -68,7 +68,7 @@ and private channels (AES-GCM) before data reaches your disk.
 |---|---|
 | 🔐 **E2E Encryption** | Signal Protocol for DMs (X3DH + Double Ratchet) and per-room AES-256-GCM (AAD-bound v2 wire format, automatic key rotation on ban/kick) for private channels, client-side only — the server never sees plaintext |
 | 🌐 **Federated** | Your node joins the global FrogTalk directory and talks to other nodes |
-| 🔁 **Cross-node Sync** | Replicates profile, themes, contacts, joined channels (incl. room themes), social graph/posts, and DM history when visiting another node |
+| 🔁 **Cross-node Sync** | Home-signed account import when traveling: profile, themes, client prefs, joined channel settings (slowmode, forwarding lock, themes), DM thread prefs, friends/following, FrogSocial posts — see [SECURITY_MODEL.md](docs/SECURITY_MODEL.md) |
 | ⚡ **Real-time** | WebSocket messaging with auto-reconnect, typing indicators, reactions |
 | 🔒 **Private Rooms** | Passphrase-protected rooms — only members with the passphrase can decrypt |
 | 💬 **Direct Messages** | Fully encrypted DMs between any two users |

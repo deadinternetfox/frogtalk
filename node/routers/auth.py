@@ -274,10 +274,11 @@ def _load_user_sync_row(user_id: int) -> dict:
         with db._conn() as con:
             row = con.execute(
                 """
-                SELECT display_name, avatar, bio, status_msg, presence,
+                SELECT display_name, avatar, banner, bio, status_msg, presence,
                        wall_enabled, wall_comments_enabled,
                        profile_public, allow_friend_requests,
-                       theme, notify_sounds, notify_desktop,
+                       theme, custom_theme_json, custom_css, client_prefs_json,
+                       notify_sounds, notify_desktop,
                        notify_dms, notify_mentions,
                        allow_dms_from, show_last_seen,
                        show_read_receipts, hide_active_channels,
@@ -293,6 +294,205 @@ def _load_user_sync_row(user_id: int) -> dict:
         return dict(row) if row else {}
     except Exception:
         return {}
+
+
+_SYNC_THEME_ALLOWLIST = frozenset({
+    "frog", "light", "midnight", "forest", "cyberpunk", "ocean", "sunset",
+    "rose", "solarized", "mono", "custom", "golden", "lava", "retrowave", "sakura",
+})
+_CUSTOM_THEME_JSON_KEYS = frozenset({
+    "accent", "bg", "surface", "border", "text", "muted",
+    "toast_bg", "toast_bg2", "toast_border", "toast_text", "toast_shadow",
+    "fwd_border", "fwd_bg", "fwd_top_border", "fwd_top_bg", "fwd_top_color",
+    "fwd_preview_color", "fwd_pill_color", "fwd_pill_bg", "fwd_pill_border",
+})
+_HEX_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{3,8}$")
+
+
+def _sanitize_custom_theme_json(raw) -> str:
+    """Canonical JSON for custom app theme colors (account sync + profile PATCH)."""
+    text = str(raw or "").strip()
+    if not text:
+        return ""
+    try:
+        data = json.loads(text) if isinstance(raw, str) else raw
+    except Exception:
+        return ""
+    if not isinstance(data, dict):
+        return ""
+    clean: dict[str, str] = {}
+    for key, val in data.items():
+        k = str(key or "").strip()
+        if k not in _CUSTOM_THEME_JSON_KEYS:
+            continue
+        v = str(val or "").strip()
+        if not _HEX_COLOR_RE.match(v):
+            continue
+        clean[k] = v.lower()
+    if not clean:
+        return ""
+    try:
+        return json.dumps(clean, separators=(",", ":"))[:8000]
+    except Exception:
+        return ""
+
+
+_SYNC_CLIENT_PREFS_MAX = 600_000
+_SYNC_CUSTOM_SOUND_MAX = 131_072
+_SYNC_CUSTOM_SOUND_KEYS = frozenset({"app:msg", "app:ring"})
+_SYNC_CUSTOM_CSS_MAX = 10_240
+_SYNC_DM_DISAPPEAR_ALLOWED = frozenset({0, 3600, 86400, 604800, 2592000})
+
+
+def _sanitize_sync_dm_channel_settings(raw: dict) -> dict:
+    """Per-DM channel prefs for account sync (disappear timer, forwarding, read cursor)."""
+    if not isinstance(raw, dict):
+        return {}
+    sec = int(raw.get("disappear_after") or 0)
+    if sec not in _SYNC_DM_DISAPPEAR_ALLOWED:
+        sec = 0
+    out: dict = {
+        "disappear_after": sec,
+        "forwarding_disabled": 1 if int(raw.get("forwarding_disabled") or 0) else 0,
+        "my_last_read": max(0, min(2_147_483_647, int(raw.get("my_last_read") or 0))),
+        "hidden": 1 if raw.get("hidden") in (True, 1, "1") else 0,
+    }
+    return out
+
+
+def _sanitize_sync_profile_banner(raw) -> str:
+    """Profile banner for sync apply — data:image/* or https? URLs only."""
+    text = str(raw or "").strip()
+    if not text:
+        return ""
+    if len(text) > 500_000:
+        return ""
+    if text.startswith("data:"):
+        if not re.match(
+            r"^data:image/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=\n\r]+$",
+            text,
+            re.IGNORECASE,
+        ):
+            return ""
+        return text
+    if text.startswith("http://") or text.startswith("https://"):
+        return text[:2000]
+    return ""
+
+
+def _valid_preferred_node_url(url: str) -> str:
+    """Allow https? URLs and bare .onion host hints; reject injection chars."""
+    text = str(url or "").strip()[:512]
+    if not text:
+        return ""
+    low = text.lower()
+    if low.startswith("http://") or low.startswith("https://"):
+        return text
+    if ".onion" in low and not re.search(r'[<>"\'\s\\]', text):
+        return text
+    return ""
+
+
+def _sanitize_client_prefs_json(raw) -> str:
+    """Network UI defaults + capped app-level custom notification sounds."""
+    text = str(raw or "").strip()
+    if not text:
+        return ""
+    try:
+        data = json.loads(text) if isinstance(raw, str) else raw
+    except Exception:
+        return ""
+    if not isinstance(data, dict):
+        return ""
+    out: dict = {}
+    out["prefer_onion"] = 1 if int(data.get("prefer_onion") or 0) else 0
+    url = _valid_preferred_node_url(str(data.get("preferred_node_url") or ""))
+    if url:
+        out["preferred_node_url"] = url
+    sounds_in = data.get("custom_sounds")
+    if isinstance(sounds_in, dict):
+        sounds: dict[str, str] = {}
+        total = 0
+        for key, val in sounds_in.items():
+            k = str(key or "").strip()
+            if k not in _SYNC_CUSTOM_SOUND_KEYS:
+                continue
+            v = str(val or "").strip()
+            if not v.startswith("data:audio/"):
+                continue
+            if not re.match(
+                r"^data:audio/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=\n\r]+$",
+                v,
+                re.IGNORECASE,
+            ):
+                continue
+            if len(v) > _SYNC_CUSTOM_SOUND_MAX:
+                continue
+            if total + len(v) > _SYNC_CLIENT_PREFS_MAX:
+                break
+            sounds[k] = v
+            total += len(v)
+        if sounds:
+            out["custom_sounds"] = sounds
+    try:
+        return json.dumps(out, separators=(",", ":"))[:_SYNC_CLIENT_PREFS_MAX]
+    except Exception:
+        return ""
+
+
+def _parse_client_prefs_export(raw: str) -> dict:
+    """Parse stored client_prefs_json for sync export (already sanitized)."""
+    text = str(raw or "").strip()
+    if not text:
+        return {}
+    try:
+        data = json.loads(text)
+    except Exception:
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    out: dict = {
+        "prefer_onion": 1 if int(data.get("prefer_onion") or 0) else 0,
+        "preferred_node_url": str(data.get("preferred_node_url") or "")[:512],
+    }
+    sounds = data.get("custom_sounds")
+    if isinstance(sounds, dict):
+        clean_sounds = {
+            k: str(sounds[k])[:_SYNC_CUSTOM_SOUND_MAX]
+            for k in _SYNC_CUSTOM_SOUND_KEYS
+            if k in sounds and str(sounds[k] or "").startswith("data:audio/")
+        }
+        if clean_sounds:
+            out["custom_sounds"] = clean_sounds
+    return out
+
+
+def _client_prefs_from_local_storage_map(prefs: dict) -> str:
+    """Build exportable client_prefs from a parsed localStorage-shaped dict."""
+    if not isinstance(prefs, dict):
+        return ""
+    sounds: dict[str, str] = {}
+    raw_sounds = prefs.get("custom_sounds")
+    if isinstance(raw_sounds, dict):
+        for key, val in raw_sounds.items():
+            k = str(key or "").strip()
+            if k in _SYNC_CUSTOM_SOUND_KEYS and val:
+                sounds[k] = str(val)
+    payload = {
+        "prefer_onion": 1 if prefs.get("prefer_onion") else 0,
+        "preferred_node_url": str(prefs.get("preferred_node_url") or "").strip(),
+        "custom_sounds": sounds,
+    }
+    return _sanitize_client_prefs_json(payload)
+
+
+def _normalize_sync_theme(raw: str) -> str:
+    theme = str(raw or "frog").strip().lower()
+    if theme == "dark":
+        theme = "frog"
+    if theme not in _SYNC_THEME_ALLOWLIST:
+        theme = "frog"
+    return theme
 
 
 def _sanitize_room_order_json(raw: str) -> str:
@@ -415,6 +615,7 @@ def _ssrf_guard(url: str) -> None:
             or ip.is_multicast
             or ip.is_reserved
             or ip.is_unspecified
+            or not ip.is_global
         ):
             raise ValueError(f"refusing private/loopback host: {host} -> {ip_str}")
 
@@ -475,21 +676,65 @@ def _create_session_with_meta(request: Request, user_id: int) -> str:
     return token
 
 
-def _post_json(url: str, body: dict, headers: dict | None = None, timeout: float = 3.5):
+class _SyncNoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Refuse redirects on account-sync fetches (SSRF re-check not implemented)."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise ValueError(f"sync fetch redirect not allowed ({code} -> {newurl})")
+
+
+def _sync_urlopen(req, timeout: float):
+    opener = urllib.request.build_opener(_SyncNoRedirectHandler())
+    return opener.open(req, timeout=timeout)
+
+
+def _federation_outbound_headers(method: str, path: str, body: bytes) -> dict:
+    """Bearer + optional Ed25519 request signing for peer API calls."""
+    hdrs: dict[str, str] = {}
+    fed = (os.getenv("FROGTALK_FEDERATION_TOKEN", "") or "").strip()
+    if fed:
+        hdrs["X-Federation-Token"] = fed
+    try:
+        import crypto_fed as _cf
+
+        if _cf.federation_auth_mode() not in ("dual", "signed"):
+            return hdrs
+        ident = db.get_or_create_local_server_identity() or {}
+        peer_id = str(ident.get("server_id") or "").strip()
+        if not peer_id:
+            return hdrs
+        hdrs.update(_cf.sign_request_headers(method.upper(), path, body, peer_id))
+    except Exception:
+        pass
+    return hdrs
+
+
+def _post_json(
+    url: str,
+    body: dict,
+    headers: dict | None = None,
+    timeout: float = 3.5,
+    *,
+    sign_path: str = "",
+):
     _ssrf_guard(url)
     payload = json.dumps(body).encode("utf-8")
+    merged = {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "User-Agent": FED_UA,
+    }
+    if sign_path:
+        merged.update(_federation_outbound_headers("POST", sign_path, payload))
+    if headers:
+        merged.update(headers)
     req = urllib.request.Request(
         url,
         data=payload,
-        headers={
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-            "User-Agent": FED_UA,
-            **(headers or {}),
-        },
+        headers=merged,
         method="POST",
     )
-    with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 — scheme + host validated by _ssrf_guard
+    with _sync_urlopen(req, timeout=timeout) as resp:  # noqa: S310 — scheme + host validated by _ssrf_guard
         raw = resp.read().decode("utf-8", errors="replace")
     return json.loads(raw)
 
@@ -505,7 +750,7 @@ def _get_json(url: str, headers: dict | None = None, timeout: float = 3.5):
         },
         method="GET",
     )
-    with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 — scheme + host validated by _ssrf_guard
+    with _sync_urlopen(req, timeout=timeout) as resp:  # noqa: S310 — scheme + host validated by _ssrf_guard
         raw = resp.read().decode("utf-8", errors="replace")
     return json.loads(raw)
 
@@ -850,7 +1095,7 @@ def _lookup_federation_profile_gid_payload(gid: str) -> dict | None:
         "status_msg": str(prof.get("status_msg") or "")[:200],
         "mood": str(prof.get("mood") or "")[:200],
         "presence": str(prof.get("presence") or "offline")[:32],
-        "custom_style": str(prof.get("custom_style") or "")[:12000],
+        "custom_style": _sanitize_inline_style(str(prof.get("custom_style") or "")[:12000]),
         "banner": str(prof.get("banner") or "")[:500_000],
         "origin_server_id": str(prof.get("origin_server_id") or "").strip(),
     }
@@ -874,7 +1119,7 @@ def _upsert_profile_cache_from_payload(payload: dict) -> None:
             status_msg=str(payload.get("status_msg") or "")[:200],
             mood=str(payload.get("mood") or "")[:200],
             presence=str(payload.get("presence") or "offline")[:32],
-            custom_style=str(payload.get("custom_style") or "")[:12000],
+            custom_style=_sanitize_inline_style(str(payload.get("custom_style") or "")[:12000]),
             banner=str(payload.get("banner") or "")[:500_000],
         )
     except Exception:
@@ -897,8 +1142,8 @@ def _fetch_home_profile_payload(gid: str, home_server_id: str) -> dict | None:
         data = _post_json(
             f"{base}/api/auth/federation-sync-profile-gid",
             {"global_user_id": gid},
-            headers={"X-Federation-Token": fed},
             timeout=5.0,
+            sign_path="/api/auth/federation-sync-profile-gid",
         )
     except Exception:
         return None
@@ -1021,7 +1266,7 @@ def build_federation_profile_card(
         "status_msg": str(cached.get("status_msg") or "")[:200],
         "mood": str(cached.get("mood") or "")[:200],
         "presence": str(cached.get("presence") or "offline")[:32],
-        "custom_style": str(cached.get("custom_style") or "")[:12000],
+        "custom_style": _sanitize_inline_style(str(cached.get("custom_style") or "")[:12000]),
         "banner": str(cached.get("banner") or "")[:500_000],
         "origin_server_id": str(cached.get("origin_server_id") or home_sid or "")[:128],
         "home_server_id": sub_home_sid,
@@ -1143,6 +1388,10 @@ def _sync_error_hint_public(err: str) -> str:
         return "Sync rejected: home server identity did not match. Use Re-sync from home."
     if "export_gid_mismatch" in raw:
         return "Sync rejected: account identity mismatch."
+    if "export_signature_required" in raw or "export_signer_pubkey_unpinned" in raw:
+        return "Sync rejected: home export must be signed. Check federation pubkey pinning."
+    if "export_signature_invalid" in raw:
+        return "Sync rejected: export signature invalid. Re-sync from home."
     if "invalid federation token" in raw:
         return "Federation token misconfigured on this node — contact the operator."
     return str(err)[:200]
@@ -1175,18 +1424,26 @@ def _verify_sync_export(
     if src_url and origin and src_url != origin:
         raise ValueError("export_source_url_mismatch")
     sig_b64 = str(payload.get("export_sig_b64") or "").strip()
-    if sig_b64 and src_sid:
-        pem = str(db.get_federation_server_pubkey(src_sid) or "").strip()
-        if pem:
-            try:
-                import crypto_fed as _cf
+    require_sig = (
+        os.getenv("FROGTALK_SYNC_REQUIRE_EXPORT_SIG", "1").strip().lower()
+        in ("1", "true", "yes", "on")
+    )
+    pem = str(db.get_federation_server_pubkey(src_sid) or "").strip() if src_sid else ""
+    if require_sig and src_sid:
+        if not pem:
+            raise ValueError("export_signer_pubkey_unpinned")
+        if not sig_b64:
+            raise ValueError("export_signature_required")
+    if sig_b64 and pem:
+        try:
+            import crypto_fed as _cf
 
-                if not _cf.verify_sync_export_signature(payload, pem):
-                    raise ValueError("export_signature_invalid")
-            except ValueError:
-                raise
-            except Exception:
-                raise ValueError("export_signature_invalid") from None
+            if not _cf.verify_sync_export_signature(payload, pem):
+                raise ValueError("export_signature_invalid")
+        except ValueError:
+            raise
+        except Exception:
+            raise ValueError("export_signature_invalid") from None
 
 
 def _account_home_server_id(user_id: int) -> str:
@@ -1582,6 +1839,25 @@ def _build_sync_export_for_user(user_id: int, *, social_posts_cursor: str = "") 
         sync_theme = _sanitize_sync_channel_theme(room.get("channel_theme"), rtype)
         if sync_theme:
             room_payload["channel_theme"] = sync_theme
+        if room.get("id") in joined_ids:
+            detail = db.get_room_by_name(name) or room
+            sync_theme = _sanitize_sync_channel_theme(detail.get("channel_theme"), rtype)
+            if sync_theme:
+                room_payload["channel_theme"] = sync_theme
+            banner = _sanitize_sync_room_icon(detail.get("banner"))
+            if banner:
+                room_payload["banner"] = banner
+            about = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", str(detail.get("about") or ""))[:4000]
+            if about:
+                room_payload["about"] = about
+            room_payload["slowmode"] = max(0, min(3600, int(detail.get("slowmode") or 0)))
+            room_payload["invite_only"] = 1 if int(detail.get("invite_only") or 0) else 0
+            who_inv = str(detail.get("who_can_invite") or "everyone").strip().lower()
+            if who_inv not in ("everyone", "mods", "owner"):
+                who_inv = "everyone"
+            room_payload["who_can_invite"] = who_inv
+            room_payload["forwarding_disabled"] = 1 if int(detail.get("forwarding_disabled") or 0) else 0
+            room_payload["dj_only_queue"] = 1 if int(detail.get("dj_only_queue") or 0) else 0
         if rtype == "public" and len(public_rooms) < _SYNC_EXPORT_PUBLIC_ROOM_LIMIT:
             public_rooms.append(room_payload)
         if room.get("id") in joined_ids:
@@ -1600,6 +1876,14 @@ def _build_sync_export_for_user(user_id: int, *, social_posts_cursor: str = "") 
         gid = str(peer.get("global_user_id") or "").strip()
         if not nick or not _GID_RE.match(gid):
             continue
+        is_channel_a = int(ch.get("user_a") or 0) == uid
+        my_read = int(ch.get("last_read_a") or 0) if is_channel_a else int(ch.get("last_read_b") or 0)
+        dm_settings = _sanitize_sync_dm_channel_settings({
+            "disappear_after": ch.get("disappear_after"),
+            "forwarding_disabled": ch.get("forwarding_disabled"),
+            "my_last_read": my_read,
+            "hidden": ch.get("hidden"),
+        })
         dm_peers.append({
             "nickname": nick,
             "global_user_id": gid,
@@ -1610,6 +1894,7 @@ def _build_sync_export_for_user(user_id: int, *, social_posts_cursor: str = "") 
             "mood": str(peer.get("mood") or "")[:200],
             "presence": str(peer.get("presence") or "offline")[:32],
             "custom_style": _sanitize_inline_style(str(peer.get("custom_style") or "")[:12000]),
+            **dm_settings,
         })
         if len(dm_peers) >= _SYNC_EXPORT_DM_LIMIT:
             break
@@ -1666,6 +1951,7 @@ def _build_sync_export_for_user(user_id: int, *, social_posts_cursor: str = "") 
     self_profile = {
         "display_name": str(me.get("display_name") or "")[:64],
         "avatar": me.get("avatar") or "",
+        "banner": me.get("banner") or "",
         "bio": str(me.get("bio") or "")[:4000],
         "status_msg": str(me.get("status_msg") or "")[:200],
         "presence": str(me.get("presence") or "online")[:32],
@@ -1673,7 +1959,8 @@ def _build_sync_export_for_user(user_id: int, *, social_posts_cursor: str = "") 
         "wall_comments_enabled": 1 if int(me.get("wall_comments_enabled") or 0) else 0,
         "profile_public": 1 if int(me.get("profile_public") or 0) else 0,
         "allow_friend_requests": 1 if int(me.get("allow_friend_requests") or 0) else 0,
-        "theme": str(me.get("theme") or "frog")[:64],
+        "theme": _normalize_sync_theme(str(me.get("theme") or "frog"))[:64],
+        "custom_theme_json": _sanitize_custom_theme_json(me.get("custom_theme_json") or ""),
         "notify_sounds": 1 if int(me.get("notify_sounds") or 0) else 0,
         "notify_desktop": 1 if int(me.get("notify_desktop") or 0) else 0,
         "notify_dms": 1 if int(me.get("notify_dms") or 0) else 0,
@@ -1684,6 +1971,8 @@ def _build_sync_export_for_user(user_id: int, *, social_posts_cursor: str = "") 
         "hide_active_channels": 1 if int(me.get("hide_active_channels") or 0) else 0,
         "mood": str(me.get("mood") or "")[:200],
         "custom_style": _sanitize_inline_style(str(me.get("custom_style") or "")[:12000]),
+        "custom_css": str(me.get("custom_css") or "")[:_SYNC_CUSTOM_CSS_MAX],
+        "client_prefs": _parse_client_prefs_export(me.get("client_prefs_json") or ""),
         "room_order": _sanitize_room_order_json(str(me.get("room_order") or "")[:12000]),
         "location_sharing_enabled": 1 if int(me.get("location_sharing_enabled") or 0) else 0,
         "pin_hash": pin_hash,
@@ -2197,6 +2486,7 @@ def _apply_sync_export_to_user(user_id: int, export: dict, *, fetch_origin: str 
             continue
         if channel_type not in ("text", "music", "voice"):
             channel_type = "text"
+        dir_theme = _sanitize_sync_channel_theme(raw.get("channel_theme"), "public") or ""
         # Directory rows are index-only — do NOT materialise a local shell
         # room for every public channel on the home node. Empty local copies
         # hide the federated index entry and make Discover look solo/empty.
@@ -2256,6 +2546,7 @@ def _apply_sync_export_to_user(user_id: int, export: dict, *, fetch_origin: str 
                     category=category,
                     tags_json=tags_json,
                     channel_type=channel_type,
+                    channel_theme=dir_theme,
                     visibility="public",
                     member_count=member_count,
                     owner_nickname=owner_nickname,
@@ -2317,7 +2608,23 @@ def _apply_sync_export_to_user(user_id: int, export: dict, *, fetch_origin: str 
                 status_msg=str(item.get("status_msg") or ""),
                 avatar=(item.get("avatar") or ""),
             )
-            db.get_or_create_dm(uid, peer_id)
+            cid = int(db.get_or_create_dm(uid, peer_id) or 0)
+            if cid > 0 and any(
+                k in item
+                for k in ("disappear_after", "forwarding_disabled", "my_last_read", "hidden")
+            ):
+                dm_prefs = _sanitize_sync_dm_channel_settings(item)
+                try:
+                    db.apply_sync_dm_channel_settings(
+                        cid,
+                        uid,
+                        disappear_after=dm_prefs.get("disappear_after"),
+                        forwarding_disabled=dm_prefs.get("forwarding_disabled"),
+                        my_last_read=dm_prefs.get("my_last_read") or None,
+                        hidden=bool(dm_prefs.get("hidden")) if "hidden" in item else None,
+                    )
+                except Exception:
+                    pass
             dm_linked += 1
         except Exception:
             continue
@@ -2446,9 +2753,8 @@ def _apply_sync_export_to_user(user_id: int, export: dict, *, fetch_origin: str 
             wall_comments_enabled = 1 if int(self_profile.get("wall_comments_enabled") or 0) else 0
             profile_public = 1 if int(self_profile.get("profile_public") or 0) else 0
             allow_friend_requests = 1 if int(self_profile.get("allow_friend_requests") or 0) else 0
-            theme = str(self_profile.get("theme") or "frog").strip().lower()
-            if theme not in ("frog", "light", "midnight", "forest", "cyberpunk", "ocean", "sunset", "rose", "solarized", "mono", "custom"):
-                theme = "frog"
+            theme = _normalize_sync_theme(str(self_profile.get("theme") or "frog"))
+            custom_theme_json = _sanitize_custom_theme_json(self_profile.get("custom_theme_json") or "")
             notify_sounds = 1 if int(self_profile.get("notify_sounds") or 0) else 0
             notify_desktop = 1 if int(self_profile.get("notify_desktop") or 0) else 0
             notify_dms = 1 if int(self_profile.get("notify_dms") or 0) else 0
@@ -2462,7 +2768,15 @@ def _apply_sync_export_to_user(user_id: int, export: dict, *, fetch_origin: str 
             show_read_receipts = 1 if int(self_profile.get("show_read_receipts") or 0) else 0
             hide_active_channels = 1 if int(self_profile.get("hide_active_channels") or 0) else 0
             mood = str(self_profile.get("mood") or "")[:200]
-            custom_style = _sanitize_inline_style(str(self_profile.get("custom_style") or "")[:12000])
+            raw_css = str(self_profile.get("custom_css") or "")[:_SYNC_CUSTOM_CSS_MAX]
+            custom_style = _sanitize_inline_style(
+                str(self_profile.get("custom_style") or "")[:12000]
+            ) or _sanitize_inline_style(raw_css)
+            client_prefs_json = _sanitize_client_prefs_json(
+                self_profile.get("client_prefs") if isinstance(self_profile.get("client_prefs"), dict)
+                else self_profile.get("client_prefs_json") or ""
+            )
+            profile_banner = _sanitize_sync_profile_banner(self_profile.get("banner"))
             room_order = _sanitize_room_order_json(str(self_profile.get("room_order") or "")[:12000])
             location_sharing_enabled = 1 if int(self_profile.get("location_sharing_enabled") or 0) else 0
             pin_hash = str(self_profile.get("pin_hash") or "").strip()
@@ -2479,6 +2793,7 @@ def _apply_sync_export_to_user(user_id: int, export: dict, *, fetch_origin: str 
                     UPDATE users
                     SET display_name=?,
                         avatar=?,
+                        banner=?,
                         bio=?,
                         status_msg=?,
                         presence=?,
@@ -2487,6 +2802,7 @@ def _apply_sync_export_to_user(user_id: int, export: dict, *, fetch_origin: str 
                         profile_public=?,
                         allow_friend_requests=?,
                         theme=?,
+                        custom_theme_json=?,
                         notify_sounds=?,
                         notify_desktop=?,
                         notify_dms=?,
@@ -2497,6 +2813,8 @@ def _apply_sync_export_to_user(user_id: int, export: dict, *, fetch_origin: str 
                         hide_active_channels=?,
                         mood=?,
                         custom_style=?,
+                        custom_css=?,
+                        client_prefs_json=?,
                         room_order=?,
                         location_sharing_enabled=?,
                         pin_hash=?,
@@ -2512,6 +2830,7 @@ def _apply_sync_export_to_user(user_id: int, export: dict, *, fetch_origin: str 
                     (
                         display_name,
                         avatar,
+                        profile_banner or None,
                         bio,
                         status_msg,
                         presence,
@@ -2520,6 +2839,7 @@ def _apply_sync_export_to_user(user_id: int, export: dict, *, fetch_origin: str 
                         profile_public,
                         allow_friend_requests,
                         theme,
+                        custom_theme_json,
                         notify_sounds,
                         notify_desktop,
                         notify_dms,
@@ -2530,6 +2850,8 @@ def _apply_sync_export_to_user(user_id: int, export: dict, *, fetch_origin: str 
                         hide_active_channels,
                         mood,
                         custom_style,
+                        raw_css,
+                        client_prefs_json,
                         room_order,
                         location_sharing_enabled,
                         (pin_hash or None),
@@ -3146,8 +3468,8 @@ def _fetch_sync_export_via_ticket(base_url: str, ticket: str, cursor: str = "") 
         data = _post_json(
             f"{base_url}/api/auth/federation-sync-export-ticket",
             body,
-            headers={"X-Federation-Token": fed},
             timeout=8.0,
+            sign_path="/api/auth/federation-sync-export-ticket",
         )
     except Exception:
         return None
@@ -3174,8 +3496,8 @@ def _fetch_sync_export_via_federation_gid(
         data = _post_json(
             f"{source}/api/auth/federation-sync-export-gid",
             body,
-            headers={"X-Federation-Token": fed},
             timeout=12.0,
+            sign_path="/api/auth/federation-sync-export-gid",
         )
     except Exception:
         return None
@@ -3293,6 +3615,15 @@ def _parse_sync_channel_raw(raw) -> dict | None:
         desc = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", str(raw.get("description") or ""))[:200]
         vanity = str(raw.get("vanity") or "").strip().lower()[:32]
         channel_theme = _sanitize_sync_channel_theme(raw.get("channel_theme"), room_type)
+        banner = _sanitize_sync_room_icon(raw.get("banner"))
+        about = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", str(raw.get("about") or ""))[:4000]
+        slowmode = max(0, min(3600, int(raw.get("slowmode") or 0)))
+        invite_only = 1 if int(raw.get("invite_only") or 0) else 0
+        who_inv = str(raw.get("who_can_invite") or "everyone").strip().lower()
+        if who_inv not in ("everyone", "mods", "owner"):
+            who_inv = "everyone"
+        forwarding_disabled = 1 if int(raw.get("forwarding_disabled") or 0) else 0
+        dj_only_queue = 1 if int(raw.get("dj_only_queue") or 0) else 0
     else:
         name = str(raw or "").strip().lower()
         room_type = "public"
@@ -3301,6 +3632,13 @@ def _parse_sync_channel_raw(raw) -> dict | None:
         desc = ""
         vanity = ""
         channel_theme = None
+        banner = None
+        about = ""
+        slowmode = 0
+        invite_only = 0
+        who_inv = "everyone"
+        forwarding_disabled = 0
+        dj_only_queue = 0
     if not _ROOM_NAME_RE.match(name):
         return None
     if room_type not in ("public", "private"):
@@ -3317,6 +3655,15 @@ def _parse_sync_channel_raw(raw) -> dict | None:
     }
     if channel_theme:
         out["channel_theme"] = channel_theme
+    if banner:
+        out["banner"] = banner
+    if about:
+        out["about"] = about
+    out["slowmode"] = slowmode
+    out["invite_only"] = invite_only
+    out["who_can_invite"] = who_inv
+    out["forwarding_disabled"] = forwarding_disabled
+    out["dj_only_queue"] = dj_only_queue
     return out
 
 
@@ -3365,16 +3712,36 @@ def _materialize_federated_channel(raw) -> dict | None:
             room = db.get_room_by_name(name)
         except Exception:
             room = None
-    elif room and parsed.get("icon"):
-        try:
-            db.update_room_settings(name, icon=parsed["icon"])
-        except Exception:
-            pass
-    if room and parsed.get("channel_theme"):
-        try:
-            db.update_room_settings(name, channel_theme=parsed["channel_theme"])
-        except Exception:
-            pass
+    if room:
+        patch = {}
+        if parsed.get("icon"):
+            patch["icon"] = parsed["icon"]
+        if parsed.get("description"):
+            patch["description"] = parsed["description"]
+        if parsed.get("channel_theme"):
+            patch["channel_theme"] = parsed["channel_theme"]
+        if parsed.get("banner"):
+            patch["banner"] = parsed["banner"]
+        if parsed.get("about"):
+            patch["about"] = parsed["about"]
+        if "slowmode" in parsed:
+            patch["slowmode"] = parsed["slowmode"]
+        if "invite_only" in parsed:
+            patch["invite_only"] = parsed["invite_only"]
+        if parsed.get("who_can_invite"):
+            patch["who_can_invite"] = parsed["who_can_invite"]
+        if "forwarding_disabled" in parsed:
+            patch["forwarding_disabled"] = parsed["forwarding_disabled"]
+        if patch:
+            try:
+                db.update_room_settings(name, **patch)
+            except Exception:
+                pass
+        if "dj_only_queue" in parsed:
+            try:
+                db.room_set_dj_only(name, int(parsed["dj_only_queue"]))
+            except Exception:
+                pass
     if room and parsed.get("vanity"):
         _try_apply_sync_room_vanity(room, parsed["vanity"])
     return room
@@ -3409,6 +3776,9 @@ def materialize_directory_federated_channel(room_name: str) -> tuple[dict | None
         "description": str(fed.get("description") or "")[:200],
         "icon": fed.get("icon"),
     }
+    dir_theme = _sanitize_sync_channel_theme(fed.get("channel_theme"), "public")
+    if dir_theme:
+        raw["channel_theme"] = dir_theme
     room = _materialize_federated_channel(raw)
     if not room:
         existing = db.get_room_by_name(name)
@@ -3529,8 +3899,8 @@ def _fetch_home_memberships_payload(base_url: str, global_user_id: str) -> dict 
         data = _post_json(
             f"{source}/api/auth/federation-sync-memberships-gid",
             {"global_user_id": gid},
-            headers={"X-Federation-Token": fed},
             timeout=5.0,
+            sign_path="/api/auth/federation-sync-memberships-gid",
         )
     except Exception:
         data = None
@@ -3856,6 +4226,7 @@ class ProfileUpdateRequest(BaseModel):
     allow_friend_requests: bool | None = None
     # New settings fields
     theme: str | None = Field(default=None, max_length=64)
+    custom_theme_json: str | None = Field(default=None, max_length=20_000)
     notify_sounds: bool | None = None
     notify_desktop: bool | None = None
     notify_dms: bool | None = None
@@ -3864,6 +4235,13 @@ class ProfileUpdateRequest(BaseModel):
     show_last_seen: str | None = Field(default=None, max_length=32)
     show_read_receipts: bool | None = None
     hide_active_channels: bool | None = None
+
+
+class ClientPrefsUpdateRequest(BaseModel):
+    """Network UI defaults + capped app notification sounds (account sync)."""
+    prefer_onion: bool | None = None
+    preferred_node_url: str | None = Field(default=None, max_length=512)
+    custom_sounds: dict | None = None
 
 
 def _fed_session_secret() -> str:
@@ -4700,17 +5078,39 @@ async def federation_sync_reset(
     return {"ok": True, "shells_pruned": pruned, "keep_rooms": sorted(keep)}
 
 
+async def _authenticate_federation_peer_request(
+    request: Request,
+    raw_body: bytes,
+    x_federation_token: str | None,
+) -> tuple[bool, str | None, str | None]:
+    from routers.federation import authenticate_federation_request
+
+    return await authenticate_federation_request(request, raw_body, x_federation_token)
+
+
 @router.post("/federation-sync-profile-gid")
 @limiter.limit("240/hour")
 async def federation_sync_profile_gid(
     request: Request,
-    body: FederationSyncExportGidRequest,
     x_federation_token: str | None = Header(default=None),
 ):
     """Federation peers: public profile mirror for visiting nodes."""
-    if not _fed_token_ok(x_federation_token):
-        return JSONResponse(status_code=401, content={"error": "Invalid federation token"})
-    gid = str(body.global_user_id or "").strip()
+    from routers.federation import _read_body_bytes_once
+
+    raw_body = await _read_body_bytes_once(request)
+    auth_ok, _peer_id, reason = await _authenticate_federation_peer_request(
+        request, raw_body, x_federation_token,
+    )
+    if not auth_ok:
+        return JSONResponse(
+            status_code=401,
+            content={"error": "Invalid federation auth", "reason": reason or "auth_failed"},
+        )
+    try:
+        parsed = json.loads(raw_body.decode("utf-8") or "{}")
+    except Exception:
+        return JSONResponse(status_code=400, content={"error": "Bad JSON body"})
+    gid = str(parsed.get("global_user_id") or "").strip()
     if not _GID_RE.match(gid):
         return JSONResponse(status_code=400, content={"error": "Invalid global_user_id"})
     payload = _lookup_federation_profile_gid_payload(gid)
@@ -4747,12 +5147,24 @@ async def federation_profile_card(
 @limiter.limit("120/hour")
 async def federation_sync_export_gid(
     request: Request,
-    body: FederationSyncExportGidRequest,
     x_federation_token: str | None = Header(default=None),
 ):
-    if not _fed_token_ok(x_federation_token):
-        return JSONResponse(status_code=401, content={"error": "Invalid federation token"})
-    gid = str(body.global_user_id or "").strip()
+    from routers.federation import _read_body_bytes_once
+
+    raw_body = await _read_body_bytes_once(request)
+    auth_ok, _peer_id, reason = await _authenticate_federation_peer_request(
+        request, raw_body, x_federation_token,
+    )
+    if not auth_ok:
+        return JSONResponse(
+            status_code=401,
+            content={"error": "Invalid federation auth", "reason": reason or "auth_failed"},
+        )
+    try:
+        parsed = json.loads(raw_body.decode("utf-8") or "{}")
+    except Exception:
+        return JSONResponse(status_code=400, content={"error": "Bad JSON body"})
+    gid = str(parsed.get("global_user_id") or "").strip()
     if not _GID_RE.match(gid):
         return JSONResponse(status_code=400, content={"error": "Invalid global_user_id"})
     with db._conn() as con:
@@ -4762,7 +5174,7 @@ async def federation_sync_export_gid(
         ).fetchone()
     if not row:
         return JSONResponse(status_code=404, content={"error": "Account not found on this node"})
-    cursor = str(body.social_posts_cursor or "").strip()
+    cursor = str(parsed.get("social_posts_cursor") or "").strip()
     return _build_sync_export_for_user(int(row["id"]), social_posts_cursor=cursor)
 
 
@@ -4770,12 +5182,24 @@ async def federation_sync_export_gid(
 @limiter.limit("240/hour")
 async def federation_sync_memberships_gid(
     request: Request,
-    body: FederationSyncExportGidRequest,
     x_federation_token: str | None = Header(default=None),
 ):
-    if not _fed_token_ok(x_federation_token):
-        return JSONResponse(status_code=401, content={"error": "Invalid federation token"})
-    gid = str(body.global_user_id or "").strip()
+    from routers.federation import _read_body_bytes_once
+
+    raw_body = await _read_body_bytes_once(request)
+    auth_ok, _peer_id, reason = await _authenticate_federation_peer_request(
+        request, raw_body, x_federation_token,
+    )
+    if not auth_ok:
+        return JSONResponse(
+            status_code=401,
+            content={"error": "Invalid federation auth", "reason": reason or "auth_failed"},
+        )
+    try:
+        parsed = json.loads(raw_body.decode("utf-8") or "{}")
+    except Exception:
+        return JSONResponse(status_code=400, content={"error": "Bad JSON body"})
+    gid = str(parsed.get("global_user_id") or "").strip()
     if not _GID_RE.match(gid):
         return JSONResponse(status_code=400, content={"error": "Invalid global_user_id"})
     with db._conn() as con:
@@ -4804,12 +5228,25 @@ async def federation_sync_export(
 @limiter.limit("120/hour")
 async def federation_sync_export_ticket(
     request: Request,
-    body: FederationSyncExportTicketRequest,
     x_federation_token: str | None = Header(default=None),
 ):
-    if not _fed_token_ok(x_federation_token):
-        return JSONResponse(status_code=401, content={"error": "Invalid federation token"})
-    payload = _verify_federation_login_ticket_for_source(body.ticket, str(request.base_url))
+    from routers.federation import _read_body_bytes_once
+
+    raw_body = await _read_body_bytes_once(request)
+    auth_ok, _peer_id, reason = await _authenticate_federation_peer_request(
+        request, raw_body, x_federation_token,
+    )
+    if not auth_ok:
+        return JSONResponse(
+            status_code=401,
+            content={"error": "Invalid federation auth", "reason": reason or "auth_failed"},
+        )
+    try:
+        parsed = json.loads(raw_body.decode("utf-8") or "{}")
+    except Exception:
+        return JSONResponse(status_code=400, content={"error": "Bad JSON body"})
+    ticket = str(parsed.get("ticket") or "").strip()
+    payload = _verify_federation_login_ticket_for_source(ticket, str(request.base_url))
     if not payload:
         return JSONResponse(status_code=401, content={"error": "Invalid or expired ticket"})
     nick = str(payload.get("nickname") or "").strip()
@@ -4822,7 +5259,7 @@ async def federation_sync_export_ticket(
     user_gid = str((user or {}).get("global_user_id") or "").strip()
     if claim_gid and user_gid and claim_gid != user_gid:
         return JSONResponse(status_code=409, content={"error": "Ticket identity mismatch"})
-    cursor = str(body.social_posts_cursor or "").strip()
+    cursor = str(parsed.get("social_posts_cursor") or "").strip()
     return _build_sync_export_for_user(int(user["id"]), social_posts_cursor=cursor)
 
 
@@ -5118,7 +5555,66 @@ async def me(current_user: dict = Depends(get_current_user)):
                 }
         except Exception:
             pass
+    try:
+        row = _load_user_sync_row(uid)
+        if row:
+            out["client_prefs"] = _parse_client_prefs_export(row.get("client_prefs_json") or "")
+            out["custom_css"] = str(row.get("custom_css") or "")[:_SYNC_CUSTOM_CSS_MAX]
+    except Exception:
+        pass
     return out
+
+
+@router.patch("/client-prefs")
+@limiter.limit("60/hour")
+async def update_client_prefs(
+    request: Request,
+    body: ClientPrefsUpdateRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Persist network/sound client prefs for federation account sync."""
+    uid = int(current_user["id"])
+    existing = _parse_client_prefs_export(
+        (_load_user_sync_row(uid) or {}).get("client_prefs_json") or ""
+    )
+    merged: dict = dict(existing)
+    if body.prefer_onion is not None:
+        merged["prefer_onion"] = 1 if body.prefer_onion else 0
+    if body.preferred_node_url is not None:
+        url = _valid_preferred_node_url(str(body.preferred_node_url or ""))
+        if str(body.preferred_node_url or "").strip() and not url:
+            return JSONResponse(
+                status_code=400,
+                content={"error": "invalid preferred_node_url"},
+            )
+        merged["preferred_node_url"] = url
+    if body.custom_sounds is not None and isinstance(body.custom_sounds, dict):
+        sounds: dict[str, str] = {}
+        for k in _SYNC_CUSTOM_SOUND_KEYS:
+            if k not in body.custom_sounds:
+                continue
+            v = str(body.custom_sounds.get(k) or "").strip()
+            if v.startswith("data:audio/"):
+                sounds[k] = v[:_SYNC_CUSTOM_SOUND_MAX]
+        if sounds:
+            merged["custom_sounds"] = sounds
+        elif "custom_sounds" in merged and not sounds:
+            merged.pop("custom_sounds", None)
+    stored = _sanitize_client_prefs_json(merged)
+    with db._conn() as con:
+        con.execute(
+            "UPDATE users SET client_prefs_json=? WHERE id=?",
+            (stored, uid),
+        )
+        con.commit()
+    try:
+        invalidate_request_session_cache(request)
+    except Exception:
+        pass
+    return {
+        "ok": True,
+        "client_prefs": _parse_client_prefs_export(stored),
+    }
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -5405,12 +5901,14 @@ async def update_profile(request: Request, body: ProfileUpdateRequest, current_u
     # Update user settings
     with db._conn() as con:
         if body.theme is not None:
-            allowed_themes = {"frog", "light", "midnight", "forest", "cyberpunk", "ocean", "sunset", "rose", "solarized", "mono", "custom"}
-            # 'dark' is a legacy alias for 'frog' (identical palette). Remap
-            # it so the DB never stores the old name again.
-            incoming_theme = "frog" if body.theme == "dark" else body.theme
-            if incoming_theme in allowed_themes:
-                con.execute("UPDATE users SET theme=? WHERE id=?", (incoming_theme, current_user["id"]))
+            incoming_theme = _normalize_sync_theme(body.theme)
+            con.execute("UPDATE users SET theme=? WHERE id=?", (incoming_theme, current_user["id"]))
+        if body.custom_theme_json is not None:
+            ctj = _sanitize_custom_theme_json(body.custom_theme_json)
+            con.execute(
+                "UPDATE users SET custom_theme_json=? WHERE id=?",
+                (ctj, current_user["id"]),
+            )
         if body.notify_sounds is not None:
             con.execute("UPDATE users SET notify_sounds=? WHERE id=?", (1 if body.notify_sounds else 0, current_user["id"]))
         if body.notify_desktop is not None:

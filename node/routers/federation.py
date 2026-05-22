@@ -1632,6 +1632,9 @@ def _local_register_payload() -> dict | None:
             region = geoip.format_region_label(geoip.lookup_base_url(base_url))
         except Exception:
             region = ""
+    from fed_turn import local_turn_public_view
+
+    turn_pub = local_turn_public_view()
     return {
         "server_id": server_id,
         "display_name": display_name[:120] or server_id,
@@ -1642,9 +1645,9 @@ def _local_register_payload() -> dict | None:
         "trust_tier": "community",
         "server_pubkey": pubkey,
         "capabilities": ["federation-v1"],
-        "turn_urls": [],
-        "turn_username": "",
-        "turn_credential": "",
+        "turn_urls": turn_pub.get("turn_urls") or [],
+        "turn_username": turn_pub.get("turn_username") or "",
+        "turn_credential": turn_pub.get("turn_credential") or "",
     }
 
 
@@ -1859,36 +1862,27 @@ async def ice_config(
     can fetch ICE config, and only for peer servers we actively federate
     with.
     """
-    from fed_turn import local_turn_public_view, parse_server_turn_json, turn_ice_servers
+    from fed_turn import local_turn_public_view, merge_ice_servers, parse_server_turn_json
 
-    merged_urls: list[str] = []
-    user = ""
-    cred = ""
     local = local_turn_public_view()
-    merged_urls.extend(local.get("turn_urls") or [])
-    user = local.get("turn_username") or ""
-    cred = local.get("turn_credential") or ""
+    peer_turn: dict = {"turn_urls": [], "turn_username": "", "turn_credential": ""}
     peer_sid = (peer_server_id or "").strip()
     if peer_sid:
         row = db.get_federation_server_row(peer_sid)
-        # Only honour peer TURN creds when the peer is an active federation
-        # server we've registered. Unknown server_ids are silently ignored
-        # to avoid leaking the registered-peers list via probing.
         if row and int(row.get("enabled") or 0) == 1:
             raw = row.get("turn_urls_json") or "[]"
             if isinstance(raw, str):
                 peer_turn = parse_server_turn_json(raw)
-            else:
-                peer_turn = {"turn_urls": [], "turn_username": "", "turn_credential": ""}
-            for u in peer_turn.get("turn_urls") or []:
-                if u not in merged_urls:
-                    merged_urls.append(u)
-            if not user and peer_turn.get("turn_username"):
-                user = peer_turn["turn_username"]
-            if not cred and peer_turn.get("turn_credential"):
-                cred = peer_turn["turn_credential"]
+    ice_servers = merge_ice_servers(local, peer_turn)
+    merged_urls: list[str] = []
+    for s in ice_servers:
+        u = s.get("urls")
+        if isinstance(u, list):
+            merged_urls.extend(str(x) for x in u)
+        elif u:
+            merged_urls.append(str(u))
     return {
-        "ice_servers": turn_ice_servers(merged_urls, username=user, credential=cred),
+        "ice_servers": ice_servers or local.get("ice_servers") or [],
         "turn_urls": merged_urls,
     }
 
@@ -2244,6 +2238,7 @@ async def register_network_server(
         server_pubkey=body.server_pubkey,
         capabilities=body.capabilities,
         turn_urls_json=turn_json,
+        allow_pubkey_overwrite=is_admin,
     )
     prune_duplicate_federation_servers()
     return {"ok": True}
@@ -4634,8 +4629,17 @@ async def _handle_dm_event(event: dict) -> None:
         # is opt-in per device; forwarding the body would leak it to the
         # tray on devices that don't have the passphrase.
         send_push(
-            peer["id"], "FrogTalk", f"💬 New message from {sender['nickname']}", "/app",
-            extra={"from_nickname": sender["nickname"]},
+            peer["id"],
+            "FrogTalk",
+            f"💬 New message from {sender['nickname']}",
+            "/app",
+            kind="dm",
+            tag=f"ft-dm-{channel_id}",
+            extra={
+                "from_nickname": sender["nickname"],
+                "sender_name": sender["nickname"],
+                "conversation_id": str(channel_id),
+            },
         )
     except Exception:
         pass
@@ -4729,6 +4733,10 @@ async def _handle_friend_event(event: dict) -> None:
             return
         if not raw:
             return
+        max_bytes = int(os.getenv("FROGTALK_FRIEND_SOUND_MAX_BYTES", str(10 * 1024 * 1024)))
+        if len(raw) > max_bytes:
+            _log.info("federation: drop friend.sound.created — payload too large")
+            return
         sound_root = Path(os.getenv("FROGTALK_FRIEND_SOUND_DIR", "data/friend_sounds"))
         target_dir = sound_root / str(owner["id"]) / str(friend["id"]) / kind
         try:
@@ -4807,15 +4815,16 @@ async def _federated_social_notify(
         return
     unread = db.get_social_notification_unread_count(int(owner["id"]))
     try:
-        from ws_manager import manager
-        await manager.send_to_user(int(owner["id"]), {
+        from routers.social import _push_social_notif, _safe_social_preview
+
+        await _push_social_notif(int(owner["id"]), {
             "type": "social_notification",
             "event": kind,
             "id": notif_id,
             "actor": actor.get("nickname"),
             "actor_avatar": actor.get("avatar"),
             "post_id": int(local_post_id),
-            "preview": preview,
+            "preview": _safe_social_preview(preview),
             "emoji": emoji,
             "unread": unread,
         })
@@ -4979,6 +4988,16 @@ async def _handle_social_event(event: dict) -> None:
                 (int(local_sid), author["id"]),
             )
             con.commit()
+        try:
+            from ws_manager import manager
+
+            await manager.broadcast_all({
+                "type": "story_deleted",
+                "user_id": int(author["id"]),
+                "nickname": author.get("nickname"),
+            })
+        except Exception:
+            pass
         return
 
     if event_type == "social.follow.changed":
@@ -5005,6 +5024,26 @@ async def _handle_social_event(event: dict) -> None:
             await _notify_wall_rewrap_for_new_follower(
                 int(following["id"]), int(follower["id"]),
             )
+            try:
+                notif_id = db.add_social_notification(
+                    user_id=int(following["id"]),
+                    actor_id=int(follower["id"]),
+                    kind="follow",
+                )
+                if notif_id is not None:
+                    unread = db.get_social_notification_unread_count(int(following["id"]))
+                    from routers.social import _push_social_notif
+
+                    await _push_social_notif(int(following["id"]), {
+                        "type": "social_notification",
+                        "event": "follow",
+                        "id": notif_id,
+                        "actor": follower.get("nickname"),
+                        "actor_avatar": follower.get("avatar"),
+                        "unread": unread,
+                    })
+            except Exception:
+                _log.debug("federated follow notify failed", exc_info=True)
         elif action == "unfollow":
             db.unfollow_user(follower["id"], following["id"])
 

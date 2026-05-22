@@ -71,12 +71,64 @@ async def _coalesce_hot(key: str, builder):
         _hot_inflight.pop(key, None)
 
 
+def _safe_social_preview(text: str | None) -> str | None:
+    """Drop ciphertext/JSON blobs from notification previews."""
+    s = str(text or "").strip()
+    if not s or len(s) > 200:
+        return None
+    if s[0] in "{[":
+        return None
+    return s[:140]
+
+
 async def _push_social_notif(recipient_id: int, payload: dict) -> None:
-    """Best-effort WS push for a social-activity event. Never raises."""
+    """WS push for social activity; FCM/web-push when recipient is offline."""
+    delivered = False
     try:
-        await manager.send_to_user(recipient_id, payload)
+        delivered = await manager.send_to_user(recipient_id, payload)
     except Exception:
         _log.debug("social notif WS push failed", exc_info=True)
+    if delivered:
+        return
+    try:
+        if manager.is_user_online(int(recipient_id)):
+            return
+    except Exception:
+        pass
+    try:
+        from routers.push import send_push
+
+        event = str(payload.get("event") or "").strip().lower()
+        actor = str(payload.get("actor") or "Someone").strip()[:64]
+        titles = {
+            "like": "New like",
+            "comment": "New comment",
+            "follow": "New follower",
+            "repost": "Repost",
+        }
+        title = titles.get(event, "FrogSocial")
+        if event == "follow":
+            body = f"@{actor} started following you"
+        elif event == "comment":
+            preview = _safe_social_preview(payload.get("preview"))
+            body = f"@{actor}: {preview}" if preview else f"@{actor} commented on your post"
+        elif event == "like":
+            body = f"@{actor} liked your post"
+        elif event == "repost":
+            body = f"@{actor} reposted your post"
+        else:
+            body = f"@{actor} — {event or 'activity'}"
+        send_push(
+            int(recipient_id),
+            title,
+            body,
+            "/app",
+            kind="social",
+            tag=f"ft-social-{payload.get('id') or event}",
+            extra={"event": event, "post_id": payload.get("post_id")},
+        )
+    except Exception:
+        _log.debug("social offline push failed", exc_info=True)
 
 
 class CreateStoryRequest(BaseModel):
@@ -193,7 +245,7 @@ async def social_profile(nickname: str, current_user: dict = Depends(get_current
                 "is_following": False,
                 "is_friend": False,
             }
-        return {
+        out = {
             "id": uid,
             "nickname": user["nickname"],
             "display_name": user.get("display_name"),
@@ -203,11 +255,7 @@ async def social_profile(nickname: str, current_user: dict = Depends(get_current
             "status_msg": user.get("status_msg", ""),
             "mood": user.get("mood", ""),
             "presence": user.get("presence", "online"),
-            # Track B: `custom_css` is the raw editor input (only useful
-            # to the owner's own client). `custom_style` is the sanitised
-            # inline declaration list \u2014 the only field the renderer
-            # ever applies to the DOM.
-            "custom_css": user.get("custom_css", ""),
+            # Track B: `custom_style` is the sanitised declaration list (DOM-safe).
             "custom_style": user.get("custom_style", "") or "",
             "tags": user.get("tags", []),
             "created_at": user.get("created_at"),
@@ -224,6 +272,9 @@ async def social_profile(nickname: str, current_user: dict = Depends(get_current
             "last_seen": db.get_privacy_last_seen(uid, viewer_id),
             "story_status": db.user_active_story_status(uid, viewer_id),
         }
+        if is_self:
+            out["custom_css"] = user.get("custom_css", "")
+        return out
 
     async def _coalesced():
         return await run_in_threadpool(_build)

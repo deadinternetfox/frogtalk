@@ -61,7 +61,7 @@ const Messages = (() => {
         bridge = '';
       }
     }
-    return `showUserInfo('${UI.escHtml(msg.nickname)}',${msg.user_id||'null'},'${UI.escHtml(bridge)}','${UI.escHtml(msg.bridge_source_name||'')}','${UI.escHtml(msg.bridge_source_id||'')}','${UI.escHtml(msg.bridge_source_parent||'')}','${UI.escHtml(msg.avatar||'')}','${UI.escHtml(msg.bridge_sender_username||'')}')`;
+    return `showUserInfo(${jsStr(msg.nickname)},${msg.user_id||'null'},${jsStr(bridge)},${jsStr(msg.bridge_source_name||'')},${jsStr(msg.bridge_source_id||'')},${jsStr(msg.bridge_source_parent||'')},${jsStr(msg.avatar||'')},${jsStr(msg.bridge_sender_username||'')})`;
   }
 
   // BOT pill — small accent-tinted badge rendered immediately after the

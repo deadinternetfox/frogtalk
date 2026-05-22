@@ -330,6 +330,9 @@ const App = {
       if (!res.ok) return null;
       const fresh = await res.json().catch(() => ({}));
       State.user = Object.assign({}, State.user || {}, fresh);
+      if (typeof _mergeUserSettingsFromMe === 'function') {
+        try { _mergeUserSettingsFromMe(fresh); } catch {}
+      }
       if (fresh.account_home_base_url) {
         this.rememberSyncSourceBase(fresh.account_home_base_url);
       }
@@ -965,7 +968,11 @@ const App = {
     // Apply saved theme
     const savedThemeRaw = State.user?.theme || localStorage.getItem('frogtalk-theme') || 'frog';
     const savedTheme = (String(savedThemeRaw || '').toLowerCase() === 'dark') ? 'frog' : savedThemeRaw;
-    if (typeof applyTheme === 'function') applyTheme(savedTheme);
+    if (savedTheme === 'custom' && typeof applyStoredCustomThemeJson === 'function') {
+      applyStoredCustomThemeJson(State.user?.custom_theme_json || localStorage.getItem('frogtalk-custom-theme'));
+    } else if (typeof applyTheme === 'function') {
+      applyTheme(savedTheme);
+    }
 
     // Rehydrate profile fields (status_msg, presence) from this node — not
     // only the fc_user cache which can be stale after SW/cache bumps.

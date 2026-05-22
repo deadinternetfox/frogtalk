@@ -560,6 +560,17 @@ const WS = (() => {
         } catch {}
         break;
       }
+      case 'story_deleted': {
+        try {
+          if (window.Social && typeof window.Social.refreshChatStoryCache === 'function') {
+            window.Social.refreshChatStoryCache(true);
+          }
+          if (window.Social && typeof window.Social.loadStoriesBar === 'function') {
+            window.Social.loadStoriesBar();
+          }
+        } catch {}
+        break;
+      }
       // ── DM events ────────────────────────────────
       case 'dm_message': {
         if (typeof handleWSDMMessage === 'function') handleWSDMMessage(data);

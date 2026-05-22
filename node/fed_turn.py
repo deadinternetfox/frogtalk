@@ -69,6 +69,32 @@ def turn_ice_servers(
     return servers
 
 
+def merge_ice_servers(local_view: dict, peer_view: dict | None) -> list[dict[str, Any]]:
+    """Merge local + peer TURN into WebRTC iceServers with per-server credentials."""
+    servers: list[dict[str, Any]] = []
+    local = local_view or {}
+    peer = peer_view or {}
+    local_urls = list(local.get("turn_urls") or [])
+    peer_urls = list(peer.get("turn_urls") or [])
+    if local_urls:
+        servers.extend(
+            turn_ice_servers(
+                local_urls,
+                username=str(local.get("turn_username") or ""),
+                credential=str(local.get("turn_credential") or ""),
+            )
+        )
+    if peer_urls:
+        servers.extend(
+            turn_ice_servers(
+                peer_urls,
+                username=str(peer.get("turn_username") or ""),
+                credential=str(peer.get("turn_credential") or ""),
+            )
+        )
+    return servers
+
+
 def local_turn_public_view() -> dict:
     urls = local_turn_urls()
     return {

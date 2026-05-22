@@ -254,6 +254,7 @@ def enqueue_call_offer(
     call_type: str,
     sdp: str,
     fp_sig: str = "",
+    renegotiate: bool = False,
 ) -> dict:
     home = callee_home_server(callee)
     if not home:
@@ -277,7 +278,32 @@ def enqueue_call_offer(
         "sdp": sdp_clip,
         "fp_sig": str(fp_sig or "")[:_FED_CALL_FP_SIG_MAX],
     }
+    if renegotiate:
+        payload["renegotiate"] = True
     return _enqueue("call.offer", payload, [home])
+
+
+def enqueue_call_renegotiate(
+    caller: dict,
+    callee: dict,
+    *,
+    global_call_id: str,
+    local_call_id: int,
+    call_type: str,
+    sdp: str,
+    fp_sig: str = "",
+) -> dict:
+    """Mid-call SDP offer (screen share, camera-on) to callee's home node."""
+    return enqueue_call_offer(
+        caller,
+        callee,
+        global_call_id=global_call_id,
+        local_call_id=local_call_id,
+        call_type=call_type,
+        sdp=sdp,
+        fp_sig=fp_sig,
+        renegotiate=True,
+    )
 
 
 def enqueue_call_answer(
@@ -419,7 +445,8 @@ async def _apply_call_offer(payload, origin, gid_call, _fed_nickname, _fed_globa
         )
         return
 
-    if _offer_throttled(origin, callee_gid):
+    reneg_early = bool(payload.get("renegotiate"))
+    if not reneg_early and _offer_throttled(origin, callee_gid):
         _log.warning(
             "federation: drop call.offer — flood from origin=%s callee_gid=%s",
             origin, callee_gid,
@@ -442,16 +469,58 @@ async def _apply_call_offer(payload, origin, gid_call, _fed_nickname, _fed_globa
         _log.info("federation: drop call.offer — caller upsert failed")
         return
 
-    err = can_call_user(int(caller["id"]), int(callee["id"]))
-    if err:
-        _log.info("federation: drop call.offer — gate=%s", err)
-        return
-
     sdp = _fed_clip(payload.get("sdp"), _FED_CALL_SDP_MAX) or ""
     if not sdp:
         return
     fp_sig = _fed_clip(payload.get("fp_sig"), _FED_CALL_FP_SIG_MAX) or ""
     call_type = _safe_call_type(payload.get("call_type"))
+    reneg = bool(payload.get("renegotiate"))
+
+    if reneg:
+        local_id = db.resolve_local_call_id(gid_call, origin) or db.resolve_local_call_id(gid_call)
+        if not local_id:
+            _log.info("federation: drop call.offer renegotiate — unknown call %s", gid_call)
+            return
+        if not _participants_match_gid(local_id, caller_gid):
+            _log.info("federation: drop call.offer renegotiate — caller not participant")
+            return
+        if not _participants_match_gid(local_id, callee_gid):
+            _log.info("federation: drop call.offer renegotiate — callee not participant")
+            return
+        offer_payload = {
+            "type": "call_offer",
+            "from_id": int(caller["id"]),
+            "from_nickname": caller.get("nickname") or caller_nick,
+            "call_type": call_type,
+            "call_id": local_id,
+            "global_call_id": gid_call,
+            "sdp": sdp,
+            "fp_sig": fp_sig,
+            "renegotiate": True,
+            "federated": True,
+            "peer_home_server_id": origin,
+            "origin_server_id": origin,
+        }
+        callee_id = int(callee["id"])
+        delivered = await manager.send_to_user(callee_id, offer_payload)
+        if not delivered:
+            try:
+                db.queue_call_signal(
+                    local_id,
+                    callee_id,
+                    int(caller["id"]),
+                    caller.get("nickname") or caller_nick,
+                    "call_offer",
+                    json.dumps(offer_payload),
+                )
+            except Exception:
+                _log.exception("queue_call_signal(call_offer renegotiate fed) failed")
+        return
+
+    err = can_call_user(int(caller["id"]), int(callee["id"]))
+    if err:
+        _log.info("federation: drop call.offer — gate=%s", err)
+        return
 
     local_id = db.resolve_local_call_id(gid_call, origin)
     if not local_id:

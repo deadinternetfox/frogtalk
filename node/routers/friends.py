@@ -122,12 +122,26 @@ async def search_users(request: Request, q: str = "", current_user: dict = Depen
 
 
 @users_router.get("/profile/{nickname}")
-async def get_profile(nickname: str, _: dict = Depends(get_current_user)):
+async def get_profile(nickname: str, current_user: dict = Depends(get_current_user)):
     profile = db.get_user_profile(nickname)
     if not profile:
         return JSONResponse(status_code=404, content={"error": "User not found"})
+    out = dict(profile)
+    is_self = int(current_user["id"]) == int(profile["id"])
+    if not is_self:
+        out.pop("custom_css", None)
+    gid = str(out.get("global_user_id") or "").strip()
+    if gid:
+        try:
+            ident = db.get_or_create_local_server_identity() or {}
+            local_sid = str(ident.get("server_id") or "").strip()
+            home = db.resolve_global_user_home_server_id(gid)
+            if home and local_sid and home != local_sid:
+                out["peer_home_server_id"] = home
+        except Exception:
+            pass
     return JSONResponse(
-        content=profile,
+        content=out,
         headers={"Cache-Control": "no-store, max-age=0, must-revalidate"},
     )
 

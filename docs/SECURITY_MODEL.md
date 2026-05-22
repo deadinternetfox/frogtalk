@@ -169,8 +169,10 @@ wraps, and often a re-wrap after the relationship exists on both sides. Details:
 
 When you use the same account on a **foreign** node, the app can pull a bounded
 snapshot from your **home** node (`GET/POST /api/auth/federation-sync-*`): joined
-channels (including sanitized `channel_theme` JSON), DM peers, follow graph, your
-app theme preset and profile inline CSS (`custom_style`), contact profile styling
+channels (including sanitized `channel_theme`, banner, about, slowmode, invite rules,
+`forwarding_disabled`, music `dj_only_queue`), DM peers (including per-thread
+disappear timer, forwarding lock, read cursor, hidden flag), follow graph, your
+app theme preset (including custom color JSON), profile banner, profile inline CSS (`custom_style`; raw `custom_css` is editor-only and not exposed to other viewers), capped client prefs (Tor preference, preferred node URL hint, app notification sounds), contact profile styling
 in `federation_user_profiles`, and FrogSocial posts already visible on home
 (**300 per export page**; paginated resume when `FROGTALK_SYNC_PAGINATION=1`).
 This is separate from live federation inbox traffic; it is a deliberate import for
@@ -182,7 +184,9 @@ UX on node switch.
 (`export_version`, `source_server_id`, `global_user_id`, `source_public_url`) before
 apply. When the home node signs exports (`FROGTALK_SYNC_SIGN_EXPORT=1`, default on),
 the foreign node verifies `export_sig_b64` against the pinned home
-`server_pubkey` in the directory (`get_federation_server_pubkey`). Outbound fetches
+`server_pubkey` in the directory (`get_federation_server_pubkey`). With
+`FROGTALK_SYNC_REQUIRE_EXPORT_SIG=1` (default), unsigned exports are rejected
+when the home pubkey is pinned. Outbound fetches
 use `_ssrf_guard`. Progress is stored in
 `user_federation_sync_state` (SQLite) so restart can resume.
 
@@ -207,12 +211,12 @@ vanity invite slugs are applied only when free on this node.
 write (`_sanitize_inline_style`, `_sanitize_channel_theme`) and replicated for
 UX. FrogSocial profiles merge `federation_user_profiles` when the local
 `users` row is sparse so travelers see friends' styling. Directory-only channels
-can be joined via `POST /api/rooms/{name}/join` (index metadata only).
+can be joined via `POST /api/rooms/{name}/join` (index metadata includes sanitized `channel_theme`; full room settings apply after join or account sync).
 
 ### Federated voice and video calls
 
 When `FROGTALK_FEDERATION_CALLS_ENABLED=1`, signed `call.*` events carry WebRTC
-signaling (offer/answer/ICE) to a peer’s **home server**; media remains P2P or
+signaling (offer/answer/ICE, including mid-call `call.offer` with `renegotiate` for screen share / camera-on) to a peer’s **home server**; media remains P2P or
 TURN. DM calls keep **Signal-signed DTLS fingerprints** (`fp_sig`). Channel voice
 uses federated `voice.session.*` / `voice.signal` mesh v1 (no `fp_sig` on group
 audio). Per-node TURN is published via `/api/network/ice-config`. Full spec:
