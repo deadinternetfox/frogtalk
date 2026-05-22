@@ -308,7 +308,9 @@
                                         // recent peer reset, long
                                         // enough not to spam the API.
   async function _fetchPeerIdentityPub(peerUserId, { noCache = false, peerHomeServerId = '' } = {}) {
-    del peerHomeServerId;
+    // Identity drift check uses /api/signal/identity/{id}; the server proxies
+    // to the peer's home node when keys are not stored locally.
+    void peerHomeServerId;
     const key = String(peerUserId);
     const now = Date.now();
     if (!noCache) {

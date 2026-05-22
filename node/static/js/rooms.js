@@ -3193,6 +3193,31 @@ const Rooms = (() => {
 
   _bindRoomMentionClicks();
 
+  /** After federation sync: private channels mirror locally but secrets are never exported. */
+  function warnPrivateRoomsMissingSecrets() {
+    try {
+      const missing = [];
+      for (const r of (State.rooms || [])) {
+        if (r.type !== 'private' || !r.joined) continue;
+        const name = String(r.name || '').trim();
+        if (!name) continue;
+        const ver = Math.max(1, parseInt(r.room_key_version, 10) || 1);
+        const has = (localStorage.getItem(_roomSecretStorageKey(name, ver)) || '').trim()
+          || (localStorage.getItem(_roomSecretStorageKey(name)) || '').trim();
+        if (!has) missing.push(name);
+      }
+      if (!missing.length || typeof UI === 'undefined' || !UI.showToast) return;
+      const sample = missing.slice(0, 3).map((n) => '#' + n).join(', ');
+      const more = missing.length > 3 ? ` (+${missing.length - 3} more)` : '';
+      UI.showToast(
+        `Private channels still need the shared secret${sample ? ': ' + sample : ''}${more}. `
+        + 'Open each channel to enter it — account sync copies hints only; use node switch in this browser to move saved secrets.',
+        'warning',
+        10000,
+      );
+    } catch {}
+  }
+
   return { 
     loadRooms, switchToRoom, openDM, showCreateRoom, createRoom, deleteRoom,
     joinRoom, leaveRoom, closeLeaveOwnerWarning, leaveOwnerOpenTransferSettings, confirmLeaveOwnerChannel,
@@ -3217,6 +3242,7 @@ const Rooms = (() => {
     migrateRoomChannelState,
     syncActiveRoomHeader,
     onRoomSettingsUpdated,
+    warnPrivateRoomsMissingSecrets,
   };
 })();
 

@@ -481,6 +481,11 @@ async def profile_posts(
         # client fetches each one lazily through /api/social/posts/{id}/media.
         # Drops a 30-image wall response from MBs of base64 to KBs of JSON.
         posts = db.get_wall_posts(user["id"], viewer_id, limit, offset, lite=True)
+        meta = {
+            "proxied_from_home": False,
+            "home_proxy_attempted": False,
+            "home_unreachable": False,
+        }
         if (use_home_proxy or not posts) and offset == 0:
             gid = str(user.get("global_user_id") or "").strip()
             if not gid:
@@ -488,6 +493,7 @@ async def profile_posts(
             origin = str(db.get_federation_profile_origin(gid) or "").strip() if gid else ""
             local_sid = _local_server_id()
             if gid and origin and local_sid and origin != local_sid:
+                meta["home_proxy_attempted"] = True
                 remote = _fetch_home_profile_posts(
                     gid,
                     origin,
@@ -497,6 +503,9 @@ async def profile_posts(
                 )
                 if remote:
                     posts = remote
+                    meta["proxied_from_home"] = True
+                elif use_home_proxy or not posts:
+                    meta["home_unreachable"] = True
         rmap = db.get_post_reactions_bulk([p["id"] for p in posts if int(p.get("id") or 0) > 0])
         for p in posts:
             p["reactions"] = rmap.get(p["id"], [])
@@ -506,14 +515,16 @@ async def profile_posts(
                     pass
                 else:
                     p["media_data"] = f"/api/social/posts/{p['id']}/media"
-        return ("ok", posts)
+        return ("ok", {"posts": posts, **meta})
 
-    status, posts = await run_in_threadpool(_build)
+    status, payload = await run_in_threadpool(_build)
     if status == "missing":
         return JSONResponse(status_code=404, content={"error": "User not found"})
     if status == "private":
         return {"posts": [], "private": True}
-    return {"posts": posts}
+    if isinstance(payload, dict):
+        return payload
+    return {"posts": payload or []}
 
 
 @router.get("/profile/{nickname}/reposts")

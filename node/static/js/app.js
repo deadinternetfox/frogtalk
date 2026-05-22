@@ -246,7 +246,7 @@ try { window.FtSync = FtSync; } catch {}
 const App = {
   pendingInvite: null,  // Store invite code to process after login
   PENDING_CALL_KEY: 'ft_pending_incoming_call',
-  ASSET_RESET_VERSION: 'federation-sync-v39-federated-social-profile',
+  ASSET_RESET_VERSION: 'federation-sync-v40-syntax-and-private-sync',
   _syncOverlayDismissed: false,
   _syncResumeStarting: false,
   easterEgg: null,
@@ -1907,6 +1907,11 @@ const App = {
   async _onFederationSyncComplete(payload) {
     try {
       if (typeof Rooms !== 'undefined' && Rooms.loadRooms) await Rooms.loadRooms();
+    } catch {}
+    try {
+      if (typeof Rooms !== 'undefined' && Rooms.warnPrivateRoomsMissingSecrets) {
+        Rooms.warnPrivateRoomsMissingSecrets();
+      }
     } catch {}
     if (!this.isAtHomeNode()) {
       try { await this.ensureSignalReadyForDecrypt({ timeoutMs: 15000 }); } catch {}

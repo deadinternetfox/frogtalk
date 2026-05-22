@@ -1158,6 +1158,12 @@ const Social = (() => {
     }
     const data = await res.json().catch(() => ({ posts: [] }));
     const posts = data.posts || [];
+    if (data.home_unreachable && _profileData?.federated) {
+      _profileData.home_posts_unreachable = true;
+    }
+    if (data.proxied_from_home) {
+      _profileData.home_posts_proxied = true;
+    }
     // Track D — decrypt enc_v=2 posts before caching. Profile tabs
     // share this cache so we only decrypt once per fetch.
     if (window.WallCrypto) {
@@ -3897,6 +3903,10 @@ const Social = (() => {
 
       _updateTabLoadUi(loadUi, 86, 'Rendering profile', 'Preparing wall and tabs');
 
+      const fedHomeLabel = (u.federated && u.home_base_url)
+        ? esc(String(u.home_base_url).replace(/^https?:\/\//i, ''))
+        : '';
+
       content.innerHTML = `
       <div class="social-profile fade-in">
         <!-- Banner -->
@@ -3916,7 +3926,7 @@ const Social = (() => {
             </div>
             <div class="sp-handle-row" style="margin-top:3px;margin-bottom:8px">
               <span class="sp-handle">@${esc(u.nickname)}</span>
-              ${u.federated ? `<span style="display:inline-flex;align-items:center;gap:4px;margin-left:8px;font-size:10px;color:#7fd6a2;background:rgba(127,214,162,.1);border:1px solid rgba(127,214,162,.28);padding:2px 8px;border-radius:8px;vertical-align:middle">🌐 Federated${u.home_base_url ? ' · ' + esc(String(u.home_base_url).replace(/^https?:\\/\\//, '')) : ''}</span>` : ''}
+              ${u.federated ? `<span style="display:inline-flex;align-items:center;gap:4px;margin-left:8px;font-size:10px;color:#7fd6a2;background:rgba(127,214,162,.1);border:1px solid rgba(127,214,162,.28);padding:2px 8px;border-radius:8px;vertical-align:middle">🌐 Federated${fedHomeLabel ? ' · ' + fedHomeLabel : ''}</span>` : ''}
             </div>
             ${u.federated && u.home_unreachable ? `<div style="font-size:11px;color:#f6d27a;margin:-4px 0 8px;line-height:1.4">Home node unreachable — showing cached profile. <button type="button" class="sp-action-btn secondary" style="padding:4px 8px;font-size:11px;margin-top:6px" onclick="Social.openProfile('${esc(u.nickname)}',{refresh:true})">↻ Refresh</button></div>` : ''}
             <div class="sp-actions-row" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px">
@@ -4103,8 +4113,11 @@ const Social = (() => {
         const homeHost = _profileData?.home_base_url
           ? String(_profileData.home_base_url).replace(/^https?:\/\//, '').replace(/\/$/, '')
           : '';
+        const homeDown = !!_profileData?.home_posts_unreachable || !!_profileData?.home_unreachable;
         const fedHint = _profileData?.federated && (_profileData?.wall_on_home || homeHost)
-          ? `<div class="se-sub" style="margin-top:8px;font-size:12px;color:#8ab89a;line-height:1.45">Posts may live on their home node${homeHost ? ' (' + esc(homeHost) + ')' : ''}. Federated wall posts also appear here after sync or live federation.</div>`
+          ? `<div class="se-sub" style="margin-top:8px;font-size:12px;color:#8ab89a;line-height:1.45">${homeDown
+            ? `Home node is offline or unreachable${homeHost ? ' (' + esc(homeHost) + ')' : ''} — showing cached profile only.`
+            : `Posts may live on their home node${homeHost ? ' (' + esc(homeHost) + ')' : ''}. Federated wall posts also appear here after sync or live federation.`}</div>`
           : '';
         container.innerHTML = `<div class="social-empty social-empty--pad">
           <div class="se-icon">📝</div>
