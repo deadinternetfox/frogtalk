@@ -3987,11 +3987,28 @@ function renderDirectoryCard(ch, compact) {
     : esc(ch.icon || '💬');
   // "Joined" vs "Join" state — check our local rooms list.
   const alreadyJoined = !!(State.rooms || []).find(r => r.name === ch.name && r.joined);
-  
+  const isFed = !!ch.is_federated;
+  const remoteOnly = !!ch.remote_only;
+  // Short, human-readable label for the home node (strip protocol +
+  // trailing slash). When the server only sent us a UUID-style server_id
+  // we collapse it to the first 8 chars so the badge stays readable.
+  const homeNode = (() => {
+    const base = String(ch.home_base_url || '').replace(/^https?:\/\//, '').replace(/\/$/, '');
+    if (base) return base;
+    const sid = String(ch.home_server_id || '');
+    return sid ? sid.slice(0, 8) : '';
+  })();
+  const fedBadge = isFed
+    ? `<span class="dir-card-fed-badge" title="Federated channel${homeNode ? ' on ' + esc(homeNode) : ''}" style="display:inline-flex;align-items:center;gap:3px;font-size:11px;color:#7fd6a2;background:rgba(127,214,162,.08);border:1px solid rgba(127,214,162,.25);padding:1px 6px;border-radius:6px;margin-left:6px">🌐${homeNode ? ' ' + esc(homeNode) : ''}</span>`
+    : '';
+  const remoteHint = remoteOnly
+    ? `<div class="dir-card-remote-hint" style="font-size:11px;color:#8da59b;margin-top:4px">Channel lives on another node — joining will fetch history.</div>`
+    : '';
+
   if (compact) {
     return `<div class="dir-card-compact" onclick="viewChannelProfile(${_jsStr(ch.name)})">
       <div class="dir-card-icon">${iconHtml}</div>
-      <div class="dir-card-name">${esc(ch.name)}</div>
+      <div class="dir-card-name">${esc(ch.name)}${fedBadge}</div>
       <div class="dir-card-meta">${ch.member_count || 0} members</div>
       ${ch.category ? `<div class="dir-card-cat">${catIcons[ch.category]||''} ${esc(ch.category)}</div>` : ''}
     </div>`;
@@ -4005,13 +4022,14 @@ function renderDirectoryCard(ch, compact) {
     </div>
     <div class="dir-card-body">
       <div class="dir-card-top">
-        <span class="dir-card-title">${esc(ch.name)}</span>
+        <span class="dir-card-title">${esc(ch.name)}</span>${fedBadge}
         ${ch.category ? `<span class="dir-card-badge">${catIcons[ch.category]||''} ${esc(ch.category)}</span>` : ''}
         <span class="dir-card-members">👥 ${ch.member_count || 0}</span>
       </div>
       <div class="dir-card-desc">${esc(plainDesc.substring(0, 200))}${plainDesc.length > 200 ? '…' : ''}</div>
       ${tags.length ? `<div class="dir-card-tags">${tags.slice(0, 5).map(t => `<span class="dir-tag">${esc(t)}</span>`).join('')}</div>` : ''}
       ${ch.owner_name ? `<div class="dir-card-owner">by ${isSafeCssImageUrl(ch.owner_avatar) ? `<img src="${esc(ch.owner_avatar)}" style="width:14px;height:14px;border-radius:50%;vertical-align:middle;margin-right:2px">` : ''}${esc(ch.owner_name)}</div>` : ''}
+      ${remoteHint}
     </div>
     <div class="dir-card-join">
       ${alreadyJoined
@@ -4030,7 +4048,7 @@ async function searchDirectory() {
   // them.  Fall back to a plain text placeholder if the area is empty.
   const _hadContent = el.children.length > 0;
   if (!_hadContent) {
-    el.innerHTML = '<div style="text-align:center;padding:20px;color:#666">Loading...</div>';
+    el.innerHTML = '<div style="text-align:center;padding:20px;color:#666">Loading…</div>';
   } else {
     el.style.opacity = '0.55';
     el.style.transition = 'opacity .15s ease';
@@ -4041,26 +4059,38 @@ async function searchDirectory() {
     if (q) params.set('search', q);
     if (cat) params.set('category', cat);
     const r = await fetch(`/api/directory/channels?${params}`, { headers: { 'X-Session-Token': State.token } });
-    if (!r.ok) { el.style.opacity=''; el.innerHTML = '<div style="color:#f44336;padding:20px">Failed to load</div>'; return; }
+    if (!r.ok) { el.style.opacity=''; el.innerHTML = '<div style="color:#f44336;padding:20px">Failed to load directory</div>'; return; }
     const data = await r.json();
     const channels = data.channels || [];
+    const fed = data.federation || {};
+    const esc = s => _escapeHtml(String(s == null ? '' : s));
+    let banner = '';
+    const syncSparse = (window.FtSync && FtSync.state) ? !!FtSync.state().in_progress : false;
+    if (syncSparse) {
+      banner = `<div class="dir-fed-banner" style="font-size:12px;color:#b7d9c3;background:rgba(127,214,162,.08);border:1px solid rgba(127,214,162,.18);padding:8px 12px;border-radius:8px;margin-bottom:12px">⏳ Federation sync in progress — federated channels will keep arriving as your home node responds.</div>`;
+    } else if ((fed.remote_count || 0) > 0) {
+      banner = `<div class="dir-fed-banner" style="font-size:12px;color:#b7d9c3;background:rgba(127,214,162,.06);border:1px solid rgba(127,214,162,.12);padding:6px 12px;border-radius:8px;margin-bottom:10px">🌐 Showing ${esc(fed.local_count || 0)} local + ${esc(fed.remote_count)} federated channel${(fed.remote_count === 1 ? '' : 's')}.</div>`;
+    }
 
     if (!channels.length) {
       el.style.opacity = '';
-      el.innerHTML = `<div style="text-align:center;padding:40px">
+      const emptyHint = syncSparse
+        ? 'Federation sync is still importing channels. Hold on for a moment.'
+        : 'No channels match your search. Try a different category, or check back after your home node sync completes.';
+      el.innerHTML = `${banner}<div style="text-align:center;padding:40px">
         <div style="font-size:48px;margin-bottom:12px">🔍</div>
         <div style="color:#888;font-size:15px">No channels found</div>
-        <div style="color:#555;font-size:12px;margin-top:4px">Try a different search or category</div>
+        <div style="color:#555;font-size:12px;margin-top:4px">${esc(emptyHint)}</div>
       </div>`;
       return;
     }
 
-    el.innerHTML = channels.map(ch => renderDirectoryCard(ch, false)).join('');
+    el.innerHTML = banner + channels.map(ch => renderDirectoryCard(ch, false)).join('');
     el.style.opacity = '';
   } catch (e) {
     el.style.opacity = '';
     try { console.error('[directory] searchDirectory failed:', e); } catch {}
-    el.innerHTML = '<div style="color:#f44336;padding:20px">Error loading directory</div>';
+    el.innerHTML = '<div style="color:#f44336;padding:20px">Error loading directory. Check your connection and retry.</div>';
   }
 }
 

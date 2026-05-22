@@ -578,7 +578,20 @@ def create_user(nickname: str, password: str, registration_ip: Optional[str] = N
                     )
                 )
             con.commit()
-            return cur.lastrowid
+            uid = int(cur.lastrowid or 0)
+            if uid > 0:
+                try:
+                    ident = get_or_create_local_server_identity() or {}
+                    home_sid = str(ident.get("server_id") or "").strip()
+                    if home_sid:
+                        con.execute(
+                            "UPDATE users SET account_home_server_id=? WHERE id=?",
+                            (home_sid, uid),
+                        )
+                        con.commit()
+                except Exception:
+                    pass
+            return uid
     except sqlite3.IntegrityError:
         return None
 
@@ -1301,6 +1314,7 @@ def get_messages(room_name: str, limit: int = 100, before_id: Optional[int] = No
                    LEFT JOIN bots  b ON b.owner_id = m.user_id AND b.name = m.nickname
                    LEFT JOIN messages r ON r.id = m.reply_to
                    WHERE m.room_name=? AND m.id < ?
+                     AND COALESCE(m.tombstoned, 0) = 0
                    ORDER BY m.id DESC LIMIT ?""",
                 (room_name, before_id, limit)
             ).fetchall()
@@ -1329,6 +1343,7 @@ def get_messages(room_name: str, limit: int = 100, before_id: Optional[int] = No
                    LEFT JOIN bots  b ON b.owner_id = m.user_id AND b.name = m.nickname
                    LEFT JOIN messages r ON r.id = m.reply_to
                    WHERE m.room_name=?
+                     AND COALESCE(m.tombstoned, 0) = 0
                    ORDER BY m.id DESC LIMIT ?""",
                 (room_name, limit)
             ).fetchall()
@@ -1676,6 +1691,8 @@ def _migrate():
             con.execute("ALTER TABLE users ADD COLUMN global_user_id TEXT")
         if "identity_pubkey" not in cols:
             con.execute("ALTER TABLE users ADD COLUMN identity_pubkey TEXT")
+        if "account_home_server_id" not in cols:
+            con.execute("ALTER TABLE users ADD COLUMN account_home_server_id TEXT DEFAULT ''")
         # Identity split: `nickname` is the unique handle (UI label
         # "Username"), `display_name` is the freeform display label
         # (UI label "Nickname") that defaults to nickname when NULL.
@@ -1890,6 +1907,24 @@ def _migrate():
             con.execute("ALTER TABLE dm_messages ADD COLUMN view_once INTEGER DEFAULT 0")
         if "preview_suppressed" not in dm_msg_cols:
             con.execute("ALTER TABLE dm_messages ADD COLUMN preview_suppressed INTEGER DEFAULT 0")
+        if "sync_origin_server_id" not in dm_msg_cols:
+            try:
+                con.execute("ALTER TABLE dm_messages ADD COLUMN sync_origin_server_id TEXT DEFAULT ''")
+            except Exception:
+                pass
+        if "sync_origin_message_id" not in dm_msg_cols:
+            try:
+                con.execute("ALTER TABLE dm_messages ADD COLUMN sync_origin_message_id TEXT DEFAULT ''")
+            except Exception:
+                pass
+        try:
+            con.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_dm_sync_origin "
+                "ON dm_messages(sync_origin_server_id, sync_origin_message_id) "
+                "WHERE sync_origin_server_id != '' AND sync_origin_message_id != ''"
+            )
+        except Exception:
+            pass
         con.execute("""
             CREATE TABLE IF NOT EXISTS dm_view_once_views (
                 id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2119,6 +2154,124 @@ def _migrate():
             )
             """
         )
+        # Federated public channel directory cache. Populated from account
+        # sync (`public_rooms` in the sync export), `channel.directory.snapshot`
+        # events, and bumped each time a federated `message.created` lands
+        # in a public room. Rows are keyed by (room_name, home_server_id) so
+        # a channel mirrored from multiple peers stays distinct until the
+        # mesh agrees on a canonical home — `home_server_id` is the **room's
+        # home** node, not the importing peer.
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS federation_channel_index (
+                room_name           TEXT NOT NULL,
+                home_server_id      TEXT NOT NULL,
+                display_name        TEXT DEFAULT '',
+                description         TEXT DEFAULT '',
+                directory_description TEXT DEFAULT '',
+                icon                TEXT,
+                category            TEXT DEFAULT '',
+                tags_json           TEXT DEFAULT '[]',
+                channel_type        TEXT DEFAULT 'text',
+                visibility          TEXT DEFAULT 'public',
+                member_count        INTEGER DEFAULT 0,
+                owner_nickname      TEXT DEFAULT '',
+                owner_global_user_id TEXT DEFAULT '',
+                home_base_url       TEXT DEFAULT '',
+                last_seen_at        TEXT DEFAULT (datetime('now')),
+                last_synced_at      TEXT DEFAULT (datetime('now')),
+                tombstoned          INTEGER DEFAULT 0,
+                PRIMARY KEY (room_name, home_server_id)
+            )
+            """
+        )
+        for _ddl in (
+            "CREATE INDEX IF NOT EXISTS idx_fci_last_seen ON federation_channel_index(tombstoned, last_seen_at)",
+            "CREATE INDEX IF NOT EXISTS idx_fci_category ON federation_channel_index(category, tombstoned)",
+            "CREATE INDEX IF NOT EXISTS idx_fci_name ON federation_channel_index(room_name)",
+        ):
+            try: con.execute(_ddl)
+            except Exception: pass
+        # Per-room federated member roster snapshot (origin-of-truth: room
+        # home server). Lets remote nodes show a real member list before
+        # incremental `room.member.*` events catch up. Keyed by (room_name,
+        # global_user_id) so the same user from two homes never duplicates.
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS federation_room_member_index (
+                room_name           TEXT NOT NULL,
+                global_user_id      TEXT NOT NULL,
+                nickname            TEXT NOT NULL,
+                display_name        TEXT DEFAULT '',
+                avatar              TEXT DEFAULT '',
+                home_server_id      TEXT DEFAULT '',
+                role                TEXT DEFAULT 'member',
+                last_seen_at        TEXT DEFAULT (datetime('now')),
+                tombstoned          INTEGER DEFAULT 0,
+                PRIMARY KEY (room_name, global_user_id)
+            )
+            """
+        )
+        for _ddl in (
+            "CREATE INDEX IF NOT EXISTS idx_frmi_room ON federation_room_member_index(room_name, tombstoned)",
+            "CREATE INDEX IF NOT EXISTS idx_frmi_gid ON federation_room_member_index(global_user_id)",
+        ):
+            try: con.execute(_ddl)
+            except Exception: pass
+        # Room history backfill cursor — last applied federated message
+        # per (room_name, origin_server_id) so a destination node can
+        # request only the gap it needs after a switch.
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS federation_history_cursor (
+                room_name        TEXT NOT NULL,
+                origin_server_id TEXT NOT NULL,
+                last_origin_msg_id TEXT DEFAULT '',
+                last_origin_created_at TEXT DEFAULT '',
+                updated_at       TEXT DEFAULT (datetime('now')),
+                PRIMARY KEY (room_name, origin_server_id)
+            )
+            """
+        )
+        # Tombstone flag on `messages` so federated deletes survive across
+        # nodes without losing the row (needed for backfill replay + audit).
+        msg_cols_pre = {r["name"] for r in con.execute("PRAGMA table_info(messages)").fetchall()}
+        if "tombstoned" not in msg_cols_pre:
+            try:
+                con.execute("ALTER TABLE messages ADD COLUMN tombstoned INTEGER DEFAULT 0")
+            except Exception:
+                pass
+        if "origin_server_id" not in msg_cols_pre:
+            try:
+                con.execute("ALTER TABLE messages ADD COLUMN origin_server_id TEXT DEFAULT ''")
+            except Exception:
+                pass
+        if "origin_message_id" not in msg_cols_pre:
+            try:
+                con.execute("ALTER TABLE messages ADD COLUMN origin_message_id TEXT DEFAULT ''")
+            except Exception:
+                pass
+        # Lookup by (origin_server_id, origin_message_id) drives
+        # `message.deleted` / `message.edited` apply. Partial index keeps
+        # the existing UNIQUE message id index untouched and skips the
+        # vast majority of local rows that have empty origin fields.
+        try:
+            con.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_origin "
+                "ON messages(origin_server_id, origin_message_id) "
+                "WHERE origin_server_id != '' AND origin_message_id != ''"
+            )
+        except Exception:
+            pass
+        # Optional home_server_id hint on `rooms` so the directory can
+        # display "Hosted on <node>" without joining the index table on
+        # every render. Default '' = local.
+        room_cols_pre = {r["name"] for r in con.execute("PRAGMA table_info(rooms)").fetchall()}
+        if "home_server_id" not in room_cols_pre:
+            try:
+                con.execute("ALTER TABLE rooms ADD COLUMN home_server_id TEXT DEFAULT ''")
+            except Exception:
+                pass
         con.execute(
             """
             CREATE TABLE IF NOT EXISTS official_build_manifests (
@@ -2718,11 +2871,25 @@ def _migrate():
         # the counts on wall_posts and maintaining them via triggers turns each
         # row into a single column read.
         wall_cols = {r["name"] for r in con.execute("PRAGMA table_info(wall_posts)").fetchall()}
+        # Track/music + encryption columns — the early init_db block runs before
+        # wall_posts exists on fresh installs, so we must migrate here too.
+        for _col, _ddl in (
+            ("track_title", "ALTER TABLE wall_posts ADD COLUMN track_title TEXT"),
+            ("track_room", "ALTER TABLE wall_posts ADD COLUMN track_room TEXT"),
+            ("track_mood", "ALTER TABLE wall_posts ADD COLUMN track_mood TEXT"),
+            ("enc_v", "ALTER TABLE wall_posts ADD COLUMN enc_v INTEGER NOT NULL DEFAULT 0"),
+            ("audience", "ALTER TABLE wall_posts ADD COLUMN audience TEXT"),
+            ("ciphertext", "ALTER TABLE wall_posts ADD COLUMN ciphertext BLOB"),
+        ):
+            if _col not in wall_cols:
+                con.execute(_ddl)
+                wall_cols.add(_col)
         _newly_added_counters: list[str] = []
         for _col in ("reaction_count", "comment_count", "repost_count"):
             if _col not in wall_cols:
                 con.execute(f"ALTER TABLE wall_posts ADD COLUMN {_col} INTEGER DEFAULT 0")
                 _newly_added_counters.append(_col)
+                wall_cols.add(_col)
 
         # Backfill once for any newly-added column (idempotent — runs only on
         # the first server start that introduced the column).
@@ -4223,6 +4390,378 @@ def accept_friend_request(from_id: int, to_id: int) -> bool:
     return True
 
 
+def sync_import_accepted_friendship(user_a: int, user_b: int) -> bool:
+    """Mirror a bidirectional accepted friendship during account sync.
+
+    The request/accept flow is for live UX; sync must idempotently recreate
+    the graph without waiting on pending rows or direction quirks.
+    """
+    if user_a <= 0 or user_b <= 0 or user_a == user_b:
+        return False
+    try:
+        with _conn() as con:
+            for from_id, to_id in ((user_a, user_b), (user_b, user_a)):
+                row = con.execute(
+                    "SELECT status FROM friends WHERE user_id=? AND friend_id=?",
+                    (from_id, to_id),
+                ).fetchone()
+                if row:
+                    if str(row["status"] or "") != "accepted":
+                        con.execute(
+                            "UPDATE friends SET status='accepted' WHERE user_id=? AND friend_id=?",
+                            (from_id, to_id),
+                        )
+                else:
+                    con.execute(
+                        "INSERT INTO friends (user_id, friend_id, status) VALUES (?,?, 'accepted')",
+                        (from_id, to_id),
+                    )
+            con.commit()
+        return True
+    except Exception:
+        return False
+
+
+def get_user_account_home_server_id(user_id: int) -> str:
+    """Pinned federation home for this account (empty → treat as local-native)."""
+    uid = int(user_id or 0)
+    if uid <= 0:
+        return ""
+    try:
+        with _conn() as con:
+            row = con.execute(
+                "SELECT account_home_server_id FROM users WHERE id=?",
+                (uid,),
+            ).fetchone()
+        if row:
+            return str(row["account_home_server_id"] or "").strip()
+    except Exception:
+        pass
+    return ""
+
+
+def set_user_account_home_server_id(user_id: int, server_id: str, *, force: bool = False) -> bool:
+    """Pin which federation server owns this account for sync gating."""
+    uid = int(user_id or 0)
+    sid = str(server_id or "").strip()
+    if uid <= 0 or not sid:
+        return False
+    try:
+        with _conn() as con:
+            if force:
+                con.execute(
+                    "UPDATE users SET account_home_server_id=? WHERE id=?",
+                    (sid, uid),
+                )
+            else:
+                con.execute(
+                    "UPDATE users SET account_home_server_id=? "
+                    "WHERE id=? AND (account_home_server_id IS NULL OR account_home_server_id='')",
+                    (sid, uid),
+                )
+            con.commit()
+        return True
+    except Exception:
+        return False
+
+
+def apply_synced_wall_post(payload: Dict, origin_server_id: str) -> Optional[int]:
+    """Import a wall post from account sync (includes friends-only rows)."""
+    origin = (origin_server_id or "").strip()
+    gid = str(payload.get("global_post_id") or "").strip()
+    if not origin or not gid:
+        return None
+    existing = resolve_federation_wall_local_id(origin, "post", gid)
+    if existing:
+        return existing
+    author = _federated_wall_actor(
+        payload, origin,
+        gid_key="author_global_user_id",
+        nick_key="nickname",
+        require_global_id=True,
+    )
+    if not author:
+        return None
+    privacy = str(payload.get("privacy") or "public").strip().lower()
+    if privacy not in ("public", "followers", "friends"):
+        privacy = "public"
+    allow_comments = 1 if bool(payload.get("allow_comments", True)) else 0
+    share_enabled = 1 if bool(payload.get("share_enabled", True)) else 0
+    content = str(payload.get("content") or "")[:_FED_WALL_CONTENT_MAX]
+    local_id = create_wall_post(
+        int(author["id"]),
+        content,
+        payload.get("media_data"),
+        payload.get("media_type"),
+        privacy,
+        share_enabled,
+        allow_comments,
+        payload.get("track_title"),
+        payload.get("track_room"),
+        payload.get("track_mood"),
+    )
+    map_federation_wall_object(origin, "post", gid, int(local_id))
+    return int(local_id)
+
+
+def patch_sync_user_profile(
+    user_id: int,
+    *,
+    display_name: str = "",
+    avatar: str = "",
+    status_msg: str = "",
+) -> None:
+    """Apply non-empty profile fields from account sync (federated mirrors)."""
+    uid = int(user_id or 0)
+    if uid <= 0:
+        return
+    sets: list[str] = []
+    vals: list = []
+    dn = str(display_name or "").strip()[:64]
+    if dn:
+        sets.append("display_name=?")
+        vals.append(dn)
+    av = avatar if avatar is not None else ""
+    if av:
+        sets.append("avatar=?")
+        vals.append(str(av)[:200_000])
+    sm = str(status_msg or "").strip()[:200]
+    if sm:
+        sets.append("status_msg=?")
+        vals.append(sm)
+    if not sets:
+        return
+    vals.append(uid)
+    try:
+        with _conn() as con:
+            con.execute(f"UPDATE users SET {', '.join(sets)} WHERE id=?", vals)
+            con.commit()
+    except Exception:
+        pass
+
+
+def _patch_wall_post_created_at(local_post_id: int, created_at: str) -> None:
+    ts = str(created_at or "").strip()
+    if not ts:
+        return
+    try:
+        pid = int(local_post_id or 0)
+    except Exception:
+        return
+    if pid <= 0:
+        return
+    try:
+        with _conn() as con:
+            con.execute(
+                "UPDATE wall_posts SET created_at=? WHERE id=?",
+                (ts, pid),
+            )
+            con.commit()
+    except Exception:
+        pass
+
+
+def _apply_synced_encrypted_wall_post(
+    payload: Dict,
+    origin: str,
+    author_id: int,
+    viewer_user_id: int,
+) -> Optional[int]:
+    """Import an enc_v=2 wall post from account sync."""
+    import base64 as _b64
+
+    gid = str(payload.get("global_post_id") or "").strip()
+    if not origin or not gid:
+        return None
+    existing = resolve_federation_wall_local_id(origin, "post", gid)
+    if existing:
+        return int(existing)
+
+    try:
+        ct = _b64.b64decode(str(payload.get("ciphertext_b64") or ""), validate=True)
+    except Exception:
+        return None
+    if not ct or len(ct) > 256 * 1024:
+        return None
+
+    aud = str(payload.get("audience") or payload.get("privacy") or "followers").strip().lower()
+    if aud not in ("followers", "friends") and not aud.startswith("list:"):
+        return None
+
+    wraps_decoded: list[tuple[int, bytes]] = []
+    wraps_in = payload.get("wrapped_keys") or []
+    if isinstance(wraps_in, list):
+        for w in wraps_in:
+            if not isinstance(w, dict):
+                continue
+            rgid = str(w.get("recipient_global_user_id") or "").strip()
+            wb = str(w.get("wrapped_b64") or "").strip()
+            if not rgid or not wb:
+                continue
+            local_recipient = _lookup_local_user_by_gid(rgid)
+            if not local_recipient:
+                continue
+            rid = int(local_recipient["id"])
+            if rid == author_id:
+                continue
+            try:
+                blob = _b64.b64decode(wb, validate=True)
+            except Exception:
+                continue
+            if blob and len(blob) <= 4096:
+                wraps_decoded.append((rid, blob))
+
+    privacy = _audience_to_privacy(aud)
+    share_enabled = 1 if bool(payload.get("share_enabled", True)) else 0
+    allow_comments = 1 if bool(payload.get("allow_comments", True)) else 0
+    media_data = payload.get("media_data")
+    media_type = payload.get("media_type")
+
+    try:
+        if wraps_decoded:
+            local_id = create_wall_post_encrypted(
+                user_id=author_id,
+                audience=aud,
+                ciphertext=ct,
+                wrapped_keys=wraps_decoded,
+                media_data=media_data,
+                media_type=media_type,
+                share_enabled=share_enabled,
+                allow_comments=allow_comments,
+                track_title=payload.get("track_title"),
+                track_room=payload.get("track_room"),
+                track_mood=payload.get("track_mood"),
+            )
+        elif int(viewer_user_id or 0) == author_id:
+            # Author's own encrypted posts: feed/reels allow user_id match
+            # without a wall_post_keys row on the destination node.
+            with _conn() as con:
+                con.execute("BEGIN IMMEDIATE")
+                try:
+                    cur = con.execute(
+                        """
+                        INSERT INTO wall_posts
+                            (user_id, content, media_data, media_type, privacy,
+                             share_enabled, allow_comments,
+                             track_title, track_room, track_mood,
+                             enc_v, audience, ciphertext)
+                        VALUES (?, '', ?, ?, ?, ?, ?, ?, ?, ?, 2, ?, ?)
+                        """,
+                        (
+                            author_id,
+                            media_data,
+                            media_type,
+                            privacy,
+                            share_enabled,
+                            allow_comments,
+                            payload.get("track_title"),
+                            payload.get("track_room"),
+                            payload.get("track_mood"),
+                            aud,
+                            bytes(ct),
+                        ),
+                    )
+                    local_id = int(cur.lastrowid)
+                    con.execute("COMMIT")
+                except Exception:
+                    con.execute("ROLLBACK")
+                    return None
+        else:
+            return None
+    except (ValueError, Exception):
+        return None
+
+    map_federation_wall_object(origin, "post", gid, int(local_id))
+    return int(local_id)
+
+
+def _apply_synced_plaintext_for_author(
+    payload: Dict,
+    origin: str,
+    author_id: int,
+) -> Optional[int]:
+    """Insert a plaintext synced post for an already-resolved author."""
+    gid = str(payload.get("global_post_id") or "").strip()
+    if not origin or not gid:
+        return None
+    existing = resolve_federation_wall_local_id(origin, "post", gid)
+    if existing:
+        return int(existing)
+    privacy = str(payload.get("privacy") or "public").strip().lower()
+    if privacy not in ("public", "followers", "friends"):
+        privacy = "public"
+    allow_comments = 1 if bool(payload.get("allow_comments", True)) else 0
+    share_enabled = 1 if bool(payload.get("share_enabled", True)) else 0
+    content = str(payload.get("content") or "")[:_FED_WALL_CONTENT_MAX]
+    local_id = create_wall_post(
+        int(author_id),
+        content,
+        payload.get("media_data"),
+        payload.get("media_type"),
+        privacy,
+        share_enabled,
+        allow_comments,
+        payload.get("track_title"),
+        payload.get("track_room"),
+        payload.get("track_mood"),
+    )
+    map_federation_wall_object(origin, "post", gid, int(local_id))
+    return int(local_id)
+
+
+def apply_synced_social_post(
+    payload: Dict,
+    origin_server_id: str,
+    *,
+    viewer_user_id: int = 0,
+) -> Optional[int]:
+    """Import a FrogSocial wall post from account sync (plain or encrypted)."""
+    origin = (origin_server_id or "").strip()
+    gid = str(payload.get("global_post_id") or "").strip()
+    if not origin or not gid:
+        return None
+
+    existing = resolve_federation_wall_local_id(origin, "post", gid)
+    if existing:
+        return int(existing)
+
+    author = _federated_wall_actor(
+        payload,
+        origin,
+        gid_key="author_global_user_id",
+        nick_key="nickname",
+        require_global_id=True,
+    )
+    if not author:
+        lookup = _lookup_local_user_by_gid(str(payload.get("author_global_user_id") or ""))
+        if lookup:
+            author = lookup
+    if not author:
+        return None
+    author_id = int(author["id"])
+
+    patch_sync_user_profile(
+        author_id,
+        display_name=str(payload.get("author_display_name") or ""),
+        avatar=payload.get("author_avatar") or "",
+    )
+
+    enc_v = int(payload.get("enc_v") or 0)
+    if enc_v == 2:
+        local_id = _apply_synced_encrypted_wall_post(
+            payload, origin, author_id, int(viewer_user_id or 0),
+        )
+    else:
+        # Do not delegate to apply_synced_wall_post — it re-resolves the
+        # author and treats the freshly materialized mirror as a native
+        # account homed on this node, rejecting the home origin mismatch.
+        local_id = _apply_synced_plaintext_for_author(payload, origin, author_id)
+
+    if local_id:
+        _patch_wall_post_created_at(int(local_id), str(payload.get("created_at") or ""))
+    return local_id
+
+
 def decline_friend_request(from_id: int, to_id: int) -> bool:
     with _conn() as con:
         con.execute(
@@ -4452,6 +4991,36 @@ def get_or_create_dm(user_a: int, user_b: int) -> int:
         return cur.lastrowid
 
 
+def get_dm_channels_for_sync(user_id: int) -> List[Dict]:
+    """All DM channels for account sync, including hidden conversations."""
+    uid = int(user_id or 0)
+    if uid <= 0:
+        return []
+    with _conn() as con:
+        rows = con.execute(
+            """
+            SELECT dc.id, dc.user_a, dc.user_b,
+                   COALESCE(dc.hidden_by_a, 0) AS hidden_by_a,
+                   COALESCE(dc.hidden_by_b, 0) AS hidden_by_b,
+                   CASE WHEN dc.user_a=? THEN dc.user_b ELSE dc.user_a END AS other_id
+            FROM dm_channels dc
+            WHERE dc.user_a=? OR dc.user_b=?
+            ORDER BY dc.id DESC
+            """,
+            (uid, uid, uid),
+        ).fetchall()
+    out: List[Dict] = []
+    for r in rows:
+        d = dict(r)
+        is_a = int(d.get("user_a") or 0) == uid
+        d["hidden"] = bool(
+            (is_a and int(d.get("hidden_by_a") or 0))
+            or ((not is_a) and int(d.get("hidden_by_b") or 0))
+        )
+        out.append(d)
+    return out
+
+
 def get_dm_channels(user_id: int) -> List[Dict]:
     # Single query: pick latest visible message per channel via a window-style
     # MAX(id) join, and compute unread count in the same SELECT instead of
@@ -4651,6 +5220,83 @@ def get_dm_messages(channel_id: int, user_id: int, limit: int = 50,
     if after_id:
         return [dict(r) for r in rows], True
     return list(reversed([dict(r) for r in rows])), True
+
+
+def find_user_by_global_id(global_user_id: str) -> Optional[Dict]:
+    """Return the local users row whose global_user_id matches, if any."""
+    gid = (global_user_id or "").strip()
+    if not gid:
+        return None
+    try:
+        with _conn() as con:
+            row = con.execute(
+                "SELECT id, nickname, display_name, avatar, global_user_id, is_admin "
+                "FROM users WHERE global_user_id=? LIMIT 1",
+                (gid,),
+            ).fetchone()
+        return dict(row) if row else None
+    except Exception:
+        return None
+
+
+def save_synced_dm_message(
+    *,
+    channel_id: int,
+    sender_id: int,
+    content: str,
+    media_type: Optional[str] = None,
+    media_name: Optional[str] = None,
+    media_blur: int = 0,
+    view_once: int = 0,
+    edited: bool = False,
+    deleted: bool = False,
+    created_at: str = "",
+    source_server_id: str = "",
+    origin_message_id: str = "",
+) -> bool:
+    """Idempotently backfill a DM message from a federation sync export.
+
+    Deduplication keys on (source_server_id, origin_message_id). The
+    content is treated as opaque ciphertext — DM E2E keys live on the
+    user's devices, not on the relaying nodes, so we never decrypt.
+    Returns True on first-time insert, False on duplicate or error.
+    """
+    if channel_id <= 0 or sender_id <= 0 or not origin_message_id:
+        return False
+    src = (source_server_id or "").strip()
+    omid = str(origin_message_id or "").strip()
+    if not src or not omid:
+        return False
+    try:
+        with _conn() as con:
+            # Skip if we already have this row (idempotent re-applies after
+            # crash/retry don't double-insert).
+            already = con.execute(
+                "SELECT id FROM dm_messages WHERE sync_origin_server_id=? AND sync_origin_message_id=? LIMIT 1",
+                (src, omid),
+            ).fetchone()
+            if already:
+                return False
+            con.execute(
+                """INSERT INTO dm_messages
+                   (channel_id, sender_id, content, media_data, media_type,
+                    media_name, reply_to, media_blur, view_once,
+                    edited, deleted, created_at,
+                    sync_origin_server_id, sync_origin_message_id)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,COALESCE(NULLIF(?, ''), datetime('now')),?,?)""",
+                (
+                    channel_id, sender_id, content,
+                    None, media_type, media_name, None,
+                    1 if media_blur else 0, 1 if view_once else 0,
+                    1 if edited else 0, 1 if deleted else 0,
+                    created_at,
+                    src, omid,
+                ),
+            )
+            con.commit()
+        return True
+    except Exception:
+        return False
 
 
 def send_dm_message(channel_id: int, sender_id: int, content: str,
@@ -6347,7 +6993,8 @@ def get_channel_members(room_id: int) -> List[Dict]:
     with _conn() as con:
         rows = con.execute("""
             SELECT u.id AS user_id, u.nickname, u.avatar, u.is_admin,
-                   u.presence, u.last_seen, u.display_name
+                   u.presence, u.last_seen, u.display_name,
+                   COALESCE(u.global_user_id, '') AS global_user_id
             FROM room_members rm
             JOIN users u ON u.id = rm.user_id
             WHERE rm.room_id = ?
@@ -7100,23 +7747,51 @@ def get_invite_code_collides(slug: str) -> bool:
 
 def get_public_channels(category: str = None, search: str = None,
                         limit: int = 50, offset: int = 0) -> List[Dict]:
-    """Get public channels for directory."""
+    """Get local + federated public channels for directory.
+
+    A channel is "active" if:
+      * it has a local message within ``active_days`` (chatty channels), OR
+      * its `rooms` row was materialised within ``active_days`` (newly synced), OR
+      * it has a federated index entry with a recent ``last_seen_at``
+        (we received a federation event for it in the window).
+
+    Channels without any of the above fall off the directory until they
+    become active again. Tombstoned federated entries are excluded.
+    """
     active_days = get_channel_directory_active_days()
     with _conn() as con:
         query = """
             SELECT r.id, r.name, r.description, r.directory_description,
                    r.icon, r.category, r.tags,
-                   (SELECT COUNT(*) FROM room_members WHERE room_id=r.id) AS member_count,
+                   CASE
+                     WHEN LOWER(u.nickname) = 'federation_sync'
+                          AND COALESCE(fci.member_count, 0) > 0
+                       THEN fci.member_count
+                     ELSE (SELECT COUNT(*) FROM room_members WHERE room_id=r.id)
+                   END AS member_count,
                    r.channel_type,
-                   u.nickname as owner_name, u.avatar as owner_avatar
+                   u.nickname as owner_name, u.avatar as owner_avatar,
+                   COALESCE(r.home_server_id, fci.home_server_id, '') AS home_server_id,
+                   COALESCE(fci.home_base_url, '') AS home_base_url,
+                   CASE
+                     WHEN r.home_server_id IS NOT NULL AND r.home_server_id != '' THEN 1
+                     WHEN fci.room_name IS NOT NULL THEN 1
+                     WHEN LOWER(u.nickname) = 'federation_sync' THEN 1
+                     ELSE 0
+                   END AS is_federated
             FROM rooms r
             JOIN users u ON r.owner_id = u.id
+            LEFT JOIN federation_channel_index fci
+                   ON fci.room_name = r.name AND fci.tombstoned = 0
             WHERE r.is_public=1
-                            AND r.type='public'
-              AND COALESCE((SELECT MAX(m.created_at) FROM messages m WHERE m.room_name = r.name), r.created_at)
-                  >= datetime('now', '-' || ? || ' days')
+              AND r.type='public'
+              AND (
+                COALESCE((SELECT MAX(m.created_at) FROM messages m WHERE m.room_name = r.name), r.created_at)
+                    >= datetime('now', '-' || ? || ' days')
+                OR (fci.last_seen_at IS NOT NULL AND fci.last_seen_at >= datetime('now', '-' || ? || ' days'))
+              )
         """
-        params = [active_days]
+        params: list = [active_days, active_days]
         if category:
             query += " AND r.category=?"
             params.append(category)
@@ -7126,7 +7801,41 @@ def get_public_channels(category: str = None, search: str = None,
         query += " ORDER BY member_count DESC LIMIT ? OFFSET ?"
         params.extend([limit, offset])
         rows = con.execute(query, params).fetchall()
-    return [dict(r) for r in rows]
+    local_rows = [dict(r) for r in rows]
+
+    # Append federated-only rows (channels mirrored in the index that
+    # don't yet exist as a local `rooms` shell). These ride alongside the
+    # local list in the directory so the user sees a single merged view.
+    needed = max(0, int(limit) - len(local_rows))
+    fed_rows: List[Dict] = []
+    if needed > 0 or offset > 0:
+        fed_offset = max(0, int(offset) - max(0, int(limit) - len(local_rows)))
+        fetch_limit = needed if needed > 0 else int(limit)
+        for row in list_federation_channel_index(
+            category=category or "",
+            search=search or "",
+            limit=fetch_limit,
+            offset=fed_offset,
+            active_days=active_days,
+        ):
+            fed_rows.append({
+                "id": None,
+                "name": row.get("name"),
+                "description": row.get("description") or "",
+                "directory_description": row.get("directory_description") or "",
+                "icon": row.get("icon"),
+                "category": row.get("category") or "",
+                "tags": row.get("tags") or "[]",
+                "member_count": row.get("member_count") or 0,
+                "channel_type": row.get("channel_type") or "text",
+                "owner_name": row.get("owner_nickname") or "",
+                "owner_avatar": None,
+                "home_server_id": row.get("home_server_id") or "",
+                "home_base_url": row.get("home_base_url") or "",
+                "is_federated": 1,
+                "remote_only": True,
+            })
+    return local_rows + fed_rows
 
 
 def set_room_public(room_name: str, is_public: int, category: str = '',
@@ -11263,8 +11972,13 @@ def _resolve_federated_message_sender(payload: Dict) -> tuple[int, str, Optional
     return get_or_create_federation_system_user(), nick, "federation", bridge_avatar
 
 
-def save_federated_room_message(event_id: str, payload: Dict) -> Optional[int]:
-    """Apply replicated message event idempotently into local room timeline."""
+def save_federated_room_message(event_id: str, payload: Dict, origin_server_id: str = "") -> Optional[int]:
+    """Apply replicated message event idempotently into local room timeline.
+
+    ``origin_server_id`` is the home server the event came from. We track
+    it on the row so backfill, tombstoning, and "Hosted on" indicators
+    can resolve back to the source without re-parsing payloads.
+    """
     eid = (event_id or "").strip()
     if not eid:
         return None
@@ -11279,6 +11993,9 @@ def save_federated_room_message(event_id: str, payload: Dict) -> Optional[int]:
 
     user_id, nickname, bridge_platform, bridge_avatar = _resolve_federated_message_sender(payload)
 
+    origin_sid = (origin_server_id or "").strip()
+    origin_msg_id = str(payload.get("origin_message_id") or payload.get("message_id") or "").strip()
+
     with _conn() as con:
         seen = con.execute(
             "SELECT message_id FROM federation_message_events WHERE event_id=?",
@@ -11291,26 +12008,424 @@ def save_federated_room_message(event_id: str, payload: Dict) -> Optional[int]:
         if not room:
             owner_id = get_or_create_federation_system_user()
             con.execute(
-                "INSERT OR IGNORE INTO rooms (name, description, type, owner_id, room_key_hint, channel_type) VALUES (?,?,?,?,?,?)",
-                (room_name, "Federated room", "public", owner_id, None, "text"),
+                "INSERT OR IGNORE INTO rooms (name, description, type, owner_id, room_key_hint, channel_type, home_server_id) VALUES (?,?,?,?,?,?,?)",
+                (room_name, "Federated room", "public", owner_id, None, "text", origin_sid),
+            )
+        elif origin_sid:
+            # First-write wins for home_server_id — never let a later peer
+            # overwrite an established home (defence against malicious
+            # peers relabelling a local channel).
+            con.execute(
+                "UPDATE rooms SET home_server_id=? WHERE name=? AND (home_server_id IS NULL OR home_server_id='')",
+                (origin_sid, room_name),
             )
 
+        edited_flag = 1 if bool(payload.get("edited")) else 0
+        key_ver = max(0, int(payload.get("key_version") or 0))
         cur = con.execute(
             """
             INSERT INTO messages (room_name, user_id, nickname, content, media_data, media_type,
-                                  media_blur, view_once, bridge_platform, bridge_avatar, reply_to)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                                  media_blur, view_once, bridge_platform, bridge_avatar, reply_to,
+                                  origin_server_id, origin_message_id, key_version, edited)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (room_name, user_id, nickname, content, media_data, media_type,
-             media_blur, view_once, bridge_platform, bridge_avatar, None),
+             media_blur, view_once, bridge_platform, bridge_avatar, None,
+             origin_sid, origin_msg_id, key_ver, edited_flag),
         )
         msg_id = int(cur.lastrowid)
         con.execute(
             "INSERT INTO federation_message_events (event_id, message_id) VALUES (?, ?)",
             (eid, msg_id),
         )
+        # Bump the channel index `last_seen_at` so federated channels stay
+        # in the directory active window even without local human messages.
+        if origin_sid:
+            try:
+                con.execute(
+                    """
+                    UPDATE federation_channel_index
+                       SET last_seen_at=datetime('now')
+                     WHERE room_name=? AND home_server_id=?
+                    """,
+                    (room_name, origin_sid),
+                )
+            except Exception:
+                pass
+        # Track the cursor so future history backfill knows what we've
+        # already seen from this peer.
+        if origin_sid and origin_msg_id:
+            try:
+                con.execute(
+                    """
+                    INSERT INTO federation_history_cursor (room_name, origin_server_id, last_origin_msg_id, last_origin_created_at, updated_at)
+                    VALUES (?, ?, ?, ?, datetime('now'))
+                    ON CONFLICT(room_name, origin_server_id) DO UPDATE SET
+                        last_origin_msg_id=excluded.last_origin_msg_id,
+                        last_origin_created_at=excluded.last_origin_created_at,
+                        updated_at=datetime('now')
+                    """,
+                    (room_name, origin_sid, origin_msg_id, str(payload.get("created_at") or "")),
+                )
+            except Exception:
+                pass
         con.commit()
         return msg_id
+
+
+# ──────────────────────────────────────────────────────────────
+# Federation channel directory index
+# ──────────────────────────────────────────────────────────────
+
+_FED_CHANNEL_INDEX_RETENTION_DAYS = 90
+
+
+def upsert_federation_channel_index(
+    room_name: str,
+    home_server_id: str,
+    *,
+    display_name: str = "",
+    description: str = "",
+    directory_description: str = "",
+    icon: Optional[str] = None,
+    category: str = "",
+    tags_json: str = "[]",
+    channel_type: str = "text",
+    visibility: str = "public",
+    member_count: int = 0,
+    owner_nickname: str = "",
+    owner_global_user_id: str = "",
+    home_base_url: str = "",
+) -> bool:
+    """Upsert a row into the federated channel directory cache.
+
+    Caller MUST have already validated room_name, visibility, etc. — this
+    helper trusts its arguments. We only accept ``visibility='public'``
+    so private channels can never end up in the public discovery surface.
+    """
+    name = (room_name or "").strip().lower()
+    sid = (home_server_id or "").strip()
+    if not name or not sid:
+        return False
+    if visibility not in ("public",):
+        return False
+    if channel_type not in ("text", "music", "voice"):
+        channel_type = "text"
+    try:
+        with _conn() as con:
+            con.execute(
+                """
+                INSERT INTO federation_channel_index (
+                    room_name, home_server_id, display_name, description, directory_description,
+                    icon, category, tags_json, channel_type, visibility,
+                    member_count, owner_nickname, owner_global_user_id, home_base_url,
+                    last_seen_at, last_synced_at, tombstoned
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'),datetime('now'),0)
+                ON CONFLICT(room_name, home_server_id) DO UPDATE SET
+                    display_name=excluded.display_name,
+                    description=excluded.description,
+                    directory_description=excluded.directory_description,
+                    icon=excluded.icon,
+                    category=excluded.category,
+                    tags_json=excluded.tags_json,
+                    channel_type=excluded.channel_type,
+                    visibility=excluded.visibility,
+                    member_count=excluded.member_count,
+                    owner_nickname=excluded.owner_nickname,
+                    owner_global_user_id=excluded.owner_global_user_id,
+                    home_base_url=excluded.home_base_url,
+                    last_synced_at=datetime('now'),
+                    last_seen_at=datetime('now'),
+                    tombstoned=0
+                """,
+                (
+                    name, sid, display_name[:128], description[:512],
+                    directory_description[:1200],
+                    icon, category[:32], tags_json[:2000],
+                    channel_type, visibility,
+                    max(0, int(member_count or 0)),
+                    owner_nickname[:64], owner_global_user_id[:64],
+                    home_base_url[:256],
+                ),
+            )
+            con.commit()
+        return True
+    except Exception:
+        return False
+
+
+def tombstone_federation_channel_index(room_name: str, home_server_id: str) -> bool:
+    """Mark a federated channel as deleted/unavailable so discovery hides it."""
+    name = (room_name or "").strip().lower()
+    sid = (home_server_id or "").strip()
+    if not name or not sid:
+        return False
+    try:
+        with _conn() as con:
+            cur = con.execute(
+                "UPDATE federation_channel_index SET tombstoned=1, last_synced_at=datetime('now') "
+                "WHERE room_name=? AND home_server_id=?",
+                (name, sid),
+            )
+            con.commit()
+            return cur.rowcount > 0
+    except Exception:
+        return False
+
+
+def prune_federation_channel_index(max_age_days: int = _FED_CHANNEL_INDEX_RETENTION_DAYS) -> int:
+    """Delete tombstoned rows older than ``max_age_days``. Returns pruned count."""
+    try:
+        with _conn() as con:
+            cur = con.execute(
+                "DELETE FROM federation_channel_index "
+                "WHERE tombstoned=1 AND last_synced_at < datetime('now', '-' || ? || ' days')",
+                (max(1, int(max_age_days)),),
+            )
+            con.commit()
+            return int(cur.rowcount or 0)
+    except Exception:
+        return 0
+
+
+def get_federation_channel_index_entry(room_name: str) -> Optional[Dict]:
+    """Return the most-recently-seen federation index row for ``room_name``.
+
+    When the same channel name exists at multiple peers we prefer the
+    one we've heard from most recently (resolves split-brain announcements
+    in the cache; the underlying conflict is logged by the inbox layer).
+    """
+    name = (room_name or "").strip().lower()
+    if not name:
+        return None
+    try:
+        with _conn() as con:
+            row = con.execute(
+                """
+                SELECT * FROM federation_channel_index
+                 WHERE room_name=? AND tombstoned=0
+                 ORDER BY last_seen_at DESC LIMIT 1
+                """,
+                (name,),
+            ).fetchone()
+        return dict(row) if row else None
+    except Exception:
+        return None
+
+
+def list_federation_channel_index(
+    category: str = "",
+    search: str = "",
+    limit: int = 50,
+    offset: int = 0,
+    active_days: int = 30,
+) -> List[Dict]:
+    """List federated public channels visible in the directory.
+
+    Excludes tombstones, stale entries, and any name that already exists
+    in the local ``rooms`` table (those are returned via the local query
+    path so we don't double-count or fight on icon/description).
+    """
+    days = max(1, int(active_days or 30))
+    try:
+        with _conn() as con:
+            base = """
+                SELECT fci.room_name AS name, fci.display_name, fci.description,
+                       fci.directory_description, fci.icon, fci.category, fci.tags_json AS tags,
+                       fci.channel_type, fci.visibility,
+                       fci.member_count, fci.owner_nickname, fci.owner_global_user_id,
+                       fci.home_server_id, fci.home_base_url, fci.last_seen_at
+                FROM federation_channel_index fci
+                LEFT JOIN rooms r ON r.name = fci.room_name
+                WHERE fci.tombstoned = 0
+                  AND fci.visibility = 'public'
+                  AND fci.last_seen_at >= datetime('now', '-' || ? || ' days')
+                  AND r.id IS NULL
+            """
+            params: list = [days]
+            if category:
+                base += " AND fci.category = ?"
+                params.append(category)
+            if search:
+                base += " AND (fci.room_name LIKE ? OR fci.description LIKE ? OR fci.directory_description LIKE ?)"
+                params.extend([f"%{search}%", f"%{search}%", f"%{search}%"])
+            base += " ORDER BY fci.member_count DESC, fci.last_seen_at DESC LIMIT ? OFFSET ?"
+            params.extend([int(limit), int(offset)])
+            rows = con.execute(base, params).fetchall()
+        return [dict(r) for r in rows]
+    except Exception:
+        return []
+
+
+def upsert_federation_room_member(
+    room_name: str,
+    global_user_id: str,
+    nickname: str,
+    *,
+    display_name: str = "",
+    avatar: str = "",
+    home_server_id: str = "",
+    role: str = "member",
+) -> bool:
+    """Cache a federated room member from a peer snapshot.
+
+    Caller MUST have already verified the snapshot signature + that the
+    sending peer is authoritative for the room (room home or owner).
+    """
+    name = (room_name or "").strip().lower()
+    gid = (global_user_id or "").strip()
+    nick = (nickname or "").strip()
+    if not name or not gid or not nick:
+        return False
+    if role not in ("owner", "admin", "moderator", "member"):
+        role = "member"
+    try:
+        with _conn() as con:
+            con.execute(
+                """
+                INSERT INTO federation_room_member_index (
+                    room_name, global_user_id, nickname, display_name, avatar,
+                    home_server_id, role, last_seen_at, tombstoned
+                ) VALUES (?,?,?,?,?,?,?,datetime('now'),0)
+                ON CONFLICT(room_name, global_user_id) DO UPDATE SET
+                    nickname=excluded.nickname,
+                    display_name=excluded.display_name,
+                    avatar=excluded.avatar,
+                    home_server_id=excluded.home_server_id,
+                    role=excluded.role,
+                    last_seen_at=datetime('now'),
+                    tombstoned=0
+                """,
+                (
+                    name, gid, nick[:64], (display_name or "")[:64],
+                    (avatar or "")[:200_000], (home_server_id or "")[:64], role,
+                ),
+            )
+            con.commit()
+        return True
+    except Exception:
+        return False
+
+
+def tombstone_federation_room_member(room_name: str, global_user_id: str) -> bool:
+    """Mark a federated room member row as tombstoned (left/banned)."""
+    name = (room_name or "").strip().lower()
+    gid = (global_user_id or "").strip()
+    if not name or not gid:
+        return False
+    try:
+        with _conn() as con:
+            cur = con.execute(
+                "UPDATE federation_room_member_index SET tombstoned=1, last_seen_at=datetime('now') "
+                "WHERE room_name=? AND global_user_id=?",
+                (name, gid),
+            )
+            con.commit()
+            return cur.rowcount > 0
+    except Exception:
+        return False
+
+
+def replace_federation_room_members(
+    room_name: str,
+    snapshot: List[Dict],
+    *,
+    sourced_from_home: bool,
+) -> int:
+    """Apply a full federated snapshot of members for a room.
+
+    If ``sourced_from_home`` is True the caller has authenticated the
+    snapshot from the room's home server — we tombstone anyone not in
+    the snapshot. Otherwise we only upsert (additive) so a non-home
+    peer cannot purge members from our view.
+    """
+    name = (room_name or "").strip().lower()
+    if not name or not isinstance(snapshot, list):
+        return 0
+    seen: set[str] = set()
+    inserted = 0
+    for entry in snapshot:
+        if not isinstance(entry, dict):
+            continue
+        gid = str(entry.get("global_user_id") or "").strip()
+        nick = str(entry.get("nickname") or "").strip()
+        if not gid or not nick:
+            continue
+        if upsert_federation_room_member(
+            name, gid, nick,
+            display_name=str(entry.get("display_name") or ""),
+            avatar=str(entry.get("avatar") or ""),
+            home_server_id=str(entry.get("home_server_id") or ""),
+            role=str(entry.get("role") or "member"),
+        ):
+            inserted += 1
+            seen.add(gid)
+    if sourced_from_home and seen:
+        try:
+            placeholders = ",".join(["?"] * len(seen))
+            with _conn() as con:
+                con.execute(
+                    f"UPDATE federation_room_member_index SET tombstoned=1, last_seen_at=datetime('now') "
+                    f"WHERE room_name=? AND global_user_id NOT IN ({placeholders})",
+                    (name, *list(seen)),
+                )
+                con.commit()
+        except Exception:
+            pass
+    return inserted
+
+
+def list_federation_room_members(room_name: str, limit: int = 200) -> List[Dict]:
+    """Return cached federated members for a room (no tombstones)."""
+    name = (room_name or "").strip().lower()
+    if not name:
+        return []
+    try:
+        with _conn() as con:
+            rows = con.execute(
+                """
+                SELECT global_user_id, nickname, display_name, avatar,
+                       home_server_id, role, last_seen_at
+                  FROM federation_room_member_index
+                 WHERE room_name=? AND tombstoned=0
+                 ORDER BY role='owner' DESC, role='admin' DESC, role='moderator' DESC, nickname COLLATE NOCASE
+                 LIMIT ?
+                """,
+                (name, max(1, int(limit))),
+            ).fetchall()
+        return [dict(r) for r in rows]
+    except Exception:
+        return []
+
+
+def federation_channel_index_count(
+    category: str = "",
+    search: str = "",
+    active_days: int = 30,
+) -> int:
+    """Count federated channels that would appear in the directory."""
+    days = max(1, int(active_days or 30))
+    try:
+        with _conn() as con:
+            base = """
+                SELECT COUNT(*) AS c FROM federation_channel_index fci
+                LEFT JOIN rooms r ON r.name = fci.room_name
+                WHERE fci.tombstoned = 0
+                  AND fci.visibility = 'public'
+                  AND fci.last_seen_at >= datetime('now', '-' || ? || ' days')
+                  AND r.id IS NULL
+            """
+            params: list = [days]
+            if category:
+                base += " AND fci.category = ?"
+                params.append(category)
+            if search:
+                base += " AND (fci.room_name LIKE ? OR fci.description LIKE ? OR fci.directory_description LIKE ?)"
+                params.extend([f"%{search}%", f"%{search}%", f"%{search}%"])
+            row = con.execute(base, params).fetchone()
+        return int(row["c"]) if row else 0
+    except Exception:
+        return 0
 
 
 # ──────────────────────────────────────────────────────────────

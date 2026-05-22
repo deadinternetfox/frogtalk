@@ -147,9 +147,18 @@ def _enqueue(event_type: str, payload: dict, target_server_ids: list[str]) -> di
 
 
 def callee_home_server(callee_user: dict) -> str:
+    """Server_id of the callee's home node, with local-fallback.
+
+    If ``resolve_global_user_home_server_id`` can't pin the user (no
+    federated profile row, or the row's origin is missing) we treat the
+    callee as local — the call still works because the caller's TURN
+    bundle is the local node's anyway.
+    """
     gid = str((callee_user or {}).get("global_user_id") or "").strip()
     if gid:
-        return db.resolve_global_user_home_server_id(gid)
+        home = db.resolve_global_user_home_server_id(gid)
+        if home:
+            return home
     ident = db.get_or_create_local_server_identity() or {}
     return str(ident.get("server_id") or "").strip()
 
@@ -457,6 +466,11 @@ async def _apply_call_offer(payload, origin, gid_call, _fed_nickname, _fed_globa
         "sdp": sdp,
         "fp_sig": fp_sig,
         "federated": True,
+        # The caller's home is the origin server that pushed this event.
+        # Carrying it through lets the callee's createPC merge the
+        # caller-side TURN servers via /api/network/ice-config.
+        "peer_home_server_id": origin,
+        "origin_server_id": origin,
     }
     callee_id = int(callee["id"])
     await manager.send_to_user(callee_id, offer_payload)
@@ -535,6 +549,11 @@ async def _apply_call_answer(payload, origin, gid_call, _fed_global_id):
         "fp_sig": str(payload.get("fp_sig") or "")[:_FED_CALL_FP_SIG_MAX],
         "renegotiate": reneg,
         "federated": True,
+        # The answerer's home == origin. Caller updates _peerHomeServerId
+        # in handleCallAnswer so any later ICE-restart pulls the right
+        # peer TURN bundle (see calls.js).
+        "peer_home_server_id": origin,
+        "origin_server_id": origin,
     }
     delivered = await manager.send_to_user(int(caller_user["id"]), ans)
     if not delivered:

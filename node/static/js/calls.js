@@ -1,33 +1,16 @@
 /* ─── calls.js ─────────────────────────────────────────────────────────────── */
 'use strict';
 
+// STUN-only fallback used when `/api/network/ice-config` is unreachable.
+// We never ship long-lived TURN credentials in JS — the operator-configured
+// TURN bundle (with HMAC-rotated creds where supported) is delivered by the
+// server at call time. Without that bundle, peers behind symmetric NAT will
+// fail to connect; that's the right user-visible outcome rather than a
+// silent fallback to shared shared-secret credentials embedded in every
+// shipped build.
 const ICE_SERVERS = [
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
-  { urls: 'stun:161.97.182.73:3478' },
-  {
-    urls: 'turn:161.97.182.73:3478',
-    username: 'frogtalk',
-    credential: 'FrogTurn2024!'
-  },
-  {
-    urls: 'turn:161.97.182.73:3478?transport=tcp',
-    username: 'frogtalk',
-    credential: 'FrogTurn2024!'
-  },
-  // TLS-on-5349 / TLS-on-443: punches through carrier networks and corporate
-  // firewalls that block 3478 udp/tcp. If coturn isn't TLS-configured these
-  // entries simply fail to gather — the plain TURN entries above still work.
-  {
-    urls: 'turns:161.97.182.73:5349?transport=tcp',
-    username: 'frogtalk',
-    credential: 'FrogTurn2024!'
-  },
-  {
-    urls: 'turns:161.97.182.73:443?transport=tcp',
-    username: 'frogtalk',
-    credential: 'FrogTurn2024!'
-  }
 ];
 
 let _iceConfigCache = { at: 0, key: '', servers: null };
@@ -103,8 +86,19 @@ async function buildIceServers(peerServerId) {
     const r = await apiFetch(`/api/network/ice-config${q}`);
     if (r.ok) {
       const d = await r.json();
-      const servers = (d.ice_servers && d.ice_servers.length) ? d.ice_servers : ICE_SERVERS;
+      const servers = (Array.isArray(d.ice_servers) && d.ice_servers.length) ? d.ice_servers : ICE_SERVERS;
       _iceConfigCache = { at: now, key, servers };
+      const hasTurn = servers.some(s => {
+        const u = s && s.urls;
+        const list = Array.isArray(u) ? u : [u];
+        return list.some(v => typeof v === 'string' && (v.startsWith('turn:') || v.startsWith('turns:')));
+      });
+      if (!hasTurn && typeof toast === 'function') {
+        // Don't spam the user — the warning fires at most once per cache window.
+        try {
+          toast('Call routing limited: no TURN server configured on this node.', 'warn', 4500);
+        } catch {}
+      }
       return servers;
     }
   } catch (e) {
@@ -525,6 +519,11 @@ async function startCall (type, nick, uid) {
   _callPeerUID  = uid   || _activeDM?.user_id;
   _callPeerAvatar = _activeDM?.avatar || null;
   _callId       = null;
+  // _activeDM carries the federated peer's home server when the DM is
+  // cross-node — feed it into the ICE config so RTC negotiates with the
+  // peer's TURN as well as ours. Cleared on every fresh startCall so we
+  // don't reuse a stale id from a previous call.
+  _peerHomeServerId = String(_activeDM?.peer_home_server_id || '');
   if (!_callPeerNick) {
     // Usually means they tapped call outside a DM. Phrase it so it actually
     // points at the cause instead of confusing "no peer connected" language.
@@ -659,6 +658,10 @@ async function handleCallOffer (data) {
   _callPeerAvatar = data.from_avatar || null;
   _callId       = data.call_id || null;
   _callGlobalId = data.global_call_id || _callGlobalId;
+  // Track the caller's home server so createPC's ICE config merges the
+  // remote TURN bundle. Without this federated calls only attempted the
+  // local node's TURN and lost cross-region NAT traversal.
+  _peerHomeServerId = String(data.peer_home_server_id || data.origin_server_id || '');
   if (data.federated) toast('Incoming call from another node', 'info');
   _pendingOffer = { sdp: data.sdp, call_id: data.call_id || null, from_id: data.from_id, fp_sig: data.fp_sig };
   // Ring + popup immediately so Frog Social / FrogChannel / any view still
@@ -832,8 +835,18 @@ function rejectCall () {
 
 /* ── Call created confirmation (server sends call_id back to caller) ────────── */
 function handleCallCreated (data) {
-  if (data.call_id && _callState === 'calling') {
+  if (!data) return;
+  if (data.call_id && (_callState === 'calling' || !_callId)) {
     _callId = data.call_id;
+  }
+  // Track the callee's home server announced by our local node so the
+  // caller's createPC merges that node's TURN bundle on any later
+  // ICE-restart. Falls back to whatever startCall pinned from the DM row.
+  const peerHome = String(data.peer_home_server_id || data.callee_home_server_id || '');
+  if (peerHome) _peerHomeServerId = peerHome;
+  if (data.global_call_id) _callGlobalId = data.global_call_id;
+  if (data.federated) {
+    try { toast('Calling peer on another node…', 'info'); } catch {}
   }
 }
 
@@ -841,6 +854,12 @@ function handleCallCreated (data) {
 async function handleCallAnswer (data) {
   if (!_pc) return;
   clearTimeout(_callRingTimeout); _callRingTimeout = null;
+  // Pick up the peer's home server id if the answer includes it. Useful
+  // for ICE-restart paths where we re-call buildIceServers after the
+  // initial setRemoteDescription so the relay set stays in sync.
+  if (data && (data.peer_home_server_id || data.origin_server_id)) {
+    _peerHomeServerId = String(data.peer_home_server_id || data.origin_server_id || _peerHomeServerId);
+  }
   // Track E: verify callee's signed DTLS fingerprint envelope against the
   // SDP we're about to apply. Callee signs with the real call_id, so we
   // bind it here. Fatal verify reasons → tear down before the DTLS
@@ -1178,13 +1197,6 @@ function resetCall () {
   } catch (e) {
     console.warn('resetCall error (non-fatal)', e);
   }
-}
-
-function handleCallCreated(data) {
-  if (!data) return;
-  if (data.call_id) _callId = data.call_id;
-  if (data.global_call_id) _callGlobalId = data.global_call_id;
-  if (data.federated) toast('Calling peer on another node…', 'info');
 }
 
 /* ── RTCPeerConnection factory ─────────────────────────────────────────────── */

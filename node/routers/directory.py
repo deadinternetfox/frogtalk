@@ -80,7 +80,7 @@ def _safe_directory_banner(banner) -> str:
 
 
 def _sanitize_public_channel_row(row: dict) -> dict:
-    """Sanitize media URLs before they reach browsers."""
+    """Sanitize media URLs before they reach browsers + carry federation flags."""
     out = dict(row)
     out["icon"] = _safe_directory_icon(out.get("icon"))
     owner_avatar = out.get("owner_avatar")
@@ -90,6 +90,15 @@ def _sanitize_public_channel_row(row: dict) -> dict:
             out["owner_avatar"] = _normalize_room_icon(str(owner_avatar))
         except ValueError:
             out["owner_avatar"] = None
+    home = str(out.get("home_server_id") or "").strip()
+    out["home_server_id"] = home
+    out["is_federated"] = bool(out.get("is_federated") or home)
+    out["remote_only"] = bool(out.get("remote_only"))
+    home_base = str(out.get("home_base_url") or "").strip()
+    if home_base.startswith("http://") or home_base.startswith("https://"):
+        out["home_base_url"] = home_base
+    else:
+        out["home_base_url"] = ""
     return out
 
 
@@ -138,13 +147,24 @@ def _sanitize_directory_tags(tags: List[str]) -> List[str]:
 
 
 @router.get("/channels")
+@limiter.limit("180/minute")
 async def browse_public_channels(
+    request: Request,
     category: Optional[str] = Query(None),
     q: Optional[str] = Query(None, alias="search"),
     limit: int = Query(50, le=100),
     offset: int = Query(0, ge=0, le=_MAX_DIRECTORY_OFFSET),
 ):
-    """Browse public channels in the directory."""
+    """Browse local + federated public channels in the directory.
+
+    Federation sync mirrors metadata from peer nodes into
+    ``federation_channel_index``; the merged query in
+    :func:`database.get_public_channels` returns both local rooms and
+    federated-only entries (deduped by name). The ``federation`` block
+    in the response surfaces sync state so the UI can render a partial
+    or syncing banner instead of pretending the discovery surface is
+    empty.
+    """
     clean_cat = _normalize_directory_category(category)
     if category and not clean_cat:
         return JSONResponse(status_code=400, content={"error": "Invalid category"})
@@ -153,9 +173,22 @@ async def browse_public_channels(
         _sanitize_public_channel_row(row)
         for row in db.get_public_channels(clean_cat, search, limit, offset)
     ]
+    try:
+        federated_count = db.federation_channel_index_count(
+            category=clean_cat or "",
+            search=search or "",
+            active_days=db.get_channel_directory_active_days(),
+        )
+    except Exception:
+        federated_count = 0
     return {
         "channels": channels,
         "categories": list(CHANNEL_CATEGORIES),
+        "federation": {
+            "federated_count": int(federated_count),
+            "local_count": sum(1 for c in channels if not c.get("remote_only")),
+            "remote_count": sum(1 for c in channels if c.get("remote_only")),
+        },
     }
 
 
@@ -264,11 +297,66 @@ async def search_users_directory(
 
 @router.get("/channels/{room_name}/profile")
 async def channel_profile(room_name: str, current_user: dict = Depends(get_current_user)):
-    """Get full channel profile for directory listing."""
-    room_or_resp = _require_directory_room(room_name, current_user)
-    if isinstance(room_or_resp, JSONResponse):
-        return room_or_resp
-    room = room_or_resp
+    """Get full channel profile for directory listing.
+
+    Augmented with federation metadata: ``home_server_id``,
+    ``federation_status`` (``local``/``federated``/``unreachable``),
+    ``is_joined``, ``my_role`` so the frontend can show "Hosted on X",
+    surface unreachable-node states, and gate admin controls without
+    a follow-up round trip.
+    """
+    name = _validate_room_name(room_name)
+    if not name:
+        return JSONResponse(status_code=400, content={"error": "Invalid channel name"})
+    room = _directory_visible_room(
+        name,
+        int(current_user["id"]),
+        is_admin=bool(current_user.get("is_admin")),
+    )
+    if not room:
+        # Fall back to a federated-only profile if we have an index row
+        # for it. This is the "channel lives on another node and we
+        # haven't joined yet" case — show what we know without leaking
+        # private metadata.
+        fed = db.get_federation_channel_index_entry(name)
+        if not fed:
+            return JSONResponse(status_code=404, content={"error": "Channel not found"})
+        tags_remote: list[str] = []
+        try:
+            raw_tags = json.loads(fed.get("tags_json") or "[]")
+            if isinstance(raw_tags, list):
+                tags_remote = _sanitize_directory_tags([str(t) for t in raw_tags])
+        except Exception:
+            tags_remote = []
+        return {
+            "name": fed.get("room_name"),
+            "description": _sanitize_room_text(fed.get("description", ""), max_len=256),
+            "directory_description": _sanitize_room_text(
+                fed.get("directory_description", ""), max_len=1200, multiline=True
+            ),
+            "about": "",
+            "banner": "",
+            "icon": _safe_directory_icon(fed.get("icon")),
+            "category": _normalize_directory_category(fed.get("category")) or "",
+            "tags": tags_remote,
+            "member_count": int(fed.get("member_count") or 0),
+            "channel_type": fed.get("channel_type") or "text",
+            "is_public": True,
+            "created_at": None,
+            "owner_name": fed.get("owner_nickname") or "",
+            "owner_avatar": None,
+            "is_owner": False,
+            "like_count": 0,
+            "liked_by_me": False,
+            "recent_comments": [],
+            "home_server_id": fed.get("home_server_id") or "",
+            "home_base_url": fed.get("home_base_url") or "",
+            "federation_status": "federated",
+            "is_joined": False,
+            "my_role": None,
+            "is_federated": True,
+            "remote_only": True,
+        }
     owner = db.get_user_by_id(room["owner_id"])
     tags = []
     try:
@@ -278,6 +366,23 @@ async def channel_profile(room_name: str, current_user: dict = Depends(get_curre
     if not isinstance(tags, list):
         tags = []
     tags = _sanitize_directory_tags([str(t) for t in tags])
+    home_sid = str(room.get("home_server_id") or "").strip()
+    is_joined = False
+    my_role: Optional[str] = None
+    try:
+        if db.is_room_member(current_user["id"], room["id"]):
+            is_joined = True
+            if int(room.get("owner_id") or 0) == int(current_user["id"]):
+                my_role = "owner"
+            elif bool(current_user.get("is_admin")):
+                my_role = "admin"
+            else:
+                my_role = "member"
+    except Exception:
+        is_joined = False
+    # Pick up federation index data if we have it (member_count from peer,
+    # home_base_url for "Hosted on" labels). Local row's numbers always win.
+    fed = db.get_federation_channel_index_entry(room["name"]) or {}
     return {
         "name": room["name"],
         "description": _sanitize_room_text(room.get("description", ""), max_len=256),
@@ -301,6 +406,12 @@ async def channel_profile(room_name: str, current_user: dict = Depends(get_curre
         "recent_comments": db.get_channel_comments(
             room["id"], limit=10, offset=0, viewer_id=current_user["id"]
         ),
+        "home_server_id": home_sid,
+        "home_base_url": str(fed.get("home_base_url") or ""),
+        "federation_status": "federated" if home_sid else "local",
+        "is_joined": is_joined,
+        "my_role": my_role,
+        "is_federated": bool(home_sid),
     }
 
 

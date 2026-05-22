@@ -3215,11 +3215,20 @@ const Social = (() => {
     let html = `<div id="social-feed-stories">${extras.storiesHtml || renderStoriesBar()}</div><div id="social-feed-suggest">${extras.suggestedHtml || ''}</div>`;
 
     if (!posts.length) {
-      html += `<div class="social-empty">
-        <div class="se-icon se-icon--lg">🐸</div>
-        <div class="se-title se-title--lg">Your feed is empty</div>
-        <div style="color:#888;font-size:14px">Follow people to see their posts here, or check out <a href="#" onclick="Social.switchTab('explore');return false" style="color:#4caf50">Explore</a>.</div>
-      </div>`;
+      const syncing = !!(window.FtSync && window.FtSync.state && window.FtSync.state().in_progress);
+      if (syncing) {
+        html += `<div class="social-empty">
+          <div class="se-icon se-icon--lg">⏳</div>
+          <div class="se-title se-title--lg">Catching up on FrogSocial…</div>
+          <div style="color:#888;font-size:14px">Posts from people you follow are being backfilled from your home node.</div>
+        </div>`;
+      } else {
+        html += `<div class="social-empty">
+          <div class="se-icon se-icon--lg">🐸</div>
+          <div class="se-title se-title--lg">Your feed is empty</div>
+          <div style="color:#888;font-size:14px">Follow people to see their posts here, or check out <a href="#" onclick="Social.switchTab('explore');return false" style="color:#4caf50">Explore</a>.</div>
+        </div>`;
+      }
     } else {
       html += `<div class="social-feed">${posts.map(p => renderFeedPost(p)).join('')}</div>`;
     }
@@ -3389,11 +3398,20 @@ const Social = (() => {
     </div><div id="explore-channels-host"></div>`;
 
     if (posts.length === 0) {
-      html += `<div class="social-empty">
-        <div class="se-icon se-icon--lg">🌍</div>
-        <div style="font-size:16px;font-weight:600">Nothing to explore yet</div>
-        <div style="color:#888;font-size:14px;margin-top:6px">Be the first to post something!</div>
-      </div>`;
+      const syncing = !!(window.FtSync && window.FtSync.state && window.FtSync.state().in_progress);
+      if (syncing) {
+        html += `<div class="social-empty">
+          <div class="se-icon se-icon--lg">⏳</div>
+          <div style="font-size:16px;font-weight:600">Catching up on Explore…</div>
+          <div style="color:#888;font-size:14px;margin-top:6px">Public posts are syncing from your home node.</div>
+        </div>`;
+      } else {
+        html += `<div class="social-empty">
+          <div class="se-icon se-icon--lg">🌍</div>
+          <div style="font-size:16px;font-weight:600">Nothing to explore yet</div>
+          <div style="color:#888;font-size:14px;margin-top:6px">Be the first to post something!</div>
+        </div>`;
+      }
       _disposeMediaIn(content);
       content.innerHTML = html;
       return;
@@ -4493,14 +4511,20 @@ const Social = (() => {
 
       if (posts.length === 0) {
         _updateTabLoadUi(loadUi, 78, 'Rendering reels', 'No reels found for this filter');
-        content.innerHTML = scopeBar + `
+        const syncingReels = !!(window.FtSync && window.FtSync.state && window.FtSync.state().in_progress);
+        content.innerHTML = scopeBar + (syncingReels ? `
+          <div class="reels-empty">
+            <div class="reels-empty-icon">⏳</div>
+            <div class="reels-empty-title">Catching up on reels…</div>
+            <div class="reels-empty-sub">Video posts are syncing from your home node.</div>
+          </div>` : `
           <div class="reels-empty">
             <div class="reels-empty-icon">🎞</div>
             <div class="reels-empty-title">${scope === 'friends' ? 'No friend reels yet' : 'No reels yet'}</div>
             <div class="reels-empty-sub">${scope === 'friends'
               ? 'Reels posted, reposted, or liked by your friends will appear here.'
               : 'When people share videos they\'ll show up here. Be the first!'}</div>
-          </div>`;
+          </div>`);
         _updateTabLoadUi(loadUi, 92, 'Reels ready', 'Try another scope or sort to discover videos');
         return;
       }
@@ -7728,6 +7752,17 @@ const Social = (() => {
     } catch {}
   }
 
+  function _invalidateAllSocialCaches() {
+    try { _feedCache = null; } catch {}
+    try { _exploreCache.clear(); } catch {}
+    try { _reelsCache.clear(); } catch {}
+    try { _musicCache.clear(); } catch {}
+    try { _suggestedCache = null; } catch {}
+    try { _profilePostsCache.clear(); } catch {}
+    try { _profileRepostsCache.clear(); } catch {}
+    try { _storyData = null; } catch {}
+  }
+
   async function toggleFollow(nickname, btn) {
     const isFollowing = btn?.textContent?.trim() === 'Following' || btn?.textContent?.trim() === 'Unfollow';
     const method = isFollowing ? 'DELETE' : 'POST';
@@ -9899,6 +9934,7 @@ const Social = (() => {
   return {
     open, close, openProfile, openProfileMusic, switchTab, switchProfileTab,
     invalidateProfileCache: _invalidateProfileCache,
+    invalidateAllSocialCaches: _invalidateAllSocialCaches,
     switchProfileMediaMode, loadProfileMediaCombined,
     openSideMenu, closeSideMenu, navTo, _initUploadRecovery,
     _closeLinkEmbed,

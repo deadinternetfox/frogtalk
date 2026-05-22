@@ -231,6 +231,7 @@ const UI = (() => {
         }
         if (data.display_name !== undefined) State.user.display_name = data.display_name || null;
         if (data.avatar !== undefined) State.user.avatar = data.avatar;
+        if (typeof data.at_home_node === 'boolean') State.user.at_home_node = data.at_home_node;
         if (typeof State.save === 'function') State.save();
         _profileRefreshLastAt = Date.now();
         renderSelfStatus();
@@ -2285,12 +2286,17 @@ async function doAuth() {
       is_admin: data.is_admin,
       presence: data.presence || 'online',
       status_msg: ('status_msg' in data) ? (data.status_msg ?? '') : '',
+      at_home_node: data.at_home_node !== false,
     };
     State.save();
     try {
       if (window.App && typeof App === 'object') {
-        if (typeof App.applyFederationSyncMeta === 'function') {
-          App.applyFederationSyncMeta(data?.federation_sync);
+        if (data.at_home_node !== false) {
+          if (typeof App.clearFederationSyncClientState === 'function') {
+            App.clearFederationSyncClientState();
+          }
+        } else if (typeof App.applyFederationSyncMeta === 'function' && data?.federation_sync?.in_progress) {
+          App.applyFederationSyncMeta(data.federation_sync);
         } else {
           App.federationSyncHint = String(data?.federation_sync?.hint || '').trim();
         }

@@ -192,8 +192,20 @@ _SYNC_EXPORT_DM_LIMIT = 400
 _SYNC_EXPORT_BLOCKED_LIMIT = 400
 _SYNC_EXPORT_PUBLIC_ROOM_LIMIT = 800
 _SYNC_EXPORT_SOCIAL_POST_LIMIT = 300
+_SYNC_EXPORT_EXPLORE_POST_LIMIT = 120
 _SYNC_EXPORT_SOCIAL_MEDIA_MAX = 4_000_000
 _SYNC_EXPORT_ROOM_ICON_MAX = 400_000
+# Recent chat history per joined room — capped because the sync export is
+# a single JSON blob. media_data is stripped (clients lazy-load), so each
+# message is mostly text + small metadata.
+_SYNC_EXPORT_HISTORY_PER_ROOM = 80
+_SYNC_EXPORT_HISTORY_TOTAL_ROOMS = 60
+# Recent DM ciphertext per DM channel. Ciphertext is opaque on the wire
+# so this transports privately-encrypted DMs without leaking plaintext.
+_SYNC_EXPORT_DM_HISTORY_PER_CHANNEL = 60
+_SYNC_EXPORT_DM_HISTORY_TOTAL_CHANNELS = 40
+_SYNC_EXPORT_MEMBER_ROOM_LIMIT = 40
+_SYNC_EXPORT_MEMBERS_PER_ROOM = 120
 
 _sync_state_lock = _threading.Lock()
 _federation_sync_state: dict[int, dict] = {}
@@ -515,6 +527,79 @@ def _sync_state_get(user_id: int) -> dict:
     return cur
 
 
+def _resolve_server_id_for_base(base_url: str) -> str:
+    base = _norm_base(base_url)
+    if not base:
+        return ""
+    try:
+        ident = db.get_or_create_local_server_identity() or {}
+        local_sid = str(ident.get("server_id") or "").strip()
+        local_base = _norm_base(str(ident.get("base_url") or ""))
+        if local_sid and local_base and local_base == base:
+            return local_sid
+        for row in db.list_federation_servers(official_only=False):
+            for key in ("base_url", "onion_url"):
+                if _norm_base(str(row.get(key) or "")) == base:
+                    return str(row.get("server_id") or "").strip()
+    except Exception:
+        pass
+    return ""
+
+
+def _account_home_server_id(user_id: int) -> str:
+    """Federation home server for account-sync gating (not call routing)."""
+    ident = db.get_or_create_local_server_identity() or {}
+    local_sid = str(ident.get("server_id") or "").strip()
+    uid = int(user_id or 0)
+    if uid <= 0:
+        return local_sid
+    pinned = db.get_user_account_home_server_id(uid)
+    if pinned:
+        return pinned
+    with _sync_state_lock:
+        sync = dict(_federation_sync_state.get(uid) or {})
+    src = _norm_base(str(sync.get("source_base") or ""))
+    if src:
+        try:
+            for row in db.list_federation_servers(official_only=False):
+                for key in ("base_url", "onion_url"):
+                    if _norm_base(str(row.get(key) or "")) == src:
+                        sid = str(row.get("server_id") or "").strip()
+                        if sid:
+                            return sid
+        except Exception:
+            pass
+    return local_sid
+
+
+def _user_at_account_home(user_id: int) -> bool:
+    """True when the signed-in user is on the node that owns their account."""
+    ident = db.get_or_create_local_server_identity() or {}
+    local_sid = str(ident.get("server_id") or "").strip()
+    if not local_sid:
+        return True
+    return _account_home_server_id(user_id) == local_sid
+
+
+def _sync_state_for_user(user_id: int) -> dict:
+    """Return federation sync state, suppressed when already on home node."""
+    uid = int(user_id or 0)
+    if uid <= 0:
+        return {"in_progress": False, "done": False, "progress_pct": 0, "phases": []}
+    if _user_at_account_home(uid):
+        with _sync_state_lock:
+            _federation_sync_state.pop(uid, None)
+        return {
+            "in_progress": False,
+            "done": False,
+            "progress_pct": 0,
+            "phases": [],
+            "at_home_node": True,
+            "skipped": True,
+        }
+    return _sync_state_get(uid)
+
+
 def _sync_progress(user_id: int, pct: int, hint: str, phase: str = "",
                    counters: dict | None = None, totals: dict | None = None) -> None:
     uid = int(user_id or 0)
@@ -559,12 +644,28 @@ def _build_sync_export_for_user(user_id: int) -> dict:
         ctype = str(room.get("channel_type") or "text").strip().lower()
         if ctype not in ("text", "music", "voice"):
             ctype = "text"
+        owner_nick = ""
+        owner_gid = ""
+        try:
+            if room.get("owner_id"):
+                owner_row = db.get_user_by_id(int(room.get("owner_id"))) or {}
+                owner_nick = str(owner_row.get("nickname") or "")[:64]
+                owner_gid = str(owner_row.get("global_user_id") or "")[:64]
+        except Exception:
+            owner_nick = ""
+            owner_gid = ""
         room_payload = {
             "name": name,
             "type": rtype,
             "channel_type": ctype,
             "description": str(room.get("description") or "")[:200],
+            "directory_description": str(room.get("directory_description") or "")[:1200],
+            "category": str(room.get("category") or "")[:32],
+            "tags": str(room.get("tags") or "[]")[:2000],
             "icon": _sanitize_sync_room_icon(room.get("icon")),
+            "member_count": int(room.get("member_count") or 0),
+            "owner_nickname": owner_nick,
+            "owner_global_user_id": owner_gid,
         }
         if rtype == "public" and len(public_rooms) < _SYNC_EXPORT_PUBLIC_ROOM_LIMIT:
             public_rooms.append(room_payload)
@@ -575,7 +676,7 @@ def _build_sync_export_for_user(user_id: int) -> dict:
                 continue
 
     dm_peers: list[dict] = []
-    for ch in db.get_dm_channels(uid):
+    for ch in db.get_dm_channels_for_sync(uid):
         other_id = int(ch.get("other_id") or 0)
         if other_id <= 0:
             continue
@@ -588,6 +689,7 @@ def _build_sync_export_for_user(user_id: int) -> dict:
             "nickname": nick,
             "global_user_id": gid,
             "avatar": peer.get("avatar") or "",
+            "display_name": str(peer.get("display_name") or "")[:64],
         })
         if len(dm_peers) >= _SYNC_EXPORT_DM_LIMIT:
             break
@@ -610,6 +712,8 @@ def _build_sync_export_for_user(user_id: int) -> dict:
             "nickname": nick,
             "global_user_id": gid,
             "avatar": (profile or {}).get("avatar") or (row or {}).get("avatar") or "",
+            "display_name": str((profile or {}).get("display_name") or "")[:64],
+            "status_msg": str((profile or {}).get("status_msg") or "")[:200],
         })
 
     friends: list[dict] = []
@@ -624,6 +728,8 @@ def _build_sync_export_for_user(user_id: int) -> dict:
             "nickname": nick,
             "global_user_id": gid,
             "avatar": (profile or {}).get("avatar") or (row or {}).get("avatar") or "",
+            "display_name": str((profile or {}).get("display_name") or "")[:64],
+            "status_msg": str((profile or {}).get("status_msg") or "")[:200],
         })
         if len(friends) >= _SYNC_EXPORT_DM_LIMIT:
             break
@@ -692,8 +798,23 @@ def _build_sync_export_for_user(user_id: int) -> dict:
         if len(blocked_users) >= _SYNC_EXPORT_BLOCKED_LIMIT:
             break
 
+    import base64 as _b64_sync
+
+    me_row = db.get_user_by_id(uid) or {}
+    my_gid = str(me_row.get("global_user_id") or "").strip()
+
     social_posts: list[dict] = []
     seen_post_gids: set[str] = set()
+    post_ids: list[int] = []
+
+    def _queue_post_id(pid: int) -> None:
+        try:
+            n = int(pid or 0)
+        except Exception:
+            return
+        if n > 0 and n not in post_ids and len(post_ids) < _SYNC_EXPORT_SOCIAL_POST_LIMIT:
+            post_ids.append(n)
+
     try:
         with db._conn() as con:
             own_rows = con.execute(
@@ -705,44 +826,54 @@ def _build_sync_export_for_user(user_id: int) -> dict:
                 """,
                 (uid, _SYNC_EXPORT_SOCIAL_POST_LIMIT),
             ).fetchall()
-        own_ids = [int(r["id"]) for r in own_rows if r and r["id"]]
+        for r in own_rows:
+            _queue_post_id(int(r["id"]))
     except Exception:
-        own_ids = []
+        pass
     try:
-        feed_rows = db.get_feed_posts(uid, limit=_SYNC_EXPORT_SOCIAL_POST_LIMIT, offset=0, mood="", lite=False)
+        for row in db.get_feed_posts(uid, limit=_SYNC_EXPORT_SOCIAL_POST_LIMIT, offset=0, mood="", lite=False):
+            _queue_post_id(int(row.get("id") or 0))
     except Exception:
-        feed_rows = []
-    post_ids: list[int] = []
-    for row in feed_rows[:_SYNC_EXPORT_SOCIAL_POST_LIMIT]:
-        try:
-            pid = int(row.get("id") or 0)
-        except Exception:
-            pid = 0
-        if pid > 0 and pid not in post_ids:
-            post_ids.append(pid)
-    for pid in own_ids:
-        if pid not in post_ids and len(post_ids) < _SYNC_EXPORT_SOCIAL_POST_LIMIT:
-            post_ids.append(pid)
+        pass
+    try:
+        for row in db.get_explore_posts(
+            uid, limit=_SYNC_EXPORT_EXPLORE_POST_LIMIT, offset=0, sort="new", lite=False,
+        ):
+            _queue_post_id(int(row.get("id") or 0))
+    except Exception:
+        pass
+    try:
+        with db._conn() as con:
+            reel_rows = con.execute(
+                """
+                SELECT wp.id FROM wall_posts wp
+                WHERE wp.privacy='public'
+                  AND wp.media_type LIKE 'video/%'
+                ORDER BY wp.created_at DESC
+                LIMIT ?
+                """,
+                (_SYNC_EXPORT_EXPLORE_POST_LIMIT,),
+            ).fetchall()
+        for r in reel_rows:
+            _queue_post_id(int(r["id"]))
+    except Exception:
+        pass
+
     for post_id in post_ids:
         try:
-            post = db.get_wall_post_by_id(post_id) if hasattr(db, "get_wall_post_by_id") else None
+            with db._conn() as con:
+                row = con.execute(
+                    """
+                    SELECT wp.*, u.nickname, u.avatar, u.display_name
+                    FROM wall_posts wp
+                    JOIN users u ON u.id = wp.user_id
+                    WHERE wp.id=?
+                    """,
+                    (post_id,),
+                ).fetchone()
+            post = dict(row) if row else None
         except Exception:
             post = None
-        if not post:
-            try:
-                with db._conn() as con:
-                    row = con.execute(
-                        """
-                        SELECT wp.*, u.nickname, u.avatar
-                        FROM wall_posts wp
-                        JOIN users u ON u.id = wp.user_id
-                        WHERE wp.id=?
-                        """,
-                        (post_id,),
-                    ).fetchone()
-                post = dict(row) if row else None
-            except Exception:
-                post = None
         if not post:
             continue
         try:
@@ -767,12 +898,15 @@ def _build_sync_export_for_user(user_id: int) -> dict:
         privacy = str(post.get("privacy") or "public").strip().lower()
         if privacy not in ("public", "followers", "friends"):
             privacy = "public"
+        enc_v = int(post.get("enc_v") or 0)
         media_data, media_type = _sanitize_sync_media(post.get("media_data"), post.get("media_type"))
-        social_posts.append({
+        item: dict = {
             "global_post_id": post_gid,
             "origin_server_id": str(post_origin or source_server_id or "").strip(),
             "author_global_user_id": author_gid,
             "nickname": author_nick,
+            "author_display_name": str(post.get("display_name") or author.get("display_name") or "")[:64],
+            "author_avatar": (post.get("avatar") or author.get("avatar") or ""),
             "content": str(post.get("content") or "")[:4000],
             "media_data": media_data,
             "media_type": media_type,
@@ -782,12 +916,197 @@ def _build_sync_export_for_user(user_id: int) -> dict:
             "track_title": str(post.get("track_title") or "")[:160],
             "track_room": str(post.get("track_room") or "")[:64],
             "track_mood": str(post.get("track_mood") or "")[:32],
-        })
+            "created_at": str(post.get("created_at") or "")[:64],
+            "enc_v": enc_v,
+        }
+        if enc_v == 2:
+            item["content"] = ""
+            item["audience"] = str(post.get("audience") or privacy or "followers").strip().lower()[:32]
+            ct = post.get("ciphertext")
+            if ct is not None:
+                try:
+                    item["ciphertext_b64"] = _b64_sync.b64encode(bytes(ct)).decode("ascii")
+                except Exception:
+                    continue
+            wraps: list[dict] = []
+            if my_gid and _GID_RE.match(my_gid):
+                try:
+                    with db._conn() as con:
+                        wk = con.execute(
+                            "SELECT wrapped_key FROM wall_post_keys WHERE post_id=? AND recipient_id=?",
+                            (post_id, uid),
+                        ).fetchone()
+                    if wk and wk["wrapped_key"]:
+                        wraps.append({
+                            "recipient_global_user_id": my_gid,
+                            "wrapped_b64": _b64_sync.b64encode(bytes(wk["wrapped_key"])).decode("ascii"),
+                        })
+                except Exception:
+                    pass
+            if wraps:
+                item["wrapped_keys"] = wraps
+            elif author_id != uid:
+                continue
+        social_posts.append(item)
+
+    # Recent room history per joined room. We export plain message rows
+    # without media_data — the destination node lazy-loads media on demand
+    # (and the source node still enforces room access there). Tombstoned
+    # rows are skipped because they should already be invisible to peers.
+    room_histories: list[dict] = []
+    history_rooms_done = 0
+    for raw in rooms:
+        if history_rooms_done >= _SYNC_EXPORT_HISTORY_TOTAL_ROOMS:
+            break
+        name = str(raw.get("name") or "").strip().lower()
+        if not _ROOM_NAME_RE.match(name):
+            continue
+        try:
+            msgs = db.get_messages(name, limit=_SYNC_EXPORT_HISTORY_PER_ROOM) or []
+        except Exception:
+            msgs = []
+        if not msgs:
+            continue
+        clean: list[dict] = []
+        for m in msgs:
+            try:
+                mid = int(m.get("id") or 0)
+            except Exception:
+                mid = 0
+            if mid <= 0:
+                continue
+            nick = str(m.get("nickname") or "").strip()
+            if not nick:
+                continue
+            clean.append({
+                "id": mid,
+                "nickname": nick[:64],
+                "display_name": str(m.get("display_name") or "")[:64],
+                "content": str(m.get("content") or "")[:10_000],
+                "media_type": str(m.get("media_type") or "")[:64] or None,
+                "has_media": bool(m.get("has_media")),
+                "media_blur": int(m.get("media_blur") or 0),
+                "view_once": int(m.get("view_once") or 0),
+                "key_version": int(m.get("key_version") or 0),
+                "edited": bool(m.get("edited")),
+                "created_at": str(m.get("created_at") or ""),
+                "system_kind": str(m.get("system_kind") or "")[:32] or None,
+                "bridge_platform": str(m.get("bridge_platform") or "")[:32] or None,
+                "avatar": str(m.get("avatar") or "")[:200_000],
+            })
+        if clean:
+            room_histories.append({"room_name": name, "messages": clean})
+            history_rooms_done += 1
+
+    # Recent DM history per DM channel. DMs are end-to-end encrypted —
+    # the content stays as opaque ciphertext on the wire so we never
+    # expose plaintext through federation. The destination decrypts with
+    # the keys the receiving user already holds (X3DH/identity prekey).
+    dm_histories: list[dict] = []
+    dm_history_count = 0
+    try:
+        dm_channels_for_history = db.get_dm_channels_for_sync(uid)
+    except Exception:
+        dm_channels_for_history = []
+    for ch in dm_channels_for_history:
+        if dm_history_count >= _SYNC_EXPORT_DM_HISTORY_TOTAL_CHANNELS:
+            break
+        cid = int(ch.get("id") or 0)
+        other_id = int(ch.get("other_id") or 0)
+        if cid <= 0 or other_id <= 0:
+            continue
+        peer = db.get_user_by_id(other_id) or {}
+        peer_gid = str(peer.get("global_user_id") or "").strip()
+        peer_nick = str(peer.get("nickname") or "").strip()
+        if not peer_gid or not _GID_RE.match(peer_gid):
+            continue
+        try:
+            msgs, ok = db.get_dm_messages(cid, uid, _SYNC_EXPORT_DM_HISTORY_PER_CHANNEL)
+        except Exception:
+            msgs, ok = [], False
+        if not ok or not msgs:
+            continue
+        clean: list[dict] = []
+        for m in msgs:
+            try:
+                mid = int(m.get("id") or 0)
+            except Exception:
+                mid = 0
+            if mid <= 0:
+                continue
+            sender_id = int(m.get("sender_id") or 0)
+            is_self = sender_id == uid
+            clean.append({
+                "id": mid,
+                "from_self": bool(is_self),
+                "content": str(m.get("content") or "")[:20_000],
+                "media_type": str(m.get("media_type") or "")[:64] or None,
+                "media_name": str(m.get("media_name") or "")[:200] or None,
+                "has_media": bool(m.get("has_media")),
+                "media_blur": int(m.get("media_blur") or 0),
+                "view_once": int(m.get("view_once") or 0),
+                "edited": bool(m.get("edited")),
+                "deleted": bool(m.get("deleted")),
+                "created_at": str(m.get("created_at") or ""),
+                "key_version": int(m.get("key_version") or 0),
+            })
+        if clean:
+            dm_histories.append({
+                "peer_global_user_id": peer_gid,
+                "peer_nickname": peer_nick,
+                "messages": clean,
+            })
+            dm_history_count += 1
+
+    room_member_snapshots: list[dict] = []
+    member_rooms_done = 0
+    for raw in rooms:
+        if member_rooms_done >= _SYNC_EXPORT_MEMBER_ROOM_LIMIT:
+            break
+        name = str(raw.get("name") or "").strip().lower()
+        if not _ROOM_NAME_RE.match(name):
+            continue
+        room = db.get_room_by_name(name)
+        if not room:
+            continue
+        try:
+            members = db.get_channel_members(int(room["id"])) or []
+        except Exception:
+            members = []
+        if not members:
+            continue
+        snap: list[dict] = []
+        for m in members[:_SYNC_EXPORT_MEMBERS_PER_ROOM]:
+            nick = str(m.get("nickname") or "").strip()
+            if not nick:
+                continue
+            gid = str(m.get("global_user_id") or "").strip()
+            if not gid or not _GID_RE.match(gid):
+                continue
+            role = "member"
+            try:
+                if int(room.get("owner_id") or 0) == int(m.get("user_id") or 0):
+                    role = "owner"
+            except Exception:
+                role = "member"
+            snap.append({
+                "global_user_id": gid,
+                "nickname": nick[:64],
+                "display_name": str(m.get("display_name") or "")[:64],
+                "avatar": str(m.get("avatar") or "")[:200_000],
+                "role": role,
+            })
+        if snap:
+            room_member_snapshots.append({"room_name": name, "members": snap})
+            member_rooms_done += 1
 
     return {
         "rooms": rooms,
         "public_rooms": public_rooms,
         "dm_peers": dm_peers,
+        "room_histories": room_histories,
+        "dm_histories": dm_histories,
+        "room_member_snapshots": room_member_snapshots,
         "following": following,
         "friends": friends,
         "blocked_users": blocked_users,
@@ -815,6 +1134,9 @@ def _apply_sync_export_to_user(user_id: int, export: dict) -> dict:
     social_posts_in = payload.get("social_posts")
     self_profile = payload.get("self_profile")
     push_tokens_in = payload.get("push_tokens")
+    room_histories_in = payload.get("room_histories")
+    dm_histories_in = payload.get("dm_histories")
+    member_snaps_in = payload.get("room_member_snapshots")
     rooms = rooms_in if isinstance(rooms_in, list) else []
     public_rooms = public_rooms_in if isinstance(public_rooms_in, list) else []
     dm_peers = dm_in if isinstance(dm_in, list) else []
@@ -823,6 +1145,14 @@ def _apply_sync_export_to_user(user_id: int, export: dict) -> dict:
     blocked_users = blocked_in if isinstance(blocked_in, list) else []
     social_posts = social_posts_in if isinstance(social_posts_in, list) else []
     push_tokens = push_tokens_in if isinstance(push_tokens_in, list) else []
+    room_histories = room_histories_in if isinstance(room_histories_in, list) else []
+    dm_histories = dm_histories_in if isinstance(dm_histories_in, list) else []
+    member_snaps = member_snaps_in if isinstance(member_snaps_in, list) else []
+
+    ident = db.get_or_create_local_server_identity() or {}
+    local_sid = str(ident.get("server_id") or "").strip()
+    if source_server_id and source_server_id != local_sid:
+        db.set_user_account_home_server_id(uid, source_server_id, force=True)
 
     rooms_joined = 0
     rooms_missing = 0
@@ -832,6 +1162,9 @@ def _apply_sync_export_to_user(user_id: int, export: dict) -> dict:
     blocked_linked = 0
     push_tokens_linked = 0
     social_posts_imported = 0
+    history_messages_applied = 0
+    dm_history_messages_applied = 0
+    members_snapshots_applied = 0
     me = db.get_user_by_id(uid) or {}
     my_gid = str(me.get("global_user_id") or "").strip()
 
@@ -877,8 +1210,12 @@ def _apply_sync_export_to_user(user_id: int, export: dict) -> dict:
     n_blocked = len(blocked_users[:_SYNC_EXPORT_BLOCKED_LIMIT])
     n_social = len(social_posts[:_SYNC_EXPORT_SOCIAL_POST_LIMIT])
     n_push = len(push_tokens[:24])
+    n_history_rooms_cap = len(room_histories[:_SYNC_EXPORT_HISTORY_TOTAL_ROOMS])
+    n_dm_history_cap = len(dm_histories[:_SYNC_EXPORT_DM_HISTORY_TOTAL_CHANNELS])
+    n_member_snaps = len(member_snaps[:_SYNC_EXPORT_MEMBER_ROOM_LIMIT])
     work_units = (
-        n_rooms + n_public + n_dms + n_follow + n_friends + n_blocked + n_social + n_push + 1
+        n_rooms + n_public + n_dms + n_follow + n_friends + n_blocked + n_social + n_push
+        + n_history_rooms_cap + n_dm_history_cap + n_member_snaps + 1
     )
     done_units = 0
 
@@ -890,6 +1227,9 @@ def _apply_sync_export_to_user(user_id: int, export: dict) -> dict:
         "profile": 1,
         "social_posts": n_social,
         "push": n_push,
+        "messages": n_history_rooms_cap,
+        "dm_messages": n_dm_history_cap,
+        "members": n_member_snaps,
     })
 
     def _sync_step(phase: str, hint: str, counter_key: str | None = None, counter_value: int | None = None) -> None:
@@ -961,14 +1301,34 @@ def _apply_sync_export_to_user(user_id: int, export: dict) -> dict:
         channel_type = str(raw.get("channel_type") or "text").strip().lower()
         desc = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", str(raw.get("description") or ""))[:200]
         icon = _sanitize_sync_room_icon(raw.get("icon"))
+        category = str(raw.get("category") or "").strip().lower()
+        directory_description = re.sub(
+            r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "",
+            str(raw.get("directory_description") or ""),
+        )[:1200]
+        tags_raw = raw.get("tags") or []
+        if isinstance(tags_raw, str):
+            tags_json = tags_raw[:2000]
+        else:
+            try:
+                import json as _json
+                tags_json = _json.dumps([str(t)[:24] for t in tags_raw if t])[:2000]
+            except Exception:
+                tags_json = "[]"
+        member_count = int(raw.get("member_count") or 0)
+        owner_nickname = str(raw.get("owner_nickname") or "")[:64]
+        owner_gid = str(raw.get("owner_global_user_id") or "")[:64]
         if room_type != "public":
             continue
         if not _ROOM_NAME_RE.match(name):
             continue
         if channel_type not in ("text", "music", "voice"):
             channel_type = "text"
-        existing = db.get_room_by_name(name)
-        if not existing:
+        # Directory rows are index-only — do NOT materialise a local shell
+        # room for every public channel on the home node. Empty local copies
+        # hide the federated index entry and make Discover look solo/empty.
+        existing = db.get_room_by_name(name) if name in keep_room_names else None
+        if name in keep_room_names and not existing:
             try:
                 owner = db.get_or_create_federation_system_user()
                 db.create_room(
@@ -978,7 +1338,7 @@ def _apply_sync_export_to_user(user_id: int, export: dict) -> dict:
                 existing = db.get_room_by_name(name)
             except Exception:
                 existing = None
-        elif icon or desc:
+        elif existing and (icon or desc):
             try:
                 patch = {}
                 if icon:
@@ -989,6 +1349,28 @@ def _apply_sync_export_to_user(user_id: int, export: dict) -> dict:
                     db.update_room_settings(name, **patch)
             except Exception:
                 pass
+        # Always update the federated channel index so the directory
+        # shows synced channels with their real home node. Even if the
+        # local `rooms` materialisation failed, the index still surfaces
+        # the channel as a federated-only listing.
+        if source_server_id:
+            try:
+                db.upsert_federation_channel_index(
+                    name, source_server_id,
+                    display_name=name,
+                    description=desc,
+                    directory_description=directory_description,
+                    icon=icon,
+                    category=category,
+                    tags_json=tags_json,
+                    channel_type=channel_type,
+                    visibility="public",
+                    member_count=member_count,
+                    owner_nickname=owner_nickname,
+                    owner_global_user_id=owner_gid,
+                )
+            except Exception:
+                _log.debug("upsert_federation_channel_index failed name=%s", name, exc_info=True)
         if not existing:
             continue
         # Directory rows mirror metadata only — do NOT auto-join every public room.
@@ -1018,6 +1400,7 @@ def _apply_sync_export_to_user(user_id: int, export: dict) -> dict:
                 gid,
                 nick,
                 origin_server_id=source_server_id,
+                display_name=str(item.get("display_name") or "")[:64],
                 avatar=(item.get("avatar") or ""),
             )
             if not peer:
@@ -1025,6 +1408,12 @@ def _apply_sync_export_to_user(user_id: int, export: dict) -> dict:
             peer_id = int(peer.get("id") or 0)
             if peer_id <= 0 or peer_id == uid:
                 continue
+            db.patch_sync_user_profile(
+                peer_id,
+                display_name=str(item.get("display_name") or ""),
+                status_msg=str(item.get("status_msg") or ""),
+                avatar=(item.get("avatar") or ""),
+            )
             db.get_or_create_dm(uid, peer_id)
             dm_linked += 1
         except Exception:
@@ -1046,6 +1435,7 @@ def _apply_sync_export_to_user(user_id: int, export: dict) -> dict:
                 gid,
                 nick,
                 origin_server_id=source_server_id,
+                display_name=str(item.get("display_name") or "")[:64],
                 avatar=(item.get("avatar") or ""),
             )
             if not peer:
@@ -1053,6 +1443,12 @@ def _apply_sync_export_to_user(user_id: int, export: dict) -> dict:
             peer_id = int(peer.get("id") or 0)
             if peer_id <= 0 or peer_id == uid:
                 continue
+            db.patch_sync_user_profile(
+                peer_id,
+                display_name=str(item.get("display_name") or ""),
+                status_msg=str(item.get("status_msg") or ""),
+                avatar=(item.get("avatar") or ""),
+            )
             if db.follow_user(uid, peer_id):
                 following_linked += 1
         except Exception:
@@ -1071,6 +1467,7 @@ def _apply_sync_export_to_user(user_id: int, export: dict) -> dict:
                 gid,
                 nick,
                 origin_server_id=source_server_id,
+                display_name=str(item.get("display_name") or "")[:64],
                 avatar=(item.get("avatar") or ""),
             )
             if not peer:
@@ -1078,10 +1475,18 @@ def _apply_sync_export_to_user(user_id: int, export: dict) -> dict:
             peer_id = int(peer.get("id") or 0)
             if peer_id <= 0 or peer_id == uid:
                 continue
-            # Rebuild accepted-friends graph idempotently.
-            db.send_friend_request(uid, peer_id)
-            if db.accept_friend_request(uid, peer_id):
+            db.patch_sync_user_profile(
+                peer_id,
+                display_name=str(item.get("display_name") or ""),
+                status_msg=str(item.get("status_msg") or ""),
+                avatar=(item.get("avatar") or ""),
+            )
+            if db.sync_import_accepted_friendship(uid, peer_id):
                 friends_linked += 1
+            try:
+                db.follow_user(uid, peer_id)
+            except Exception:
+                pass
             db.get_or_create_dm(uid, peer_id)
         except Exception:
             continue
@@ -1251,6 +1656,8 @@ def _apply_sync_export_to_user(user_id: int, export: dict) -> dict:
             "global_post_id": str(row.get("global_post_id") or "").strip(),
             "author_global_user_id": str(row.get("author_global_user_id") or "").strip(),
             "nickname": str(row.get("nickname") or "").strip(),
+            "author_display_name": str(row.get("author_display_name") or "")[:64],
+            "author_avatar": row.get("author_avatar"),
             "content": str(row.get("content") or "")[:4000],
             "media_data": row.get("media_data"),
             "media_type": row.get("media_type"),
@@ -1260,6 +1667,11 @@ def _apply_sync_export_to_user(user_id: int, export: dict) -> dict:
             "track_title": str(row.get("track_title") or "")[:160],
             "track_room": str(row.get("track_room") or "")[:64],
             "track_mood": str(row.get("track_mood") or "")[:32],
+            "created_at": str(row.get("created_at") or "")[:64],
+            "enc_v": int(row.get("enc_v") or 0),
+            "audience": str(row.get("audience") or row.get("privacy") or "")[:32],
+            "ciphertext_b64": str(row.get("ciphertext_b64") or ""),
+            "wrapped_keys": row.get("wrapped_keys") if isinstance(row.get("wrapped_keys"), list) else [],
         }
         payload_post["media_data"], payload_post["media_type"] = _sanitize_sync_media(
             payload_post.get("media_data"),
@@ -1271,15 +1683,197 @@ def _apply_sync_export_to_user(user_id: int, export: dict) -> dict:
         if not payload_post["global_post_id"] or not payload_post["author_global_user_id"] or not payload_post["nickname"]:
             continue
         try:
-            created = db.apply_federated_wall_post_created(payload_post, post_origin)
-            if created:
+            existed = db.resolve_federation_wall_local_id(
+                post_origin, "post", payload_post["global_post_id"],
+            )
+            created = db.apply_synced_social_post(
+                payload_post, post_origin, viewer_user_id=uid,
+            )
+            if created and not existed:
                 social_posts_imported += 1
         except Exception:
             continue
         if social_posts_imported and (social_posts_imported % 3 == 0):
             _sync_step("social_posts", f"Syncing FrogSocial… ({social_posts_imported}/{n_social})", "social_posts", social_posts_imported)
 
-    _sync_progress(uid, 100, "Sync complete", "done", counters={"social_posts": social_posts_imported})
+    # ── Recent chat history backfill ──────────────────────────────────
+    # Apply room-history snapshots from the source node. We deliberately
+    # do this after rooms are joined so user_can_access_room evaluates
+    # correctly for any peer-history audit hook downstream.
+    n_history_rooms = len(room_histories)
+    if n_history_rooms:
+        _sync_step("messages", f"Restoring chat history… (0/{n_history_rooms})", "messages", 0)
+    history_rooms_done = 0
+    for hist in room_histories:
+        if not isinstance(hist, dict):
+            continue
+        rn = str(hist.get("room_name") or "").strip().lower()
+        if not _ROOM_NAME_RE.match(rn):
+            continue
+        msgs = hist.get("messages")
+        if not isinstance(msgs, list) or not msgs:
+            continue
+        if not db.get_room_by_name(rn):
+            continue
+        applied = 0
+        for m in msgs[:_SYNC_EXPORT_HISTORY_PER_ROOM]:
+            if not isinstance(m, dict):
+                continue
+            try:
+                origin_msg_id = int(m.get("id") or 0)
+            except Exception:
+                origin_msg_id = 0
+            if origin_msg_id <= 0:
+                continue
+            ts = str(m.get("created_at") or "")
+            content = str(m.get("content") or "")[:10_000]
+            nick = str(m.get("nickname") or "")[:64]
+            if not nick:
+                continue
+            media_type = str(m.get("media_type") or "")[:64] or None
+            event_id = f"sync_{source_server_id}_{rn}_{origin_msg_id}"
+            try:
+                ok = db.save_federated_room_message(
+                    event_id,
+                    {
+                        "room_name": rn,
+                        "nickname": nick,
+                        "display_name": str(m.get("display_name") or "")[:64],
+                        "content": content,
+                        "media_data": None,
+                        "media_type": media_type,
+                        "media_blur": int(m.get("media_blur") or 0),
+                        "view_once": int(m.get("view_once") or 0),
+                        "key_version": int(m.get("key_version") or 0),
+                        "edited": bool(m.get("edited")),
+                        "avatar": str(m.get("avatar") or "")[:200_000],
+                        "created_at": ts,
+                        "origin_message_id": str(origin_msg_id),
+                    },
+                    source_server_id,
+                )
+                if ok:
+                    applied += 1
+            except Exception:
+                continue
+        history_messages_applied += applied
+        history_rooms_done += 1
+        if history_rooms_done % 5 == 0:
+            _sync_step(
+                "messages",
+                f"Restoring chat history… ({history_rooms_done}/{n_history_rooms})",
+                "messages", history_rooms_done,
+            )
+
+    # ── DM history backfill (ciphertext only) ─────────────────────────
+    n_dm_history = len(dm_histories)
+    if n_dm_history:
+        _sync_step("dm_messages", f"Restoring DM history… (0/{n_dm_history})", "dm_messages", 0)
+    dm_history_done = 0
+    for entry in dm_histories:
+        if not isinstance(entry, dict):
+            continue
+        peer_gid = str(entry.get("peer_global_user_id") or "").strip()
+        if not _GID_RE.match(peer_gid):
+            continue
+        msgs = entry.get("messages")
+        if not isinstance(msgs, list) or not msgs:
+            continue
+        # The DM channel must exist locally before we can stitch messages
+        # into it. The DM-peer pass earlier in this function provisions a
+        # stub for every peer in `dm_peers`; if a DM channel is missing
+        # we skip rather than create rogue channels here.
+        peer_local = db.find_user_by_global_id(peer_gid)
+        if not peer_local:
+            continue
+        peer_uid = int(peer_local.get("id") or 0)
+        if peer_uid <= 0 or peer_uid == uid:
+            continue
+        try:
+            cid = int(db.get_or_create_dm(uid, peer_uid) or 0)
+        except Exception:
+            cid = 0
+        if cid <= 0:
+            continue
+        applied = 0
+        for m in msgs[:_SYNC_EXPORT_DM_HISTORY_PER_CHANNEL]:
+            if not isinstance(m, dict):
+                continue
+            try:
+                origin_msg_id = int(m.get("id") or 0)
+            except Exception:
+                origin_msg_id = 0
+            if origin_msg_id <= 0:
+                continue
+            sender_id = uid if bool(m.get("from_self")) else peer_uid
+            content_ct = str(m.get("content") or "")[:20_000]
+            media_type = str(m.get("media_type") or "")[:64] or None
+            media_name = str(m.get("media_name") or "")[:200] or None
+            try:
+                ok = db.save_synced_dm_message(
+                    channel_id=cid,
+                    sender_id=sender_id,
+                    content=content_ct,
+                    media_type=media_type,
+                    media_name=media_name,
+                    media_blur=int(m.get("media_blur") or 0),
+                    view_once=int(m.get("view_once") or 0),
+                    edited=bool(m.get("edited")),
+                    deleted=bool(m.get("deleted")),
+                    created_at=str(m.get("created_at") or ""),
+                    source_server_id=source_server_id,
+                    origin_message_id=str(origin_msg_id),
+                )
+                if ok:
+                    applied += 1
+            except Exception:
+                continue
+        dm_history_messages_applied += applied
+        dm_history_done += 1
+        if dm_history_done % 3 == 0:
+            _sync_step(
+                "dm_messages",
+                f"Restoring DM history… ({dm_history_done}/{n_dm_history})",
+                "dm_messages", dm_history_done,
+            )
+
+    # ── Member roster snapshots (joined rooms) ─────────────────────────
+    if n_member_snaps:
+        _sync_step("members", f"Syncing member lists… (0/{n_member_snaps})", "members", 0)
+    members_done = 0
+    for entry in member_snaps[:_SYNC_EXPORT_MEMBER_ROOM_LIMIT]:
+        if not isinstance(entry, dict):
+            continue
+        rn = str(entry.get("room_name") or "").strip().lower()
+        if not _ROOM_NAME_RE.match(rn):
+            continue
+        snap = entry.get("members")
+        if not isinstance(snap, list) or not snap:
+            continue
+        try:
+            applied_n = db.replace_federation_room_members(
+                rn,
+                snap,
+                sourced_from_home=True,
+            )
+            if applied_n > 0:
+                members_snapshots_applied += 1
+                members_done += 1
+        except Exception:
+            continue
+        if members_done % 3 == 0:
+            _sync_step(
+                "members",
+                f"Syncing member lists… ({members_done}/{n_member_snaps})",
+                "members", members_done,
+            )
+
+    _sync_progress(uid, 100, "Sync complete", "done", counters={
+        "social_posts": social_posts_imported,
+        "messages": history_messages_applied,
+        "dm_messages": dm_history_messages_applied,
+        "members": members_snapshots_applied,
+    })
 
     return {
         "rooms_joined": rooms_joined,
@@ -1291,6 +1885,9 @@ def _apply_sync_export_to_user(user_id: int, export: dict) -> dict:
         "blocked_linked": blocked_linked,
         "push_tokens_linked": push_tokens_linked,
         "social_posts_imported": social_posts_imported,
+        "history_messages_applied": history_messages_applied,
+        "dm_history_messages_applied": dm_history_messages_applied,
+        "members_snapshots_applied": members_snapshots_applied,
     }
 
 
@@ -2137,12 +2734,21 @@ async def login(request: Request, body: LoginRequest):
     if nick_key:
         _login_clear_failures(nick_key)
         _federated_bootstrap_clear_failures(nick_key)
+    # Password login on an account that already lives here is a home-node
+    # session — drop any stale in-memory sync overlay state from a prior
+    # visit to a federated peer on this same process.
+    if local_exists:
+        with _sync_state_lock:
+            _federation_sync_state.pop(int(user["id"]), None)
     token = _create_session_with_meta(request, user["id"])
     sync_meta = None
     if isinstance(boot, dict):
         source_base = _norm_base(str(boot.get("remote_base") or ""))
         remote_token = str(boot.get("remote_token") or "").strip()
         if source_base and remote_token:
+            remote_sid = _resolve_server_id_for_base(source_base)
+            if remote_sid:
+                db.set_user_account_home_server_id(int(user["id"]), remote_sid, force=True)
             _sync_state_set(user["id"], {
                 "source_base": source_base,
                 "in_progress": True,
@@ -2180,6 +2786,15 @@ async def _start_federation_sync_for_user(
     uid = int(user_id or 0)
     if uid <= 0:
         return {"in_progress": False, "done": False, "error": "invalid user"}
+    if _user_at_account_home(uid):
+        with _sync_state_lock:
+            _federation_sync_state.pop(uid, None)
+        return {
+            "in_progress": False,
+            "done": False,
+            "at_home_node": True,
+            "skipped": True,
+        }
     cur = _sync_state_get(uid)
     if cur.get("in_progress"):
         return cur
@@ -2240,8 +2855,9 @@ def _auth_session_response(user_id: int, token: str, sync_meta: dict | None = No
         "bio": ident.get("bio") or "",
         "presence": ident.get("presence") or "online",
         "status_msg": ident.get("status_msg") or "",
+        "at_home_node": _user_at_account_home(user_id),
     }
-    if isinstance(sync_meta, dict) and sync_meta:
+    if isinstance(sync_meta, dict) and sync_meta and not out["at_home_node"]:
         out["federation_sync"] = sync_meta
     return out
 
@@ -2371,6 +2987,8 @@ async def login_with_federation_ticket(
     if not payload:
         return JSONResponse(status_code=401, content={"error": "Invalid or expired ticket"})
 
+    ticket_nick = str(payload.get("nickname") or "").strip()
+    had_local_account = bool(db.get_user_by_nick(ticket_nick)) if ticket_nick else False
     user = _ensure_local_user_from_ticket(payload)
     if not user:
         return JSONResponse(status_code=409, content={"error": "Could not provision account on this node"})
@@ -2396,7 +3014,14 @@ async def login_with_federation_ticket(
     sync_meta = None
     source_base = _norm_base(str(payload.get("src") or ""))
     here = _norm_base(str(request.base_url))
-    if source_base and source_base != here:
+    # Import only when landing on a peer node. Switching *back* to your home
+    # node carries `src` = the node you left, not where account data lives.
+    should_sync = (
+        source_base
+        and source_base != here
+        and not (had_local_account and _user_at_account_home(int(user["id"])))
+    )
+    if should_sync:
         _sync_state_set(user["id"], {
             "source_base": source_base,
             "in_progress": True,
@@ -2425,7 +3050,7 @@ async def login_with_federation_ticket(
 
 @router.get("/federation-sync-status")
 async def federation_sync_status(current_user: dict = Depends(get_current_user)):
-    return _sync_state_get(int(current_user["id"]))
+    return _sync_state_for_user(int(current_user["id"]))
 
 
 @router.post("/federation-sync-resume")
@@ -2441,6 +3066,15 @@ async def federation_sync_resume(
     or the client loaded stale JS and missed the initial sync kick.
     """
     uid = int(current_user["id"])
+    if _user_at_account_home(uid):
+        with _sync_state_lock:
+            _federation_sync_state.pop(uid, None)
+        return {
+            "in_progress": False,
+            "done": False,
+            "at_home_node": True,
+            "skipped": True,
+        }
     me = db.get_user_by_id(uid) or current_user
     state = await _start_federation_sync_for_user(
         uid,
@@ -2761,6 +3395,7 @@ async def me(current_user: dict = Depends(get_current_user)):
         # Never let a PIN-status failure break /me — the user can still
         # use the app without the PIN feature.
         out.setdefault("has_pin", 0)
+    out["at_home_node"] = _user_at_account_home(int(current_user["id"]))
     return out
 
 

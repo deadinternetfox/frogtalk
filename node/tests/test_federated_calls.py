@@ -1,4 +1,5 @@
 """Federated call signaling helpers."""
+import asyncio
 import os
 import unittest
 from unittest import mock
@@ -115,6 +116,71 @@ class FederatedCallsTests(unittest.TestCase):
         with mock.patch("database.is_blocked_either_way", return_value=False), \
              mock.patch("federation_calls.require_friend_for_calls", return_value=False):
             self.assertIsNone(fc.can_call_user(1, 2))
+
+    def test_apply_call_offer_drops_forged_origin(self):
+        """Caller's claimed home must equal the federation event's origin.
+
+        Without this check a peer holding only the shared federation
+        token could spoof a `call.offer` for any caller they like.
+        """
+        ev = {
+            "event_id": "evt_test_1",
+            "event_type": "call.offer",
+            "origin_server_id": "srv_attacker",
+            "payload": {
+                "global_call_id": "00000000-0000-4000-8000-000000000111",
+                "caller_global_user_id": "caller-gid",
+                "callee_global_user_id": "callee-gid",
+                "call_type": "voice",
+                "sdp": "v=0",
+                "fp_sig": "",
+                "caller_nickname": "alice",
+            },
+        }
+        # The caller's real home is `srv_honest`; the attacker forged origin.
+        with mock.patch("federation_calls.federation_calls_enabled", return_value=True), \
+             mock.patch.object(db, "resolve_global_user_home_server_id",
+                               side_effect=lambda gid: "srv_honest" if gid == "caller-gid" else "srv_anywhere"), \
+             mock.patch.object(db, "save_pending_call_offer") as save_mock:
+            asyncio.run(fc.apply_call_event(ev))
+            save_mock.assert_not_called()
+
+    def test_callee_home_server_routes_to_remote_peer(self):
+        """``callee_home_server`` returns the remote sid for federated peers."""
+        with mock.patch.object(db, "resolve_global_user_home_server_id",
+                               return_value="srv_au"), \
+             mock.patch.object(db, "get_or_create_local_server_identity",
+                               return_value={"server_id": "srv_local"}):
+            sid = fc.callee_home_server({"global_user_id": "gid-au"})
+            self.assertEqual(sid, "srv_au")
+        with mock.patch.object(db, "resolve_global_user_home_server_id",
+                               return_value=""), \
+             mock.patch.object(db, "get_or_create_local_server_identity",
+                               return_value={"server_id": "srv_local"}):
+            sid = fc.callee_home_server({"global_user_id": "gid-local"})
+            self.assertEqual(sid, "srv_local")
+
+    def test_turn_ice_servers_merges_peer_urls(self):
+        """Merged ICE config picks up peer TURN URLs without duplicates."""
+        local_only = turn_ice_servers(
+            ["stun:stun.local:3478", "turn:turn.local:3478"],
+            username="alice", credential="pw1",
+        )
+        merged = turn_ice_servers(
+            [
+                "stun:stun.local:3478",
+                "turn:turn.local:3478",
+                "turn:turn.peer:3478",
+            ],
+            username="alice", credential="pw1",
+        )
+        self.assertGreater(len(merged), len(local_only))
+        # No duplicate `stun:stun.local:3478` after the merge.
+        seen = set()
+        for s in merged:
+            url = s.get("urls")
+            self.assertNotIn(url, seen)
+            seen.add(url)
 
 
 class FederatedVoiceTests(unittest.TestCase):

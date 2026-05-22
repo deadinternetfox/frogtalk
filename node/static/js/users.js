@@ -132,6 +132,7 @@ const Users = (() => {
     // truth for names/display_names and only merge online presence into it.
     let onlineSource = _allUsers;
     let offlineSource = [];
+    let remoteSource = [];
     if (onRoom && _channelMembers.length) {
       const onlineMap = new Map(
         _allUsers.map(u => [String((u.nickname || '')).toLowerCase(), u])
@@ -139,6 +140,13 @@ const Users = (() => {
       onlineSource = [];
       offlineSource = [];
       for (const member of _channelMembers) {
+        // Federated/remote members live in their own section because we
+        // don't have a live WS connection to their home node and can't
+        // report accurate presence.
+        if (member.remote === true) {
+          remoteSource.push({ ...member, presence: 'offline', live_online: false });
+          continue;
+        }
         const key = String((member.nickname || '')).toLowerCase();
         const online = onlineMap.get(key);
         const merged = online ? { ...member, ...online, display_name: member.display_name || online.display_name } : { ...member };
@@ -166,6 +174,7 @@ const Users = (() => {
     };
     const onlineShown = onlineSource.filter(matches);
     const offlineShown = offlineSource.filter(matches);
+    const remoteShown = remoteSource.filter(matches);
 
     // Publish effective presence exactly as the members list computes it,
     // so other UI (mentions, etc.) can stay in perfect sync.
@@ -224,6 +233,15 @@ const Users = (() => {
       offlineShown.forEach(u => list.appendChild(_renderUserRow(u, false)));
     }
 
+    if (remoteShown.length) {
+      const header = document.createElement('div');
+      header.className = 'users-section users-section-offline';
+      header.title = 'Federated members from other nodes';
+      header.textContent = _filter ? `Federated matches — ${remoteShown.length}` : `Federated — ${remoteShown.length}`;
+      list.appendChild(header);
+      remoteShown.forEach(u => list.appendChild(_renderUserRow(u, false)));
+    }
+
     // Bots section — installed-in-channel bots sit at the bottom under
     // their own header so users can see what's mentionable. Filtered by
     // the same search box as users (matches bot name or description).
@@ -243,10 +261,13 @@ const Users = (() => {
       botsToShow.forEach(b => list.appendChild(_renderBotRow(b)));
     }
 
-    if (!onlineShown.length && !offlineShown.length && !botsToShow.length) {
+    if (!onlineShown.length && !offlineShown.length && !remoteShown.length && !botsToShow.length) {
       const empty = document.createElement('div');
       empty.style.cssText = 'color:#666;font-size:12px;padding:12px;text-align:center';
-      empty.textContent = _filter ? 'No members match' : 'No members yet';
+      const syncing = !!(window.FtSync && window.FtSync.state && window.FtSync.state().in_progress);
+      empty.textContent = _filter ? 'No members match'
+        : syncing ? 'Members loading from your home node…'
+        : 'No members yet';
       list.appendChild(empty);
     }
   }
@@ -262,7 +283,7 @@ const Users = (() => {
 
   function _renderUserRow(u, isOnline) {
     const el = document.createElement('div');
-    el.className = 'user-item' + (isOnline ? '' : ' offline');
+    el.className = 'user-item' + (isOnline ? '' : ' offline') + (u.remote ? ' remote' : '');
     el.onclick = () => showUserInfo(u.nickname, u.user_id);
     const isAdmin = u.nickname === 'admin' || u.is_admin;
     const inCall = isOnline && typeof getVoiceParticipantNicks === 'function' && getVoiceParticipantNicks().has(u.nickname);
@@ -273,6 +294,9 @@ const Users = (() => {
         iAmInSameVoice
           ? '<span class="in-call-badge live" title="Live in voice">🔊</span>'
           : '<span class="in-call-badge" title="In voice channel">📞</span>');
+    const remoteBadge = u.remote
+      ? `<span class="user-remote-badge" title="On ${UI.escHtml(String(u.home_server_id || '').slice(0, 12) || 'another node')}" style="font-size:10px;color:#7fd6a2;background:rgba(127,214,162,.08);border:1px solid rgba(127,214,162,.22);padding:0 4px;border-radius:4px;margin-left:4px">🌐</span>`
+      : '';
     // isSelf: prefer user_id match (most reliable), fall back to nickname
     const isSelf = !!(State.user && _sameUser(u.user_id, u.nickname, State.user.id, State.user.nickname));
     const handleNick = isSelf ? (State.user.nickname || u.nickname) : u.nickname;
@@ -302,7 +326,7 @@ const Users = (() => {
         ${dot}
       </div>
       <div class="user-name-wrap">
-        <span class="user-name${isAdmin ? ' admin' : ''}">${isAdmin ? '👑 ' : ''}${UI.escHtml(displayLabel)}${voiceIcon ? ' ' + voiceIcon : ''}</span>
+        <span class="user-name${isAdmin ? ' admin' : ''}">${isAdmin ? '👑 ' : ''}${UI.escHtml(displayLabel)}${voiceIcon ? ' ' + voiceIcon : ''}${remoteBadge}</span>
         ${hasHandle ? `<span class="user-handle">@${UI.escHtml(handleNick)}</span>` : ''}
       </div>
     `;

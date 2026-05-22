@@ -2086,8 +2086,21 @@ const Messages = (() => {
   function _emptyStateHtml(room) {
     const isDm = State.currentRoomType === 'dm' || (room && room.startsWith('dm:'));
     const peer = State.dmPeer || '';
-    let title, subtitle;
-    if (isDm && peer) {
+    // If a federation sync is still running, show a syncing state rather
+    // than the "be the first to say something" empty CTA — otherwise users
+    // panic that they lost their chat history when switching nodes.
+    const syncing = !!(window.FtSync && window.FtSync.state && window.FtSync.state().in_progress);
+    let title, subtitle, icon = '💬';
+    if (syncing) {
+      icon = '⏳';
+      if (isDm && peer) {
+        title = `Catching up on your DM with ${peer}…`;
+        subtitle = 'History will appear as your home node responds.';
+      } else {
+        title = `Catching up on #${room || 'channel'}…`;
+        subtitle = 'History is being backfilled from your home node.';
+      }
+    } else if (isDm && peer) {
       title = `This is the start of your conversation with ${peer}`;
       subtitle = 'Say hi — messages here are end-to-end encrypted.';
     } else {
@@ -2096,7 +2109,7 @@ const Messages = (() => {
     }
     return (
       `<div class="msg-empty-state" id="msg-empty-state" aria-hidden="true">` +
-        `<div class="msg-empty-icon">💬</div>` +
+        `<div class="msg-empty-icon">${UI.escHtml(icon)}</div>` +
         `<div class="msg-empty-title">${UI.escHtml(title)}</div>` +
         `<div class="msg-empty-sub">${UI.escHtml(subtitle)}</div>` +
       `</div>`

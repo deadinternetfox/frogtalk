@@ -190,6 +190,10 @@ def enqueue_dm_message_created(
 
 # Keep profile events under the 256 KiB outbox cap (avatar data URLs can be MBs).
 _PROFILE_FED_FIELD_MAX_CHARS = 200_000
+# Member snapshot cap: 500 members is enough for almost every channel
+# we ship today and keeps a single outbox row under the size limit
+# even with small avatar URLs attached.
+_MAX_FED_MEMBER_SNAPSHOT = 500
 
 
 def enqueue_user_profile_updated(user: dict, *, extra: dict | None = None) -> dict:
@@ -232,8 +236,14 @@ def enqueue_room_message_created(
     media_blur: int = 0,
     view_once: int = 0,
     created_at: str | None = None,
+    origin_message_id: int | str | None = None,
 ) -> dict:
-    """Enqueue a signed ``message.created`` for peer nodes."""
+    """Enqueue a signed ``message.created`` for peer nodes.
+
+    ``origin_message_id`` is the local DB row id of the source message;
+    surfaced so peers can keep a history-backfill cursor and present a
+    consistent "next message after id N" experience to the user.
+    """
     ts = created_at or (datetime.utcnow().isoformat() + "Z")
     avatar = str(sender.get("avatar") or "")
     if len(avatar) > _PROFILE_FED_FIELD_MAX_CHARS:
@@ -252,6 +262,139 @@ def enqueue_room_message_created(
             "media_blur": int(media_blur or 0),
             "view_once": int(view_once or 0),
             "created_at": ts,
+            "origin_message_id": str(origin_message_id or "").strip(),
+        },
+    )
+
+
+def enqueue_room_message_deleted(
+    *,
+    room_name: str,
+    origin_message_id: int | str,
+    actor_global_user_id: str = "",
+    actor_nickname: str = "",
+) -> dict:
+    """Enqueue a signed ``message.deleted`` so peers can tombstone the row.
+
+    Only the channel home or a local moderator should emit this; callers
+    must enforce that authority — the federation inbox re-checks moderator
+    role against the local copy before tombstoning.
+    """
+    return enqueue_server_event(
+        "message.deleted",
+        {
+            "room_name": str(room_name or "").strip(),
+            "origin_message_id": str(origin_message_id or "").strip(),
+            "actor_global_user_id": str(actor_global_user_id or "").strip(),
+            "actor_nickname": str(actor_nickname or "").strip(),
+            "deleted_at": datetime.utcnow().isoformat() + "Z",
+        },
+    )
+
+
+_members_snapshot_last_sent: dict[str, float] = {}
+_MEMBERS_SNAPSHOT_THROTTLE_SEC = 60
+
+
+def maybe_emit_room_members_snapshot(room_name: str) -> dict:
+    """Emit a fresh `room.members.snapshot` if we haven't done so recently.
+
+    Designed to be called after any local join/leave/role change. Caller
+    is responsible for ensuring this node is authoritative for the room
+    (i.e. the room's home server). We throttle to once per minute per
+    room so a quick burst of joins doesn't flood peers.
+    """
+    name = (room_name or "").strip().lower()
+    if not name:
+        return {"ok": False, "error": "no_room"}
+    now = time.time()
+    last = _members_snapshot_last_sent.get(name, 0.0)
+    if now - last < _MEMBERS_SNAPSHOT_THROTTLE_SEC:
+        return {"ok": False, "error": "throttled"}
+    try:
+        room = db.get_room_by_name(name)
+    except Exception:
+        return {"ok": False, "error": "lookup_failed"}
+    if not room:
+        return {"ok": False, "error": "no_room"}
+    # Private channels never emit a snapshot — the membership is
+    # confidential and other peers have no need-to-know.
+    if str(room.get("type") or "public").lower() == "private":
+        return {"ok": False, "error": "private_room"}
+    try:
+        local_members = db.get_channel_members(int(room.get("id") or 0)) or []
+    except Exception:
+        local_members = []
+    members_payload: list[dict] = []
+    owner_id = int(room.get("owner_id") or 0)
+    for m in local_members:
+        gid = str(m.get("global_user_id") or "").strip()
+        nick = str(m.get("nickname") or "").strip()
+        if not gid or not nick:
+            continue
+        uid = int(m.get("user_id") or 0)
+        role = "member"
+        if uid and uid == owner_id:
+            role = "owner"
+        elif int(m.get("is_admin") or 0):
+            role = "admin"
+        members_payload.append({
+            "global_user_id": gid,
+            "nickname": nick,
+            "display_name": str(m.get("display_name") or ""),
+            "avatar": str(m.get("avatar") or ""),
+            "role": role,
+        })
+    _members_snapshot_last_sent[name] = now
+    return enqueue_room_members_snapshot(
+        room_name=name,
+        members=members_payload,
+        member_count=len(members_payload),
+    )
+
+
+def enqueue_room_members_snapshot(
+    *,
+    room_name: str,
+    members: list[dict],
+    member_count: int,
+) -> dict:
+    """Enqueue a signed ``room.members.snapshot`` so peers can hydrate rosters.
+
+    Callers MUST be authoritative for the room (room owner/admin on this
+    node — i.e. the room's local home). The inbox handler verifies the
+    origin matches the room's pinned home_server_id before purging members
+    that aren't in the snapshot.
+
+    Member entries are clipped to safe sizes; avatars over the federation
+    limit are dropped to avoid blowing outbox row size.
+    """
+    safe_members: list[dict] = []
+    for m in members[:_MAX_FED_MEMBER_SNAPSHOT]:
+        if not isinstance(m, dict):
+            continue
+        gid = str(m.get("global_user_id") or "").strip()
+        nick = str(m.get("nickname") or "").strip()
+        if not gid or not nick:
+            continue
+        avatar = str(m.get("avatar") or "")
+        if len(avatar) > _PROFILE_FED_FIELD_MAX_CHARS:
+            avatar = ""
+        safe_members.append({
+            "global_user_id": gid[:64],
+            "nickname": nick[:64],
+            "display_name": str(m.get("display_name") or "")[:64],
+            "avatar": avatar,
+            "home_server_id": str(m.get("home_server_id") or "")[:64],
+            "role": str(m.get("role") or "member")[:16],
+        })
+    return enqueue_server_event(
+        "room.members.snapshot",
+        {
+            "room_name": str(room_name or "").strip(),
+            "members": safe_members,
+            "member_count": int(member_count or 0),
+            "snapshot_at": datetime.utcnow().isoformat() + "Z",
         },
     )
 
@@ -2215,6 +2358,14 @@ def _insert_inbox_events_sync(events: list[dict]) -> tuple[int, int]:
     _SENSITIVE_TYPES = {
         "room.member.banned",
         "room.member.unbanned",
+        # Lifecycle mutations need a signed origin so a peer that only
+        # holds the shared token cannot forge a delete/edit for arbitrary
+        # message ids.
+        "message.deleted",
+        "message.edited",
+        # Members snapshot purges remote roster rows when origin matches
+        # the room home; a forged origin must not be able to wipe rosters.
+        "room.members.snapshot",
     }
     now = datetime.now(tz=timezone.utc)
     # Tightened from ±1h to ±5min after audit: an attacker who captures a
@@ -3405,9 +3556,118 @@ async def federation_outbox_processor() -> int:
     return marked
 
 
+async def _handle_message_lifecycle_event(event: dict) -> None:
+    """Apply `message.deleted` and `message.edited` from a federated peer.
+
+    Authorization: we only mutate a row when the originating peer is the
+    same one that originally relayed the message (same origin_server_id
+    on `messages` row) and the actor passes `can_moderate_room` on this
+    node. This prevents a hostile peer from tombstoning unrelated rows.
+    """
+    payload = dict(event.get("payload") or {})
+    event_type = str(event.get("event_type") or "")
+    room_name = _fed_room_name(payload.get("room_name"))
+    if not room_name:
+        return
+    room_name = room_name.lower()
+    origin_msg_id = str(payload.get("origin_message_id") or "").strip()
+    if not origin_msg_id:
+        return
+    origin_sid = str(event.get("origin_server_id") or "").strip()
+    if not origin_sid:
+        return
+    actor_nick = _fed_nickname(payload.get("actor_nickname"))
+    actor_user = None
+    if actor_nick:
+        actor_user = _ensure_local_user_by_nickname(actor_nick)
+    # Look the row up by (origin_server_id, origin_message_id) — the
+    # idempotency keys we already store in `messages`.
+    def _resolve_row() -> dict | None:
+        try:
+            with db._conn() as con:
+                row = con.execute(
+                    """
+                    SELECT id, room_name, user_id, origin_server_id
+                      FROM messages
+                     WHERE room_name=? AND origin_server_id=? AND origin_message_id=?
+                     LIMIT 1
+                    """,
+                    (room_name, origin_sid, origin_msg_id),
+                ).fetchone()
+            return dict(row) if row else None
+        except Exception:
+            return None
+
+    row = await asyncio.to_thread(_resolve_row)
+    if not row:
+        return
+    msg_id = int(row.get("id") or 0)
+    if msg_id <= 0:
+        return
+    # When the actor isn't the original sender, require moderator role
+    # on this node — same trust model as our local delete/edit endpoints.
+    sender_uid = int(row.get("user_id") or 0)
+    actor_is_sender = bool(actor_user and int(actor_user.get("id") or 0) == sender_uid)
+    if not actor_is_sender:
+        if not actor_user or not db.can_moderate_room(
+            room_name, actor_user["id"], bool(actor_user.get("is_admin"))
+        ):
+            _log.warning(
+                "federation: dropping %s (unauthorised) room=%s msg=%s",
+                event_type, room_name, msg_id,
+            )
+            return
+    if event_type == "message.deleted":
+        try:
+            with db._conn() as con:
+                con.execute(
+                    "UPDATE messages SET tombstoned=1, content='', media_data=NULL, media_type=NULL WHERE id=?",
+                    (msg_id,),
+                )
+                con.commit()
+        except Exception:
+            return
+        try:
+            from ws_manager import manager
+            await manager.broadcast_room(room_name, {
+                "type": "message_deleted",
+                "room": room_name,
+                "id": msg_id,
+            })
+        except Exception:
+            pass
+        return
+    if event_type == "message.edited":
+        new_content = _fed_clip(payload.get("content"), _FED_CONTENT_MAX)
+        try:
+            with db._conn() as con:
+                con.execute(
+                    "UPDATE messages SET content=?, edited=1 WHERE id=?",
+                    (new_content, msg_id),
+                )
+                con.commit()
+        except Exception:
+            return
+        try:
+            from ws_manager import manager
+            await manager.broadcast_room(room_name, {
+                "type": "message_edited",
+                "room": room_name,
+                "id": msg_id,
+                "content": new_content,
+                "edited": True,
+            })
+        except Exception:
+            pass
+
+
 async def _handle_message_event(event: dict) -> None:
     """Handle incoming replicated room message event."""
-    if event.get("event_type") != "message.created":
+    event_type = str(event.get("event_type") or "")
+    if event_type in ("message.deleted", "message.edited"):
+        await _handle_message_lifecycle_event(event)
+        return
+    if event_type != "message.created":
         return
     payload = dict(event.get("payload") or {})
     # Hostile-peer hardening: validate every untrusted field before we
@@ -3436,10 +3696,12 @@ async def _handle_message_event(event: dict) -> None:
     else:
         payload["media_type"] = mt or None
         payload["media_data"] = md
+    origin_sid = str(event.get("origin_server_id") or "").strip()
     msg_id = await asyncio.to_thread(
         db.save_federated_room_message,
         str(event.get("event_id") or ""),
         payload,
+        origin_sid,
     )
     if not msg_id:
         return
@@ -3607,6 +3869,63 @@ async def _handle_room_event(event: dict) -> None:
         await _apply_federated_room_settings(room_name.lower(), payload)
         return
 
+    if event_type == "room.members.snapshot":
+        room_name = _fed_room_name(payload.get("room_name"))
+        if not room_name:
+            return
+        room_name = room_name.lower()
+        members_in = payload.get("members") or []
+        if not isinstance(members_in, list):
+            return
+        # Only honour snapshots from the room's pinned home server.
+        # Other peers can still push incremental room.member.joined/left
+        # events but cannot purge our local view via a snapshot.
+        origin_sid = str(event.get("origin_server_id") or "").strip()
+        room_row = db.get_room_by_name(room_name)
+        room_home = ""
+        if room_row:
+            room_home = str(room_row.get("home_server_id") or "").strip()
+        sourced_from_home = bool(origin_sid) and (
+            origin_sid == room_home or not room_home
+        )
+        clean: list[dict] = []
+        for m in members_in[:_MAX_FED_MEMBER_SNAPSHOT]:
+            if not isinstance(m, dict):
+                continue
+            gid = str(m.get("global_user_id") or "").strip()
+            nick = _fed_nickname(m.get("nickname"))
+            if not gid or not nick:
+                continue
+            role = str(m.get("role") or "member").strip().lower()
+            if role not in ("owner", "admin", "moderator", "member"):
+                role = "member"
+            clean.append({
+                "global_user_id": gid[:64],
+                "nickname": nick[:64],
+                "display_name": _fed_clip(m.get("display_name"), _FED_DISPLAY_MAX),
+                "avatar": _fed_clip(m.get("avatar"), _FED_AVATAR_MAX),
+                "home_server_id": str(m.get("home_server_id") or "")[:64],
+                "role": role,
+            })
+        await asyncio.to_thread(
+            db.replace_federation_room_members,
+            room_name, clean,
+            sourced_from_home=sourced_from_home,
+        )
+        # If we now know about the room's home, pin it so future snapshots
+        # from other peers are downgraded to upsert-only.
+        if origin_sid and room_row and not room_home:
+            try:
+                with db._conn() as con:
+                    con.execute(
+                        "UPDATE rooms SET home_server_id=? WHERE name=? AND (home_server_id IS NULL OR home_server_id='')",
+                        (origin_sid, room_name),
+                    )
+                    con.commit()
+            except Exception:
+                pass
+        return
+
     if event_type == "room.music.settings":
         room_name = _fed_room_name(payload.get("room_name"))
         if not room_name:
@@ -3682,10 +4001,25 @@ async def _handle_room_event(event: dict) -> None:
 
     if event_type == "room.member.joined":
         db.join_room(user["id"], room["id"])
+        # Also keep the federated index in sync so other surfaces (room
+        # profile, member sidebar on remote-only nodes) can show this user
+        # without waiting for a snapshot.
+        gid = str(user.get("global_user_id") or "").strip()
+        if gid:
+            db.upsert_federation_room_member(
+                room["name"], gid, user.get("nickname") or nickname,
+                display_name=user.get("display_name") or "",
+                avatar=user.get("avatar") or "",
+                home_server_id=str(event.get("origin_server_id") or "").strip(),
+                role="owner" if int(user.get("id") or 0) == int(room.get("owner_id") or 0) else "member",
+            )
     elif event_type == "room.member.left":
         with db._conn() as con:
             con.execute("DELETE FROM room_members WHERE room_id=? AND user_id=?", (room["id"], user["id"]))
             con.commit()
+        gid = str(user.get("global_user_id") or "").strip()
+        if gid:
+            db.tombstone_federation_room_member(room["name"], gid)
     elif event_type == "room.member.banned":
         await _apply_federated_room_ban(room, user, payload)
     elif event_type == "room.member.unbanned":

@@ -74,6 +74,9 @@ const FtSync = {
     social_graph: '👥',
     profile: '⚙️',
     social_posts: '🤳🏼',
+    messages: '📝',
+    dm_messages: '✉️',
+    members: '👤',
     push: '🔔',
     done: '✅',
   },
@@ -171,7 +174,7 @@ try { window.FtSync = FtSync; } catch {}
 const App = {
   pendingInvite: null,  // Store invite code to process after login
   PENDING_CALL_KEY: 'ft_pending_incoming_call',
-  ASSET_RESET_VERSION: 'federation-sync-v5',
+  ASSET_RESET_VERSION: 'federation-sync-v9',
   easterEgg: null,
   easterTapCount: 0,
   easterTapTimer: null,
@@ -302,10 +305,36 @@ const App = {
     } catch {}
   },
 
+  _normalizeOrigin(url) {
+    return String(url || '').trim().replace(/\/$/, '').toLowerCase();
+  },
+
+  isAtHomeNode() {
+    if (State.user && State.user.at_home_node === true) return true;
+    if (State.user && State.user.at_home_node === false) return false;
+    const here = this._normalizeOrigin(window.location.origin);
+    const source = this._normalizeOrigin(this.getSyncSourceBase());
+    // No switch context, or the remembered source is this node → home session.
+    return !source || source === here;
+  },
+
+  clearFederationSyncClientState() {
+    try {
+      localStorage.removeItem('ft_sync_source_base');
+      sessionStorage.removeItem('ft_switch_from');
+      sessionStorage.removeItem('ft_just_switched');
+      localStorage.removeItem('ft_just_switched_node');
+    } catch {}
+  },
+
   async probeAccountSyncIfSparse() {
     if (!State.token) return false;
-    const here = String(window.location.origin || '').replace(/\/$/, '');
-    let source = this.getSyncSourceBase().replace(/\/$/, '');
+    if (this.isAtHomeNode()) {
+      this.clearFederationSyncClientState();
+      return false;
+    }
+    const here = this._normalizeOrigin(window.location.origin);
+    let source = this._normalizeOrigin(this.getSyncSourceBase());
     if (!source || source === here) return false;
 
     let joined = 0;
@@ -377,6 +406,7 @@ const App = {
 
   applyFederationSyncMeta(meta) {
     if (!meta || typeof meta !== 'object') return;
+    if (this.isAtHomeNode() && !meta.done) return;
     const inProgress = !!meta.in_progress;
     const hint = String(meta.hint || '').trim();
     if (!inProgress && !hint && !meta.done) return;
@@ -395,6 +425,10 @@ const App = {
 
   async ensureFederationSyncAfterSwitch() {
     if (!State.token) return false;
+    if (this.isAtHomeNode()) {
+      this.clearFederationSyncClientState();
+      return false;
+    }
     const params = new URLSearchParams(window.location.search);
     const switched = params.get('switched') === '1'
       || (() => { try { return sessionStorage.getItem('ft_just_switched') === '1'; } catch { return false; } })();
@@ -473,14 +507,21 @@ const App = {
         is_admin: data.is_admin,
         presence: data.presence || 'online',
         status_msg: ('status_msg' in data) ? (data.status_msg ?? '') : '',
+        at_home_node: data.at_home_node !== false,
       };
       State.save();
-      this.applyFederationSyncMeta(data?.federation_sync || {
-        in_progress: true,
-        progress_pct: 2,
-        hint: 'Syncing channels and DMs from your home node…',
-        phase: 'fetch',
-      });
+      if (data.at_home_node !== false) {
+        this.clearFederationSyncClientState();
+      } else if (data?.federation_sync?.in_progress) {
+        this.applyFederationSyncMeta(data.federation_sync);
+      } else if (!data?.federation_sync) {
+        this.applyFederationSyncMeta({
+          in_progress: true,
+          progress_pct: 2,
+          hint: 'Syncing channels and DMs from your home node…',
+          phase: 'fetch',
+        });
+      }
       this.forceAndroidFcmResync(State.token);
       try { localStorage.setItem('ft_just_switched_node', '1'); } catch {}
       this.clearSwitchTicket();
@@ -791,9 +832,17 @@ const App = {
     } catch {}
 
     // Rooms must load before call recovery or signaling bootstrap (joined-room WS).
-    const justSwitchedNode = this.consumeJustSwitchedNodeFlag()
+    const atHomeNode = this.isAtHomeNode();
+    if (atHomeNode) {
+      this.clearFederationSyncClientState();
+      this._applyFederationSyncUiState({ in_progress: false, done: false, hint: '' });
+    }
+
+    const justSwitchedNode = !atHomeNode && (
+      this.consumeJustSwitchedNodeFlag()
       || (new URLSearchParams(window.location.search).get('switched') === '1')
-      || (() => { try { return sessionStorage.getItem('ft_just_switched') === '1'; } catch { return false; } })();
+      || (() => { try { return sessionStorage.getItem('ft_just_switched') === '1'; } catch { return false; } })()
+    );
 
     if (justSwitchedNode) {
       try { sessionStorage.removeItem('ft_sync_overlay_seen'); } catch {}
@@ -814,13 +863,16 @@ const App = {
     }
 
     const sparseAccount = ((State.rooms || []).filter((r) => r.joined).length < 2);
-    if (sparseAccount || justSwitchedNode) {
+    if (!atHomeNode && (sparseAccount || justSwitchedNode)) {
       await this.probeAccountSyncIfSparse();
     }
 
-    const syncApplied = await this.waitForFederationSyncIfNeeded(
-      (justSwitchedNode || sparseAccount) ? 60000 : 22000
-    );
+    let syncApplied = false;
+    if (!atHomeNode) {
+      syncApplied = await this.waitForFederationSyncIfNeeded(
+        (justSwitchedNode || sparseAccount) ? 60000 : 22000
+      );
+    }
     if (syncApplied) {
       try { await Rooms.loadRooms(); } catch {}
     }
@@ -1392,6 +1444,7 @@ const App = {
   },
 
   _maybeAutoOpenSyncOverlay(state) {
+    if (this.isAtHomeNode()) return;
     if (!state?.in_progress) return;
     this.openSyncOverlay();
   },
@@ -1411,15 +1464,55 @@ const App = {
     } catch {}
     try {
       if (window.Social) {
-        if (Social.invalidateProfileCache) Social.invalidateProfileCache();
-        if (Social.loadFeed) await Social.loadFeed();
-        if (Social.loadExplore) await Social.loadExplore();
+        if (Social.invalidateAllSocialCaches) Social.invalidateAllSocialCaches();
+        else if (Social.invalidateProfileCache) Social.invalidateProfileCache();
+        if (Social.loadFeed) await Social.loadFeed({ force: true });
+        if (Social.loadExplore) await Social.loadExplore(undefined, { force: true });
         if (Social.loadReelsTab) await Social.loadReelsTab();
+        if (Social.loadMusicTab) await Social.loadMusicTab();
         if (Social.refreshActivityBadge) void Social.refreshActivityBadge();
         if (Social.refreshChatStoryCache) void Social.refreshChatStoryCache(true);
       }
     } catch (e) {
       console.warn('[App] social reload after sync failed', e);
+    }
+    try {
+      if (typeof UI !== 'undefined' && UI.refreshSelfProfileFromServer) {
+        await UI.refreshSelfProfileFromServer({ force: true });
+      }
+      if (typeof UI !== 'undefined' && UI.renderSelfStatus) UI.renderSelfStatus();
+      if (typeof UI !== 'undefined' && UI.setSelfNameAndHandle) UI.setSelfNameAndHandle();
+    } catch (e) {
+      console.warn('[App] profile refresh after sync failed', e);
+    }
+    try {
+      if (typeof Rooms !== 'undefined' && Rooms.showChannelDirectory) {
+        const dirModal = document.getElementById('channel-directory-modal');
+        if (dirModal && !dirModal.classList.contains('hidden')) {
+          await Rooms.showChannelDirectory();
+        }
+      }
+    } catch (e) {
+      console.warn('[App] directory reload after sync failed', e);
+    }
+    try {
+      if (typeof loadChannelMembers === 'function' && State.currentRoom && State.currentRoomType !== 'dm') {
+        await loadChannelMembers(State.currentRoom);
+      }
+    } catch (e) {
+      console.warn('[App] members reload after sync failed', e);
+    }
+    // Reload chat history for the currently-open room so users immediately
+    // see federated messages backfilled by the sync export. Without this
+    // the chat keeps the pre-switch (empty) view until the user manually
+    // switches rooms.
+    try {
+      const cur = State.currentRoom;
+      if (cur && typeof Rooms !== 'undefined' && Rooms.switchToRoom) {
+        await Rooms.switchToRoom(cur, State.currentRoomType || 'public');
+      }
+    } catch (e) {
+      console.warn('[App] room history reload after sync failed', e);
     }
     try {
       const joined = (State.rooms || []).filter((r) => r.joined);
@@ -1430,11 +1523,19 @@ const App = {
     const pruned = Number(payload?.rooms_pruned || 0);
     const dms = Number(payload?.dm_linked || 0);
     const posts = Number(payload?.social_posts_imported || 0);
+    const msgs = Number(payload?.history_messages_applied || 0);
+    const dmMsgs = Number(payload?.dm_history_messages_applied || 0);
+    const friendsN = Number(payload?.friends_linked || 0);
+    const membersN = Number(payload?.members_snapshots_applied || 0);
     const parts = [];
     if (joined > 0) parts.push(`${joined} channels`);
     if (pruned > 0) parts.push(`${pruned} removed`);
     if (dms > 0) parts.push(`${dms} DMs`);
+    if (friendsN > 0) parts.push(`${friendsN} friends`);
+    if (membersN > 0) parts.push(`${membersN} member lists`);
     if (posts > 0) parts.push(`${posts} posts`);
+    if (msgs > 0) parts.push(`${msgs} messages`);
+    if (dmMsgs > 0) parts.push(`${dmMsgs} DM messages`);
     if (parts.length && typeof UI !== 'undefined' && UI.showToast) {
       UI.showToast(`Federation sync complete — ${parts.join(', ')}`, 'success', 4500);
     } else if (!payload?.error && typeof UI !== 'undefined' && UI.showToast) {

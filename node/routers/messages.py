@@ -239,6 +239,7 @@ async def send_message(request: Request, room_name: str, body: SendMessageReques
             media_blur=int(body.media_blur or 0),
             view_once=int(body.view_once or 0),
             created_at=datetime.utcnow().isoformat() + "Z",
+            origin_message_id=msg_id,
         )
     except Exception:
         pass
@@ -345,6 +346,24 @@ async def edit_message(msg_id: int, body: EditRequest,
                     pass
     except Exception:
         pass
+    # Federate content edits so other nodes update their cached copy. We
+    # only emit when content actually changed; media-blur is local UX only.
+    if room_name and body.content is not None:
+        try:
+            from routers.federation import enqueue_server_event
+            enqueue_server_event(
+                "message.edited",
+                {
+                    "room_name": room_name,
+                    "origin_message_id": str(msg_id),
+                    "content": str(body.content or ""),
+                    "actor_nickname": str(current_user.get("nickname") or ""),
+                    "actor_global_user_id": str(current_user.get("global_user_id") or ""),
+                    "edited_at": datetime.utcnow().isoformat() + "Z",
+                },
+            )
+        except Exception:
+            pass
     return {"ok": True}
 
 
@@ -375,6 +394,19 @@ async def delete_message(msg_id: int, current_user: dict = Depends(get_current_u
         try:
             import bridge_outbound
             bridge_outbound.forward_user_delete(room_name, msg_id)
+        except Exception:
+            pass
+        # Federate the delete so peer nodes mirror the tombstone. We
+        # broadcast `origin_message_id = local msg_id` because peers
+        # already index incoming messages by (origin_server_id, origin_message_id).
+        try:
+            from routers.federation import enqueue_room_message_deleted
+            enqueue_room_message_deleted(
+                room_name=room_name,
+                origin_message_id=msg_id,
+                actor_global_user_id=str(current_user.get("global_user_id") or ""),
+                actor_nickname=str(current_user.get("nickname") or ""),
+            )
         except Exception:
             pass
     return {"ok": True}

@@ -670,6 +670,7 @@ async def websocket_endpoint(
                             media_blur=media_blur,
                             view_once=view_once,
                             created_at=payload["created_at"],
+                            origin_message_id=msg_id,
                         )
                     except Exception:
                         logger.exception("federation: failed to enqueue room message")
@@ -1055,6 +1056,7 @@ async def websocket_endpoint(
                     })
                     continue
                 callee_user = db.get_user_by_id(to_id) or {}
+                callee_home_sid = ""
                 try:
                     import federation_calls as _fc
                     if _fc.is_remote_peer(callee_user):
@@ -1072,6 +1074,7 @@ async def websocket_endpoint(
                         ident = db.get_or_create_local_server_identity() or {}
                         local_sid = str(ident.get("server_id") or "").strip()
                         db.map_federation_call(gid, local_sid, call_id_db, "caller")
+                        callee_home_sid = _fc.callee_home_server(callee_user)
                         _fc.enqueue_call_offer(
                             user,
                             callee_user,
@@ -1086,11 +1089,23 @@ async def websocket_endpoint(
                             "call_id": call_id_db,
                             "global_call_id": gid,
                             "federated": True,
+                            # Surface the callee's home so the caller's
+                            # createPC merges that node's TURN bundle.
+                            "peer_home_server_id": callee_home_sid,
+                            "callee_home_server_id": callee_home_sid,
                         })
                         continue
                 except Exception:
                     logger.exception("federated call_offer routing failed")
                 call_id_db = db.create_call(user["id"], to_id, call_type)
+                # Local-only call: peer home == our own server_id. The client
+                # still passes this through buildIceServers but the server
+                # path returns the local config.
+                try:
+                    _ident_local = db.get_or_create_local_server_identity() or {}
+                    _local_sid = str(_ident_local.get("server_id") or "").strip()
+                except Exception:
+                    _local_sid = ""
                 payload_offer = {
                     "type": "call_offer",
                     "from_id": user["id"],
@@ -1101,6 +1116,7 @@ async def websocket_endpoint(
                     "sdp": data.get("sdp"),
                     # Track E: signed DTLS fingerprint envelope (opaque).
                     "fp_sig": data.get("fp_sig") or "",
+                    "peer_home_server_id": _local_sid,
                 }
                 db.save_pending_call_offer(
                     call_id_db,
@@ -1114,10 +1130,13 @@ async def websocket_endpoint(
                 )
                 delivered = await manager.send_to_user(to_id, payload_offer)
                 # Tell caller their call_id so call_end can reference it even
-                # if the callee never answers.
+                # if the callee never answers. Pin the callee's home so any
+                # ICE-restart on the caller side keeps the right TURN bundle.
                 await manager.send_personal(websocket, {
                     "type": "call_created",
                     "call_id": call_id_db,
+                    "peer_home_server_id": _local_sid,
+                    "callee_home_server_id": _local_sid,
                 })
                 call_label = "📹 Video" if call_type == "video" else "📞 Voice"
                 # Always fire a *high-priority* call push, even if the user appears
@@ -1189,6 +1208,11 @@ async def websocket_endpoint(
                     db.update_call_status(call_id, "active",
                                           started_at=datetime.utcnow().isoformat())
                     db.delete_pending_call_offer(call_id)
+                try:
+                    _ident_local = db.get_or_create_local_server_identity() or {}
+                    _local_sid = str(_ident_local.get("server_id") or "").strip()
+                except Exception:
+                    _local_sid = ""
                 answer_payload = {
                     "type": "call_answer",
                     "from_id": user["id"],
@@ -1198,6 +1222,10 @@ async def websocket_endpoint(
                     # Track E: callee's signed DTLS fingerprint envelope.
                     "fp_sig": data.get("fp_sig") or "",
                     "renegotiate": is_renegotiate,
+                    # Where the answerer lives — caller's createPC uses this
+                    # to pick the right peer TURN bundle on any ICE-restart.
+                    "peer_home_server_id": _local_sid,
+                    "origin_server_id": _local_sid,
                 }
                 try:
                     import federation_calls as _fc

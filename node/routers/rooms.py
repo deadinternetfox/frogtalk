@@ -1629,6 +1629,16 @@ async def join_room(room_name: str, current_user: dict = Depends(get_current_use
         })
     except Exception:
         pass
+    # Emit a (throttled) full member snapshot so peer nodes hydrate their
+    # federated roster index immediately instead of waiting for every
+    # incremental event. Only fires when this node is authoritative for
+    # the room (public + we host the owner).
+    try:
+        if str(room.get("type") or "public").lower() == "public":
+            from routers import federation as federation_mod
+            federation_mod.maybe_emit_room_members_snapshot(room_name)
+    except Exception:
+        pass
     # Private-room key handoff. The freshly-joined user has no current
     # room secret (either it's their first join or they were just
     # unbanned after a rotation). Ask the owner/a moderator to rotate
@@ -1642,10 +1652,22 @@ async def join_room(room_name: str, current_user: dict = Depends(get_current_use
 async def get_channel_members(room_name: str,
                               current_user: dict = Depends(get_current_user)):
     """Return all joined members of a channel with presence + last_seen.
-    Used by the right-hand sidebar to split online vs offline users."""
+    Used by the right-hand sidebar to split online vs offline users.
+
+    Authorization: the viewer must be able to access this room
+    (`db.user_can_access_room`). Public rooms are open to any signed-in
+    user; private rooms require membership or admin. Without this check
+    a leaked room name would expose a private channel's membership list
+    to anyone with a session.
+    """
     room = db.get_room_by_name(room_name)
     if not room:
         return JSONResponse(status_code=404, content={"error": "Room not found"})
+    if not db.user_can_access_room(
+        current_user["id"], room["name"],
+        is_admin=bool(current_user.get("is_admin")),
+    ):
+        return JSONResponse(status_code=403, content={"error": "Not authorized to view this channel's members"})
     members = db.get_channel_members(room["id"])
     try:
         online_ids = {
@@ -1656,9 +1678,25 @@ async def get_channel_members(room_name: str,
     except Exception:
         online_ids = set()
 
+    # Track which global_user_ids are already represented locally so we
+    # don't re-add them via the federated snapshot index below.
+    local_gids: set[str] = set()
     for m in members:
         uid = int(m.get("user_id") or 0)
         p = str(m.get("presence") or "").strip().lower()
+        try:
+            gid = str(m.get("global_user_id") or "").strip()
+        except Exception:
+            gid = ""
+        if not gid and uid:
+            try:
+                row = db.get_user_by_id(uid) or {}
+                gid = str(row.get("global_user_id") or "").strip()
+            except Exception:
+                gid = ""
+        m["global_user_id"] = gid
+        if gid:
+            local_gids.add(gid)
 
         # The requester is actively authenticated in this room fetch path.
         # Treat self as live to avoid a login/channel-switch race where the
@@ -1675,6 +1713,32 @@ async def get_channel_members(room_name: str,
         else:
             # Sidebar offline section should always render offline dot/color.
             m["presence"] = "offline"
+        m["remote"] = False
+
+    # Hydrate with federated snapshot rows so other nodes' members show up
+    # before incremental events arrive. Federated rows never carry live
+    # presence (we have no direct WS to them) and are clearly labelled.
+    federated: list[dict] = []
+    try:
+        for row in db.list_federation_room_members(room["name"], limit=500):
+            gid = str(row.get("global_user_id") or "").strip()
+            if not gid or gid in local_gids:
+                continue
+            federated.append({
+                "user_id": None,
+                "nickname": row.get("nickname") or "",
+                "display_name": row.get("display_name") or "",
+                "avatar": row.get("avatar") or "",
+                "global_user_id": gid,
+                "home_server_id": row.get("home_server_id") or "",
+                "role": row.get("role") or "member",
+                "is_admin": 0,
+                "presence": "offline",
+                "live_online": False,
+                "remote": True,
+            })
+    except Exception:
+        federated = []
 
     # Bots installed in this channel are surfaced in their own section
     # at the bottom of the right-hand sidebar so users can see who can
@@ -1691,7 +1755,14 @@ async def get_channel_members(room_name: str,
         "avatar": b.get("avatar") or "",
         "description": b.get("description") or "",
     } for b in bots if b.get("name")]
-    return {"members": members, "bots": bots}
+    return {
+        "members": members + federated,
+        "bots": bots,
+        "federation": {
+            "local_count": len(members),
+            "remote_count": len(federated),
+        },
+    }
 
 
 @router.get("/{room_name}/voice-participants")
@@ -1727,6 +1798,12 @@ async def leave_room(room_name: str, current_user: dict = Depends(get_current_us
                 "nickname": current_user["nickname"],
             },
         })
+    except Exception:
+        pass
+    try:
+        if str(room.get("type") or "public").lower() == "public":
+            from routers import federation as federation_mod
+            federation_mod.maybe_emit_room_members_snapshot(room_name)
     except Exception:
         pass
     # Determine what happened so the client can react accordingly
