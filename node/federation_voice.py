@@ -373,11 +373,20 @@ async def apply_voice_event(event: dict) -> None:
 
 
 def _bind_actor_origin(gid: str, origin: str) -> bool:
-    """True when the gid's known home matches origin or gid is unknown."""
-    home = db.resolve_global_user_home_server_id(gid)
-    if not home:
+    """True when origin may assert voice state for ``gid``.
+
+    Account home may differ from the node the user is connected to (travel).
+    Accept any enabled federation peer as relay origin, same as ``call.*``.
+    """
+    from federation_calls import _relay_origin_allowed
+
+    oid = str(origin or "").strip()
+    if not oid:
+        return False
+    home = db.resolve_global_user_home_server_id(str(gid or "").strip())
+    if not home or home == oid:
         return True
-    return home == origin
+    return _relay_origin_allowed(oid)
 
 
 async def _apply_voice_join(
@@ -458,7 +467,19 @@ async def _apply_voice_leave(payload, origin, session_id, room_name, _fed_global
 
 
 def _combined_participants(room_name: str, voice_manager) -> list:
-    local = voice_manager.participants(room_name)
+    local: list[dict] = []
+    for p in voice_manager.participants(room_name):
+        uid = int(p.get("user_id") or 0)
+        gid = ""
+        if uid:
+            u = db.get_user_by_id(uid) or {}
+            gid = str(u.get("global_user_id") or "").strip()
+        local.append({
+            "user_id": uid,
+            "nickname": p.get("nickname") or "",
+            "avatar": p.get("avatar") or "",
+            "global_user_id": gid,
+        })
     remote = federated_voice_registry.remotes_for_room(room_name)
     return local + remote
 

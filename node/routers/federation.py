@@ -166,7 +166,18 @@ def enqueue_dm_message_created(
 
     Includes ``global_user_id`` for both parties so receivers can match
     federated accounts even when nicknames differ between nodes.
+
+    Uses per-peer outbox rows (same routing as federated calls) so a
+    single successful push to one mirror does not mark the event sent
+    before slower peers (e.g. Tor) receive it.
     """
+    import federation_dms as fed_dm
+
+    if not fed_dm.should_federate_dm(sender, peer):
+        return {"ok": True, "skipped": "peer_online_local"}
+    targets = fed_dm.dm_message_target_servers(peer)
+    if not targets:
+        return {"ok": False, "error": "no_dm_route"}
     ts = created_at or (datetime.utcnow().isoformat() + "Z")
     return enqueue_server_event(
         "dm.message.created",
@@ -185,6 +196,7 @@ def enqueue_dm_message_created(
             "view_once": int(view_once or 0),
             "created_at": ts,
         },
+        target_server_ids=targets,
     )
 
 
@@ -981,6 +993,14 @@ def _server_advertises_onion_only(server: dict) -> bool:
     return transport == "onion"
 
 
+def _select_peer_push_target(server: dict) -> str:
+    """Outbound federation push URL — prefer clearnet inbox over Tor."""
+    base = _normalize_base_url(str((server or {}).get("base_url") or ""))
+    if base:
+        return base
+    return _select_peer_target(server)
+
+
 def _public_server_target(server: dict) -> str:
     onion_url = _normalize_base_url(str(server.get("onion_url") or ""))
     base_url = _normalize_base_url(str(server.get("base_url") or ""))
@@ -1512,11 +1532,22 @@ async def authenticate_federation_request(
         # In strict 'signed' mode, never fall back to bearer.
         if mode == "signed":
             return False, peer_id, reason or "signature_required"
-        # In 'dual', if the request DID try to sign (peer_id provided)
-        # but the signature was bad, refuse outright instead of
-        # silently downgrading to bearer — otherwise a malformed signed
-        # request would be ambiguous and could mask attacks.
-        if peer_id and reason and reason not in ("missing_headers",):
+        # In 'dual', refuse bearer fallback only when the peer clearly
+        # attempted a real signature that failed. ``unknown_peer`` means
+        # the receiver has not pinned our server_id yet — outbound pushes
+        # must still work via the shared federation token during rollout.
+        _NO_BEARER_FALLBACK = frozenset({
+            "bad_signature",
+            "bad_signature_b64",
+            "body_hash_mismatch",
+            "replay",
+            "stale_timestamp",
+            "bad_timestamp",
+            "verify_error",
+            "not_ed25519",
+            "bad_peer_pubkey",
+        })
+        if peer_id and reason and reason in _NO_BEARER_FALLBACK:
             return False, peer_id, reason
 
     # 2. Legacy bearer fallback (dual or legacy mode).
@@ -1925,6 +1956,15 @@ async def ice_config(
     peer_turn: dict = {"turn_urls": [], "turn_username": "", "turn_credential": ""}
     peer_sid = (peer_server_id or "").strip()
     if peer_sid:
+        if not db.get_federation_server_pubkey(peer_sid):
+            try:
+                row0 = db.get_federation_server_row(peer_sid)
+                if row0 and int(row0.get("enabled") or 0) == 1:
+                    target = _select_peer_target(row0)
+                    if target:
+                        _try_pin_peer_pubkey_from_status_sync(peer_sid, target)
+            except Exception:
+                pass
         row = db.get_federation_server_row(peer_sid)
         if row and int(row.get("enabled") or 0) == 1:
             raw = row.get("turn_urls_json") or "[]"
@@ -2316,6 +2356,63 @@ async def sync_official_directory(
     return result
 
 
+@router.get("/federation/signal/bundle/{global_user_id}")
+async def federation_signal_bundle_by_gid(
+    global_user_id: str,
+    x_federation_token: str | None = Header(default=None),
+):
+    """Inter-node prekey fetch for cross-node DM encryption (consumes one OTPK)."""
+    if not _fed_token_ok(x_federation_token):
+        return JSONResponse(status_code=401, content={"error": "Invalid federation auth"})
+    gid = str(global_user_id or "").strip()
+    if not gid:
+        return JSONResponse(status_code=400, content={"error": "bad_global_user_id"})
+    with db._conn() as con:
+        row = con.execute(
+            "SELECT id FROM users WHERE global_user_id=? LIMIT 1",
+            (gid,),
+        ).fetchone()
+    if not row:
+        return JSONResponse(status_code=404, content={"error": "user_not_found"})
+    uid = int(row["id"])
+    bundle = db.signal_fetch_bundle(uid)
+    if bundle is None:
+        return JSONResponse(status_code=404, content={"error": "no_bundle"})
+    from routers.signal import bundle_api_dict
+
+    return bundle_api_dict(uid, bundle)
+
+
+@router.get("/federation/signal/identity/{global_user_id}")
+async def federation_signal_identity_by_gid(
+    global_user_id: str,
+    x_federation_token: str | None = Header(default=None),
+):
+    """Inter-node identity pub fetch (does not consume OTPK)."""
+    if not _fed_token_ok(x_federation_token):
+        return JSONResponse(status_code=401, content={"error": "Invalid federation auth"})
+    gid = str(global_user_id or "").strip()
+    if not gid:
+        return JSONResponse(status_code=400, content={"error": "bad_global_user_id"})
+    with db._conn() as con:
+        row = con.execute(
+            "SELECT id FROM users WHERE global_user_id=? LIMIT 1",
+            (gid,),
+        ).fetchone()
+    if not row:
+        return JSONResponse(status_code=404, content={"error": "user_not_found"})
+    ident = db.signal_get_identity_pub(int(row["id"]))
+    if ident is None:
+        return JSONResponse(status_code=404, content={"error": "no_identity"})
+    import base64
+
+    return {
+        "user_id": int(row["id"]),
+        "global_user_id": gid,
+        "identity_pub": base64.b64encode(bytes(ident)).decode("ascii"),
+    }
+
+
 @router.get("/identity/me")
 async def identity_me(x_session_token: str | None = Header(default=None)):
     current_user = await _current_user_from_header(x_session_token)
@@ -2478,6 +2575,8 @@ def _insert_inbox_events_sync(events: list[dict]) -> tuple[int, int]:
         # Strip the transport-auth helper field before persisting so it
         # never lands in payload_json / replays.
         ev.pop("_signed_peer_id", None)
+        _maybe_tofu_pin_origin_from_event(ev)
+        ev.pop("origin_pubkey_pem", None)
 
         # ---- Time window check (replay defence, applies even without sigs) ----
         origin_time_str = str(ev.get("origin_time") or "").strip()
@@ -2606,6 +2705,7 @@ _FED_BIO_MAX = 1024
 _FED_AVATAR_MAX = 256 * 1024
 _FED_STATUS_MAX = 128
 _FED_DISPLAY_MAX = 32
+_FED_BANNER_MAX = 500_000
 _FED_GLOBAL_ID_RE = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
     re.IGNORECASE,
@@ -3034,6 +3134,29 @@ async def federation_inbox(
         else:
             rejected_rate += 1
 
+    # TOFU-pin origins before verify (status fetch often blocked on hub URLs).
+    def _prefetch_inbox_origin_keys(events: list[dict]) -> None:
+        seen: set[str] = set()
+        for ev in events:
+            if not isinstance(ev, dict):
+                continue
+            origin = str(ev.get("origin_server_id") or "").strip()
+            if not origin or origin in seen:
+                continue
+            seen.add(origin)
+            if db.get_federation_server_pubkey(origin):
+                continue
+            _maybe_tofu_pin_origin_from_event(ev)
+            if db.get_federation_server_pubkey(origin):
+                continue
+            row = db.get_federation_server_row(origin)
+            if row:
+                target = _select_peer_push_target(row)
+                if target:
+                    _try_pin_peer_pubkey_from_status_sync(origin, target)
+
+    await asyncio.to_thread(_prefetch_inbox_origin_keys, filtered)
+
     # Run all SQLite writes on a worker thread so the event loop stays
     # responsive to user requests even when peers spam events.
     accepted, rejected = await asyncio.to_thread(_insert_inbox_events_sync, filtered)
@@ -3335,10 +3458,12 @@ def _outbox_collect_targets_sync() -> tuple[str, dict[str, str], list[dict]]:
             continue
         if block_http and peer_uses_http_only_clearnet(srv):
             continue
+        if not _tor_mode_enabled() and _server_advertises_onion_only(srv):
+            continue
         peer_sid = str(srv.get("server_id") or "").strip()
         if not peer_sid or peer_sid == local_server_id:
             continue
-        target = _select_peer_target(srv)
+        target = _select_peer_push_target(srv)
         if not target:
             continue
         normalized_target = _normalize_base_url(target)
@@ -3363,8 +3488,25 @@ def _outbox_collect_targets_sync() -> tuple[str, dict[str, str], list[dict]]:
 
     if not peer_urls:
         return local_server_id, peer_urls, []
-    events = db.list_federation_outbox_events(status="pending", limit=50)
+    events = db.list_federation_outbox_events(
+        status="pending", limit=50, priority_sensitive=True,
+    )
     return local_server_id, peer_urls, events
+
+
+def _maybe_tofu_pin_origin_from_event(ev: dict) -> None:
+    """Pin origin Ed25519 key from a signed inbox envelope when status fetch fails."""
+    origin = str(ev.get("origin_server_id") or "").strip()
+    if not origin or db.get_federation_server_pubkey(origin):
+        return
+    wire_pem = crypto_fed._normalize_pubkey_pem(
+        str(ev.get("origin_pubkey_pem") or "")
+    )
+    if not wire_pem:
+        return
+    if not crypto_fed.verify_event(ev, wire_pem):
+        return
+    db.pin_federation_server_pubkey(origin, wire_pem)
 
 
 def _try_pin_peer_pubkey_from_status_sync(server_id: str, base_url: str) -> None:
@@ -3405,13 +3547,12 @@ def ensure_peer_pubkeys_pinned() -> int:
             continue
         if db.get_federation_server_pubkey(sid):
             continue
-        target = _select_peer_target(srv)
+        target = _select_peer_push_target(srv)
         if not target:
             continue
         _try_pin_peer_pubkey_from_status_sync(sid, target)
         if db.get_federation_server_pubkey(sid):
             pinned += 1
-            _log.info("federation: pinned pubkey for peer %s via %s", sid, target)
     return pinned
 
 
@@ -3476,7 +3617,22 @@ async def federation_outbox_processor() -> int:
             return None
         origin_time = str(row.get("origin_time") or "").strip()
         if not origin_time:
-            origin_time = datetime.utcnow().isoformat() + "Z"
+            origin_time = datetime.now(tz=timezone.utc).isoformat().replace("+00:00", "Z")
+        else:
+            # Pending rows can sit for hours; receivers reject >5min skew.
+            try:
+                ts = origin_time.replace("Z", "+00:00")
+                origin_dt = datetime.fromisoformat(ts)
+                if origin_dt.tzinfo is None:
+                    origin_dt = origin_dt.replace(tzinfo=timezone.utc)
+                if abs((datetime.now(tz=timezone.utc) - origin_dt).total_seconds()) > 240:
+                    origin_time = datetime.now(tz=timezone.utc).isoformat().replace(
+                        "+00:00", "Z",
+                    )
+            except Exception:
+                origin_time = datetime.now(tz=timezone.utc).isoformat().replace(
+                    "+00:00", "Z",
+                )
         envelope: dict = {
             "event_id": event_id,
             "event_type": str(row.get("event_type") or ""),
@@ -3491,7 +3647,12 @@ async def federation_outbox_processor() -> int:
             crypto_fed.sign_event(envelope)
         except Exception:
             _log.exception("federation: failed to sign outbox event %s", event_id)
-        return {
+        origin_pem = ""
+        try:
+            origin_pem = crypto_fed.get_local_public_key_pem() or ""
+        except Exception:
+            origin_pem = ""
+        wire = {
             "event_id": event_id,
             "event_type": envelope["event_type"],
             "origin_server_id": local_server_id,
@@ -3502,6 +3663,9 @@ async def federation_outbox_processor() -> int:
             ),
             "payload": payload,
         }
+        if origin_pem:
+            wire["origin_pubkey_pem"] = origin_pem
+        return wire
 
     BATCH_SIZE = 25
     batch = events[:BATCH_SIZE]
@@ -3509,9 +3673,11 @@ async def federation_outbox_processor() -> int:
     targeted_rows: dict[str, list[dict]] = {}
     for row in batch:
         tgt = str(row.get("target_server_id") or "").strip()
-        if tgt:
+        if tgt and tgt in peer_urls:
             targeted_rows.setdefault(tgt, []).append(row)
         else:
+            # Missing/unknown/onion-only targets must fan out to reachable
+            # clearnet peers; otherwise rows stay pending forever.
             broadcast_rows.append(row)
 
     base_headers = {
@@ -3556,34 +3722,49 @@ async def federation_outbox_processor() -> int:
 
         body = json.dumps({"events": envelopes}).encode("utf-8")
         headers = dict(base_headers)
-        try:
-            signed = crypto_fed.sign_request_headers(
-                "POST", "/api/federation/events/inbox", body, str(local_server_id or "")
-            )
-            headers.update(signed)
-        except Exception:
-            _log.exception("federation: outbox signed-header attach failed")
+        # Event bodies are Ed25519-signed; shared bearer authenticates the
+        # HTTP hop. Per-request signed headers require the receiver to have
+        # already pinned our server_id and broke delivery during rollout.
 
         try:
             raw = await asyncio.to_thread(
                 _fetch_url_bytes,
                 f"{base}/api/federation/events/inbox",
-                timeout_s=8.0,
+                timeout_s=25.0,
                 method="POST",
                 data=body,
                 headers=headers,
             )
+            resp: dict = {}
             try:
-                json.loads(raw.decode("utf-8", errors="replace") or "{}")
+                resp = json.loads(raw.decode("utf-8", errors="replace") or "{}")
             except Exception:
-                pass
+                resp = {}
+            accepted_n = int(resp.get("accepted") or 0)
+            if accepted_n <= 0:
+                rejected_n = int(resp.get("rejected") or 0)
+                _log.warning(
+                    "federation: outbox push peer=%s url=%s accepted=0 rejected=%s",
+                    peer_sid, base, rejected_n,
+                )
+                return [], False, False
             return deliveries, True, False
         except httpx.HTTPStatusError as e:
             status = getattr(e.response, "status_code", 0)
             return deliveries, False, status == 413
         except urllib.error.HTTPError as e:
-            return deliveries, False, getattr(e, "code", 0) == 413
-        except Exception:
+            code = int(getattr(e, "code", 0) or 0)
+            if code not in (413,):
+                _log.warning(
+                    "federation: outbox push HTTP %s peer=%s url=%s",
+                    code, peer_sid, base,
+                )
+            return deliveries, False, code == 413
+        except Exception as exc:
+            _log.warning(
+                "federation: outbox push failed peer=%s url=%s: %s",
+                peer_sid, base, exc,
+            )
             return deliveries, False, False
 
     push_jobs = []
@@ -4386,6 +4567,13 @@ async def _handle_user_event(event: dict) -> None:
     nick_in = _fed_nickname(payload.get("nickname"))
     if not nick_in:
         return
+    banner_in = ""
+    if not payload.get("banner_omitted"):
+        banner_in = _fed_clip(payload.get("banner"), _FED_BANNER_MAX)
+    custom_style_in = ""
+    if "custom_style" in payload or "custom_css" in payload:
+        raw_style = str(payload.get("custom_style") or payload.get("custom_css") or "")[:10240]
+        custom_style_in = _sanitize_inline_style(raw_style)
     db.upsert_federation_user_profile(
         global_user_id=gid,
         nickname=nick_in,
@@ -4394,6 +4582,11 @@ async def _handle_user_event(event: dict) -> None:
         bio=_fed_clip(payload.get("bio"), _FED_BIO_MAX),
         identity_pubkey=_fed_clip(payload.get("identity_pubkey"), 4096),
         origin_server_id=origin,
+        status_msg=_fed_clip(payload.get("status_msg"), _FED_STATUS_MAX),
+        mood=_fed_clip(payload.get("mood"), 100),
+        presence=str(payload.get("presence") or "offline")[:32],
+        custom_style=custom_style_in,
+        banner=banner_in,
     )
 
     # Only mirror profile fields into the local `users` table when the
@@ -4477,6 +4670,12 @@ async def _handle_user_event(event: dict) -> None:
             # column from federation \u2014 raw input only ever comes from
             # the owning user's editor on their home node.
 
+        if not payload.get("banner_omitted"):
+            banner_local = _fed_clip(payload.get("banner"), _FED_BANNER_MAX)
+            if banner_local:
+                base_sql += ", banner=?"
+                params.append(banner_local)
+
         base_sql += " WHERE id=?"
         params.append(local_user["id"])
         con.execute(base_sql, params)
@@ -4502,6 +4701,10 @@ async def _handle_user_event(event: dict) -> None:
         # the live WS patch used to wipe UI state on other devices.
         if status_msg_in:
             broadcast["status_msg"] = status_msg_in
+        if not payload.get("banner_omitted"):
+            banner_ws = _fed_clip(payload.get("banner"), _FED_BANNER_MAX)
+            if banner_ws:
+                broadcast["banner"] = banner_ws
         await manager.broadcast_all(broadcast)
     except Exception:
         pass
@@ -4655,6 +4858,9 @@ async def _handle_dm_event(event: dict) -> None:
         "type": "dm_message",
         "id": msg_id,
         "channel_id": channel_id,
+        "federated": True,
+        "origin_server_id": origin,
+        "sender_global_user_id": sender_gid or None,
         "sender_id": sender["id"],
         "sender_nick": sender["nickname"],
         "sender_display_name": sender.get("display_name"),

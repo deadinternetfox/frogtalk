@@ -5,6 +5,7 @@
 const Social = (() => {
   let _currentTab = 'feed';     // feed | explore | profile
   let _profileUser = null;       // currently viewed profile nickname
+  let _profileRefreshNext = false;
   let _profileData = null;
   let _feedCache = null;
   // Suggested-users payload cache so the feed fast-path can rebuild the
@@ -365,6 +366,7 @@ const Social = (() => {
   function _authMediaSrc(raw) {
     const src = String(raw || '');
     if (!src) return '';
+    if (/^https?:\/\//i.test(src)) return src;
     if (!src.startsWith('/api/social/posts/')) return src;
     const token = String(State?.token || '');
     if (!token) return src;
@@ -386,6 +388,15 @@ const Social = (() => {
   // against an unreliable byte-range stream.
   function _authMediaThumb(raw) {
     const src = String(raw || '');
+    if (/^https?:\/\//i.test(src)) {
+      try {
+        const u = new URL(src);
+        u.pathname = u.pathname.replace(/\/media$/, '/thumb');
+        return `${u.origin}${u.pathname}${u.search}${u.hash}`;
+      } catch {
+        return '';
+      }
+    }
     if (!src.startsWith('/api/social/posts/')) return '';
     const token = String(State?.token || '');
     try {
@@ -900,7 +911,8 @@ const Social = (() => {
     _cancelBgPrefetch();
   }
 
-  function openProfile(nickname) {
+  function openProfile(nickname, opts) {
+    _profileRefreshNext = !!(opts && typeof opts === 'object' && opts.refresh);
     // If the post-detail overlay is open (user tapped @username from
     // inside a popped-up post), close it first so we don't leave the
     // post sitting in the background while the profile renders behind
@@ -1128,9 +1140,12 @@ const Social = (() => {
     const cacheKey = String(nickname || '').toLowerCase();
     const cached = _profilePostsCache.get(cacheKey);
     if (_cacheFresh(cached)) return cached.posts;
+    const prof = _profileData || {};
+    const proxyHome = !!(prof.federated && (prof.wall_on_home || prof.home_base_url));
+    const postsQs = proxyHome ? '?proxy_home=1' : '';
     let res = null;
     for (let i = 0; i < 2; i += 1) {
-      res = await api('/api/social/profile/' + encodeURIComponent(nickname) + '/posts').catch(() => null);
+      res = await api('/api/social/profile/' + encodeURIComponent(nickname) + '/posts' + postsQs).catch(() => null);
       if (!_isProfileTabLoadCurrent(tabKey, loadToken)) return null; // tab switched mid-flight
       if (res && res.ok) break;
       if (i === 0) await new Promise(resolve => setTimeout(resolve, 180));
@@ -3272,12 +3287,31 @@ const Social = (() => {
       return _socialSyncCardHtml('progress', 'Importing from your home node', inline, false);
     }
     const err = String(st.error || '').trim();
-    if (err) {
+    const warn = String(st.sync_warning || '').trim();
+    const coreOk = (window.FtSync && FtSync.federationSyncCoreComplete)
+      ? FtSync.federationSyncCoreComplete(st)
+      : false;
+    if (err && !coreOk) {
+      const hint = (window.FtSync && FtSync.syncErrorPublicHint)
+        ? FtSync.syncErrorPublicHint(err)
+        : err.slice(0, 180);
       return _socialSyncCardHtml(
         'warn',
         'Account sync issue',
-        esc(err.slice(0, 180)),
+        esc(hint),
         true,
+      );
+    }
+    if (warn && !st.in_progress && !coreOk) {
+      const low = warn.toLowerCase();
+      if (low.includes('export_signer_pubkey_unpinned') || low.includes('export_signature_required')) {
+        return '';
+      }
+      return _socialSyncCardHtml(
+        'info',
+        'FrogSocial import note',
+        esc(warn),
+        false,
       );
     }
     if (!st.done) {
@@ -3297,7 +3331,7 @@ const Social = (() => {
       lines.push(`Backfill is partial (${imported}/${total} posts on this node).`);
     }
     if (omitted > 0) {
-      lines.push(`${omitted} encrypted post${omitted === 1 ? '' : 's'} stay on your home node until keys match on both nodes.`);
+      lines.push(`${omitted} encrypted post${omitted === 1 ? '' : 's'} need matching encryption keys — switch nodes in the same browser or re-sync from home.`);
     }
     if (skipped > 0 && !lines.length) {
       lines.push(`${skipped} post${skipped === 1 ? '' : 's'} skipped during import.`);
@@ -3743,8 +3777,10 @@ const Social = (() => {
   }
 
   // ── PROFILE ─────────────────────────────────────────────────────────────
-  async function loadProfile(nickname) {
+  async function loadProfile(nickname, opts) {
     if (!nickname) nickname = State.user?.nickname;
+    const doRefresh = !!(opts && opts.refresh) || _profileRefreshNext;
+    _profileRefreshNext = false;
     _profileUser = nickname;
     const loadUi = _beginTabLoadUi('profile', 'Opening profile', `Looking up @${nickname}…`);
     const content = document.getElementById('social-content');
@@ -3775,7 +3811,11 @@ const Social = (() => {
         _updateTabLoadUi(loadUi, 44, 'Profile loaded from cache', `@${nickname}'s data ready`);
       } else {
         _updateTabLoadUi(loadUi, 28, 'Downloading profile', `Fetching @${nickname}'s info…`);
-        const res = await api('/api/social/profile/' + encodeURIComponent(nickname) + `?v=${Date.now()}`);
+        const refreshQs = doRefresh ? '&refresh=1' : '';
+        let res = await api('/api/social/profile/' + encodeURIComponent(nickname) + `?v=${Date.now()}${refreshQs}`);
+        if (!res.ok && Number(res.status) === 404) {
+          res = await api('/api/social/profile/' + encodeURIComponent(nickname) + `?v=${Date.now()}&refresh=1`);
+        }
         if (!res.ok) {
           // Only treat a clean 404 as "user doesn't exist". Transient failures
           // (5xx / 429 / network / timeout) get a retry button instead of
@@ -3783,7 +3823,7 @@ const Social = (() => {
           const status = Number(res.status) || 0;
           const safeNick = esc(String(nickname || ''));
           if (status === 404) {
-            content.innerHTML = `<div class="social-empty">User @${safeNick} not found</div>`;
+            content.innerHTML = `<div class="social-empty">User @${safeNick} not found on this node.<div style="margin-top:8px;font-size:12px;color:#8ab89a">Federated profiles need a home-node cache or directory entry.</div></div>`;
           } else {
             const label = status === 429 ? 'Slow down — too many requests'
                         : status === 401 || status === 403 ? 'You don\u2019t have access to this profile'
@@ -3876,7 +3916,9 @@ const Social = (() => {
             </div>
             <div class="sp-handle-row" style="margin-top:3px;margin-bottom:8px">
               <span class="sp-handle">@${esc(u.nickname)}</span>
+              ${u.federated ? `<span style="display:inline-flex;align-items:center;gap:4px;margin-left:8px;font-size:10px;color:#7fd6a2;background:rgba(127,214,162,.1);border:1px solid rgba(127,214,162,.28);padding:2px 8px;border-radius:8px;vertical-align:middle">🌐 Federated${u.home_base_url ? ' · ' + esc(String(u.home_base_url).replace(/^https?:\\/\\//, '')) : ''}</span>` : ''}
             </div>
+            ${u.federated && u.home_unreachable ? `<div style="font-size:11px;color:#f6d27a;margin:-4px 0 8px;line-height:1.4">Home node unreachable — showing cached profile. <button type="button" class="sp-action-btn secondary" style="padding:4px 8px;font-size:11px;margin-top:6px" onclick="Social.openProfile('${esc(u.nickname)}',{refresh:true})">↻ Refresh</button></div>` : ''}
             <div class="sp-actions-row" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px">
               ${isSelf
                 ? `<button class="sp-action-btn secondary" onclick="Social.openNewPost()">+ New Post</button>
@@ -4058,9 +4100,16 @@ const Social = (() => {
 
       // Default "wall" view: all posts (text + media) the viewer may see
       if (posts.length === 0) {
+        const homeHost = _profileData?.home_base_url
+          ? String(_profileData.home_base_url).replace(/^https?:\/\//, '').replace(/\/$/, '')
+          : '';
+        const fedHint = _profileData?.federated && (_profileData?.wall_on_home || homeHost)
+          ? `<div class="se-sub" style="margin-top:8px;font-size:12px;color:#8ab89a;line-height:1.45">Posts may live on their home node${homeHost ? ' (' + esc(homeHost) + ')' : ''}. Federated wall posts also appear here after sync or live federation.</div>`
+          : '';
         container.innerHTML = `<div class="social-empty social-empty--pad">
           <div class="se-icon">📝</div>
           <div class="se-sub">Nothing on the wall yet</div>
+          ${fedHint}
         </div>`;
         return;
       }
@@ -10155,6 +10204,18 @@ const Social = (() => {
     // Refresh inline avatars/nicknames in the Suggested-for-you bar and
     // any other rendered profile references when a user updates their
     // profile picture or nickname.
+    refreshProfileBanner(nickname, banner) {
+      try {
+        const nick = String(nickname || '').trim();
+        if (!nick || _currentTab !== 'profile' || String(_profileUser || '').toLowerCase() !== nick.toLowerCase()) {
+          return;
+        }
+        _invalidateProfileCache(nick);
+        const el = document.querySelector('.social-profile .sp-banner');
+        if (!el || typeof UI === 'undefined' || !UI.profileBannerBackground) return;
+        el.style.background = UI.profileBannerBackground(banner);
+      } catch {}
+    },
     refreshUserProfile(userId, nickname, avatar) {
       try {
         if (avatar === undefined) return;

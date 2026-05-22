@@ -209,8 +209,157 @@ async def unfollow_user(nickname: str, current_user: dict = Depends(get_current_
     }
 
 
+from routers.auth import (  # noqa: E402
+    build_federation_profile_card,
+    hydrate_federation_profile_from_home,
+    resolve_server_base_url,
+    _fetch_home_profile_posts,
+)
+
+
+def _local_server_id() -> str:
+    try:
+        ident = db.get_or_create_local_server_identity() or {}
+        return str(ident.get("server_id") or "").strip()
+    except Exception:
+        return ""
+
+
+def _merge_federation_profile_fields(user: dict) -> dict:
+    """Overlay federation_user_profiles when local users row is thin (travel nodes)."""
+    if not user:
+        return user
+    gid = str(user.get("global_user_id") or "").strip()
+    if not gid:
+        gid = db.find_federation_profile_gid_by_nickname(str(user.get("nickname") or ""))
+    if not gid:
+        return user
+    prof = db.get_federation_user_profile_row(gid) or {}
+    if not prof:
+        return user
+    for key in (
+        "banner", "avatar", "display_name", "bio", "status_msg",
+        "mood", "presence", "custom_style",
+    ):
+        if not str(user.get(key) or "").strip() and str(prof.get(key) or "").strip():
+            user[key] = prof[key]
+    return user
+
+
+def _maybe_hydrate_federation_banner(gid: str) -> None:
+    if not gid:
+        return
+    prof = db.get_federation_user_profile_row(gid) or {}
+    if str(prof.get("banner") or "").strip():
+        return
+    try:
+        hydrate_federation_profile_from_home(gid, str(prof.get("origin_server_id") or ""))
+    except Exception:
+        pass
+
+
+def _federation_subject_meta(user: dict) -> dict:
+    gid = str(user.get("global_user_id") or "").strip()
+    if not gid:
+        gid = db.find_federation_profile_gid_by_nickname(str(user.get("nickname") or ""))
+    if not gid:
+        return {}
+    origin = str(db.get_federation_profile_origin(gid) or "").strip()
+    local_sid = _local_server_id()
+    if not origin or (local_sid and origin == local_sid):
+        return {"global_user_id": gid}
+    home_base = resolve_server_base_url(origin)
+    return {
+        "global_user_id": gid,
+        "federated": True,
+        "home_server_id": origin,
+        "home_base_url": home_base,
+        "wall_on_home": True,
+        "home_unreachable": False,
+    }
+
+
+def _resolve_social_profile_user(nickname: str, *, refresh: bool = False) -> dict | None:
+    """Local account, shadow federated user, or federation cache + home fetch."""
+    nick = str(nickname or "").strip()
+    if not nick:
+        return None
+    user = db.get_user_profile(nick)
+    if user:
+        user = _merge_federation_profile_fields(dict(user))
+        gid = str(user.get("global_user_id") or "").strip()
+        if gid and not str(user.get("banner") or "").strip():
+            _maybe_hydrate_federation_banner(gid)
+            user = _merge_federation_profile_fields(dict(user))
+        return user
+    card = build_federation_profile_card(nickname=nick, refresh=refresh)
+    if card.get("error"):
+        return None
+    gid = str(card.get("global_user_id") or "").strip()
+    row = db.ensure_federated_dm_local_user(
+        gid,
+        str(card.get("nickname") or nick),
+        origin_server_id=str(card.get("origin_server_id") or card.get("home_server_id") or ""),
+        display_name=str(card.get("display_name") or ""),
+        avatar=str(card.get("avatar") or ""),
+    )
+    if row:
+        user = db.get_user_profile(str(row.get("nickname") or nick)) or dict(row)
+    else:
+        user = {
+            "id": 0,
+            "nickname": str(card.get("nickname") or nick),
+            "display_name": card.get("display_name"),
+            "avatar": card.get("avatar"),
+            "banner": card.get("banner"),
+            "bio": card.get("bio", ""),
+            "status_msg": card.get("status_msg", ""),
+            "mood": card.get("mood", ""),
+            "presence": card.get("presence", "offline"),
+            "custom_style": card.get("custom_style", ""),
+            "global_user_id": gid,
+            "profile_public": True,
+        }
+    user = _merge_federation_profile_fields(dict(user))
+    for key in (
+        "banner", "avatar", "display_name", "bio", "status_msg",
+        "mood", "presence", "custom_style",
+    ):
+        if str(card.get(key) or "").strip() and not str(user.get(key) or "").strip():
+            user[key] = card[key]
+    if gid and not str(user.get("banner") or "").strip():
+        _maybe_hydrate_federation_banner(gid)
+        user = _merge_federation_profile_fields(dict(user))
+    user["_federation_card"] = card
+    return user
+
+
+def _attach_federation_profile_flags(out: dict, user: dict) -> dict:
+    u = dict(user or {})
+    card = u.pop("_federation_card", None)
+    meta = _federation_subject_meta(u)
+    if card:
+        out["federated"] = True
+        out["global_user_id"] = str(card.get("global_user_id") or meta.get("global_user_id") or "")
+        out["home_server_id"] = str(card.get("home_server_id") or meta.get("home_server_id") or "")
+        out["home_base_url"] = str(card.get("home_base_url") or meta.get("home_base_url") or "")
+        out["wall_on_home"] = not bool(card.get("wall_available"))
+        out["home_unreachable"] = bool(card.get("home_unreachable"))
+        out["profile_source"] = str(card.get("source") or "cache")
+    elif meta.get("federated"):
+        out.update(meta)
+        out["profile_source"] = "cache"
+    if card and not str(out.get("banner") or "").strip() and str(card.get("banner") or "").strip():
+        out["banner"] = card["banner"]
+    return out
+
+
 @router.get("/profile/{nickname}")
-async def social_profile(nickname: str, current_user: dict = Depends(get_current_user)):
+async def social_profile(
+    nickname: str,
+    refresh: int = Query(0),
+    current_user: dict = Depends(get_current_user),
+):
     """Full social profile with stats.
 
     Hot path: hit on every Frog Social profile open. Bundles ~10 sequential
@@ -222,22 +371,24 @@ async def social_profile(nickname: str, current_user: dict = Depends(get_current
     that hit the same profile collapse to one DB hit instead of N.
     """
     viewer_id = current_user["id"]
-    _coalesce_key = f"profile:{viewer_id}:{nickname}"
+    do_refresh = bool(int(refresh or 0))
+    _coalesce_key = f"profile:{viewer_id}:{nickname}:{'r' if do_refresh else 'n'}"
 
     def _build():
-        user = db.get_user_profile(nickname)
+        user = _resolve_social_profile_user(nickname, refresh=do_refresh)
         if not user:
             return None
-        uid = user["id"]
-        is_self = viewer_id == uid
+        uid = int(user.get("id") or 0)
+        is_self = uid > 0 and viewer_id == uid
         profile_public = bool(user.get("profile_public", 1))
-        is_friend = is_self or db.are_friends(viewer_id, uid)
+        is_friend = is_self or (uid > 0 and db.are_friends(viewer_id, uid))
         # Private profile to a non-friend viewer: emit minimal payload.
-        if not profile_public and not is_self and not is_friend:
-            return {
+        if uid > 0 and not profile_public and not is_self and not is_friend:
+            out = {
                 "id": uid,
                 "nickname": user["nickname"],
                 "avatar": user.get("avatar"),
+                "banner": user.get("banner"),
                 "is_self": False,
                 "profile_public": False,
                 "private": True,
@@ -245,8 +396,9 @@ async def social_profile(nickname: str, current_user: dict = Depends(get_current
                 "is_following": False,
                 "is_friend": False,
             }
+            return _attach_federation_profile_flags(out, dict(user))
         out = {
-            "id": uid,
+            "id": uid or None,
             "nickname": user["nickname"],
             "display_name": user.get("display_name"),
             "avatar": user.get("avatar"),
@@ -262,19 +414,19 @@ async def social_profile(nickname: str, current_user: dict = Depends(get_current
             "is_admin": bool(user.get("is_admin")),
             "profile_public": profile_public,
             "private": False,
-            "post_count": db.get_post_count(uid),
-            "follower_count": db.get_follower_count(uid),
-            "following_count": db.get_following_count(uid),
-            "is_following": db.is_following(viewer_id, uid),
+            "post_count": db.get_post_count(uid) if uid > 0 else 0,
+            "follower_count": db.get_follower_count(uid) if uid > 0 else 0,
+            "following_count": db.get_following_count(uid) if uid > 0 else 0,
+            "is_following": db.is_following(viewer_id, uid) if uid > 0 else False,
             "is_friend": is_friend,
-            "friend_status": db.friend_request_status(viewer_id, uid),
+            "friend_status": db.friend_request_status(viewer_id, uid) if uid > 0 else "none",
             "is_self": is_self,
-            "last_seen": db.get_privacy_last_seen(uid, viewer_id),
-            "story_status": db.user_active_story_status(uid, viewer_id),
+            "last_seen": db.get_privacy_last_seen(uid, viewer_id) if uid > 0 else None,
+            "story_status": db.user_active_story_status(uid, viewer_id) if uid > 0 else None,
         }
         if is_self:
             out["custom_css"] = user.get("custom_css", "")
-        return out
+        return _attach_federation_profile_flags(out, user)
 
     async def _coalesced():
         return await run_in_threadpool(_build)
@@ -309,25 +461,51 @@ async def profile_posts(
     nickname: str,
     limit: int = Query(30, le=50),
     offset: int = Query(0),
+    proxy_home: int = Query(0),
     current_user: dict = Depends(get_current_user),
 ):
     viewer_id = current_user["id"]
+    viewer_gid = str(current_user.get("global_user_id") or "").strip()
+    use_home_proxy = bool(int(proxy_home or 0))
 
     def _build():
         user = db.get_user_by_nick(nickname)
         if not user:
-            return ("missing", None)
+            resolved = _resolve_social_profile_user(nickname, refresh=False)
+            if not resolved or not int(resolved.get("id") or 0):
+                return ("missing", None)
+            user = db.get_user_by_id(int(resolved["id"])) or resolved
         if _private_blocked(user, viewer_id):
             return ("private", None)
         # Lite mode: image/video blobs are stripped at the SQL level and the
         # client fetches each one lazily through /api/social/posts/{id}/media.
         # Drops a 30-image wall response from MBs of base64 to KBs of JSON.
         posts = db.get_wall_posts(user["id"], viewer_id, limit, offset, lite=True)
-        rmap = db.get_post_reactions_bulk([p["id"] for p in posts])
+        if (use_home_proxy or not posts) and offset == 0:
+            gid = str(user.get("global_user_id") or "").strip()
+            if not gid:
+                gid = db.find_federation_profile_gid_by_nickname(nickname)
+            origin = str(db.get_federation_profile_origin(gid) or "").strip() if gid else ""
+            local_sid = _local_server_id()
+            if gid and origin and local_sid and origin != local_sid:
+                remote = _fetch_home_profile_posts(
+                    gid,
+                    origin,
+                    limit=limit,
+                    offset=offset,
+                    viewer_global_user_id=viewer_gid,
+                )
+                if remote:
+                    posts = remote
+        rmap = db.get_post_reactions_bulk([p["id"] for p in posts if int(p.get("id") or 0) > 0])
         for p in posts:
             p["reactions"] = rmap.get(p["id"], [])
             if p.get("has_media") and not p.get("media_data"):
-                p["media_data"] = f"/api/social/posts/{p['id']}/media"
+                md = str(p.get("media_data") or "")
+                if md.startswith("http://") or md.startswith("https://"):
+                    pass
+                else:
+                    p["media_data"] = f"/api/social/posts/{p['id']}/media"
         return ("ok", posts)
 
     status, posts = await run_in_threadpool(_build)

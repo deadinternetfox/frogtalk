@@ -150,6 +150,9 @@ const _voiceOutboundQueue = [];
 // the callee's local ICE candidates are lost forever — producing the
 // "connected but stuck on Connecting…" deadlock.
 const _outboundCallQueue = [];
+// ICE gathered before the server assigns call_id (call_created) is dropped
+// server-side — buffer until we have ids, then flush.
+const _preCallIdIceQueue = [];
 function _wsLooksOpen() {
   try { return (typeof WS !== 'undefined' && typeof WS.isOpen === 'function') ? WS.isOpen() : true; }
   catch { return true; }
@@ -169,6 +172,25 @@ function _flushOutboundCallQueue() {
   while (_outboundCallQueue.length) {
     const msg = _outboundCallQueue.shift();
     try { wsSend(msg); } catch { /* dropped: peer can recover via ICE-restart */ }
+  }
+}
+function _queueIceUntilCallId(candidate) {
+  if (!candidate || !_callPeerNick) return;
+  _preCallIdIceQueue.push({
+    type: 'ice_candidate',
+    to_nickname: _callPeerNick,
+    to_id: _callPeerUID || undefined,
+    candidate: JSON.stringify(candidate),
+  });
+  if (_preCallIdIceQueue.length > 64) _preCallIdIceQueue.splice(0, _preCallIdIceQueue.length - 64);
+}
+function _flushPreCallIdIce() {
+  if (!_callId || !_preCallIdIceQueue.length) return;
+  while (_preCallIdIceQueue.length) {
+    const msg = _preCallIdIceQueue.shift();
+    msg.call_id = _callId;
+    if (_callGlobalId) msg.global_call_id = _callGlobalId;
+    _sendCallSignal(msg);
   }
 }
 function _sendVoiceSignal(payload) {
@@ -333,7 +355,9 @@ function _extractDtlsFp(sdp) {
 async function _signCallFp(callId, peerUserId, sdp) {
   try {
     if (!window.Signal || !Signal.isReady?.()) return '';
-    if (!callId || !peerUserId) return '';
+    if (!peerUserId) return '';
+    // Initial call_offer uses call_id=0 as a sentinel — still sign the SDP.
+    if (callId === undefined || callId === null || callId === '') return '';
     const fp = _extractDtlsFp(sdp);
     if (!fp) return '';
     return await Signal.signCallFingerprint({
@@ -870,16 +894,19 @@ async function handleCallCreated (data) {
   const peerHome = String(data.peer_home_server_id || data.callee_home_server_id || '');
   if (peerHome) _peerHomeServerId = peerHome;
   if (data.global_call_id) _callGlobalId = data.global_call_id;
-  if (peerHome && _pc) {
+  if (peerHome) {
     try {
       const ice = await buildIceServers(_peerHomeServerId);
-      const pol = (_pc.getConfiguration && _pc.getConfiguration())?.iceTransportPolicy;
-      _pc.setConfiguration({ iceServers: ice, iceTransportPolicy: pol || 'all' });
+      const pc = _pc;
+      if (!pc || typeof pc.setConfiguration !== 'function') return;
+      const pol = pc.getConfiguration?.()?.iceTransportPolicy;
+      pc.setConfiguration({ iceServers: ice, iceTransportPolicy: pol || 'all' });
     } catch (e) { console.warn('refresh ICE after call_created failed', e); }
   }
   if (data.federated) {
     try { toast('Calling peer on another node…', 'info'); } catch {}
   }
+  _flushPreCallIdIce();
 }
 
 /* ── Receive answer ────────────────────────────────────────────────────────── */
@@ -1042,6 +1069,12 @@ function handleCallError(data) {
     toast((_callPeerNick || 'User') + ' is busy', 'info');
   } else if (reason === 'user_not_found') {
     toast('Could not find that user', 'error');
+  } else if (reason === 'federation_route_failed' || reason === 'no_callee_route') {
+    toast('Cannot reach that user on the network — try again after refresh', 'error');
+  } else if (reason === 'blocked') {
+    toast('Call blocked', 'error');
+  } else if (reason === 'not_friends') {
+    toast('You must be friends to call across nodes', 'error');
   } else if (reason === 'tampering') {
     toast('Call blocked: signalling verification failed', 'error');
   } else {
@@ -1194,6 +1227,7 @@ function resetCall () {
     clearTimeout(_pendingAnswerRetryTimer); _pendingAnswerRetryTimer = null;
     _pendingAnswerSend = null;
     _pendingIceQueue.length = 0;
+    _preCallIdIceQueue.length = 0;
     _outboundCallQueue.length = 0;
     _voiceOutboundQueue.length = 0;
     _remoteDescApplied = false;
@@ -1238,16 +1272,19 @@ async function createPC () {
   const pc = new RTCPeerConnection({ iceServers: ice });
 
   pc.onicecandidate = e => {
-    if (e.candidate && _callPeerNick) {
-      _sendCallSignal({
-        type: 'ice_candidate',
-        to_nickname: _callPeerNick,
-        to_id: _callPeerUID || undefined,
-        call_id: _callId || undefined,
-        global_call_id: _callGlobalId || undefined,
-        candidate: JSON.stringify(e.candidate),
-      });
+    if (!e.candidate || !_callPeerNick) return;
+    if (!_callId) {
+      _queueIceUntilCallId(e.candidate);
+      return;
     }
+    _sendCallSignal({
+      type: 'ice_candidate',
+      to_nickname: _callPeerNick,
+      to_id: _callPeerUID || undefined,
+      call_id: _callId,
+      global_call_id: _callGlobalId || undefined,
+      candidate: JSON.stringify(e.candidate),
+    });
   };
 
   pc.ontrack = e => {

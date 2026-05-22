@@ -293,10 +293,10 @@
 
   async function _fetchPeerBundle(peerUserId) {
     const apiFetch = window.apiFetch || ((u) => fetch(u, { credentials: 'include' }));
-    const res = await apiFetch(`/api/signal/bundle/${encodeURIComponent(peerUserId)}`);
+    const path = `/api/signal/bundle/${encodeURIComponent(peerUserId)}`;
+    const res = await apiFetch(path);
     if (!res.ok) throw new Error('peer bundle fetch failed: ' + res.status);
-    const data = await res.json();
-    return data;
+    return res.json();
   }
 
   // Lightweight peer identity_pub fetch — does NOT consume an OTPK.
@@ -307,7 +307,8 @@
   const _PEER_IDENT_TTL_MS = 60 * 1000; // 60s — short enough to catch a
                                         // recent peer reset, long
                                         // enough not to spam the API.
-  async function _fetchPeerIdentityPub(peerUserId, { noCache = false } = {}) {
+  async function _fetchPeerIdentityPub(peerUserId, { noCache = false, peerHomeServerId = '' } = {}) {
+    del peerHomeServerId;
     const key = String(peerUserId);
     const now = Date.now();
     if (!noCache) {
@@ -315,8 +316,9 @@
       if (hit && (now - hit.ts) < _PEER_IDENT_TTL_MS) return hit.b64;
     }
     const apiFetch = window.apiFetch || ((u) => fetch(u, { credentials: 'include' }));
+    const path = `/api/signal/identity/${encodeURIComponent(peerUserId)}`;
     try {
-      const res = await apiFetch(`/api/signal/identity/${encodeURIComponent(key)}`);
+      const res = await apiFetch(path);
       if (!res.ok) return null;
       const data = await res.json();
       const b64 = data && typeof data.identity_pub === 'string' ? data.identity_pub : null;
@@ -344,7 +346,37 @@
     return diff === 0;
   }
 
-  async function _ensureSessionWith(peerUserId) {
+  /** Normalise peer identity material to 32 raw X25519 bytes for comparison. */
+  function _identityPubBytes(buf) {
+    if (!buf) return null;
+    try {
+      const u8 = new Uint8Array(_toAb(buf));
+      if (u8.length === 33 && u8[0] === _DJB_TYPE) return u8.slice(1);
+      if (u8.length === 32) return u8;
+    } catch {}
+    return null;
+  }
+
+  function _identityB64ToBytes(b64) {
+    if (!b64) return null;
+    try {
+      const u8 = new Uint8Array(_b64ToAb(b64));
+      if (u8.length === 32) return u8;
+    } catch {}
+    return null;
+  }
+
+  function _identityBytesEqual(a, b) {
+    if (!a || !b || a.length !== 32 || b.length !== 32) return false;
+    let diff = 0;
+    for (let i = 0; i < 32; i++) diff |= a[i] ^ b[i];
+    return diff === 0;
+  }
+
+  const _identityRotateLogged = new Set();
+
+  async function _ensureSessionWith(peerUserId, opts = {}) {
+    const peerHome = String(opts.peerHomeServerId || '').trim();
     const addr = _addr(peerUserId);
     const existing = await _store.loadSession(addr.toString());
     if (existing) {
@@ -357,17 +389,21 @@
       // session away and fall through to fresh X3DH (which emits a
       // `t:'pre'` envelope that auto-resets the peer's side).
       try {
-        const serverB64 = await _fetchPeerIdentityPub(peerUserId);
+        const serverB64 = await _fetchPeerIdentityPub(peerUserId, { peerHomeServerId: peerHome });
         if (serverB64 && typeof _store.loadStoredIdentity === 'function') {
           const localBuf = await _store.loadStoredIdentity(addr.toString());
-          if (localBuf) {
-            // STORE_IDENTITIES holds the 33-byte DJB-prefixed form
-            // (libsignal stores whatever it was handed via
-            // saveIdentity). Strip the type byte before comparing.
-            const localStripped = _stripDjbType(localBuf);
-            const localB64 = _abToB64(localStripped);
-            if (!_b64Equal(localB64, serverB64)) {
-              console.warn('[Signal] peer ' + peerUserId + ' identity rotated; resetting local session');
+          const serverBytes = _identityB64ToBytes(serverB64);
+          const localBytes = localBuf ? _identityPubBytes(localBuf) : null;
+          if (serverBytes && localBytes) {
+            if (!_identityBytesEqual(serverBytes, localBytes)) {
+              const logKey = String(peerUserId);
+              if (!_identityRotateLogged.has(logKey)) {
+                _identityRotateLogged.add(logKey);
+                console.info(
+                  '[Signal] peer ' + peerUserId
+                  + ' published new encryption keys — refreshing DM session',
+                );
+              }
               await _store.removeSession(addr.toString());
               // Also clear the stored peer identity so libsignal's
               // saveIdentity treats the next X3DH as TOFU rather than
@@ -418,9 +454,9 @@
 
   // ── Encrypt / decrypt ────────────────────────────────────────────────
 
-  async function encryptDM(peerUserId, plaintext) {
+  async function encryptDM(peerUserId, plaintext, opts = {}) {
     if (!_libsignal || !_store) throw new Error('Signal not initialised');
-    await _ensureSessionWith(peerUserId);
+    await _ensureSessionWith(peerUserId, opts);
     const addr = _addr(peerUserId);
     const cipher = new _libsignal.SessionCipher(_store, addr);
     const ptBytes = new TextEncoder().encode(String(plaintext));
@@ -446,6 +482,17 @@
     return atob(String(b64 || ''));
   }
 
+  async function _clearPeerSession(peerUserId) {
+    if (!_store) return;
+    const addr = _addr(peerUserId);
+    await _store.removeSession(addr.toString());
+    try {
+      if (typeof _store.removeIdentity === 'function') {
+        await _store.removeIdentity(addr.toString());
+      }
+    } catch {}
+  }
+
   async function decryptDM(peerUserId, envelope) {
     if (!_libsignal || !_store) throw new Error('Signal not initialised');
     if (!envelope || envelope.v !== ENVELOPE_VERSION || typeof envelope.b !== 'string') {
@@ -456,7 +503,23 @@
     const binaryBody = _b64ToBinaryString(envelope.b);
     let ptBuf;
     if (envelope.t === 'pre') {
-      ptBuf = await cipher.decryptPreKeyWhisperMessage(binaryBody, 'binary');
+      // Try decrypt first — wiping a healthy inbound session before every
+      // `pre` broke the 2nd+ message in same-node chats. On Bad MAC / stale
+      // outbound half-session, clear and retry once with a fresh cipher.
+      let preCipher = new _libsignal.SessionCipher(_store, addr);
+      try {
+        ptBuf = await preCipher.decryptPreKeyWhisperMessage(binaryBody, 'binary');
+      } catch (e1) {
+        const em = String((e1 && e1.message) || e1 || '');
+        if (em.includes('Bad MAC') || em.includes('UntrustedIdentity')
+            || em.includes('Message key not found')) {
+          await _clearPeerSession(peerUserId);
+          preCipher = new _libsignal.SessionCipher(_store, addr);
+          ptBuf = await preCipher.decryptPreKeyWhisperMessage(binaryBody, 'binary');
+        } else {
+          throw e1;
+        }
+      }
     } else if (envelope.t === 'msg') {
       ptBuf = await cipher.decryptWhisperMessage(binaryBody, 'binary');
     } else {
@@ -466,9 +529,7 @@
   }
 
   async function resetSessionWith(peerUserId) {
-    if (!_store) return;
-    const addr = _addr(peerUserId);
-    await _store.removeSession(addr.toString());
+    await _clearPeerSession(peerUserId);
   }
 
   // ── Track E — signed DTLS fingerprint envelope ───────────────────────
@@ -752,9 +813,9 @@
     // session via X3DH if none exists, OR verifies the peer's
     // identity_pub against the local session and resets on drift —
     // ensuring the first ciphertext we ship is always decryptable.
-    async ensureSessionWith(peerUserId) {
+    async ensureSessionWith(peerUserId, opts = {}) {
       if (!_libsignal || !_store) throw new Error('Signal not initialised');
-      return _ensureSessionWith(peerUserId);
+      return _ensureSessionWith(peerUserId, opts);
     },
     // Track E:
     signCallFingerprint,

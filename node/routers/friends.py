@@ -141,10 +141,10 @@ async def get_profile(nickname: str, current_user: dict = Depends(get_current_us
     gid = str(out.get("global_user_id") or "").strip()
     if gid:
         try:
-            ident = db.get_or_create_local_server_identity() or {}
-            local_sid = str(ident.get("server_id") or "").strip()
-            home = db.resolve_global_user_home_server_id(gid)
-            if home and local_sid and home != local_sid:
+            from routers.signal import _peer_home_and_gid
+
+            home, _gid = _peer_home_and_gid(int(profile["id"]))
+            if home:
                 out["peer_home_server_id"] = home
         except Exception:
             pass

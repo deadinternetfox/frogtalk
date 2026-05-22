@@ -45,15 +45,17 @@ class FederatedCallsTests(unittest.TestCase):
         self.assertEqual(db.resolve_local_call_id(gid, "srv_a"), 42)
         self.assertEqual(db.resolve_local_call_id(gid), 42)
 
+    @mock.patch("federation_calls.callee_session_on_local_node", return_value=False)
     @mock.patch("federation_calls.federation_calls_enabled", return_value=True)
     @mock.patch("database.resolve_global_user_home_server_id")
     @mock.patch("database.get_or_create_local_server_identity")
-    def test_is_remote_peer(self, mock_ident, mock_home, _enabled):
+    def test_is_remote_peer(self, mock_ident, mock_home, _enabled, _local_sess):
         mock_ident.return_value = {"server_id": "local_srv"}
         mock_home.return_value = "remote_srv"
         self.assertTrue(fc.is_remote_peer({"global_user_id": "00000000-0000-4000-8000-000000000001"}))
         mock_home.return_value = "local_srv"
-        self.assertFalse(fc.is_remote_peer({"global_user_id": "00000000-0000-4000-8000-000000000001"}))
+        # Home matches this node but callee is not on our WS — still federate.
+        self.assertTrue(fc.is_remote_peer({"global_user_id": "00000000-0000-4000-8000-000000000001"}))
 
     @mock.patch("federation_calls.federation_calls_enabled", return_value=True)
     @mock.patch("federation_calls.callee_session_on_local_node", return_value=True)
@@ -128,6 +130,20 @@ class FederatedCallsTests(unittest.TestCase):
              mock.patch("federation_calls.require_friend_for_calls", return_value=False):
             self.assertIsNone(fc.can_call_user(1, 2))
 
+    def test_relay_origin_allowed_for_enabled_peer(self):
+        with mock.patch.object(db, "get_or_create_local_server_identity",
+                               return_value={"server_id": "srv_local"}), \
+             mock.patch.object(db, "get_federation_server_row",
+                               return_value={"server_id": "srv_travel", "enabled": 1}):
+            self.assertTrue(fc._relay_origin_allowed("srv_travel"))
+        with mock.patch.object(db, "get_federation_server_row", return_value=None):
+            self.assertFalse(fc._relay_origin_allowed("srv_unknown"))
+
+    @mock.patch("federation_calls._relay_origin_allowed", return_value=True)
+    @mock.patch.object(db, "resolve_global_user_home_server_id", return_value="srv_home")
+    def test_call_home_mismatch_allowed_for_travel_relay(self, _relay, _home):
+        self.assertFalse(fc._call_home_origin_mismatch("gid-a", "srv_travel"))
+
     def test_apply_call_offer_drops_forged_origin(self):
         """Caller's claimed home must equal the federation event's origin.
 
@@ -150,6 +166,7 @@ class FederatedCallsTests(unittest.TestCase):
         }
         # The caller's real home is `srv_honest`; the attacker forged origin.
         with mock.patch("federation_calls.federation_calls_enabled", return_value=True), \
+             mock.patch("federation_calls._relay_origin_allowed", return_value=False), \
              mock.patch.object(db, "resolve_global_user_home_server_id",
                                side_effect=lambda gid: "srv_honest" if gid == "caller-gid" else "srv_anywhere"), \
              mock.patch.object(db, "save_pending_call_offer") as save_mock:
@@ -157,8 +174,8 @@ class FederatedCallsTests(unittest.TestCase):
             save_mock.assert_not_called()
 
     @mock.patch("federation_calls._enqueue")
-    @mock.patch("federation_calls.callee_home_server", return_value="srv_remote")
-    def test_enqueue_call_renegotiate_sets_flag(self, _home, mock_enqueue):
+    @mock.patch("federation_calls.call_offer_target_servers", return_value=["srv_remote", "srv_b"])
+    def test_enqueue_call_renegotiate_sets_flag(self, _targets, mock_enqueue):
         mock_enqueue.return_value = {"ok": True}
         caller = {"id": 1, "global_user_id": "gid-a", "nickname": "a"}
         callee = {"id": 2, "global_user_id": "gid-b", "nickname": "b"}
@@ -174,6 +191,43 @@ class FederatedCallsTests(unittest.TestCase):
         _etype, payload, _targets = mock_enqueue.call_args[0]
         self.assertEqual(_etype, "call.offer")
         self.assertTrue(payload.get("renegotiate"))
+
+    @mock.patch("federation_calls.callee_session_on_local_node", return_value=False)
+    @mock.patch("federation_calls.federation_calls_enabled", return_value=True)
+    @mock.patch("database.list_federation_servers", return_value=[
+        {"server_id": "srv_b", "enabled": 1, "base_url": "https://peer-b.test"},
+    ])
+    @mock.patch(
+        "database.resolve_federation_push_targets_for_recipient_gids",
+        return_value=["srv_home"],
+    )
+    @mock.patch("database.get_or_create_local_server_identity", return_value={"server_id": "srv_local"})
+    def test_call_signal_target_servers_use_recipient_home(self, *_mocks):
+        targets = fc.call_signal_target_servers(
+            {"global_user_id": "gid-traveler"},
+        )
+        self.assertEqual(targets, ["srv_home"])
+
+    @mock.patch("federation_calls.callee_session_on_local_node", return_value=False)
+    @mock.patch("database.resolve_federation_push_targets_for_recipient_gids", return_value=[])
+    @mock.patch("database.list_federation_servers", return_value=[
+        {"server_id": "srv_b", "enabled": 1, "base_url": "https://peer-b.test"},
+        {"server_id": "srv_onion", "enabled": 1, "onion_url": "http://x.onion", "base_url": ""},
+    ])
+    @mock.patch("database.get_or_create_local_server_identity", return_value={"server_id": "srv_local"})
+    def test_call_signal_target_servers_clearnet_fallback_skips_onion(self, *_mocks):
+        targets = fc.call_signal_target_servers({"global_user_id": "gid-local-home"})
+        self.assertEqual(targets, ["srv_b"])
+
+    @mock.patch("federation_calls.federation_calls_enabled", return_value=True)
+    @mock.patch("federation_calls.callee_session_on_local_node", return_value=True)
+    def test_needs_federated_call_delivery_false_when_online(self, _sess, _enabled):
+        self.assertFalse(fc.needs_federated_call_delivery({"id": 1, "global_user_id": "g1"}))
+
+    @mock.patch("federation_calls.federation_calls_enabled", return_value=True)
+    @mock.patch("federation_calls.callee_session_on_local_node", return_value=False)
+    def test_needs_federated_call_delivery_true_when_offline(self, _sess, _enabled):
+        self.assertTrue(fc.needs_federated_call_delivery({"id": 1, "global_user_id": "g1"}))
 
     def test_callee_home_server_routes_to_remote_peer(self):
         """``callee_home_server`` returns the remote sid for federated peers."""

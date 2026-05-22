@@ -919,7 +919,7 @@ async def websocket_endpoint(
                     try:
                         from routers import federation as federation_mod
                         peer = db.get_user_by_id(other_id) or {}
-                        federation_mod.enqueue_dm_message_created(
+                        dm_enq = federation_mod.enqueue_dm_message_created(
                             user,
                             peer,
                             channel_id=channel_id,
@@ -932,6 +932,13 @@ async def websocket_endpoint(
                             view_once=int(data.get("view_once") or 0),
                             created_at=payload["created_at"],
                         )
+                        if isinstance(dm_enq, dict) and not dm_enq.get("ok") and dm_enq.get("error"):
+                            logger.warning(
+                                "federation: DM enqueue failed (%s) ch=%s peer=%s",
+                                dm_enq.get("error"),
+                                channel_id,
+                                other_id,
+                            )
                     except Exception:
                         logger.exception("federation: failed to enqueue DM message")
 
@@ -1105,7 +1112,17 @@ async def websocket_endpoint(
                         local_sid = str(ident.get("server_id") or "").strip()
                         db.map_federation_call(gid, local_sid, call_id_db, "caller")
                         callee_home_sid = _fc.callee_home_server(callee_user)
-                        _fc.enqueue_call_offer(
+                        try:
+                            from routers import auth as _auth
+
+                            _auth._ensure_export_signer_pubkey_pinned(
+                                callee_home_sid,
+                                _auth.resolve_server_base_url(callee_home_sid),
+                                user_id=int(user["id"]),
+                            )
+                        except Exception:
+                            pass
+                        enq = _fc.enqueue_call_offer(
                             user,
                             callee_user,
                             global_call_id=gid,
@@ -1114,6 +1131,13 @@ async def websocket_endpoint(
                             sdp=data.get("sdp") or "",
                             fp_sig=data.get("fp_sig") or "",
                         )
+                        if not enq.get("ok"):
+                            await manager.send_personal(websocket, {
+                                "type": "call_error",
+                                "reason": str(enq.get("error") or "federation_route_failed"),
+                                "to_nickname": callee_user.get("nickname"),
+                            })
+                            continue
                         await manager.send_personal(websocket, {
                             "type": "call_created",
                             "call_id": call_id_db,
@@ -1127,7 +1151,18 @@ async def websocket_endpoint(
                         continue
                 except Exception:
                     logger.exception("federated call_offer routing failed")
-                call_id_db = db.create_call(user["id"], to_id, call_type)
+                call_gid_local = None
+                try:
+                    import federation_calls as _fc
+                    if _fc.federation_calls_enabled() and str(
+                        callee_user.get("global_user_id") or ""
+                    ).strip():
+                        call_gid_local = _fc.new_global_call_id()
+                except Exception:
+                    call_gid_local = None
+                call_id_db = db.create_call(
+                    user["id"], to_id, call_type, global_call_id=call_gid_local,
+                )
                 # Local-only call: peer home == our own server_id. The client
                 # still passes this through buildIceServers but the server
                 # path returns the local config.
@@ -1159,14 +1194,42 @@ async def websocket_endpoint(
                     fp_sig=(data.get("fp_sig") or ""),
                 )
                 delivered = await manager.send_to_user(to_id, payload_offer)
+                # Callee may be on another federation node while appearing
+                # offline here — fan-out the offer when local WS missed.
+                if not delivered and call_gid_local:
+                    try:
+                        import federation_calls as _fc
+                        ident = db.get_or_create_local_server_identity() or {}
+                        local_sid = str(ident.get("server_id") or "").strip()
+                        db.map_federation_call(call_gid_local, local_sid, call_id_db, "caller")
+                        _fc.enqueue_call_offer(
+                            user,
+                            callee_user,
+                            global_call_id=call_gid_local,
+                            local_call_id=call_id_db,
+                            call_type=call_type,
+                            sdp=data.get("sdp") or "",
+                            fp_sig=data.get("fp_sig") or "",
+                        )
+                    except Exception:
+                        logger.exception("federated call_offer fallback failed")
                 # Tell caller their call_id so call_end can reference it even
                 # if the callee never answers. Pin the callee's home so any
                 # ICE-restart on the caller side keeps the right TURN bundle.
+                callee_home_sid = _local_sid
+                try:
+                    import federation_calls as _fc
+                    if call_gid_local:
+                        callee_home_sid = _fc.callee_home_server(callee_user) or _local_sid
+                except Exception:
+                    pass
                 await manager.send_personal(websocket, {
                     "type": "call_created",
                     "call_id": call_id_db,
-                    "peer_home_server_id": _local_sid,
-                    "callee_home_server_id": _local_sid,
+                    "global_call_id": call_gid_local or "",
+                    "federated": bool(call_gid_local),
+                    "peer_home_server_id": callee_home_sid,
+                    "callee_home_server_id": callee_home_sid,
                 })
                 call_label = "📹 Video" if call_type == "video" else "📞 Voice"
                 # Always fire a *high-priority* call push, even if the user appears
@@ -1264,20 +1327,20 @@ async def websocket_endpoint(
                             "SELECT global_call_id, caller_id, callee_id FROM calls WHERE id=?",
                             (call_id,),
                         ).fetchone()
-                    if crow and crow["global_call_id"]:
-                        peer = db.get_user_by_id(to_id) or {}
-                        if _fc.user_home_is_remote(peer):
-                            caller_u = db.get_user_by_id(int(crow["caller_id"])) or {}
-                            caller_gid = str(caller_u.get("global_user_id") or "")
-                            if caller_gid:
-                                _fc.enqueue_call_answer(
-                                    user,
-                                    caller_gid,
-                                    global_call_id=str(crow["global_call_id"]),
-                                    sdp=data.get("sdp") or "",
-                                    fp_sig=data.get("fp_sig") or "",
-                                    renegotiate=is_renegotiate,
-                                )
+                        if crow and crow["global_call_id"]:
+                            peer = db.get_user_by_id(to_id) or {}
+                            if _fc.needs_federated_call_delivery(peer):
+                                caller_u = db.get_user_by_id(int(crow["caller_id"])) or {}
+                                caller_gid = str(caller_u.get("global_user_id") or "")
+                                if caller_gid:
+                                    _fc.enqueue_call_answer(
+                                        user,
+                                        caller_gid,
+                                        global_call_id=str(crow["global_call_id"]),
+                                        sdp=data.get("sdp") or "",
+                                        fp_sig=data.get("fp_sig") or "",
+                                        renegotiate=is_renegotiate,
+                                    )
                 except Exception:
                     logger.exception("federated call_answer enqueue failed")
                 delivered_ans = await manager.send_to_user(to_id, answer_payload)
@@ -1341,7 +1404,7 @@ async def websocket_endpoint(
                 try:
                     import federation_calls as _fc
                     peer = db.get_user_by_id(to_id) or {}
-                    if call_row and call_row["global_call_id"] and _fc.user_home_is_remote(peer):
+                    if call_row and call_row["global_call_id"] and _fc.needs_federated_call_delivery(peer):
                         caller_gid = str(peer.get("global_user_id") or "")
                         if caller_gid:
                             _fc.enqueue_call_reject(
@@ -1453,7 +1516,7 @@ async def websocket_endpoint(
                     try:
                         import federation_calls as _fc
                         peer = db.get_user_by_id(to_id) or {}
-                        if call_row["global_call_id"] and _fc.user_home_is_remote(peer):
+                        if call_row["global_call_id"] and _fc.needs_federated_call_delivery(peer):
                             peer_gid = str(peer.get("global_user_id") or "")
                             if peer_gid:
                                 _fc.enqueue_call_end(
@@ -1510,7 +1573,7 @@ async def websocket_endpoint(
                             (int(data.get("call_id") or 0),),
                         ).fetchone()
                     peer = db.get_user_by_id(to_id) or {}
-                    if crow and crow["global_call_id"] and _fc.user_home_is_remote(peer):
+                    if crow and crow["global_call_id"] and _fc.needs_federated_call_delivery(peer):
                         pgid = str(peer.get("global_user_id") or "")
                         if pgid:
                             _fc.enqueue_call_ice(
@@ -1583,10 +1646,16 @@ async def websocket_endpoint(
                     remote = _fv.federated_voice_registry.remotes_for_room(room_name)
                 except Exception:
                     remote = []
-                local_parts = [
-                    {"user_id": p[0], "nickname": p[1], "avatar": p[2]}
-                    for p in (existing or [])
-                ]
+                local_parts = []
+                for p in (existing or []):
+                    uid = int(p[0])
+                    u = db.get_user_by_id(uid) or {}
+                    local_parts.append({
+                        "user_id": uid,
+                        "nickname": p[1],
+                        "avatar": p[2],
+                        "global_user_id": str(u.get("global_user_id") or ""),
+                    })
                 await manager.send_personal(websocket, {
                     "type": "voice_joined",
                     "participants": local_parts + remote,

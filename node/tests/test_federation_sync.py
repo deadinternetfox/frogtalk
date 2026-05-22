@@ -1729,6 +1729,61 @@ class FederationDirectoryJoinApiTests(unittest.TestCase):
         self.assertEqual(int(loaded.get("dj_only_queue") or 0), 1)
         self.assertEqual(int(loaded.get("slowmode") or 0), 30)
 
+    def test_sync_export_includes_room_key_hint(self):
+        import routers.auth as auth_mod
+
+        db = self.db
+        uid = int(db.create_user("hint_room_owner", "secret12"))
+        rid = int(db.create_room("hint-room", "private ch", "private", uid, "hint phrase"))
+        db.join_room(uid, rid)
+        export = auth_mod._build_sync_export_for_user(uid)
+        row = next((r for r in (export.get("rooms") or []) if r.get("name") == "hint-room"), None)
+        self.assertIsNotNone(row)
+        self.assertEqual(row.get("room_key_hint"), "hint phrase")
+
+    def test_federation_profile_updated_persists_banner(self):
+        import routers.federation as fed_mod
+
+        db = self.db
+        uid = int(db.create_user("banner_fed_user", "secret12"))
+        gid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+        with db._conn() as con:
+            con.execute("UPDATE users SET global_user_id=? WHERE id=?", (gid, uid))
+            con.commit()
+        banner = "data:image/png;base64,iVBORw0KGgo="
+        fed_mod.db.upsert_federation_user_profile(
+            gid,
+            "banner_fed_user",
+            origin_server_id="srv_test_origin",
+            banner=banner,
+        )
+        row = db.get_federation_user_profile_row(gid) or {}
+        self.assertIn("iVBORw0KGgo", str(row.get("banner") or ""))
+
+    def test_social_profile_resolves_federated_cache_without_local_account(self):
+        db = self.db
+        gid = "bbbbbbbb-cccc-dddd-eeee-ffffffffffff"
+        banner = "data:image/png;base64,AAAAfedbanner"
+        db.upsert_federation_user_profile(
+            gid,
+            "fed_only_nick",
+            origin_server_id="srv_remote_home",
+            banner=banner,
+            avatar="🐸",
+            bio="from federation cache",
+        )
+        self.assertIsNone(db.get_user_id_by_nickname("fed_only_nick"))
+        token = self._login("fed_viewer")
+        r = self.client.get(
+            "/api/social/profile/fed_only_nick",
+            headers={"X-Session-Token": token},
+        )
+        self.assertEqual(r.status_code, 200, r.text)
+        body = r.json()
+        self.assertIn("fedbanner", str(body.get("banner") or ""))
+        self.assertTrue(body.get("federated"))
+        self.assertEqual(str(body.get("global_user_id") or ""), gid)
+
 
 if __name__ == "__main__":
     unittest.main()

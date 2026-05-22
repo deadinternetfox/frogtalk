@@ -168,7 +168,14 @@ wraps, and often a re-wrap after the relationship exists on both sides. Details:
 ### Account sync (visiting another node)
 
 When you use the same account on a **foreign** node, the app can pull a bounded
-snapshot from your **home** node (`GET/POST /api/auth/federation-sync-*`): joined
+snapshot from your **home** node (`GET/POST /api/auth/federation-sync-*`). On
+**node switch in the same browser**, Device Crypto Transfer (DCT) exports the
+Signal IndexedDB state and wrapped private-room secrets before redirect, stores
+an AES-GCM blob on the source node keyed by the switch ticket, and imports on
+the destination before publishing a new identity (`device_crypto.js`,
+`/api/auth/device-crypto-blob`, `/api/auth/federation-device-crypto-pull`).
+
+Account sync still pulls: joined
 channels (including sanitized `channel_theme`, banner, about, slowmode, invite rules,
 `forwarding_disabled`, music `dj_only_queue`), DM peers (including per-thread
 disappear timer, forwarding lock, read cursor, hidden flag), follow graph, your

@@ -1846,6 +1846,13 @@ document.addEventListener('click', (e) => {
 
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
+  const fedResync = document.getElementById('modal-federation-resync-confirm');
+  if (fedResync && !fedResync.classList.contains('hidden') && _federationResyncConfirmResolve) {
+    e.preventDefault();
+    e.stopPropagation();
+    cancelFederationResyncConfirm();
+    return;
+  }
   // Close the top-most visible modal overlay
   const open = Array.from(document.querySelectorAll('.modal-overlay:not(.hidden)'));
   if (!open.length) return;
@@ -2429,6 +2436,46 @@ let _networkProbeCooldownUntil = 0;
 let _networkAutoSelectBusy = false;
 let _networkResyncBusy = false;
 let _networkResyncCooldownUntil = 0;
+let _federationResyncConfirmResolve = null;
+
+function _finishFederationResyncConfirm(ok) {
+  try { closeModal('modal-federation-resync-confirm'); } catch {}
+  const fn = _federationResyncConfirmResolve;
+  _federationResyncConfirmResolve = null;
+  if (typeof fn === 'function') fn(!!ok);
+}
+
+function cancelFederationResyncConfirm() {
+  _finishFederationResyncConfirm(false);
+}
+
+function confirmFederationResyncConfirm() {
+  _finishFederationResyncConfirm(true);
+}
+
+/** Themed confirm for “already synced — re-import?” (no window.confirm). */
+function promptFederationResyncConfirm() {
+  const el = document.getElementById('modal-federation-resync-confirm');
+  if (!el) {
+    if (typeof UI !== 'undefined' && UI.confirm) {
+      return UI.confirm({
+        title: 'Re-sync from home?',
+        message: 'Fully synced with your home node. Re-import channels, DMs, friends, and FrogSocial again? This may take a minute.',
+        confirmLabel: 'Re-sync now',
+        cancelLabel: 'Cancel',
+      });
+    }
+    return Promise.resolve(false);
+  }
+  return new Promise((resolve) => {
+    _federationResyncConfirmResolve = resolve;
+    openModal('modal-federation-resync-confirm');
+    try {
+      const go = document.getElementById('fed-resync-confirm-go');
+      if (go) go.focus();
+    } catch {}
+  });
+}
 let _networkSyncListenerBound = false;
 let _networkTabLoadSeq = 0;
 let _networkTabLoading = false;
@@ -3120,6 +3167,12 @@ function _networkSyncErrorHint(err) {
   if (low.includes('missing source') || low.includes('home not in directory')) {
     return 'Home URL unknown — open Federation settings and ensure your home server is registered.';
   }
+  if (low.includes('export_signer_pubkey_unpinned')) {
+    return 'Home node signing key was not pinned — open Settings → Network and tap Re-sync.';
+  }
+  if (low.includes('export_signature_required')) {
+    return 'Home export must be signed — check federation pubkey pinning on this node.';
+  }
   if (low.includes('export_source') || low.includes('export_gid')) {
     return 'Sync rejected — identity did not match your pinned home. Try Re-sync.';
   }
@@ -3304,9 +3357,7 @@ async function networkResyncFromHome() {
   }
   const stNow = (App.federationSyncState) ? App.federationSyncState : (window.__ftFederationSync || {});
   if (_networkSyncFullyComplete(stNow)) {
-    const ok = window.confirm(
-      'Fully synced with your home node. Re-import channels, DMs, friends, and FrogSocial again? This may take a minute.'
-    );
+    const ok = await promptFederationResyncConfirm();
     if (!ok) {
       void refreshNetworkAccountSyncPanel({ forceFetch: true });
       return;
@@ -4138,6 +4189,19 @@ async function openFederatedUserOnHomeNode(opts = {}) {
       window.name = JSON.stringify({ ft_switch_ticket: switchTicket, ts: Date.now() });
     } catch {}
   }
+  if (switchTicket && window.DeviceCrypto && State.user && State.user.id) {
+    try {
+      if (window.Signal && typeof Signal.init === 'function' && !Signal.isReady()) {
+        await Signal.init(State.user.id);
+      }
+      if (window.Signal && typeof Signal.ensureReady === 'function') {
+        await Signal.ensureReady();
+      }
+      await DeviceCrypto.exportAndUploadForSwitch(switchTicket);
+    } catch (e) {
+      console.warn('[DCT] pre-switch export failed', e);
+    }
+  }
   try {
     State.clear();
   } catch {}
@@ -4218,6 +4282,20 @@ async function connectToSelectedServer() {
         ts: Date.now(),
       });
     } catch {}
+  }
+
+  if (switchTicket && window.DeviceCrypto && State.user && State.user.id) {
+    try {
+      if (window.Signal && typeof Signal.init === 'function' && !Signal.isReady()) {
+        await Signal.init(State.user.id);
+      }
+      if (window.Signal && typeof Signal.ensureReady === 'function') {
+        await Signal.ensureReady();
+      }
+      await DeviceCrypto.exportAndUploadForSwitch(switchTicket);
+    } catch (e) {
+      console.warn('[DCT] pre-switch export failed', e);
+    }
   }
 
   try {

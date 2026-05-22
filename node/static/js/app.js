@@ -68,6 +68,7 @@ const FtSync = {
   PENDING_CALL_MAX_AGE_MS: 180000,
   PHASE_ICON: {
     fetch: '📡',
+    crypto: '🔐',
     channels: '#',
     directory: '🗂️',
     dms: '💬',
@@ -87,10 +88,40 @@ const FtSync = {
       : ((window.App && App.federationSyncState) || {});
   },
 
+  syncErrorPublicHint(err) {
+    const raw = String(err || '').trim();
+    if (!raw) return '';
+    const low = raw.toLowerCase();
+    if (low.includes('export_signer_pubkey_unpinned')) {
+      return 'Home node signing key was not pinned — open Settings → Network and tap Re-sync.';
+    }
+    if (low.includes('export_signature_required')) {
+      return 'Home export must be signed — check federation pubkey pinning on this node.';
+    }
+    if (low.includes('export_unavailable') || low.includes('connection') || low.includes('timed out')) {
+      return 'Home node unreachable — check it is online and listed in Federation.';
+    }
+    if (low.includes('missing source') || low.includes('home not in directory')) {
+      return 'Home URL unknown — open Federation settings and ensure your home server is registered.';
+    }
+    if (low.includes('export_source') || low.includes('export_gid')) {
+      return 'Sync rejected — identity did not match your pinned home. Try Re-sync.';
+    }
+    return raw.slice(0, 200);
+  },
+
+  federationSyncCoreComplete(st) {
+    const s = st || {};
+    const joined = Number(s.rooms_joined || 0);
+    const dms = Number(s.dm_linked || 0);
+    return joined > 0 || dms > 0;
+  },
+
   /** Align client UI with server-normalized sync flags (avoids stuck % overlay). */
   normalizeState(st) {
     const s = (st && typeof st === 'object') ? { ...st } : {};
-    const err = String(s.error || '').trim();
+    let err = String(s.error || '').trim();
+    const warn = String(s.sync_warning || '').trim();
     if (s.done && s.in_progress) {
       s.in_progress = false;
     }
@@ -102,6 +133,17 @@ const FtSync = {
     if (!s.in_progress && err) {
       const p = Number(s.progress_pct);
       if (!Number.isFinite(p) || p < 100) s.progress_pct = 100;
+    }
+    if (!s.in_progress && s.done && err) {
+      const low = err.toLowerCase();
+      const softSig = low.includes('export_signer_pubkey_unpinned')
+        || low.includes('export_signature_required');
+      if (softSig && (this.federationSyncCoreComplete(s) || Number(s.progress_pct) >= 100)) {
+        delete s.sync_warning;
+        s.error = '';
+        s.progress_pct = 100;
+        s.hint = 'Sync complete';
+      }
     }
     return s;
   },
@@ -204,7 +246,7 @@ try { window.FtSync = FtSync; } catch {}
 const App = {
   pendingInvite: null,  // Store invite code to process after login
   PENDING_CALL_KEY: 'ft_pending_incoming_call',
-  ASSET_RESET_VERSION: 'federation-sync-v24',
+  ASSET_RESET_VERSION: 'federation-sync-v39-federated-social-profile',
   _syncOverlayDismissed: false,
   _syncResumeStarting: false,
   easterEgg: null,
@@ -339,6 +381,37 @@ const App = {
 
   _normalizeOrigin(url) {
     return String(url || '').trim().replace(/\/$/, '').toLowerCase();
+  },
+
+  async ensureSignalReadyForDecrypt(opts = {}) {
+    if (!window.Signal || typeof Signal.ensureReady !== 'function') return false;
+    const uid = Number((State.user && State.user.id) || 0);
+    if (!uid) return false;
+    const timeoutMs = Number(opts.timeoutMs) || (opts.patient ? 20000 : 12000);
+    try {
+      return await Signal.ensureReady(uid, { timeoutMs });
+    } catch {
+      return false;
+    }
+  },
+
+  maybeShowTravelerCryptoNotice(opts = {}) {
+    if (this.isAtHomeNode()) return;
+    const switched = !!(opts.justSwitched || opts.afterSwitch);
+    try {
+      if (!switched && sessionStorage.getItem('ft_traveler_crypto_notice') === '1') return;
+      sessionStorage.setItem('ft_traveler_crypto_notice', '1');
+    } catch {}
+    const dctOk = !!window.__ftDctImported;
+    let msg = 'You are on a travel node. DMs and private channels use keys from this browser — avoid messaging from home at the same time or encryption can break.';
+    if (switched && !dctOk) {
+      msg = 'Connected on this node. Encryption keys were not restored from your previous node — old DM history may stay locked until you switch back in the same browser, or send new messages after sync.';
+    } else if (switched && dctOk) {
+      msg = 'Connected on this node. Encryption keys were restored — synced DMs and private room secrets should work here.';
+    }
+    try {
+      if (typeof UI !== 'undefined' && UI.showToast) UI.showToast(msg, switched ? 'info' : 'warning', switched ? 10000 : 8000);
+    } catch {}
   },
 
   isAtHomeNode() {
@@ -501,9 +574,14 @@ const App = {
 
   async clearAccountHomePin() {
     if (!State.token) return false;
-    const ok = window.confirm(
-      'Clear your pinned home node? Use this if this server is not your real home. You can re-pin from the Network panel afterward.'
-    );
+    const ok = (typeof UI !== 'undefined' && UI.confirm)
+      ? await UI.confirm({
+        title: 'Clear home pin?',
+        message: 'Use this if this server is not your real home. You can set your account home again under Settings → Network.',
+        confirmLabel: 'Clear pin',
+        danger: true,
+      })
+      : false;
     if (!ok) return false;
     try {
       const res = await fetch('/api/auth/clear-account-home-pin', {
@@ -798,6 +876,7 @@ const App = {
       }
       this.forceAndroidFcmResync(State.token);
       try { localStorage.setItem('ft_just_switched_node', '1'); } catch {}
+      try { sessionStorage.setItem('ft_switch_ticket_dct', t); } catch {}
       this.clearSwitchTicket();
       return true;
     } catch {
@@ -1081,22 +1160,49 @@ const App = {
     // Build emoji picker
     buildEmojiPicker();
 
-    // Signal Protocol bootstrap. `Signal.init` is idempotent and only
-    // touches IndexedDB; the heavier bundle publish (signed prekey +
-    // OTPK top-up + POST /api/signal/bundle) is fired-and-forgotten so
-    // we don't block the UI. Without this, the first DM/room send on a
-    // fresh login fails with "Encryption layer not ready" because the
-    // only other call site is a lazy init buried in the v2-receive
-    // path.
+    const atHomeNodeEarly = this.isAtHomeNode();
+    const justSwitchedEarly = !atHomeNodeEarly && (
+      (new URLSearchParams(window.location.search).get('switched') === '1')
+      || (() => { try { return sessionStorage.getItem('ft_just_switched') === '1'; } catch { return false; } })()
+      || (() => { try { return localStorage.getItem('ft_just_switched_node') === '1'; } catch { return false; } })()
+    );
+    if (justSwitchedEarly && !atHomeNodeEarly && window.DeviceCrypto) {
+      let dctTicket = '';
+      try { dctTicket = String(sessionStorage.getItem('ft_switch_ticket_dct') || '').trim(); } catch {}
+      if (dctTicket) {
+        try {
+          this.applyFederationSyncMeta({
+            in_progress: true,
+            progress_pct: 2,
+            hint: 'Restoring encryption keys from your previous node…',
+            phase: 'crypto',
+          });
+        } catch {}
+        try {
+          await DeviceCrypto.tryImportAfterSwitch(dctTicket);
+        } catch (e) {
+          console.warn('[DCT] launch import failed', e);
+        }
+        try { sessionStorage.removeItem('ft_switch_ticket_dct'); } catch {}
+      }
+    }
+
+    // Signal Protocol bootstrap — on travel nodes / after switch, await
+    // init so DM sidebar decrypt does not race a fresh identity.
     try {
       if (window.Signal && typeof Signal.init === 'function' && State.user && State.user.id) {
-        Signal.init(State.user.id)
-          .then(() => {
-            if (typeof Signal.ensureMyBundleFresh === 'function') {
-              return Signal.ensureMyBundleFresh();
-            }
-          })
-          .catch(e => console.warn('[Signal] boot init failed', e));
+        const patientSignal = justSwitchedEarly || !atHomeNodeEarly;
+        if (patientSignal && typeof Signal.ensureReady === 'function') {
+          await this.ensureSignalReadyForDecrypt({ patient: true, timeoutMs: 20000 });
+        } else {
+          Signal.init(State.user.id)
+            .then(() => {
+              if (typeof Signal.ensureMyBundleFresh === 'function') {
+                return Signal.ensureMyBundleFresh();
+              }
+            })
+            .catch(e => console.warn('[Signal] boot init failed', e));
+        }
       }
     } catch (e) { console.warn('[Signal] boot init threw', e); }
 
@@ -1159,6 +1265,10 @@ const App = {
     }
     if (syncApplied) {
       try { await Rooms.loadRooms(); } catch {}
+    }
+
+    if (!atHomeNode) {
+      try { await this.ensureSignalReadyForDecrypt({ patient: justSwitchedNode, timeoutMs: 15000 }); } catch {}
     }
 
     // Cold-boot from FCM: recover the offer before the permissions wizard can block Accept.
@@ -1309,27 +1419,25 @@ const App = {
 
     if (justSwitchedNode) {
       const joined = (State.rooms || []).filter(r => r.joined);
-      const dmPending = typeof loadDMChannels === 'function';
       if (joined.length === 0) {
         try { App.showNodeSwitchOnboarding(); } catch {}
       }
-      try {
-        UI.showToast(
-          joined.length
-            ? 'Connected to this node — federation sync finished for your account.'
-            : 'Connected to this node. If this is your first hop, federation sync may still be importing your channels and DMs.',
-          'info',
-          9000
-        );
-      } catch {}
+      try { this.maybeShowTravelerCryptoNotice({ justSwitched: true, afterSwitch: true }); } catch {}
       try {
         window.history.replaceState({}, '', window.location.pathname);
         sessionStorage.removeItem('ft_just_switched');
       } catch {}
     }
 
-    // Load DM channels sidebar
-    if (typeof loadDMChannels === 'function') loadDMChannels();
+    // Load DM channels sidebar (after Signal is ready on travel nodes).
+    if (typeof loadDMChannels === 'function') {
+      if (!atHomeNode) {
+        try { await this.ensureSignalReadyForDecrypt({ timeoutMs: 12000 }); } catch {}
+      }
+      await loadDMChannels();
+    } else if (!atHomeNode) {
+      try { this.maybeShowTravelerCryptoNotice({ afterSwitch: false }); } catch {}
+    }
     if (justSwitchedNode || (this.federationSyncState && this.federationSyncState.in_progress)) {
       this.startFederationSyncWatcher();
     }
@@ -1743,7 +1851,12 @@ const App = {
         phase: 'fetch',
       })
       : FtSync.renderOverlayHtml(st);
-    const err = String(st.error || '').trim();
+    const norm = window.FtSync && FtSync.normalizeState ? FtSync.normalizeState(st) : st;
+    const err = String(norm.error || '').trim();
+    const warn = String(norm.sync_warning || '').trim();
+    const coreOk = window.FtSync && FtSync.federationSyncCoreComplete
+      ? FtSync.federationSyncCoreComplete(norm)
+      : false;
     if (!st.in_progress && st.done) {
       const summaryParts = [];
       const joined = Number(st.rooms_joined || 0);
@@ -1765,13 +1878,18 @@ const App = {
       const summaryLine = summaryParts.length
         ? `<div style="font-size:11px;color:#8da59b;margin-top:10px;line-height:1.45">${summaryParts.join(' · ')}</div>`
         : '';
-      if (err) {
-        html += `${summaryLine}<div style="margin-top:14px;display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">
+      const warnLine = (warn && !coreOk)
+        ? `<div style="font-size:11px;color:#c9b07a;margin-top:8px;line-height:1.45">${FtSync._esc(warn)}</div>`
+        : '';
+      if (err && !coreOk) {
+        const errHint = FtSync.syncErrorPublicHint ? FtSync.syncErrorPublicHint(err) : err;
+        html += `${summaryLine}${warnLine}<div style="font-size:11px;color:#c9b07a;margin-top:8px;line-height:1.45">${FtSync._esc(errHint)}</div>
+          <div style="margin-top:14px;display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">
           <button type="button" class="modal-btn secondary" onclick="App.closeSyncOverlay()" style="padding:8px 14px">Dismiss</button>
           <button type="button" class="modal-btn primary" onclick="App.closeSyncOverlay();App.forceFederationResync()" style="padding:8px 14px">↻ Retry sync</button>
         </div>`;
       } else {
-        html += `${summaryLine}<div style="margin-top:14px;display:flex;justify-content:flex-end">
+        html += `${summaryLine}${warnLine}<div style="margin-top:14px;display:flex;justify-content:flex-end">
           <button type="button" class="modal-btn primary" onclick="App.closeSyncOverlay()" style="padding:8px 14px">Continue</button>
         </div>`;
       }
@@ -1790,8 +1908,14 @@ const App = {
     try {
       if (typeof Rooms !== 'undefined' && Rooms.loadRooms) await Rooms.loadRooms();
     } catch {}
+    if (!this.isAtHomeNode()) {
+      try { await this.ensureSignalReadyForDecrypt({ timeoutMs: 15000 }); } catch {}
+    }
     try {
-      if (typeof loadDMChannels === 'function') await loadDMChannels();
+      if (typeof window.__ftDmDecryptReset === 'function') window.__ftDmDecryptReset();
+    } catch {}
+    try {
+      window.dispatchEvent(new CustomEvent('ft:crypto-ready'));
     } catch {}
     try {
       if (typeof loadFriends === 'function') await loadFriends();
@@ -1894,8 +2018,15 @@ const App = {
     } else if (!payload?.error && typeof UI !== 'undefined' && UI.showToast) {
       UI.showToast('Federation sync complete', 'success', 3500);
     }
-    if (payload?.error && typeof UI !== 'undefined' && UI.showToast) {
-      UI.showToast(`Sync issue: ${String(payload.error).slice(0, 120)}`, 'error', 6000);
+    const errAfter = String(payload?.error || '').trim();
+    const coreOk = window.FtSync && FtSync.federationSyncCoreComplete
+      ? FtSync.federationSyncCoreComplete(payload)
+      : false;
+    if (errAfter && !coreOk && typeof UI !== 'undefined' && UI.showToast) {
+      const hint = (window.FtSync && FtSync.syncErrorPublicHint)
+        ? FtSync.syncErrorPublicHint(errAfter)
+        : errAfter.slice(0, 120);
+      UI.showToast(`Sync issue: ${hint}`, 'error', 6000);
     }
   },
 

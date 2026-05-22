@@ -90,18 +90,25 @@ async def open_dm(request: Request, nickname: str, current_user: dict = Depends(
                 return JSONResponse(status_code=403, content={"error": "This user only accepts DMs from friends"})
     
     channel_id = db.get_or_create_dm(current_user["id"], profile["id"])
-    return {
-        "channel_id": channel_id,
-        "other_user": {
-            "id": profile["id"],
-            "nickname": profile["nickname"],
-            "avatar": profile.get("avatar"),
-            "presence": profile.get("presence", "online"),
-            "status_msg": profile.get("status_msg", ""),
-            "last_seen": db.get_privacy_last_seen(profile["id"], current_user["id"]),
-            "show_read_receipts": bool(profile.get("show_read_receipts", 1)),
-        }
+    other_user = {
+        "id": profile["id"],
+        "nickname": profile["nickname"],
+        "avatar": profile.get("avatar"),
+        "presence": profile.get("presence", "online"),
+        "status_msg": profile.get("status_msg", ""),
+        "last_seen": db.get_privacy_last_seen(profile["id"], current_user["id"]),
+        "show_read_receipts": bool(profile.get("show_read_receipts", 1)),
+        "global_user_id": str(profile.get("global_user_id") or "").strip() or None,
     }
+    try:
+        from routers.signal import _peer_home_and_gid
+
+        home_sid, _gid = _peer_home_and_gid(int(profile["id"]))
+        if home_sid:
+            other_user["peer_home_server_id"] = home_sid
+    except Exception:
+        pass
+    return {"channel_id": channel_id, "other_user": other_user}
 
 
 @router.get("")
@@ -121,7 +128,15 @@ async def list_dms(current_user: dict = Depends(get_current_user)):
             elif pref == "friends":
                 if not db.are_friends(viewer_id, ch["other_id"]):
                     ch["other_last_seen"] = None
-            ch.pop("other_show_last_seen", None)
+            ch.pop("other_show_read_receipts", None)
+            try:
+                from routers.signal import _peer_home_and_gid
+
+                home_sid, _gid = _peer_home_and_gid(int(ch.get("other_id") or 0))
+                if home_sid:
+                    ch["peer_home_server_id"] = home_sid
+            except Exception:
+                pass
         return channels
 
     return {"channels": await run_in_threadpool(_build)}

@@ -10602,6 +10602,35 @@ window.ConnErr = (function(){
   </div>
 </div>
 
+<!-- Re-sync from home (visiting node) — replaces window.confirm for Electron / mobile WebView -->
+<div class="modal-overlay hidden" id="modal-federation-resync-confirm"
+     onclick="if(event.target===this)cancelFederationResyncConfirm()">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="fed-resync-confirm-title"
+       style="max-width:480px;width:min(480px,94vw)">
+    <div style="text-align:center;margin-bottom:14px">
+      <div style="font-size:40px;line-height:1;margin-bottom:6px" aria-hidden="true">↻</div>
+      <div id="fed-resync-confirm-title" style="font-size:17px;font-weight:700;color:#4caf50">Re-sync from home?</div>
+      <div style="font-size:12px;color:#7a8a82;margin-top:8px;line-height:1.55;max-width:400px;margin-left:auto;margin-right:auto">
+        You are already fully synced. Import again only if something looks missing or stale on this node.
+      </div>
+    </div>
+    <ul style="margin:0 0 14px;padding:0 0 0 18px;font-size:12px;color:#b7d9c3;line-height:1.55">
+      <li>Channels &amp; channel directory</li>
+      <li>Direct messages &amp; friends</li>
+      <li>FrogSocial posts &amp; profile data</li>
+    </ul>
+    <div style="font-size:11px;color:#8da59b;line-height:1.45;padding:10px 12px;background:#141a16;border:1px solid #2a3a32;border-radius:8px">
+      This may take about a minute. You can keep using the app while sync runs in the background.
+    </div>
+    <div class="modal-actions" style="margin-top:16px;flex-wrap:wrap;gap:8px">
+      <button class="modal-btn secondary" type="button" id="fed-resync-confirm-cancel"
+              onclick="cancelFederationResyncConfirm()">Cancel</button>
+      <button class="modal-btn primary" type="button" id="fed-resync-confirm-go"
+              onclick="confirmFederationResyncConfirm()">Re-sync now</button>
+    </div>
+  </div>
+</div>
+
 <!-- ═══════════════════════ RECOVERY KEY MODALS ═══════════════════════ -->
 
 <!-- Password confirmation modal for generating a new recovery key from
@@ -11575,13 +11604,14 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoa
 })();
 </script>
 <script src="/static/js/crypto.js?v=192"></script>
-<script src="/static/js/signal_store.js?v=2"></script>
-<script src="/static/js/signal.js?v=11"></script>
+<script src="/static/js/signal_store.js?v=3"></script>
+<script src="/static/js/device_crypto.js?v=2"></script>
+<script src="/static/js/signal.js?v=18"></script>
 <script src="/static/js/wall_crypto.js?v=2"></script>
 <script src="/static/js/state.js?v=203"></script>
 <script src="/static/js/mute.js?v=191"></script>
 <script src="/static/js/notifications.js?v=435"></script>
-<script src="/static/js/ws.js?v=255"></script>
+<script src="/static/js/ws.js?v=257"></script>
 <script src="/static/js/cropper.js?v=191"></script>
 <script src="/static/js/ui.js?v=__APP_ASSET_VERSION__"></script>
   <script src="/static/js/rooms.js?v=__APP_ASSET_VERSION__"></script>
@@ -11592,8 +11622,8 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoa
 <script src="/static/js/users.js?v=202"></script>
 <script src="/static/js/emoji.js?v=193"></script>
 <script src="/static/js/friends.js?v=422"></script>
-<script src="/static/js/dms.js?v=465"></script>
-<script src="/static/js/calls.js?v=238"></script>
+<script src="/static/js/dms.js?v=477"></script>
+<script src="/static/js/calls.js?v=243"></script>
 <script src="/static/js/media.js?v=423"></script>
 <script src="/static/js/gifs.js?v=205"></script>
 <script src="/static/js/media-player.js?v=191"></script>

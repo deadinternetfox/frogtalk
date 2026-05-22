@@ -23,9 +23,12 @@ from __future__ import annotations
 
 import base64
 import binascii
+import json
+import os
+import urllib.parse
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel, Field
 from slowapi import Limiter
 from starlette.concurrency import run_in_threadpool
@@ -63,6 +66,183 @@ def _b64_decode(value: str, *, expected_len: Optional[int], field: str) -> bytes
 
 def _b64_encode(value: bytes) -> str:
     return base64.b64encode(bytes(value)).decode("ascii")
+
+
+def bundle_api_dict(user_id: int, bundle: dict) -> dict:
+    """Wire format shared by local fetch and federation bundle proxy."""
+    otpk = bundle["one_time_prekey"]
+    return {
+        "user_id": int(user_id),
+        "registration_id": bundle["registration_id"],
+        "identity_pub": _b64_encode(bundle["identity_pub"]),
+        "signed_prekey": {
+            "id": bundle["signed_prekey"]["id"],
+            "pub": _b64_encode(bundle["signed_prekey"]["pub"]),
+            "sig": _b64_encode(bundle["signed_prekey"]["sig"]),
+        },
+        "one_time_prekey": None if otpk is None else {
+            "id": otpk["id"],
+            "pub": _b64_encode(otpk["pub"]),
+        },
+    }
+
+
+def _local_server_id() -> str:
+    return str((db.get_or_create_local_server_identity() or {}).get("server_id") or "").strip()
+
+
+def _peer_home_candidates(peer_user_id: int, gid: str, local_sid: str) -> list[str]:
+    """Ordered remote server_ids that may host this peer's Signal keys."""
+    uid = int(peer_user_id or 0)
+    out: list[str] = []
+    seen: set[str] = set()
+
+    def _add(sid: str) -> None:
+        s = str(sid or "").strip()
+        if not s or s == local_sid or s in seen:
+            return
+        seen.add(s)
+        out.append(s)
+
+    # Profile origin / global resolve before account_home: mirrors often pin
+    # account_home to the viewing node while Signal keys live on origin.
+    if gid:
+        _add(db.get_federation_profile_origin(gid))
+        _add(db.resolve_global_user_home_server_id(gid))
+    if uid > 0:
+        _add(db.get_user_account_home_server_id(uid))
+    return out
+
+
+def _peer_home_and_gid(peer_user_id: int) -> tuple[str, str]:
+    """Return (clearnet-reachable home_server_id, global_user_id) for Signal fetch."""
+    from routers.auth import resolve_server_base_url
+    from routers.federation import _select_peer_push_target, _server_advertises_onion_only
+
+    uid = int(peer_user_id or 0)
+    if uid <= 0:
+        return "", ""
+    peer = db.get_user_by_id(uid) or {}
+    gid = str(peer.get("global_user_id") or "").strip()
+    local_sid = _local_server_id()
+    for sid in _peer_home_candidates(uid, gid, local_sid):
+        row = db.get_federation_server_row(sid)
+        if not row:
+            continue
+        if _server_advertises_onion_only(row):
+            continue
+        if _select_peer_push_target(row) and resolve_server_base_url(sid):
+            return sid, gid
+    # Last resort: any configured base (may be slow/unreachable).
+    for sid in _peer_home_candidates(uid, gid, local_sid):
+        if resolve_server_base_url(sid):
+            return sid, gid
+    return "", gid
+
+
+def _peer_signal_bundle_is_remote(peer_user_id: int) -> bool:
+    """True when this peer's Signal keys should be loaded from another node.
+
+    Do not treat a user as remote merely because a federation profile row
+    pins a foreign ``origin_server_id`` — local accounts on this node often
+    keep that metadata while publishing bundles here. Prefer the local bundle
+    when one exists unless ``account_home`` explicitly points elsewhere.
+    """
+    local_sid = _local_server_id()
+    if not local_sid:
+        return False
+    uid = int(peer_user_id or 0)
+    if uid <= 0:
+        return False
+    peer = db.get_user_by_id(uid) or {}
+    gid = str(peer.get("global_user_id") or "").strip()
+    account_home = db.get_user_account_home_server_id(uid) if uid else ""
+    if account_home == local_sid:
+        return False
+    if account_home and account_home != local_sid:
+        return True
+    if db.signal_fetch_bundle(uid) is not None:
+        # Keys published on this node — same-node DMs must use them.
+        return False
+    if gid:
+        origin = db.get_federation_profile_origin(gid)
+        if origin and origin != local_sid:
+            return True
+    home_sid, _gid = _peer_home_and_gid(uid)
+    return bool(home_sid and home_sid != local_sid)
+
+
+def fetch_peer_bundle_from_home_sync(peer_user_id: int) -> dict:
+    """Pull a peer's prekey bundle from their federation home node."""
+    from routers.auth import resolve_server_base_url
+    from routers.federation import _fetch_url_bytes
+
+    local_sid = _local_server_id()
+    gid = str((db.get_user_by_id(int(peer_user_id or 0)) or {}).get("global_user_id") or "").strip()
+    if not gid:
+        raise ValueError("peer_no_global_id")
+    home_sid, _gid = _peer_home_and_gid(peer_user_id)
+    if not home_sid:
+        raise ValueError("peer_home_unreachable")
+    base = resolve_server_base_url(home_sid)
+    if not base:
+        raise ValueError("peer_home_unreachable")
+    tok = (os.getenv("FROGTALK_FEDERATION_TOKEN") or "").strip()
+    if not tok:
+        raise ValueError("federation_token_missing")
+    gid_q = urllib.parse.quote(gid, safe="")
+    url = f"{base}/api/federation/signal/bundle/{gid_q}"
+    try:
+        raw = _fetch_url_bytes(
+            url,
+            timeout_s=20.0,
+            method="GET",
+            headers={
+                "Accept": "application/json",
+                "User-Agent": "FrogTalk-SignalFederation/1.0",
+                "x-federation-token": tok,
+            },
+        )
+    except Exception as exc:
+        raise ValueError(f"peer_bundle_fetch_failed:{home_sid}:{exc}") from exc
+    data = json.loads(raw.decode("utf-8", errors="replace") or "{}")
+    if not isinstance(data, dict) or not data.get("identity_pub"):
+        raise ValueError("peer_bundle_bad_response")
+    return data
+
+
+def fetch_peer_identity_from_home_sync(peer_user_id: int) -> str | None:
+    """Identity pub only (no OTPK consume) from peer home."""
+    from routers.auth import resolve_server_base_url
+    from routers.federation import _fetch_url_bytes
+
+    home_sid, gid = _peer_home_and_gid(peer_user_id)
+    local_sid = _local_server_id()
+    if not home_sid or not gid or (local_sid and home_sid == local_sid):
+        ident = db.signal_get_identity_pub(int(peer_user_id))
+        return _b64_encode(ident) if ident else None
+    base = resolve_server_base_url(home_sid)
+    tok = (os.getenv("FROGTALK_FEDERATION_TOKEN") or "").strip()
+    if not base or not tok:
+        return None
+    gid_q = urllib.parse.quote(gid, safe="")
+    url = f"{base}/api/federation/signal/identity/{gid_q}"
+    try:
+        raw = _fetch_url_bytes(
+            url,
+            timeout_s=12.0,
+            method="GET",
+            headers={
+                "Accept": "application/json",
+                "User-Agent": "FrogTalk-SignalFederation/1.0",
+                "x-federation-token": tok,
+            },
+        )
+        data = json.loads(raw.decode("utf-8", errors="replace") or "{}")
+        b64 = str((data or {}).get("identity_pub") or "").strip()
+        return b64 or None
+    except Exception:
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -144,28 +324,25 @@ async def fetch_bundle(
     user: dict = Depends(get_current_user),
 ):
     """Return one prekey bundle for `user_id` and atomically consume one OTPK."""
+    del user
     if user_id <= 0:
         raise HTTPException(status_code=400, detail="bad_user_id")
+
+    if await run_in_threadpool(_peer_signal_bundle_is_remote, int(user_id)):
+        try:
+            data = await run_in_threadpool(fetch_peer_bundle_from_home_sync, int(user_id))
+            return data
+        except ValueError as e:
+            code = str(e).split(":", 1)[0]
+            if code == "federation_token_missing":
+                raise HTTPException(status_code=503, detail="federation_not_configured")
+            raise HTTPException(status_code=404, detail=code)
 
     bundle = await run_in_threadpool(db.signal_fetch_bundle, int(user_id))
     if bundle is None:
         raise HTTPException(status_code=404, detail="no_bundle")
 
-    otpk = bundle["one_time_prekey"]
-    return {
-        "user_id": int(user_id),
-        "registration_id": bundle["registration_id"],
-        "identity_pub": _b64_encode(bundle["identity_pub"]),
-        "signed_prekey": {
-            "id": bundle["signed_prekey"]["id"],
-            "pub": _b64_encode(bundle["signed_prekey"]["pub"]),
-            "sig": _b64_encode(bundle["signed_prekey"]["sig"]),
-        },
-        "one_time_prekey": None if otpk is None else {
-            "id": otpk["id"],
-            "pub": _b64_encode(otpk["pub"]),
-        },
-    }
+    return bundle_api_dict(int(user_id), bundle)
 
 
 @router.get("/identity/{user_id}")
@@ -182,6 +359,11 @@ async def fetch_identity(
     """
     if user_id <= 0:
         raise HTTPException(status_code=400, detail="bad_user_id")
+    if await run_in_threadpool(_peer_signal_bundle_is_remote, int(user_id)):
+        ident_b64 = await run_in_threadpool(fetch_peer_identity_from_home_sync, int(user_id))
+        if not ident_b64:
+            raise HTTPException(status_code=404, detail="no_identity")
+        return {"user_id": int(user_id), "identity_pub": ident_b64}
     ident = await run_in_threadpool(db.signal_get_identity_pub, int(user_id))
     if ident is None:
         raise HTTPException(status_code=404, detail="no_identity")

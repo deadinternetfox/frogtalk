@@ -329,6 +329,123 @@
         t.onerror = () => reject(t.error);
       });
     }
+
+    // ── Node-switch export / import (Device Crypto Transfer) ───────────
+
+    static _abToB64(ab) {
+      if (!ab) return '';
+      const u8 = new Uint8Array(ab instanceof ArrayBuffer ? ab : ab.buffer);
+      let s = '';
+      for (let i = 0; i < u8.length; i++) s += String.fromCharCode(u8[i]);
+      return btoa(s);
+    }
+
+    static _b64ToAb(b64) {
+      const raw = atob(String(b64 || ''));
+      const out = new Uint8Array(raw.length);
+      for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+      return out.buffer;
+    }
+
+    static _serializeRowValue(val) {
+      if (val == null) return null;
+      if (typeof val === 'string') return { t: 's', v: val };
+      if (val instanceof ArrayBuffer || ArrayBuffer.isView(val)) {
+        return { t: 'ab', v: FrogtalkSignalStore._abToB64(val) };
+      }
+      if (typeof val === 'object') {
+        const out = {};
+        for (const k of Object.keys(val)) {
+          const child = val[k];
+          if (child instanceof ArrayBuffer || ArrayBuffer.isView(child)) {
+            out[k] = { t: 'ab', v: FrogtalkSignalStore._abToB64(child) };
+          } else if (typeof child === 'number') {
+            out[k] = child;
+          } else if (typeof child === 'string') {
+            out[k] = child;
+          }
+        }
+        return { t: 'o', v: out };
+      }
+      return val;
+    }
+
+    static _deserializeRowValue(row) {
+      if (row == null) return null;
+      if (typeof row !== 'object' || !row.t) return row;
+      if (row.t === 's') return row.v;
+      if (row.t === 'ab') return FrogtalkSignalStore._b64ToAb(row.v);
+      if (row.t === 'o' && row.v && typeof row.v === 'object') {
+        const out = {};
+        for (const k of Object.keys(row.v)) {
+          const child = row.v[k];
+          if (child && child.t === 'ab') out[k] = FrogtalkSignalStore._b64ToAb(child.v);
+          else out[k] = child;
+        }
+        return out;
+      }
+      return row;
+    }
+
+    async exportSnapshot() {
+      const [identity, identities, sessions, prekeys, signed] = await Promise.all([
+        _get(STORE_IDENTITY, 'self'),
+        _all(STORE_IDENTITIES),
+        _all(STORE_SESSIONS),
+        _all(STORE_PREKEYS),
+        _all(STORE_SIGNED_PREKEYS),
+      ]);
+      return {
+        identity: FrogtalkSignalStore._serializeRowValue(identity),
+        identities: identities.map((r) => ({
+          key: String(r.key),
+          value: FrogtalkSignalStore._serializeRowValue(r.value),
+        })),
+        sessions: sessions.map((r) => ({
+          key: String(r.key),
+          value: FrogtalkSignalStore._serializeRowValue(r.value),
+        })),
+        prekeys: prekeys.map((r) => ({
+          key: r.key,
+          value: FrogtalkSignalStore._serializeRowValue(r.value),
+        })),
+        signed_prekeys: signed.map((r) => ({
+          key: r.key,
+          value: FrogtalkSignalStore._serializeRowValue(r.value),
+        })),
+      };
+    }
+
+    async importSnapshot(snap, remapAddressKey) {
+      if (!snap || typeof snap !== 'object') return false;
+      await this._wipe();
+      const remap = (typeof remapAddressKey === 'function')
+        ? remapAddressKey
+        : (k) => k;
+
+      const identity = FrogtalkSignalStore._deserializeRowValue(snap.identity);
+      if (identity) await _put(STORE_IDENTITY, 'self', identity);
+
+      for (const row of (snap.identities || [])) {
+        const key = remap(String(row.key));
+        const val = FrogtalkSignalStore._deserializeRowValue(row.value);
+        if (key && val) await _put(STORE_IDENTITIES, key, val);
+      }
+      for (const row of (snap.sessions || [])) {
+        const key = remap(String(row.key));
+        const val = FrogtalkSignalStore._deserializeRowValue(row.value);
+        if (key && val != null) await _put(STORE_SESSIONS, key, val);
+      }
+      for (const row of (snap.prekeys || [])) {
+        const val = FrogtalkSignalStore._deserializeRowValue(row.value);
+        if (val) await _put(STORE_PREKEYS, Number(row.key), val);
+      }
+      for (const row of (snap.signed_prekeys || [])) {
+        const val = FrogtalkSignalStore._deserializeRowValue(row.value);
+        if (val) await _put(STORE_SIGNED_PREKEYS, Number(row.key), val);
+      }
+      return true;
+    }
   }
 
   try {

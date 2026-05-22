@@ -230,6 +230,23 @@ async def federation_update_check_task():
             _log.exception("Federation update check task error")
 
 
+async def _device_crypto_transfer_cleanup_task():
+    """Drop expired one-time node-switch crypto blobs."""
+    interval = max(300, int(os.getenv("FROGTALK_DEVICE_CRYPTO_PURGE_SEC", "900")))
+    while True:
+        await asyncio.sleep(interval)
+        try:
+            import database as _db
+
+            n = await asyncio.to_thread(_db.purge_expired_device_crypto_transfers)
+            if n:
+                _log.debug("Purged %d device crypto transfer row(s)", n)
+        except asyncio.CancelledError:
+            break
+        except Exception:
+            _log.exception("device crypto transfer cleanup error")
+
+
 async def _run_boot_sync_nonblocking():
     """Run one-time directory sync without blocking app startup."""
     try:
@@ -280,6 +297,14 @@ async def _start_telegram_bridge_nonblocking():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+    try:
+        import database as _db
+
+        n = _db.purge_expired_device_crypto_transfers()
+        if n:
+            _log.info("Purged %d expired device crypto transfer row(s)", n)
+    except Exception:
+        _log.exception("device crypto transfer purge failed")
     # Bump anyio's default thread-pool from 40 → 200 tokens. FastAPI runs
     # every sync dependency (e.g. get_current_user → SQLite session lookup)
     # AND every run_in_threadpool() call against this pool. With 40 tokens
@@ -305,6 +330,7 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(federation_inbox_processor_task()),
         asyncio.create_task(federation_outbox_processor_task()),
         asyncio.create_task(federation_update_check_task()),
+        asyncio.create_task(_device_crypto_transfer_cleanup_task()),
         asyncio.create_task(_run_boot_sync_nonblocking()),
         asyncio.create_task(_start_discord_bridge_nonblocking()),
         asyncio.create_task(_start_telegram_bridge_nonblocking()),

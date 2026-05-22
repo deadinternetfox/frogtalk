@@ -136,6 +136,35 @@ def require_friend_for_calls() -> bool:
     ).strip().lower() in ("1", "true", "yes")
 
 
+def _relay_origin_allowed(origin: str) -> bool:
+    """Whether a signed ``call.*`` from ``origin`` may relay traveler signaling.
+
+    Account home may differ from the node the user is connected to. Fan-out
+    delivers offers/answers/ICE from community nodes; receivers must accept
+    any enabled federation peer, not only the party's pinned home server.
+    """
+    oid = str(origin or "").strip()
+    if not oid:
+        return False
+    ident = db.get_or_create_local_server_identity() or {}
+    if oid == str(ident.get("server_id") or "").strip():
+        return True
+    row = db.get_federation_server_row(oid)
+    return bool(row and int(row.get("enabled") or 0))
+
+
+def _call_home_origin_mismatch(party_gid: str, origin: str) -> bool:
+    """True when we should drop: pinned home disagrees with origin and origin untrusted."""
+    gid = str(party_gid or "").strip()
+    oid = str(origin or "").strip()
+    if not gid or not oid:
+        return False
+    known_home = db.resolve_global_user_home_server_id(gid)
+    if not known_home or known_home == oid:
+        return False
+    return not _relay_origin_allowed(oid)
+
+
 def _enqueue(event_type: str, payload: dict, target_server_ids: list[str]) -> dict:
     from routers import federation as fed
 
@@ -196,9 +225,123 @@ def callee_session_on_local_node(callee_user: dict) -> bool:
 
 
 def is_remote_peer(callee_user: dict) -> bool:
+    """Use federation signaling unless the callee is on this node's WebSocket now.
+
+    Account home alone is not enough: travelers homed on this node but connected
+    elsewhere must still be reached via federation fan-out. Mirrors can show
+    stale ``online`` presence without a live session — homed-elsewhere callees
+    still need federation even when presence looks local.
+    """
     if callee_session_on_local_node(callee_user):
         return False
-    return user_home_is_remote(callee_user)
+    if user_home_is_remote(callee_user):
+        return True
+    return needs_federated_call_delivery(callee_user)
+
+
+def needs_federated_call_delivery(recipient_user: dict | None) -> bool:
+    """True when a call signal must leave this node to reach ``recipient_user``."""
+    if not federation_calls_enabled():
+        return False
+    return not callee_session_on_local_node(recipient_user or {})
+
+
+def _federation_fanout_server_ids(*extra_server_ids: str) -> list[str]:
+    """Callee/caller home plus every enabled peer (traveler reachability)."""
+    ident = db.get_or_create_local_server_identity() or {}
+    local_sid = str(ident.get("server_id") or "").strip()
+    targets: set[str] = set()
+    for raw in extra_server_ids:
+        sid = str(raw or "").strip()
+        if sid:
+            targets.add(sid)
+    try:
+        for row in db.list_federation_servers(official_only=False):
+            sid = str(row.get("server_id") or "").strip()
+            if not sid or sid == local_sid or not int(row.get("enabled") or 0):
+                continue
+            targets.add(sid)
+    except Exception:
+        pass
+    if not targets and local_sid:
+        targets.add(local_sid)
+    return sorted(targets)
+
+
+def _peer_is_onion_only(server_row: dict) -> bool:
+    """True when a federation row has no usable clearnet inbox URL."""
+    base = str((server_row or {}).get("base_url") or "").strip()
+    onion = str((server_row or {}).get("onion_url") or "").strip()
+    if onion and not base:
+        return True
+    transport = str((server_row or {}).get("transport_preference") or "auto").strip().lower()
+    return transport == "onion"
+
+
+def _clearnet_federation_peer_ids() -> list[str]:
+    """Enabled peers with a clearnet base URL, excluding this node and onion-only rows."""
+    ident = db.get_or_create_local_server_identity() or {}
+    local_sid = str(ident.get("server_id") or "").strip()
+    out: list[str] = []
+    try:
+        for row in db.list_federation_servers(official_only=False):
+            if not int(row.get("enabled") or 0):
+                continue
+            sid = str(row.get("server_id") or "").strip()
+            if not sid or sid == local_sid:
+                continue
+            if _peer_is_onion_only(row):
+                continue
+            if not str(row.get("base_url") or "").strip():
+                continue
+            out.append(sid)
+    except Exception:
+        pass
+    return sorted(set(out))
+
+
+def call_signal_target_servers(
+    recipient_user: dict | None,
+    *,
+    recipient_gid: str = "",
+) -> list[str]:
+    """Outbox destinations for any ``call.*`` / ``dm.*`` event aimed at one participant."""
+    user = dict(recipient_user or {})
+    gid = str(user.get("global_user_id") or recipient_gid or "").strip()
+    if not user and gid:
+        looked = _lookup_local_user_by_gid(gid)
+        if looked:
+            user = looked
+    if user and callee_session_on_local_node(user):
+        return []
+    ident = db.get_or_create_local_server_identity() or {}
+    local_sid = str(ident.get("server_id") or "").strip()
+    targets: set[str] = set()
+    if gid:
+        for sid in db.resolve_federation_push_targets_for_recipient_gids([gid]):
+            if sid:
+                targets.add(sid)
+        origin = str(db.get_federation_profile_origin(gid) or "").strip()
+        if origin and origin != local_sid:
+            targets.add(origin)
+    uid = int(user.get("id") or 0)
+    if uid > 0:
+        try:
+            home = str(db.get_user_account_home_server_id(uid) or "").strip()
+        except Exception:
+            home = ""
+        if home and home != local_sid:
+            targets.add(home)
+    if targets:
+        return sorted(targets)
+    # Same federation id on multiple physical nodes, or unknown home: reach every
+    # other clearnet-capable peer (never onion-only rows).
+    return _clearnet_federation_peer_ids()
+
+
+def call_offer_target_servers(callee_user: dict) -> list[str]:
+    """Federation destinations for ``call.offer`` when the callee is not local-WS."""
+    return call_signal_target_servers(callee_user)
 
 
 def can_call_user(caller_id: int, callee_id: int) -> str | None:
@@ -256,9 +399,9 @@ def enqueue_call_offer(
     fp_sig: str = "",
     renegotiate: bool = False,
 ) -> dict:
-    home = callee_home_server(callee)
-    if not home:
-        return {"ok": False, "error": "no_callee_home"}
+    targets = call_offer_target_servers(callee)
+    if not targets:
+        return {"ok": False, "error": "no_callee_route"}
     ident = db.get_or_create_local_server_identity() or {}
     origin = str(ident.get("server_id") or "").strip()
     db.map_federation_call(global_call_id, origin, local_call_id, "caller")
@@ -280,7 +423,20 @@ def enqueue_call_offer(
     }
     if renegotiate:
         payload["renegotiate"] = True
-    return _enqueue("call.offer", payload, [home])
+    try:
+        from routers import auth as _auth
+
+        for sid in targets:
+            base = _auth.resolve_server_base_url(sid)
+            _auth._ensure_export_signer_pubkey_pinned(
+                sid, base, user_id=int(caller.get("id") or 0),
+            )
+        _auth._ensure_export_signer_pubkey_pinned(
+            origin, "", user_id=int(caller.get("id") or 0),
+        )
+    except Exception:
+        pass
+    return _enqueue("call.offer", payload, targets)
 
 
 def enqueue_call_renegotiate(
@@ -315,14 +471,14 @@ def enqueue_call_answer(
     fp_sig: str = "",
     renegotiate: bool = False,
 ) -> dict:
-    home = db.resolve_global_user_home_server_id(caller_gid)
-    if not home:
-        return {"ok": False, "error": "no_caller_home"}
     callee_gid = str(callee.get("global_user_id") or "").strip()
     caller_gid_clean = str(caller_gid or "").strip()
     sdp_clip = _clip_sdp(sdp)
     if not callee_gid or not caller_gid_clean or not sdp_clip:
         return {"ok": False, "error": "invalid_answer_payload"}
+    targets = call_signal_target_servers(None, recipient_gid=caller_gid_clean)
+    if not targets:
+        return {"ok": False, "error": "no_caller_route"}
     payload = {
         "global_call_id": global_call_id,
         "callee_global_user_id": callee_gid,
@@ -331,7 +487,7 @@ def enqueue_call_answer(
         "fp_sig": str(fp_sig or "")[:_FED_CALL_FP_SIG_MAX],
         "renegotiate": bool(renegotiate),
     }
-    return _enqueue("call.answer", payload, [home])
+    return _enqueue("call.answer", payload, targets)
 
 
 def enqueue_call_ice(
@@ -341,21 +497,21 @@ def enqueue_call_ice(
     global_call_id: str,
     candidate: str,
 ) -> dict:
-    home = db.resolve_global_user_home_server_id(to_gid)
-    if not home:
-        return {"ok": False, "error": "no_peer_home"}
     from_gid = str(from_user.get("global_user_id") or "").strip()
     to_gid_clean = str(to_gid or "").strip()
     cand = _clip_ice(candidate)
     if not from_gid or not to_gid_clean or not cand:
         return {"ok": False, "error": "invalid_ice_payload"}
+    targets = call_signal_target_servers(None, recipient_gid=to_gid_clean)
+    if not targets:
+        return {"ok": False, "error": "no_ice_route"}
     payload = {
         "global_call_id": global_call_id,
         "from_global_user_id": from_gid,
         "to_global_user_id": to_gid_clean,
         "candidate": cand,
     }
-    return _enqueue("call.ice", payload, [home])
+    return _enqueue("call.ice", payload, targets)
 
 
 def enqueue_call_end(
@@ -365,9 +521,10 @@ def enqueue_call_end(
     global_call_id: str,
     status: str = "ended",
 ) -> dict:
-    home = db.resolve_global_user_home_server_id(to_gid)
-    if not home:
-        return {"ok": False, "error": "no_peer_home"}
+    to_gid_clean = str(to_gid or "").strip()
+    targets = call_signal_target_servers(None, recipient_gid=to_gid_clean)
+    if not targets:
+        return {"ok": False, "error": "no_end_route"}
     safe_status = str(status or "ended").strip().lower()
     if safe_status not in ("ended", "missed", "cancelled"):
         safe_status = "ended"
@@ -376,7 +533,7 @@ def enqueue_call_end(
         "from_global_user_id": str(from_user.get("global_user_id") or "").strip(),
         "status": safe_status,
     }
-    return _enqueue("call.end", payload, [home])
+    return _enqueue("call.end", payload, targets)
 
 
 def enqueue_call_reject(
@@ -385,15 +542,16 @@ def enqueue_call_reject(
     *,
     global_call_id: str,
 ) -> dict:
-    home = db.resolve_global_user_home_server_id(caller_gid)
-    if not home:
-        return {"ok": False, "error": "no_caller_home"}
+    caller_gid_clean = str(caller_gid or "").strip()
+    targets = call_signal_target_servers(None, recipient_gid=caller_gid_clean)
+    if not targets:
+        return {"ok": False, "error": "no_reject_route"}
     payload = {
         "global_call_id": global_call_id,
         "callee_global_user_id": str(callee.get("global_user_id") or "").strip(),
-        "caller_global_user_id": str(caller_gid or "").strip(),
+        "caller_global_user_id": caller_gid_clean,
     }
-    return _enqueue("call.reject", payload, [home])
+    return _enqueue("call.reject", payload, targets)
 
 
 async def apply_call_event(event: dict) -> None:
@@ -437,11 +595,10 @@ async def _apply_call_offer(payload, origin, gid_call, _fed_nickname, _fed_globa
     # Caller home binding: when we already know this user, their pinned home
     # must match the event origin. Unknown caller (first contact) is OK —
     # we'll pin their home on the upsert path below.
-    known_home = db.resolve_global_user_home_server_id(caller_gid)
-    if known_home and known_home != origin:
+    if _call_home_origin_mismatch(caller_gid, origin):
         _log.info(
-            "federation: drop call.offer — caller home %s != origin %s",
-            known_home, origin,
+            "federation: drop call.offer — caller home != origin %s (untrusted relay)",
+            origin,
         )
         return
 
@@ -600,9 +757,8 @@ async def _apply_call_answer(payload, origin, gid_call, _fed_global_id):
 
     # The answerer (callee) lives on the origin peer. Bind their home so a
     # third peer can't forge an answer for a call hosted elsewhere.
-    known_home = db.resolve_global_user_home_server_id(callee_gid)
-    if known_home and known_home != origin:
-        _log.info("federation: drop call.answer — callee home != origin")
+    if _call_home_origin_mismatch(callee_gid, origin):
+        _log.info("federation: drop call.answer — callee home != origin %s", origin)
         return
 
     local_id = db.resolve_local_call_id(gid_call)
@@ -667,9 +823,8 @@ async def _apply_call_ice(payload, origin, gid_call, _fed_global_id):
     if not to_gid or not from_gid:
         return
 
-    known_home = db.resolve_global_user_home_server_id(from_gid)
-    if known_home and known_home != origin:
-        _log.info("federation: drop call.ice — sender home != origin")
+    if _call_home_origin_mismatch(from_gid, origin):
+        _log.info("federation: drop call.ice — sender home != origin %s", origin)
         return
 
     local_id = db.resolve_local_call_id(gid_call)
@@ -718,9 +873,8 @@ async def _apply_call_end(payload, origin, gid_call, _fed_global_id):
     if not from_gid:
         return
 
-    known_home = db.resolve_global_user_home_server_id(from_gid)
-    if known_home and known_home != origin:
-        _log.info("federation: drop call.end — sender home != origin")
+    if _call_home_origin_mismatch(from_gid, origin):
+        _log.info("federation: drop call.end — sender home != origin %s", origin)
         return
 
     local_id = db.resolve_local_call_id(gid_call)
@@ -795,9 +949,8 @@ async def _apply_call_reject(payload, origin, gid_call, _fed_global_id):
     if not callee_gid:
         return
 
-    known_home = db.resolve_global_user_home_server_id(callee_gid)
-    if known_home and known_home != origin:
-        _log.info("federation: drop call.reject — callee home != origin")
+    if _call_home_origin_mismatch(callee_gid, origin):
+        _log.info("federation: drop call.reject — callee home != origin %s", origin)
         return
 
     local_id = db.resolve_local_call_id(gid_call)

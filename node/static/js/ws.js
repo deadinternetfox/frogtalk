@@ -415,11 +415,15 @@ const WS = (() => {
         // If our own avatar changed on another device, sync local state + self panel
         if (sameUser(State.user)) {
           if (data.avatar !== undefined) State.user.avatar = data.avatar;
+          if (data.banner !== undefined) State.user.banner = data.banner;
           try { State.save(); } catch {}
           try {
             const sa = document.getElementById('self-avatar-el');
             if (sa) sa.innerHTML = UI.avatarEl(State.user.avatar, State.user.nickname, 36);
           } catch {}
+          if (data.banner !== undefined) {
+            try { UI.renderSelfStatus && UI.renderSelfStatus(); } catch {}
+          }
         }
         if (typeof Users !== 'undefined' && Users.updateAvatar) {
           Users.updateAvatar(data.user_id, data.nickname, data.avatar);
@@ -462,6 +466,14 @@ const WS = (() => {
             Social.refreshUserProfile(data.user_id, data.nickname, data.avatar);
           }
         } catch {}
+        if (data.banner !== undefined && data.nickname) {
+          try {
+            if (typeof Social !== 'undefined') {
+              if (Social.invalidateProfileCache) Social.invalidateProfileCache(data.nickname);
+              if (Social.refreshProfileBanner) Social.refreshProfileBanner(data.nickname, data.banner);
+            }
+          } catch {}
+        }
         // Propagate to friends list cache + re-render if panel open
         try {
           if (typeof _allFriends !== 'undefined' && Array.isArray(_allFriends)) {

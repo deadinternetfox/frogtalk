@@ -2436,6 +2436,20 @@ def _migrate():
             FOREIGN KEY(recipient_id) REFERENCES users(id) ON DELETE CASCADE
         )""")
         con.execute("CREATE INDEX IF NOT EXISTS idx_pending_envelopes_recipient ON pending_room_key_envelopes(recipient_id)")
+        # One-time device crypto handoff for node switch (opaque ciphertext blob).
+        con.execute("""CREATE TABLE IF NOT EXISTS device_crypto_transfers (
+            ticket_hash   TEXT PRIMARY KEY,
+            user_id       INTEGER NOT NULL,
+            blob_b64      TEXT NOT NULL,
+            expires_at    INTEGER NOT NULL,
+            consumed_at   TEXT,
+            created_at    TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+        )""")
+        con.execute(
+            "CREATE INDEX IF NOT EXISTS idx_device_crypto_expires "
+            "ON device_crypto_transfers(expires_at)"
+        )
         # User blocks table
         con.execute("""CREATE TABLE IF NOT EXISTS user_blocks (
             id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -4312,13 +4326,15 @@ def search_users(query: str, limit: int = 20, requester_id: int = 0) -> List[Dic
 
 
 def _pick_profile_banner(local_val: str, fed_val: str) -> str:
-    """Prefer a usable banner: synced data URLs beat empty local rows."""
+    """Prefer a usable banner: federation/sync cache fills empty local rows."""
     local_v = str(local_val or "").strip()
     fed_v = str(fed_val or "").strip()
-    if fed_v.startswith("data:") and len(fed_v) > 80:
-        if not local_v.startswith("data:") or len(local_v) < 80:
+    if fed_v.startswith("data:"):
+        if not local_v.startswith("data:"):
             return fed_v
-    if local_v.startswith("data:") and len(local_v) > 80:
+        if len(fed_v) > len(local_v):
+            return fed_v
+    if local_v.startswith("data:"):
         return local_v
     if fed_v and not local_v:
         return fed_v
@@ -5553,6 +5569,7 @@ def get_dm_channels(user_id: int) -> List[Dict]:
                    COALESCE(dc.last_read_b, 0) AS last_read_b,
                    COALESCE(dc.forwarding_disabled, 0) AS forwarding_disabled,
                    u.id AS other_id, u.nickname AS other_nick,
+                   u.global_user_id AS other_global_user_id,
                    u.avatar AS other_avatar, u.presence AS other_presence,
                    u.last_seen AS other_last_seen,
                    u.show_last_seen AS other_show_last_seen,
@@ -7131,6 +7148,85 @@ def queue_pending_room_key_envelope(recipient_id: int, room_name: str,
         return True
     except Exception:
         return False
+
+
+_DEVICE_CRYPTO_BLOB_MAX = 4 * 1024 * 1024
+
+
+def store_device_crypto_transfer(user_id: int, ticket_hash: str, blob_b64: str, expires_at: int) -> bool:
+    """Store an opaque encrypted device blob keyed by switch-ticket hash."""
+    uid = int(user_id or 0)
+    th = str(ticket_hash or "").strip()
+    blob = str(blob_b64 or "")
+    if uid <= 0 or not th or not blob:
+        return False
+    if len(blob) > _DEVICE_CRYPTO_BLOB_MAX:
+        return False
+    try:
+        with _conn() as con:
+            con.execute(
+                """
+                INSERT OR REPLACE INTO device_crypto_transfers
+                    (ticket_hash, user_id, blob_b64, expires_at, consumed_at)
+                VALUES (?, ?, ?, ?, NULL)
+                """,
+                (th, uid, blob, int(expires_at or 0)),
+            )
+            con.commit()
+        return True
+    except Exception:
+        return False
+
+
+def take_device_crypto_transfer(ticket_hash: str) -> dict | None:
+    """Return and consume a device crypto blob if present and not expired."""
+    th = str(ticket_hash or "").strip()
+    if not th:
+        return None
+    now = int(time.time())
+    with _conn() as con:
+        row = con.execute(
+            """
+            SELECT user_id, blob_b64, expires_at
+            FROM device_crypto_transfers
+            WHERE ticket_hash=? AND consumed_at IS NULL
+            LIMIT 1
+            """,
+            (th,),
+        ).fetchone()
+        if not row:
+            return None
+        exp = int(row["expires_at"] if hasattr(row, "keys") else row[2] or 0)
+        if exp and exp < now:
+            con.execute("DELETE FROM device_crypto_transfers WHERE ticket_hash=?", (th,))
+            con.commit()
+            return None
+        blob = str(row["blob_b64"] if hasattr(row, "keys") else row[1] or "")
+        uid = int(row["user_id"] if hasattr(row, "keys") else row[0] or 0)
+        con.execute(
+            "UPDATE device_crypto_transfers SET consumed_at=datetime('now') WHERE ticket_hash=?",
+            (th,),
+        )
+        con.commit()
+    return {"user_id": uid, "blob_b64": blob}
+
+
+def purge_expired_device_crypto_transfers() -> int:
+    """Delete expired or consumed transfer rows older than 1 hour."""
+    cutoff = int(time.time()) - 3600
+    try:
+        with _conn() as con:
+            cur = con.execute(
+                """
+                DELETE FROM device_crypto_transfers
+                WHERE expires_at < ? OR consumed_at IS NOT NULL
+                """,
+                (cutoff,),
+            )
+            con.commit()
+            return int(cur.rowcount or 0)
+    except Exception:
+        return 0
 
 
 def drain_pending_room_key_envelopes(recipient_id: int) -> List[Dict]:
@@ -11706,8 +11802,21 @@ def list_federation_outbox_events(
     since_cursor: str | None = None,
     limit: int = 100,
     status: str = "pending",
+    *,
+    priority_sensitive: bool = False,
 ) -> list[dict]:
     """Fetch outbox events for pull/push to peers."""
+    order = "created_at ASC"
+    if priority_sensitive and not since_cursor:
+        order = """
+            CASE
+              WHEN event_type LIKE 'dm.%' OR event_type LIKE 'call.%' THEN 0
+              WHEN event_type LIKE 'voice.%' THEN 1
+              WHEN event_type LIKE 'message.%' THEN 2
+              ELSE 5
+            END,
+            created_at ASC
+        """
     with _conn() as con:
         if since_cursor:
             rows = con.execute(
@@ -11721,10 +11830,10 @@ def list_federation_outbox_events(
             ).fetchall()
         else:
             rows = con.execute(
-                """
+                f"""
                 SELECT * FROM federation_outbox_events
                 WHERE status=?
-                ORDER BY created_at ASC
+                ORDER BY {order}
                 LIMIT ?
                 """,
                 (status, limit),
