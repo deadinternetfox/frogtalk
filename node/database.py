@@ -1985,6 +1985,18 @@ def _migrate():
             CREATE INDEX IF NOT EXISTS idx_friend_sound_owner_friend_kind
             ON friend_sound_assets(owner_user_id, friend_user_id, kind, is_active, created_at DESC)
         """)
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS user_app_sounds (
+                user_id       INTEGER NOT NULL,
+                kind          TEXT NOT NULL,
+                file_path     TEXT NOT NULL,
+                content_type  TEXT NOT NULL,
+                file_size     INTEGER NOT NULL DEFAULT 0,
+                updated_at    TEXT DEFAULT (datetime('now')),
+                PRIMARY KEY (user_id, kind),
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+        """)
 
         # Federation metadata and replication queues (additive/non-breaking).
         con.execute(
@@ -5357,6 +5369,97 @@ def delete_friend_sound_asset(owner_user_id: int, asset_id: int) -> Optional[Dic
         con.execute("DELETE FROM friend_sound_assets WHERE id=?", (asset_id,))
         con.commit()
     return dict(row)
+
+
+_APP_SOUND_KINDS = frozenset({"msg", "ring"})
+_APP_SOUND_MAX_BYTES = 131_072
+
+
+def save_user_app_sound_from_data_url(user_id: int, kind: str, data_url: str) -> str:
+    """Persist a capped data:audio/* URL to disk; return absolute file path or ''."""
+    uid = int(user_id or 0)
+    k = str(kind or "").strip().lower()
+    if uid <= 0 or k not in _APP_SOUND_KINDS:
+        return ""
+    text = str(data_url or "").strip()
+    if not text.startswith("data:audio/") or len(text) > _APP_SOUND_MAX_BYTES:
+        return ""
+    import base64 as _b64
+    import re as _re
+    from pathlib import Path as _Path
+
+    m = _re.match(r"^data:audio/([a-z0-9.+-]+);base64,(.+)$", text, _re.IGNORECASE | _re.DOTALL)
+    if not m:
+        return ""
+    subtype = (m.group(1) or "mpeg").lower().split(";")[0]
+    if subtype not in ("mpeg", "mp3", "mp4", "aac", "ogg", "webm", "wav", "x-wav", "flac"):
+        return ""
+    try:
+        raw = _b64.b64decode(m.group(2), validate=True)
+    except Exception:
+        return ""
+    if not raw or len(raw) > _APP_SOUND_MAX_BYTES:
+        return ""
+    ext = {
+        "mpeg": ".mp3", "mp3": ".mp3", "mp4": ".m4a", "aac": ".aac",
+        "ogg": ".ogg", "webm": ".webm", "wav": ".wav", "x-wav": ".wav", "flac": ".flac",
+    }.get(subtype, ".bin")
+    content_type = f"audio/{subtype}"
+    root = _Path(os.getenv("FROGTALK_APP_SOUND_DIR", "data/app_sounds"))
+    target = root / str(uid) / f"{k}{ext}"
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(raw)
+    except Exception:
+        return ""
+    with _conn() as con:
+        con.execute(
+            """
+            INSERT INTO user_app_sounds (user_id, kind, file_path, content_type, file_size, updated_at)
+            VALUES (?,?,?,?,?,datetime('now'))
+            ON CONFLICT(user_id, kind) DO UPDATE SET
+                file_path=excluded.file_path,
+                content_type=excluded.content_type,
+                file_size=excluded.file_size,
+                updated_at=datetime('now')
+            """,
+            (uid, k, str(target), content_type, len(raw)),
+        )
+        con.commit()
+    return str(target)
+
+
+def get_user_app_sound(user_id: int, kind: str) -> Optional[Dict]:
+    uid = int(user_id or 0)
+    k = str(kind or "").strip().lower()
+    if uid <= 0 or k not in _APP_SOUND_KINDS:
+        return None
+    with _conn() as con:
+        row = con.execute(
+            "SELECT user_id, kind, file_path, content_type, file_size FROM user_app_sounds WHERE user_id=? AND kind=?",
+            (uid, k),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def delete_user_app_sound(user_id: int, kind: str) -> bool:
+    row = get_user_app_sound(user_id, kind)
+    if not row:
+        return False
+    with _conn() as con:
+        con.execute(
+            "DELETE FROM user_app_sounds WHERE user_id=? AND kind=?",
+            (int(user_id), str(kind).strip().lower()),
+        )
+        con.commit()
+    try:
+        from pathlib import Path as _Path
+        fp = _Path(str(row.get("file_path") or ""))
+        if fp.is_file():
+            fp.unlink()
+    except Exception:
+        pass
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -10585,6 +10688,53 @@ def rotate_legacy_discord_bridge_tokens() -> int:
 # ===========================================================================
 # Stories
 # ===========================================================================
+
+def list_active_stories_for_sync_export(
+    user_id: int,
+    *,
+    limit: int = 24,
+    media_max: int = 512_000,
+) -> List[Dict]:
+    """Own active stories for account sync (capped media size)."""
+    uid = int(user_id or 0)
+    if uid <= 0:
+        return []
+    cap = max(1, min(48, int(limit or 24)))
+    max_bytes = max(16_384, min(2_000_000, int(media_max or 512_000)))
+    with _conn() as con:
+        rows = con.execute(
+            """
+            SELECT id, media_data, media_type, caption, COALESCE(privacy,'public') AS privacy, created_at
+            FROM stories
+            WHERE user_id=? AND expires_at > datetime('now')
+            ORDER BY created_at DESC
+            LIMIT ?
+            """,
+            (uid, cap),
+        ).fetchall()
+    ident = get_or_create_local_server_identity() or {}
+    origin = str(ident.get("server_id") or "").strip()
+    out: List[Dict] = []
+    for row in rows:
+        media = str(row["media_data"] or "")
+        if not media or len(media) > max_bytes:
+            continue
+        story_id = int(row["id"] or 0)
+        gid = ""
+        if origin and story_id > 0:
+            gid = get_federation_wall_global_id(origin, "story", story_id) or ""
+            if not gid:
+                gid, _ = register_local_story_global_id(story_id)
+        out.append({
+            "global_story_id": gid,
+            "media_data": media,
+            "media_type": str(row["media_type"] or "")[:64],
+            "caption": str(row["caption"] or "")[:500],
+            "privacy": str(row["privacy"] or "public")[:32],
+            "created_at": str(row["created_at"] or ""),
+        })
+    return out
+
 
 def create_story(user_id: int, media_data: str, media_type: str, caption: str = '',
                  privacy: str = 'public') -> int:

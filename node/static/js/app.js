@@ -204,7 +204,7 @@ try { window.FtSync = FtSync; } catch {}
 const App = {
   pendingInvite: null,  // Store invite code to process after login
   PENDING_CALL_KEY: 'ft_pending_incoming_call',
-  ASSET_RESET_VERSION: 'federation-sync-v20',
+  ASSET_RESET_VERSION: 'federation-sync-v21',
   easterEgg: null,
   easterTapCount: 0,
   easterTapTimer: null,
@@ -1812,12 +1812,14 @@ const App = {
     const msgs = Number(payload?.history_messages_applied || 0);
     const dmMsgs = Number(payload?.dm_history_messages_applied || 0);
     const friendsN = Number(payload?.friends_linked || 0);
+    const storiesN = Number(payload?.stories_imported || 0);
     const membersN = Number(payload?.members_snapshots_applied || 0);
     const parts = [];
     if (joined > 0) parts.push(`${joined} channels`);
     if (pruned > 0) parts.push(`${pruned} removed`);
     if (dms > 0) parts.push(`${dms} DMs`);
     if (friendsN > 0) parts.push(`${friendsN} friends`);
+    if (storiesN > 0) parts.push(`${storiesN} stories`);
     if (membersN > 0) parts.push(`${membersN} member lists`);
     if (posts > 0) parts.push(`${posts} posts`);
     if (postsSkipped > 0) parts.push(`${postsSkipped} posts skipped`);

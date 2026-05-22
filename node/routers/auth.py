@@ -15,11 +15,12 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
+from pathlib import Path
 from typing import Optional
 
 _log = logging.getLogger(__name__)
 from fastapi import APIRouter, Request, Depends, Header, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 from slowapi import Limiter
 
@@ -196,7 +197,10 @@ _SYNC_EXPORT_SOCIAL_ID_CAP = 5000
 _SYNC_EXPORT_VERSION = 2
 _SYNC_EXPORT_EXPLORE_POST_LIMIT = 120
 _SYNC_EXPORT_SOCIAL_MEDIA_MAX = 4_000_000
+_SYNC_EXPORT_STORY_LIMIT = 24
+_SYNC_EXPORT_STORY_MEDIA_MAX = 512_000
 _SYNC_EXPORT_ROOM_ICON_MAX = 400_000
+_APP_SOUND_ROOT = Path(os.getenv("FROGTALK_APP_SOUND_DIR", "data/app_sounds"))
 # Recent chat history per joined room — capped because the sync export is
 # a single JSON blob. media_data is stripped (clients lazy-load), so each
 # message is mostly text + small metadata.
@@ -382,6 +386,100 @@ def _sanitize_sync_profile_banner(raw) -> str:
     return ""
 
 
+def _prepare_sync_profile_banner(raw) -> str:
+    """Sanitize then re-encode image banners before writing on travel nodes."""
+    text = _sanitize_sync_profile_banner(raw)
+    if not text or not text.startswith("data:image/"):
+        return text
+    try:
+        reencoded = _media_reencode(text)
+        return _sanitize_sync_profile_banner(reencoded) or text
+    except Exception:
+        return text
+
+
+def _normalize_app_sound_kind(key: str) -> str:
+    """Map client pref keys (``app:msg``) to storage kind (``msg``)."""
+    k = str(key or "").strip().lower()
+    if k in ("msg", "ring"):
+        return k
+    if k == "app:msg":
+        return "msg"
+    if k == "app:ring":
+        return "ring"
+    return ""
+
+
+def _app_sound_file_api_path(key: str) -> str:
+    k = _normalize_app_sound_kind(key)
+    if not k:
+        return ""
+    return f"/api/auth/app-sounds/{k}/file"
+
+
+def _finalize_client_prefs_for_storage(user_id: int, prefs: dict) -> str:
+    """Persist app notification sounds server-side; keep network prefs inline."""
+    merged = dict(prefs) if isinstance(prefs, dict) else {}
+    sounds_in = merged.get("custom_sounds")
+    if isinstance(sounds_in, dict) and int(user_id or 0) > 0:
+        stored: dict[str, str] = {}
+        for key in _SYNC_CUSTOM_SOUND_KEYS:
+            val = str(sounds_in.get(key) or "").strip()
+            kind = _normalize_app_sound_kind(key)
+            if not val or not kind:
+                continue
+            if val.startswith("data:audio/"):
+                path = db.save_user_app_sound_from_data_url(int(user_id), kind, val)
+                api_path = _app_sound_file_api_path(key)
+                if path and api_path:
+                    stored[key] = api_path
+                elif len(val) <= _SYNC_CUSTOM_SOUND_MAX:
+                    stored[key] = val
+            elif val.startswith("/api/auth/app-sounds/"):
+                stored[key] = val[:256]
+        if stored:
+            merged["custom_sounds"] = stored
+        elif "custom_sounds" in merged:
+            merged.pop("custom_sounds", None)
+    return _sanitize_client_prefs_json(merged)
+
+
+def _client_prefs_for_sync_export(user_id: int, raw_json: str) -> dict:
+    """Export client prefs with server sound URLs instead of bulky base64."""
+    parsed = _parse_client_prefs_export(raw_json)
+    uid = int(user_id or 0)
+    if uid <= 0:
+        return parsed
+    sounds = parsed.get("custom_sounds")
+    if not isinstance(sounds, dict):
+        return parsed
+    out_sounds: dict[str, str] = {}
+    for key in _SYNC_CUSTOM_SOUND_KEYS:
+        kind = _normalize_app_sound_kind(key)
+        if not kind:
+            continue
+        row = db.get_user_app_sound(uid, kind)
+        if row and str(row.get("file_path") or "").strip():
+            api_path = _app_sound_file_api_path(key)
+            if api_path:
+                out_sounds[key] = api_path
+                continue
+        val = str(sounds.get(key) or "").strip()
+        if val.startswith("data:audio/"):
+            path = db.save_user_app_sound_from_data_url(uid, kind, val)
+            api_path = _app_sound_file_api_path(key)
+            if path and api_path:
+                out_sounds[key] = api_path
+            elif val:
+                out_sounds[key] = val[:_SYNC_CUSTOM_SOUND_MAX]
+        elif val.startswith("/api/auth/app-sounds/"):
+            out_sounds[key] = val
+    if out_sounds:
+        parsed = dict(parsed)
+        parsed["custom_sounds"] = out_sounds
+    return parsed
+
+
 def _valid_preferred_node_url(url: str) -> str:
     """Allow https? URLs and bare .onion host hints; reject injection chars."""
     text = str(url or "").strip()[:512]
@@ -420,6 +518,10 @@ def _sanitize_client_prefs_json(raw) -> str:
             if k not in _SYNC_CUSTOM_SOUND_KEYS:
                 continue
             v = str(val or "").strip()
+            if v.startswith("/api/auth/app-sounds/"):
+                if len(v) <= 256:
+                    sounds[k] = v
+                continue
             if not v.startswith("data:audio/"):
                 continue
             if not re.match(
@@ -459,11 +561,15 @@ def _parse_client_prefs_export(raw: str) -> dict:
     }
     sounds = data.get("custom_sounds")
     if isinstance(sounds, dict):
-        clean_sounds = {
-            k: str(sounds[k])[:_SYNC_CUSTOM_SOUND_MAX]
-            for k in _SYNC_CUSTOM_SOUND_KEYS
-            if k in sounds and str(sounds[k] or "").startswith("data:audio/")
-        }
+        clean_sounds = {}
+        for k in _SYNC_CUSTOM_SOUND_KEYS:
+            if k not in sounds:
+                continue
+            v = str(sounds[k] or "").strip()
+            if v.startswith("data:audio/"):
+                clean_sounds[k] = v[:_SYNC_CUSTOM_SOUND_MAX]
+            elif v.startswith("/api/auth/app-sounds/"):
+                clean_sounds[k] = v[:256]
         if clean_sounds:
             out["custom_sounds"] = clean_sounds
     return out
@@ -2190,7 +2296,7 @@ def _build_sync_export_for_user(user_id: int, *, social_posts_cursor: str = "") 
         "mood": str(me.get("mood") or "")[:200],
         "custom_style": _sanitize_inline_style(str(me.get("custom_style") or "")[:12000]),
         "custom_css": str(me.get("custom_css") or "")[:_SYNC_CUSTOM_CSS_MAX],
-        "client_prefs": _parse_client_prefs_export(me.get("client_prefs_json") or ""),
+        "client_prefs": _client_prefs_for_sync_export(uid, me.get("client_prefs_json") or ""),
         "room_order": _sanitize_room_order_json(str(me.get("room_order") or "")[:12000]),
         "location_sharing_enabled": 1 if int(me.get("location_sharing_enabled") or 0) else 0,
         "pin_hash": pin_hash,
@@ -2235,6 +2341,12 @@ def _build_sync_export_for_user(user_id: int, *, social_posts_cursor: str = "") 
         uid, page_post_ids, source_server_id, my_gid,
     )
     wall_reposts = _export_sync_reposts(uid, source_server_id)
+
+    stories = db.list_active_stories_for_sync_export(
+        uid,
+        limit=_SYNC_EXPORT_STORY_LIMIT,
+        media_max=_SYNC_EXPORT_STORY_MEDIA_MAX,
+    )
 
     # Recent room history per joined room. We export plain message rows
     # without media_data — the destination node lazy-loads media on demand
@@ -2420,6 +2532,8 @@ def _build_sync_export_for_user(user_id: int, *, social_posts_cursor: str = "") 
         "social_posts_total": len(ordered_post_ids),
         "wall_reposts": wall_reposts,
         "wall_reposts_total": len(wall_reposts),
+        "stories": stories,
+        "stories_total": len(stories),
         "self_profile": self_profile,
         "push_tokens": push_tokens,
         "source_server_id": source_server_id,
@@ -2546,6 +2660,7 @@ def _apply_sync_export_to_user(user_id: int, export: dict, *, fetch_origin: str 
     dm_histories_in = payload.get("dm_histories")
     member_snaps_in = payload.get("room_member_snapshots")
     reposts_in = payload.get("wall_reposts")
+    stories_in = payload.get("stories")
     rooms = rooms_in if isinstance(rooms_in, list) else []
     public_rooms = public_rooms_in if isinstance(public_rooms_in, list) else []
     dm_peers = dm_in if isinstance(dm_in, list) else []
@@ -2560,6 +2675,7 @@ def _apply_sync_export_to_user(user_id: int, export: dict, *, fetch_origin: str 
     dm_histories = dm_histories_in if isinstance(dm_histories_in, list) else []
     member_snaps = member_snaps_in if isinstance(member_snaps_in, list) else []
     wall_reposts = reposts_in if isinstance(reposts_in, list) else []
+    stories = stories_in if isinstance(stories_in, list) else []
 
     ident = db.get_or_create_local_server_identity() or {}
     local_sid = str(ident.get("server_id") or "").strip()
@@ -2588,6 +2704,7 @@ def _apply_sync_export_to_user(user_id: int, export: dict, *, fetch_origin: str 
     push_tokens_linked = 0
     social_posts_imported = 0
     social_posts_skipped = 0
+    stories_imported = 0
     social_posts_omitted_at_export = int(payload.get("social_posts_omitted_at_export") or 0)
     history_messages_applied = 0
     dm_history_messages_applied = 0
@@ -2626,12 +2743,13 @@ def _apply_sync_export_to_user(user_id: int, export: dict, *, fetch_origin: str 
     )
     n_blocked = len(blocked_users[:_SYNC_EXPORT_BLOCKED_LIMIT])
     n_social = len(social_posts[:_SYNC_EXPORT_SOCIAL_POST_LIMIT])
+    n_stories = len(stories[:_SYNC_EXPORT_STORY_LIMIT])
     n_push = len(push_tokens[:24])
     n_history_rooms_cap = len(room_histories[:_SYNC_EXPORT_HISTORY_TOTAL_ROOMS])
     n_dm_history_cap = len(dm_histories[:_SYNC_EXPORT_DM_HISTORY_TOTAL_CHANNELS])
     n_member_snaps = len(member_snaps[:_SYNC_EXPORT_MEMBER_ROOM_LIMIT])
     work_units = (
-        n_rooms + n_public + n_dms + n_follow + n_friends + n_friend_pending + n_blocked + n_social + n_push
+        n_rooms + n_public + n_dms + n_follow + n_friends + n_friend_pending + n_blocked + n_social + n_stories + n_push
         + n_history_rooms_cap + n_dm_history_cap + n_member_snaps + 1
     )
     done_units = 0
@@ -3060,11 +3178,19 @@ def _apply_sync_export_to_user(user_id: int, export: dict, *, fetch_origin: str 
             custom_style = _sanitize_inline_style(
                 str(self_profile.get("custom_style") or "")[:12000]
             ) or _sanitize_inline_style(raw_css)
-            client_prefs_json = _sanitize_client_prefs_json(
-                self_profile.get("client_prefs") if isinstance(self_profile.get("client_prefs"), dict)
+            prefs_raw = (
+                self_profile.get("client_prefs")
+                if isinstance(self_profile.get("client_prefs"), dict)
                 else self_profile.get("client_prefs_json") or ""
             )
-            profile_banner = _sanitize_sync_profile_banner(self_profile.get("banner"))
+            if isinstance(prefs_raw, dict):
+                client_prefs_json = _finalize_client_prefs_for_storage(uid, prefs_raw)
+            else:
+                client_prefs_json = _finalize_client_prefs_for_storage(
+                    uid,
+                    _parse_client_prefs_export(str(prefs_raw or "")),
+                )
+            profile_banner = _prepare_sync_profile_banner(self_profile.get("banner"))
             room_order = _sanitize_room_order_json(str(self_profile.get("room_order") or "")[:12000])
             location_sharing_enabled = 1 if int(self_profile.get("location_sharing_enabled") or 0) else 0
             with db._conn() as con:
@@ -3226,6 +3352,40 @@ def _apply_sync_export_to_user(user_id: int, export: dict, *, fetch_origin: str 
     reposts_linked = 0
     if wall_reposts:
         reposts_linked = _apply_sync_reposts(uid, wall_reposts, default_origin=source_server_id)
+
+    for item in stories[:_SYNC_EXPORT_STORY_LIMIT]:
+        if not isinstance(item, dict):
+            continue
+        story_gid = str(item.get("global_story_id") or "").strip()
+        media_data = str(item.get("media_data") or "")
+        media_type = str(item.get("media_type") or "")[:64]
+        if not story_gid or not media_data or len(media_data) > _SYNC_EXPORT_STORY_MEDIA_MAX:
+            continue
+        if media_data.startswith("data:image/"):
+            try:
+                media_data = _media_reencode(media_data) or media_data
+            except Exception:
+                pass
+        privacy = str(item.get("privacy") or "public").strip().lower()
+        if privacy not in ("public", "followers"):
+            privacy = "public"
+        try:
+            if db.resolve_federation_wall_local_id(source_server_id, "story", story_gid):
+                continue
+            local_id = db.create_story(
+                uid,
+                media_data,
+                media_type,
+                str(item.get("caption") or "")[:500],
+                privacy,
+            )
+            if local_id and story_gid:
+                db.map_federation_wall_object(source_server_id, "story", story_gid, int(local_id))
+                stories_imported += 1
+        except Exception:
+            continue
+    if stories_imported:
+        _sync_step("social_posts", f"Syncing stories… ({stories_imported}/{n_stories})", "social_posts", stories_imported)
 
     # ── Recent chat history backfill ──────────────────────────────────
     # Apply room-history snapshots from the source node. We deliberately
@@ -3430,6 +3590,7 @@ def _apply_sync_export_to_user(user_id: int, export: dict, *, fetch_origin: str 
 
     _sync_progress(uid, 100, "Sync complete", "done", counters={
         "social_posts": social_posts_imported,
+        "stories": stories_imported,
         "messages": history_messages_applied,
         "dm_messages": dm_history_messages_applied,
         "members": members_snapshots_applied,
@@ -3466,6 +3627,8 @@ def _apply_sync_export_to_user(user_id: int, export: dict, *, fetch_origin: str 
         "social_posts_skipped": social_posts_skipped,
         "social_posts_omitted_at_export": social_posts_omitted_at_export,
         "reposts_linked": reposts_linked,
+        "stories_imported": stories_imported,
+        "stories_total": n_stories,
         "history_messages_applied": history_messages_applied,
         "dm_history_messages_applied": dm_history_messages_applied,
         "members_snapshots_applied": members_snapshots_applied,
@@ -5842,11 +6005,55 @@ async def me(current_user: dict = Depends(get_current_user)):
     try:
         row = _load_user_sync_row(uid)
         if row:
-            out["client_prefs"] = _parse_client_prefs_export(row.get("client_prefs_json") or "")
+            out["client_prefs"] = _client_prefs_for_sync_export(
+                int(current_user["id"]),
+                row.get("client_prefs_json") or "",
+            )
             out["custom_css"] = str(row.get("custom_css") or "")[:_SYNC_CUSTOM_CSS_MAX]
     except Exception:
         pass
     return out
+
+
+@router.get("/app-sounds/{kind}/file")
+async def get_app_sound_file(
+    kind: str,
+    request: Request,
+    token: Optional[str] = None,
+):
+    """Serve server-stored app notification sounds (msg / ring)."""
+    session_token = (token or "").strip() or (request.headers.get("X-Session-Token", "").strip())
+    if not session_token:
+        return JSONResponse(status_code=401, content={"error": "Not authenticated"})
+    user = db.get_user_by_token(session_token)
+    if not user:
+        return JSONResponse(status_code=401, content={"error": "Invalid or expired session"})
+    safe_kind = str(kind or "").strip().lower()
+    if safe_kind not in _SYNC_CUSTOM_SOUND_KEYS:
+        return JSONResponse(status_code=400, content={"error": "kind must be msg or ring"})
+    row = db.get_user_app_sound(int(user["id"]), safe_kind)
+    if not row:
+        return JSONResponse(status_code=404, content={"error": "Sound not found"})
+    fp = Path(str(row.get("file_path") or ""))
+    try:
+        root_resolved = _APP_SOUND_ROOT.resolve()
+        fp_resolved = fp.resolve()
+        if not str(fp_resolved).startswith(str(root_resolved) + os.sep) and fp_resolved != root_resolved:
+            return JSONResponse(status_code=404, content={"error": "Sound not found"})
+    except Exception:
+        return JSONResponse(status_code=404, content={"error": "Sound not found"})
+    if not fp.exists() or not fp.is_file():
+        return JSONResponse(status_code=404, content={"error": "Sound file missing"})
+    from routers._media_safety import safe_media_type
+
+    media_type = safe_media_type(str(row.get("content_type") or ""))
+    return FileResponse(
+        str(fp),
+        media_type=media_type,
+        filename=fp.name,
+        content_disposition_type="inline",
+        headers={"Cache-Control": "private, max-age=300"},
+    )
 
 
 @router.patch("/client-prefs")
@@ -5878,13 +6085,13 @@ async def update_client_prefs(
             if k not in body.custom_sounds:
                 continue
             v = str(body.custom_sounds.get(k) or "").strip()
-            if v.startswith("data:audio/"):
-                sounds[k] = v[:_SYNC_CUSTOM_SOUND_MAX]
+            if v.startswith("data:audio/") or v.startswith("/api/auth/app-sounds/"):
+                sounds[k] = v[:_SYNC_CUSTOM_SOUND_MAX] if v.startswith("data:") else v[:256]
         if sounds:
             merged["custom_sounds"] = sounds
         elif "custom_sounds" in merged and not sounds:
             merged.pop("custom_sounds", None)
-    stored = _sanitize_client_prefs_json(merged)
+    stored = _finalize_client_prefs_for_storage(uid, merged)
     with db._conn() as con:
         con.execute(
             "UPDATE users SET client_prefs_json=? WHERE id=?",
@@ -5897,7 +6104,7 @@ async def update_client_prefs(
         pass
     return {
         "ok": True,
-        "client_prefs": _parse_client_prefs_export(stored),
+        "client_prefs": _client_prefs_for_sync_export(uid, stored),
     }
 
 

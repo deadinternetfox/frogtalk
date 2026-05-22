@@ -359,6 +359,20 @@ const Notifications = (() => {
       return false;
     }
   }
+  function _isAuthSoundApiUrl(url) {
+    const u = String(url || '');
+    if (!u) return false;
+    if (u.startsWith('/api/auth/app-sounds/')) return true;
+    try {
+      const abs = new URL(u, window.location.origin);
+      return abs.origin === window.location.origin && abs.pathname.startsWith('/api/auth/app-sounds/');
+    } catch {
+      return false;
+    }
+  }
+  function _isServerHostedSoundUrl(url) {
+    return _isFriendSoundApiUrl(url) || _isAuthSoundApiUrl(url);
+  }
   function _sessionToken() {
     try { return String((typeof State !== 'undefined' && State && State.token) ? State.token : ''); }
     catch { return ''; }
@@ -493,7 +507,7 @@ const Notifications = (() => {
       _audioDbg('custom:play-attempt', {
         token,
         kind: String(opts?.kind || ''),
-        isFriendUrl: _isFriendSoundApiUrl(dataUrl),
+        isFriendUrl: _isServerHostedSoundUrl(dataUrl),
         sourcePreview: String(dataUrl).slice(0, 120),
       });
       a.play().then(() => {
@@ -511,7 +525,7 @@ const Notifications = (() => {
           kind: String(opts?.kind || ''),
         });
         if (token !== _customAudioToken) return;
-        if (!_isFriendSoundApiUrl(dataUrl)) {
+        if (!_isServerHostedSoundUrl(dataUrl)) {
           if (_audioDebugEnabled()) console.warn('[FTDBG] custom play rejected', String(err?.message || err || 'play_failed'));
           void _debugProbeCustomPlayFailure(dataUrl, err, token);
           finish(false, String(err?.message || err || 'play_failed'));

@@ -966,6 +966,37 @@ class FederationSyncTests(unittest.TestCase):
         status2 = db.get_pin_status(travel_uid)
         self.assertEqual(int(status2.get("has_pin") or 0), 0)
 
+    def test_sync_export_includes_stories_when_small_media(self):
+        import routers.auth as auth_mod
+
+        db = self.db
+        uid = int(db.create_user("story_sync_user", "secret12"))
+        tiny = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+        db.create_story(uid, tiny, "image/png", "sync caption", "public")
+        export = auth_mod._build_sync_export_for_user(uid)
+        rows = export.get("stories") or []
+        self.assertGreaterEqual(len(rows), 1)
+        self.assertTrue(str(rows[0].get("global_story_id") or ""))
+
+    def test_app_sound_stored_as_server_url_in_client_prefs(self):
+        import routers.auth as auth_mod
+
+        db = self.db
+        uid = int(db.create_user("app_sound_user", "secret12"))
+        wav = (
+            "data:audio/wav;base64,UklGRtQkAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YbAkAAA="
+        )
+        stored = auth_mod._finalize_client_prefs_for_storage(
+            uid,
+            {"custom_sounds": {"app:msg": wav}},
+        )
+        self.assertIn("/api/auth/app-sounds/msg/file", stored)
+        export = auth_mod._client_prefs_for_sync_export(uid, stored)
+        self.assertEqual(
+            (export.get("custom_sounds") or {}).get("app:msg"),
+            "/api/auth/app-sounds/msg/file",
+        )
+
     def test_friend_pending_export_includes_outgoing_requests(self):
         import routers.auth as auth_mod
 

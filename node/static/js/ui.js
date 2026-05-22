@@ -4514,7 +4514,10 @@ function _applyClientPrefsFromSync(prefs) {
       })();
       for (const k of ['app:msg', 'app:ring']) {
         const v = prefs.custom_sounds[k];
-        if (v && String(v).startsWith('data:audio/')) cur[k] = String(v).slice(0, 131072);
+        if (!v) continue;
+        const s = String(v);
+        if (s.startsWith('data:audio/')) cur[k] = s.slice(0, 131072);
+        else if (s.startsWith('/api/auth/app-sounds/')) cur[k] = s.slice(0, 256);
       }
       localStorage.setItem('ft_custom_sounds', JSON.stringify(cur));
     }

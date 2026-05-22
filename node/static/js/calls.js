@@ -1381,6 +1381,11 @@ async function _renegotiate () {
       renegotiate: true,
       fp_sig: fp_sig || undefined,
     });
+    try {
+      if (window.FrogTalkAndroid && typeof window.FrogTalkAndroid.onCallRenegotiate === 'function') {
+        window.FrogTalkAndroid.onCallRenegotiate(String(_callId || _callGlobalId || ''));
+      }
+    } catch {}
   } catch (e) { console.warn('renegotiate failed', e); }
 }
 
