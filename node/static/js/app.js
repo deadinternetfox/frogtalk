@@ -204,7 +204,7 @@ try { window.FtSync = FtSync; } catch {}
 const App = {
   pendingInvite: null,  // Store invite code to process after login
   PENDING_CALL_KEY: 'ft_pending_incoming_call',
-  ASSET_RESET_VERSION: 'federation-sync-v22',
+  ASSET_RESET_VERSION: 'federation-sync-v23',
   _syncOverlayDismissed: false,
   _syncResumeStarting: false,
   easterEgg: null,

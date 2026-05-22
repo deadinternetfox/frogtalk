@@ -1076,8 +1076,9 @@ const Social = (() => {
     if (variant === 'compact') cls.push('social-loading-compact');
     let syncHint = '';
     try {
-      if (window.FtSync && FtSync.state().in_progress) {
-        syncHint = FtSync.renderInline(FtSync.state(), { compact: false, fallback: 'Syncing data from your home node…' });
+      const st = _socialSyncState();
+      if (st.in_progress) {
+        syncHint = FtSync.renderInline(st, { compact: false, fallback: 'Syncing data from your home node…' });
       }
     } catch {}
     return `<div class="${cls.join(' ')}">${esc(label)}${syncHint}</div>`;
@@ -3221,7 +3222,19 @@ const Social = (() => {
   }
 
   function _socialSyncState() {
-    return (window.FtSync && FtSync.state) ? FtSync.state() : ((window.App && App.federationSyncState) || {});
+    const raw = (window.FtSync && FtSync.state) ? FtSync.state() : ((window.App && App.federationSyncState) || {});
+    if (window.FtSync && typeof FtSync.normalizeState === 'function') {
+      return FtSync.normalizeState(raw && typeof raw === 'object' ? { ...raw } : {});
+    }
+    return raw || {};
+  }
+
+  function _socialFrogSocialFullyImported(st) {
+    if (!st || st.in_progress || String(st.error || '').trim()) return false;
+    if (!st.done) return false;
+    const total = Number(st.social_posts_total || 0);
+    const imported = Number(st.social_posts_imported || 0);
+    return total === 0 || imported >= total;
   }
 
   function _socialSyncResyncButtonHtml() {
@@ -3247,6 +3260,11 @@ const Social = (() => {
   function _socialSyncBannerInnerHtml() {
     if (!_socialAwayFromHome()) return '';
     const st = _socialSyncState();
+    if (!st.in_progress && _socialFrogSocialFullyImported(st)) {
+      const omitted = Number(st.social_posts_omitted_at_export || 0);
+      const skipped = Number(st.social_posts_skipped || 0);
+      if (omitted <= 0 && skipped <= 0) return '';
+    }
     if (st.in_progress) {
       const inline = (window.FtSync && FtSync.renderInline)
         ? FtSync.renderInline(st, { compact: true, fallback: 'Syncing FrogSocial from your home node…' })
@@ -3338,7 +3356,7 @@ const Social = (() => {
     html += `<div id="social-feed-suggest">${extras.suggestedHtml || ''}</div>`;
 
     if (!posts.length) {
-      const syncing = !!(window.FtSync && window.FtSync.state && window.FtSync.state().in_progress);
+      const syncing = !!_socialSyncState().in_progress;
       if (syncing) {
         html += `<div class="social-empty">
           <div class="se-icon se-icon--lg">⏳</div>
@@ -3530,7 +3548,7 @@ const Social = (() => {
     </div><div id="explore-channels-host"></div>`;
 
     if (posts.length === 0) {
-      const syncing = !!(window.FtSync && window.FtSync.state && window.FtSync.state().in_progress);
+      const syncing = !!_socialSyncState().in_progress;
       if (syncing) {
         html += `<div class="social-empty">
           <div class="se-icon se-icon--lg">⏳</div>
@@ -4658,7 +4676,7 @@ const Social = (() => {
 
       if (posts.length === 0) {
         _updateTabLoadUi(loadUi, 78, 'Rendering reels', 'No reels found for this filter');
-        const syncingReels = !!(window.FtSync && window.FtSync.state && window.FtSync.state().in_progress);
+        const syncingReels = !!_socialSyncState().in_progress;
         const awayReels = _socialAwayFromHome();
         content.innerHTML = scopeBar + (syncingReels ? `
           <div class="reels-empty">

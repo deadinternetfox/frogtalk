@@ -269,6 +269,24 @@ class FederatedVoiceTests(unittest.TestCase):
         # anywhere near federation outbox.
         self.assertEqual(out.get("error"), "bad_kind")
 
+    def test_voice_signal_targets_include_join_origin(self):
+        reg = fv.FederatedVoiceRegistry()
+        sid = "sess-abc"
+        reg.add_remote(
+            sid,
+            global_user_id="gid-traveler",
+            nickname="t",
+            home_server_id="srv_travel",
+            room_name="general",
+        )
+        with mock.patch.object(fv, "federated_voice_registry", reg), \
+             mock.patch.object(fv.db, "resolve_global_user_home_server_id", return_value="srv_home"), \
+             mock.patch.object(fv.db, "get_or_create_local_server_identity", return_value={"server_id": "srv_local"}):
+            targets = fv.voice_signal_target_servers("gid-traveler", sid)
+        self.assertIn("srv_home", targets)
+        self.assertIn("srv_travel", targets)
+        self.assertNotIn("srv_local", targets)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1754,7 +1754,7 @@ function callUserInfo (type) {
 /* ────────────────── GROUP VOICE CHANNEL (MESH TOPOLOGY) ──────────────────── */
 /* ═══════════════════════════════════════════════════════════════════════════ */
 
-// Map of user_id -> { pc: RTCPeerConnection, stream: MediaStream }
+// Map of peer key -> { pc, nickname, avatar, userId, globalUserId, ... }
 const _voicePeers = new Map();
 let _voiceStream = null;
 let _voiceRoom = null;
@@ -1763,7 +1763,27 @@ let _voiceRoom = null;
    Tracks everyone currently in voice for the channel the user is VIEWING,
    even before they've joined the call themselves. */
 let _presenceRoom = null;                 // room name currently displayed
-const _presenceRoster = new Map();        // room name -> array of {user_id, nickname, avatar}
+const _presenceRoster = new Map();        // room name -> array of {user_id, global_user_id, nickname, avatar}
+
+function _voicePeerKey(data) {
+  if (!data) return '';
+  const gid = data.global_user_id || data.from_global_user_id || data.globalUserId;
+  if (gid) return `g:${gid}`;
+  const uid = data.user_id ?? data.from_id ?? data.userId;
+  if (uid) return `u:${uid}`;
+  return '';
+}
+
+function _normalizeVoiceParticipant(p) {
+  if (!p || typeof p !== 'object') return null;
+  return {
+    user_id: Number(p.user_id) || 0,
+    global_user_id: String(p.global_user_id || '').trim(),
+    nickname: String(p.nickname || '').trim() || '?',
+    avatar: String(p.avatar || ''),
+    federated: !!p.federated,
+  };
+}
 
 async function refreshVoicePresenceBar(roomName) {
   _presenceRoom = roomName || null;
@@ -1777,7 +1797,8 @@ async function refreshVoicePresenceBar(roomName) {
     const r = await apiFetch(`/api/rooms/${encodeURIComponent(roomName)}/voice-participants`);
     if (!r.ok) { bar.style.display = 'none'; return; }
     const data = await r.json();
-    _presenceRoster.set(roomName, Array.isArray(data.participants) ? data.participants : []);
+    const parts = Array.isArray(data.participants) ? data.participants : [];
+    _presenceRoster.set(roomName, parts.map(_normalizeVoiceParticipant).filter(Boolean));
     _renderVoicePresenceBar(roomName);
   } catch {
     bar.style.display = 'none';
@@ -1790,8 +1811,15 @@ function _renderVoicePresenceBar(roomName) {
   let roster = (_presenceRoster.get(roomName) || []).slice();
   // Ensure self appears when we are in voice here (server broadcast excludes us)
   const myId = State.user?.id;
-  if (_voiceRoom === roomName && myId && !roster.some(p => p.user_id === myId)) {
-    roster.unshift({ user_id: myId, nickname: State.user?.nickname || 'You', avatar: State.user?.avatar || '' });
+  const myGid = State.user?.global_user_id || '';
+  if (_voiceRoom === roomName && myId && !roster.some(p =>
+    (myGid && p.global_user_id === myGid) || (p.user_id && p.user_id === myId))) {
+    roster.unshift({
+      user_id: myId,
+      global_user_id: myGid,
+      nickname: State.user?.nickname || 'You',
+      avatar: State.user?.avatar || '',
+    });
   }
   if (!roster.length) { bar.style.display = 'none'; bar.innerHTML = ''; return; }
 
@@ -1809,7 +1837,7 @@ function _renderVoicePresenceBar(roomName) {
     return s.startsWith('data:image/') || s.startsWith('http://') || s.startsWith('https://');
   };
   const avatars = roster.slice(0, 12).map(p => {
-    const self = p.user_id === myId;
+    const self = (myGid && p.global_user_id === myGid) || (myId && p.user_id === myId);
     const rawNick = String(p.nickname || '?');
     const safeNick = esc(rawNick);
     const initials = esc(rawNick.slice(0, 2).toUpperCase());
@@ -1870,9 +1898,16 @@ function _presenceRemove(roomName, userIdOrPayload) {
 /** Returns nicknames of all users currently in voice call */
 function getVoiceParticipantNicks() {
   const nicks = new Set();
-  // Include self if in a voice channel
   if (_voiceRoom && State.user?.nickname) nicks.add(State.user.nickname);
-  for (const [, peer] of _voicePeers) nicks.add(peer.nickname);
+  for (const [, peer] of _voicePeers) {
+    if (peer.nickname) nicks.add(peer.nickname);
+  }
+  const room = (typeof State !== 'undefined' && State.currentRoom) ? State.currentRoom : _presenceRoom;
+  if (room) {
+    for (const p of (_presenceRoster.get(room) || [])) {
+      if (p.nickname) nicks.add(p.nickname);
+    }
+  }
   return nicks;
 }
 let _voiceMuted = false;
@@ -2042,7 +2077,7 @@ function handleVoiceMute(data) {
 async function _createVoicePeer(userId, nickname, avatar, isOfferer, globalUserId) {
   const ice = await buildIceServers('');
   const pc = new RTCPeerConnection({ iceServers: ice });
-  const peerKey = userId || globalUserId || nickname;
+  const peerKey = globalUserId ? `g:${globalUserId}` : (userId ? `u:${userId}` : `n:${nickname}`);
   
   // Add local audio track
   if (_voiceStream) {
@@ -2136,12 +2171,16 @@ async function handleVoiceJoined(data) {
 
   // Seed the presence roster for our current room with the existing peers.
   if (_voiceRoom) {
-    const roster = (data.participants || []).map(p => ({
-      user_id: p.user_id, nickname: p.nickname, avatar: p.avatar || ''
-    }));
-    // Include self (server excludes us from "existing")
-    if (State.user?.id && !roster.some(p => p.user_id === State.user.id)) {
-      roster.push({ user_id: State.user.id, nickname: State.user.nickname, avatar: State.user.avatar || '' });
+    const roster = (data.participants || []).map(_normalizeVoiceParticipant).filter(Boolean);
+    const myGid = State.user?.global_user_id || '';
+    if (State.user?.id && !roster.some(p =>
+      (myGid && p.global_user_id === myGid) || p.user_id === State.user.id)) {
+      roster.push(_normalizeVoiceParticipant({
+        user_id: State.user.id,
+        global_user_id: myGid,
+        nickname: State.user.nickname,
+        avatar: State.user.avatar || '',
+      }));
     }
     _presenceRoster.set(_voiceRoom, roster);
     if (_voiceRoom === _presenceRoom) _renderVoicePresenceBar(_voiceRoom);
@@ -2170,39 +2209,53 @@ async function handleVoiceJoined(data) {
  * They will send us an offer, so we just wait.
  */
 function handleVoiceUserJoined(data) {
-  // No toast — voice presence bar already reflects the new participant.
-  // Server-broadcast includes the room implicitly (we're in it). Use whichever
-  // room the broadcast matches: for the voice-presence bar we only need the
-  // channel the user is currently VIEWING.
   const room = data.room || _voiceRoom || _presenceRoom;
-  if (room) _presenceAdd(room, {
-    user_id: data.user_id, nickname: data.nickname, avatar: data.avatar || ''
-  });
+  if (room) {
+    if (Array.isArray(data.participants) && data.participants.length) {
+      _presenceRoster.set(room, data.participants.map(_normalizeVoiceParticipant).filter(Boolean));
+      if (room === _presenceRoom) _renderVoicePresenceBar(room);
+    } else {
+      const p = _normalizeVoiceParticipant({
+        user_id: data.user_id,
+        global_user_id: data.global_user_id,
+        nickname: data.nickname,
+        avatar: data.avatar,
+        federated: data.federated,
+      });
+      if (p) _presenceAdd(room, p);
+    }
+  }
   try { if (typeof renderUsers === 'function') renderUsers(); } catch {}
-  // They will send us an offer, we'll handle it in handleVoiceOffer
 }
 
 /**
  * Handle when another user leaves the voice channel.
  */
 function handleVoiceUserLeft(data) {
-  // No toast — voice bar updates silently.
-
-  const peer = _voicePeers.get(data.user_id);
+  const peerKey = _voicePeerKey(data);
+  const peer = peerKey ? _voicePeers.get(peerKey) : null;
   if (peer) {
     try { peer.pc.close(); } catch {}
-    // Remove audio element
-    const audio = document.getElementById(`voice-audio-${data.user_id}`);
+    const audio = document.getElementById(`voice-audio-${peerKey}`);
     if (audio) audio.remove();
   }
-  _voicePeers.delete(data.user_id);
-  _voicePeerMuted.delete(data.user_id);
+  if (peerKey) {
+    _voicePeers.delete(peerKey);
+    _voicePeerMuted.delete(peerKey);
+  }
 
   const room = data.room || _voiceRoom || _presenceRoom;
-  if (room) _presenceRemove(room, {
-    user_id: data.user_id,
-    global_user_id: data.global_user_id,
-  });
+  if (room) {
+    if (Array.isArray(data.participants)) {
+      _presenceRoster.set(room, data.participants.map(_normalizeVoiceParticipant).filter(Boolean));
+      if (room === _presenceRoom) _renderVoicePresenceBar(room);
+    } else {
+      _presenceRemove(room, {
+        user_id: data.user_id,
+        global_user_id: data.global_user_id,
+      });
+    }
+  }
 
   _updateVoiceBarParticipants();
   try { if (typeof renderUsers === 'function') renderUsers(); } catch {}
@@ -2214,7 +2267,7 @@ function handleVoiceUserLeft(data) {
 async function handleVoiceOffer(data) {
   if (!_voiceRoom || data.room !== _voiceRoom) return;
 
-  const peerKey = data.from_id || data.from_global_user_id;
+  const peerKey = _voicePeerKey(data);
   let peer = _voicePeers.get(peerKey);
   let pc;
 
@@ -2254,8 +2307,9 @@ async function handleVoiceOffer(data) {
  */
 async function handleVoiceAnswer(data) {
   if (!_voiceRoom || data.room !== _voiceRoom) return;
-  
-  const peer = _voicePeers.get(data.from_id);
+
+  const peerKey = _voicePeerKey(data);
+  const peer = _voicePeers.get(peerKey);
   if (!peer) return;
   
   await peer.pc.setRemoteDescription({ type: 'answer', sdp: data.sdp });
@@ -2274,8 +2328,9 @@ async function handleVoiceAnswer(data) {
  */
 async function handleVoiceIce(data) {
   if (!_voiceRoom || data.room !== _voiceRoom) return;
-  
-  const peer = _voicePeers.get(data.from_id);
+
+  const peerKey = _voicePeerKey(data);
+  const peer = _voicePeers.get(peerKey);
   if (!peer) return;
   
   let parsed;

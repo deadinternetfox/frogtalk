@@ -274,6 +274,40 @@ def enqueue_voice_session_leave(
     return _enqueue("voice.session.leave", payload, targets)
 
 
+def voice_signal_target_servers(
+    to_gid: str,
+    session_id: str,
+    *,
+    room_name: str = "",
+) -> list[str]:
+    """Servers that may host the callee's active voice session.
+
+    Account home alone is insufficient for travelers: also include the
+    federation origin that announced their ``voice.session.join`` (stored on
+    remote roster rows as ``home_server_id``).
+    """
+    gid = str(to_gid or "").strip()
+    sid = str(session_id or "").strip()
+    if not gid:
+        return []
+    targets: set[str] = set()
+    home = db.resolve_global_user_home_server_id(gid)
+    if home:
+        targets.add(home)
+    for p in federated_voice_registry._remote.get(sid, []):
+        if str(p.get("global_user_id") or "").strip() != gid:
+            continue
+        origin = str(p.get("home_server_id") or "").strip()
+        if origin:
+            targets.add(origin)
+        break
+    ident = db.get_or_create_local_server_identity() or {}
+    local_sid = str(ident.get("server_id") or "").strip()
+    if local_sid:
+        targets.discard(local_sid)
+    return sorted(targets)
+
+
 def enqueue_voice_signal(
     from_user: dict,
     to_gid: str,
@@ -287,9 +321,9 @@ def enqueue_voice_signal(
     safe_kind = str(kind or "").strip().lower()
     if safe_kind not in ("offer", "answer", "ice"):
         return {"ok": False, "error": "bad_kind"}
-    home = db.resolve_global_user_home_server_id(to_gid)
-    if not home:
-        return {"ok": False, "error": "no_peer_home"}
+    targets = voice_signal_target_servers(to_gid, session_id, room_name=room_name)
+    if not targets:
+        return {"ok": False, "error": "no_peer_route"}
     payload = {
         "global_voice_session_id": session_id,
         "room_name": room_name,
@@ -299,7 +333,7 @@ def enqueue_voice_signal(
         "sdp": (sdp or "")[:32768],
         "candidate": (candidate or "")[:8192],
     }
-    return _enqueue("voice.signal", payload, [home])
+    return _enqueue("voice.signal", payload, targets)
 
 
 async def apply_voice_event(event: dict) -> None:
