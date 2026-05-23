@@ -1858,7 +1858,6 @@ async function openDMChannel (id, nickname, avatar) {
   // spinner hung on "Opening conversation with…").
   _show('call-voice-btn');
   _show('dm-timer-btn');
-  _show('dm-keys-btn');
   _show('encrypt-btn');
   // Encode DM peer info for calls
   STATE.dmPeerNick = nickname;
@@ -2388,6 +2387,18 @@ function _scrollDMToBottomStable() {
   [80, 220, 500].forEach(ms => setTimeout(go, ms));
 }
 
+function _dmKeyTriggerAttrs() {
+  const dmId = Number(_activeDM?.id || 0);
+  const peerId = Number(_activeDM?.user_id || 0);
+  const peerNick = String(_activeDM?.nickname || '').trim();
+  let peerGid = '';
+  try {
+    const ch = _dmChannels?.find?.((c) => Number(c.id) === dmId);
+    peerGid = String(ch?.peer_global_user_id || ch?.global_user_id || ch?.other_global_user_id || '').trim();
+  } catch {}
+  return ` data-ft-dm-id="${dmId}" data-ft-peer-id="${peerId}" data-ft-peer-nick="${esc(peerNick)}"${peerGid ? ` data-ft-peer-gid="${esc(peerGid)}"` : ''}`;
+}
+
 function _dmSysLogActionsHtml(kind) {
   const k = String(kind || '');
   const withImport = new Set([
@@ -2402,7 +2413,7 @@ function _dmSysLogActionsHtml(kind) {
     ? 'Import keys'
     : 'Manage keys';
   return `<div class="dm-sys-log-actions" role="group" aria-label="Encryption keys">
-    <button type="button" class="dm-sys-log-btn dm-sys-log-btn-primary" data-ft-key-action="import">${btnLabel}</button>
+    <button type="button" class="dm-sys-log-btn dm-sys-log-btn-primary" data-ft-key-action="import"${_dmKeyTriggerAttrs()}>${btnLabel}</button>
   </div>`;
 }
 
@@ -2445,7 +2456,7 @@ function _renderDmLockInBubble(meta, opts = {}) {
   const mine = !!opts.mine;
   const line = esc(_dmLockPlainLine(meta));
   const importBtn = _dmLockShowImportBtn(meta, mine)
-    ? ' <button type="button" class="dm-lock-import-link" data-ft-key-action="import">Import keys</button>'
+    ? ` <button type="button" class="dm-lock-import-link" data-ft-key-action="import"${_dmKeyTriggerAttrs()}>Import keys</button>`
     : '';
   return `\u{1F512} ${line}${importBtn}`;
 }
@@ -4469,14 +4480,24 @@ function showDisappearSettings() {
           <option value="604800">7 days</option>
           <option value="2592000">30 days</option>
         </select>
-        <div style="margin-top:14px;padding-top:12px;border-top:1px solid #2a2a2a">
+        <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border-color,#2a2a2a)">
           <label style="display:flex;align-items:center;gap:10px;cursor:pointer">
-            <input type="checkbox" id="dm-forwarding-disabled" style="width:18px;height:18px;accent-color:#4caf50;cursor:pointer" onchange="toggleDMForwarding(this.checked)">
+            <input type="checkbox" id="dm-forwarding-disabled" style="width:18px;height:18px;accent-color:var(--accent-color,#4caf50);cursor:pointer" onchange="toggleDMForwarding(this.checked)">
             <div>
-              <div style="font-weight:600;font-size:14px">📤 Disable Forwarding</div>
-              <div style="font-size:12px;color:#888">Messages in this DM cannot be forwarded elsewhere</div>
+              <div style="font-weight:600;font-size:14px;color:var(--text-color,#e0e0e0)">📤 Disable Forwarding</div>
+              <div style="font-size:12px;color:var(--text-muted,#888)">Messages in this DM cannot be forwarded elsewhere</div>
             </div>
           </label>
+        </div>
+        <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border-color,#2a2a2a)">
+          <div style="font-size:12px;color:var(--text-muted,#888);margin:-4px 0 8px;text-transform:uppercase;letter-spacing:.5px;font-weight:600">🗝️ Encryption</div>
+          <p style="font-size:12px;color:var(--text-muted,#888);line-height:1.45;margin-bottom:10px">
+            Import keys to read older messages with this contact, or manage all encryption keys.
+          </p>
+          <button type="button" class="modal-btn primary" style="width:100%;margin-bottom:8px"
+            data-ft-key-action="import" id="dm-privacy-import-keys">Import keys for this chat</button>
+          <button type="button" class="modal-btn secondary" style="width:100%"
+            data-ft-key-action="keys" id="dm-privacy-open-keymgr">Open key manager</button>
         </div>
         <div class="modal-actions">
           <button class="modal-btn secondary" onclick="closeModal('modal-disappear')">Cancel</button>
@@ -4492,6 +4513,19 @@ function showDisappearSettings() {
   document.getElementById('disappear-select').value = _dmDisappearTimer.toString();
   const fwdCb = document.getElementById('dm-forwarding-disabled');
   if (fwdCb) fwdCb.checked = !!(_activeDM && _activeDM.forwarding_disabled);
+  const attrs = _dmKeyTriggerAttrs();
+  ['dm-privacy-import-keys', 'dm-privacy-open-keymgr'].forEach((id) => {
+    const btn = document.getElementById(id);
+    if (!btn) return;
+    const dm = attrs.match(/data-ft-dm-id="(\d+)"/);
+    const pid = attrs.match(/data-ft-peer-id="(\d+)"/);
+    const nick = attrs.match(/data-ft-peer-nick="([^"]*)"/);
+    const gid = attrs.match(/data-ft-peer-gid="([^"]*)"/);
+    if (dm) btn.setAttribute('data-ft-dm-id', dm[1]);
+    if (pid) btn.setAttribute('data-ft-peer-id', pid[1]);
+    if (nick) btn.setAttribute('data-ft-peer-nick', nick[1]);
+    if (gid) btn.setAttribute('data-ft-peer-gid', gid[1]);
+  });
   openModal('modal-disappear');
 }
 

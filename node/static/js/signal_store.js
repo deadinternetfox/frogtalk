@@ -446,6 +446,30 @@
       }
       return true;
     }
+
+    /** Merge sessions/identities without wiping other peers (partial .key import). */
+    async mergeSnapshot(snap, remapAddressKey) {
+      if (!snap || typeof snap !== 'object') return false;
+      const remap = (typeof remapAddressKey === 'function')
+        ? remapAddressKey
+        : (k) => k;
+
+      const existingId = await _get(STORE_IDENTITY, 'self');
+      const identity = FrogtalkSignalStore._deserializeRowValue(snap.identity);
+      if (!existingId && identity) await _put(STORE_IDENTITY, 'self', identity);
+
+      for (const row of (snap.identities || [])) {
+        const key = remap(String(row.key));
+        const val = FrogtalkSignalStore._deserializeRowValue(row.value);
+        if (key && val) await _put(STORE_IDENTITIES, key, val);
+      }
+      for (const row of (snap.sessions || [])) {
+        const key = remap(String(row.key));
+        const val = FrogtalkSignalStore._deserializeRowValue(row.value);
+        if (key && val != null) await _put(STORE_SESSIONS, key, val);
+      }
+      return true;
+    }
   }
 
   try {

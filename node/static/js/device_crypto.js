@@ -254,21 +254,184 @@
     };
   }
 
-  async function _buildPlainExport() {
+  function _filterSignalSnapshot(signal, peerLocalIds) {
+    if (!signal || !peerLocalIds || !peerLocalIds.size) return signal;
+    const keep = (key) => {
+      const uid = Number(String(key || '').split('.')[0]) || 0;
+      return uid > 0 && peerLocalIds.has(uid);
+    };
+    const out = {
+      identity: signal.identity,
+      identities: (signal.identities || []).filter((r) => keep(r.key)),
+      sessions: (signal.sessions || []).filter((r) => keep(r.key)),
+    };
+    return out;
+  }
+
+  function _filterRoomSecrets(allRooms, roomStorageKeys) {
+    if (!roomStorageKeys || !roomStorageKeys.size) return allRooms;
+    return (allRooms || []).filter((r) => roomStorageKeys.has(String(r.storage_key || '')));
+  }
+
+  async function _buildPlainExport(opts) {
+    const options = opts && typeof opts === 'object' ? opts : {};
+    const peerLocalIds = options.peerLocalIds instanceof Set
+      ? options.peerLocalIds
+      : (Array.isArray(options.peerLocalIds)
+        ? new Set(options.peerLocalIds.map((x) => Number(x)).filter((n) => n > 0))
+        : null);
+    const roomKeys = options.roomStorageKeys instanceof Set
+      ? options.roomStorageKeys
+      : (Array.isArray(options.roomStorageKeys)
+        ? new Set(options.roomStorageKeys.map((k) => String(k || '')).filter(Boolean))
+        : null);
+    const includeIdentity = options.includeIdentity !== false;
+
     if (!window.SignalStore) throw new Error('SignalStore missing');
     const store = new window.SignalStore();
-    const signal = await store.exportSnapshot();
-    if (!signal || !signal.identity) {
+    const signalFull = await store.exportSnapshot();
+    if (!signalFull || !signalFull.identity) {
       throw new Error('no_signal_identity');
+    }
+    let signal = _slimSignalForDct(signalFull);
+    if (peerLocalIds && peerLocalIds.size) {
+      signal = _filterSignalSnapshot(signal, peerLocalIds);
+      if (!includeIdentity) {
+        signal = { ...signal, identity: null };
+      }
+    } else if (!includeIdentity) {
+      signal = { identity: null, identities: [], sessions: [] };
+    }
+    const partial = !!(peerLocalIds && peerLocalIds.size) || !!(roomKeys && roomKeys.size);
+    let room_secrets = _exportRoomSecrets();
+    if (roomKeys && roomKeys.size) {
+      room_secrets = _filterRoomSecrets(room_secrets, roomKeys);
     }
     return {
       dct_version: DCT_VERSION,
-      dct_mode: 'full',
+      dct_mode: partial ? 'partial' : 'full',
       exported_at: Date.now(),
       address_book: await _collectAddressBook(),
-      signal: _slimSignalForDct(signal),
-      room_secrets: _exportRoomSecrets(),
+      signal,
+      room_secrets,
     };
+  }
+
+  async function listKeyInventory() {
+    const myId = Number((window.State && State.user && State.user.id) || 0);
+    const out = {
+      hasIdentity: false,
+      sessionCount: 0,
+      peers: [],
+      rooms: [],
+      lastExportAt: 0,
+      lastImportAt: 0,
+      nodeOrigin: String(window.location.origin || ''),
+    };
+    try {
+      out.lastExportAt = Number(localStorage.getItem('ft_key_last_export_at') || 0) || 0;
+      out.lastImportAt = Number(localStorage.getItem('ft_key_last_import_at') || 0) || 0;
+    } catch {}
+    if (window.SignalStore) {
+      try {
+        const store = new window.SignalStore();
+        if (typeof store._stats === 'function') {
+          const st = await store._stats();
+          out.hasIdentity = !!(st && st.haveIdentity);
+          out.sessionCount = Number(st.sessions || 0);
+        }
+        const snap = await store.exportSnapshot();
+        const peerCounts = new Map();
+        for (const row of (snap.sessions || [])) {
+          const uid = Number(String(row.key || '').split('.')[0]) || 0;
+          if (uid > 0 && uid !== myId) {
+            peerCounts.set(uid, (peerCounts.get(uid) || 0) + 1);
+          }
+        }
+        const peerMeta = new Map();
+        try {
+          const res = await _api('/api/dms');
+          if (res.ok) {
+            const data = await res.json().catch(() => ({}));
+            const rows = data.channels || data.dms || data || [];
+            for (const ch of rows) {
+              const lid = Number(ch.user_id || ch.other_id || ch.peer_id || ch.with_user_id || 0);
+              if (!lid) continue;
+              peerMeta.set(lid, {
+                nickname: String(ch.nickname || ch.other_nickname || ch.peer_nickname || '').trim(),
+                gid: String(ch.peer_global_user_id || ch.global_user_id || ch.other_global_user_id || '').trim(),
+                dmChannelId: Number(ch.id || 0),
+              });
+            }
+          }
+        } catch {}
+        let importedSet = new Set();
+        try {
+          const raw = localStorage.getItem('ft_key_imported_peer_gids');
+          if (raw) {
+            const arr = JSON.parse(raw);
+            if (Array.isArray(arr)) importedSet = new Set(arr.map((g) => String(g || '').trim()).filter(Boolean));
+          }
+        } catch {}
+        for (const [localId, sessions] of peerCounts.entries()) {
+          const meta = peerMeta.get(localId) || {};
+          const gid = meta.gid || '';
+          out.peers.push({
+            localUserId: localId,
+            nickname: meta.nickname || `User #${localId}`,
+            globalUserId: gid,
+            dmChannelId: meta.dmChannelId || 0,
+            sessionCount: sessions,
+            imported: gid ? importedSet.has(gid) : false,
+            lastExportAt: Number(localStorage.getItem(`ft_key_peer_export:${gid || localId}`) || 0) || 0,
+          });
+        }
+        out.peers.sort((a, b) => String(a.nickname).localeCompare(String(b.nickname)));
+      } catch (e) {
+        if (window.__ftDctDebug) console.warn('[DeviceCrypto] listKeyInventory', e);
+      }
+    }
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (!k || !k.startsWith(ROOM_SECRET_PREFIX)) continue;
+        const roomName = k.slice(ROOM_SECRET_PREFIX.length);
+        out.rooms.push({
+          storageKey: k,
+          roomName,
+          hasSecret: !!(localStorage.getItem(k) || ''),
+        });
+      }
+      out.rooms.sort((a, b) => String(a.roomName).localeCompare(String(b.roomName)));
+    } catch {}
+    return out;
+  }
+
+  function _recordKeyExportMeta(peerGids) {
+    const at = Date.now();
+    try {
+      localStorage.setItem('ft_key_last_export_at', String(at));
+      for (const g of (peerGids || [])) {
+        const gid = String(g || '').trim();
+        if (gid) localStorage.setItem(`ft_key_peer_export:${gid}`, String(at));
+      }
+    } catch {}
+  }
+
+  function _recordKeyImportMeta(peerGids) {
+    const at = Date.now();
+    try {
+      localStorage.setItem('ft_key_last_import_at', String(at));
+      if (peerGids && peerGids.length) {
+        let prev = [];
+        try {
+          const raw = localStorage.getItem('ft_key_imported_peer_gids');
+          if (raw) prev = JSON.parse(raw);
+        } catch {}
+        const merged = new Set([...(Array.isArray(prev) ? prev : []), ...peerGids.map((g) => String(g || '').trim()).filter(Boolean)]);
+        localStorage.setItem('ft_key_imported_peer_gids', JSON.stringify([...merged]));
+      }
+    } catch {}
   }
 
   async function _resolveGidToLocalId(gid) {
@@ -492,7 +655,9 @@
       return true;
     }
 
-    if (!plain.signal || !plain.signal.identity) return false;
+    const partial = mode === 'partial';
+    if (!partial && (!plain.signal || !plain.signal.identity)) return false;
+    if (partial && !plain.signal) return false;
     const idMap = new Map();
     const book = plain.address_book || {};
     const meId = Number((window.State && State.user && State.user.id) || 0);
@@ -535,7 +700,12 @@
       }
       signal.identities = keptId;
     }
-    await store.importSnapshot(signal, (k) => k);
+    if (partial) {
+      await store.mergeSnapshot(signal, (k) => k);
+    } else {
+      if (!plain.signal.identity) return false;
+      await store.importSnapshot(signal, (k) => k);
+    }
 
     _importRoomSecrets(plain.room_secrets);
     try { window.__ftDctImported = true; } catch {}
@@ -616,12 +786,12 @@
     }
   }
 
-  async function exportKeyFilePayload(passphrase) {
+  async function exportKeyFilePayload(passphrase, opts) {
     const pass = String(passphrase || '');
     if (pass.length < 8) throw new Error('passphrase_too_short');
     await _ensureSignalReadyForExport();
     if (!(await _hasExportableCrypto())) throw new Error('no_signal_identity');
-    const plain = await _buildPlainExport();
+    const plain = await _buildPlainExport(opts);
     const packed = await _packPlainExport(plain);
     const sealed = await _sealPackedForPassphrase(packed, pass);
     return {
@@ -637,8 +807,8 @@
     };
   }
 
-  async function downloadKeyFile(passphrase) {
-    const payload = await exportKeyFilePayload(passphrase);
+  async function downloadKeyFile(passphrase, opts) {
+    const payload = await exportKeyFilePayload(passphrase, opts);
     const body = JSON.stringify(payload, null, 2);
     const blob = new Blob([body], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -667,6 +837,14 @@
     const plain = await _unpackPlainExport(packed);
     const ok = await _importPlainPayload(plain, '');
     if (!ok) throw new Error('import_failed');
+    try {
+      const gids = [];
+      for (const p of ((plain.address_book && plain.address_book.peers) || [])) {
+        const g = String(p.gid || '').trim();
+        if (g) gids.push(g);
+      }
+      _recordKeyImportMeta(gids);
+    } catch {}
     try {
       if (window.Signal && typeof Signal.init === 'function' && State?.user?.id) {
         await Signal.init(State.user.id);
@@ -702,6 +880,9 @@
     importKeyFileFromText,
     buildPlainExport: _buildPlainExport,
     ensureReadyForExport: _ensureSignalReadyForExport,
+    listKeyInventory,
+    recordKeyExportMeta: _recordKeyExportMeta,
+    recordKeyImportMeta: _recordKeyImportMeta,
   };
 
   try {

@@ -3327,7 +3327,26 @@ body.ft-incoming-call-active #incoming-call{z-index:20000}
 }
 .dm-lock-import-link:hover{color:color-mix(in srgb, var(--accent-color) 75%, #fff) !important}
 .dm-lock-import-link:focus-visible{outline:2px solid color-mix(in srgb, var(--accent-color) 55%, #fff);outline-offset:2px;border-radius:2px}
-.ft-key-manager-modal{max-width:460px;width:min(460px,94vw)}
+.ft-key-manager-modal{max-width:560px;width:min(560px,96vw);max-height:min(88vh,720px);overflow:auto}
+.ft-key-gate-modal{max-width:400px;width:min(400px,94vw)}
+.ft-key-inv-section{margin:12px 0 0}
+.ft-key-inv-section-head{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12px;font-weight:700;color:var(--accent-color);margin-bottom:8px;text-transform:uppercase;letter-spacing:.04em}
+.ft-key-select-all{font-size:11px;font-weight:500;color:var(--text-muted);text-transform:none;letter-spacing:0;display:flex;align-items:center;gap:6px;cursor:pointer}
+.ft-key-inv-list{max-height:min(42vh,340px);overflow-y:auto;border:1px solid var(--border-color);border-radius:10px;background:color-mix(in srgb, var(--bg-color) 40%, var(--surface-color))}
+.ft-key-inv-row{display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border-bottom:1px solid color-mix(in srgb, var(--border-color) 80%, transparent);cursor:pointer}
+.ft-key-inv-row:last-child{border-bottom:0}
+.ft-key-inv-row:hover{background:color-mix(in srgb, var(--accent-color) 8%, transparent)}
+.ft-key-inv-row.ft-key-row-focus{background:color-mix(in srgb, var(--accent-color) 14%, transparent)}
+.ft-key-inv-row input{margin-top:3px;accent-color:var(--accent-color)}
+.ft-key-inv-row-body{flex:1;min-width:0}
+.ft-key-inv-title{font-size:13px;font-weight:600;color:var(--text-color)}
+.ft-key-inv-sub{font-size:11px;color:var(--text-muted);margin-top:3px;line-height:1.4}
+.ft-key-inv-meta{font-size:11px;color:var(--text-muted);line-height:1.5;margin-bottom:4px}
+.ft-key-inv-empty{font-size:12px;color:var(--text-muted);padding:16px;text-align:center}
+.ft-key-badge{font-size:10px;font-weight:600;padding:2px 6px;border-radius:4px;background:color-mix(in srgb, var(--accent-color) 18%, var(--surface-color));color:var(--accent-color);margin-left:4px}
+.ft-key-badge-ok{background:color-mix(in srgb, var(--accent-color) 28%, var(--bg-color));color:color-mix(in srgb, var(--accent-color) 85%, #fff)}
+.ft-privacy-keys-panel{margin:20px 0 0;padding-top:16px;border-top:1px solid var(--border-color)}
+.ft-privacy-keys-panel .modal-btn{width:100%;margin-top:10px}
 .ft-key-manager-header{display:flex;align-items:flex-start;gap:12px;margin-bottom:12px}
 .ft-key-manager-icon{font-size:2rem;line-height:1;flex:0 0 auto}
 .ft-key-manager-sub{font-size:12px;color:var(--text-muted);margin:4px 0 0;line-height:1.45}
@@ -10285,6 +10304,16 @@ window.ConnErr = (function(){
         </div>
         <input type="checkbox" id="profile-hide-active-channels" style="width:18px;height:18px;cursor:pointer;accent-color:#4caf50">
       </label>
+      <div class="ft-privacy-keys-panel">
+        <div style="font-size:14px;font-weight:600;color:var(--accent-color)">🗝️ Encryption key manager</div>
+        <p style="font-size:12px;color:var(--text-muted);line-height:1.55;margin:8px 0 0">
+          View, export, and import end-to-end encryption for every DM and private group in <b>this browser only</b>.
+          Protected by your password and App PIN (if set). FrogTalk servers never receive your keys.
+        </p>
+        <button type="button" class="modal-btn primary" id="ft-key-open-from-privacy" data-ft-key-action="keys">
+          Open key manager
+        </button>
+      </div>
       <div style="margin-top:16px">
         <div style="font-size:14px;color:#e0e0e0;margin-bottom:8px">Blocked Users</div>
         <div id="blocked-users-list" style="max-height:150px;overflow-y:auto;background:#0d0d0d;border-radius:8px;padding:8px">
@@ -10605,20 +10634,6 @@ window.ConnErr = (function(){
         <div id="recovery-key-status" style="font-size:11px;color:#7a8a82;margin-top:8px;min-height:14px"></div>
       </div>
 
-      <div style="margin:24px 0 8px;padding-top:16px;border-top:1px solid var(--border-color)">
-        <div style="font-size:13px;color:var(--accent-color);font-weight:600;margin-bottom:8px">🗝️ DM encryption backup</div>
-        <div style="font-size:12px;color:var(--text-muted);line-height:1.55;margin-bottom:12px">
-          Export or import a <b>.key</b> file to unlock older direct messages after a node switch or travel login.
-          The file is encrypted with a passphrase you choose — we never see it.
-        </div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap">
-          <button class="modal-btn primary" type="button" style="flex:1;min-width:140px"
-                  data-ft-key-action="export">Export keys</button>
-          <button class="modal-btn secondary" type="button" style="flex:1;min-width:140px"
-                  data-ft-key-action="import">Import keys</button>
-        </div>
-      </div>
-
       <!-- Linked Devices (Track F) -->
       <div style="margin:24px 0 8px;padding-top:16px;border-top:1px solid #2a2a2a">
         <div style="font-size:13px;color:#4caf50;font-weight:600;margin-bottom:8px">📱 Linked devices</div>
@@ -10751,6 +10766,26 @@ window.ConnErr = (function(){
   </div>
 </div>
 
+<!-- Key manager gate — PIN (if set) then account password -->
+<div class="modal-overlay hidden" id="modal-ft-key-gate" data-dismiss-on-backdrop="false">
+  <div class="modal ft-key-gate-modal" role="dialog" aria-modal="true" aria-labelledby="ft-key-gate-title">
+    <div class="ft-key-manager-header">
+      <span class="ft-key-manager-icon" aria-hidden="true">🔐</span>
+      <div>
+        <h2 class="modal-title" id="ft-key-gate-title" style="margin:0">Unlock key manager</h2>
+        <p class="ft-key-manager-sub">Confirm your identity to view encryption keys. Keys stay on this device.</p>
+      </div>
+    </div>
+    <label class="modal-label" for="ft-key-gate-password">Account password</label>
+    <input type="password" id="ft-key-gate-password" class="modal-input" autocomplete="current-password" placeholder="Your FrogTalk password" maxlength="128">
+    <div id="ft-key-gate-error" class="auth-error" style="display:none;margin-top:10px" role="alert"></div>
+    <div class="modal-actions" style="margin-top:14px">
+      <button type="button" class="modal-btn secondary" id="ft-key-gate-cancel">Cancel</button>
+      <button type="button" class="modal-btn primary" id="ft-key-gate-submit">Continue</button>
+    </div>
+  </div>
+</div>
+
 <!-- DM encryption key manager — client-side only (.key never sent to server) -->
 <div class="modal-overlay hidden" id="modal-ft-key-manager" data-dismiss-on-backdrop="true">
   <div class="modal ft-key-manager-modal" role="dialog" aria-modal="true" aria-labelledby="ft-key-manager-title">
@@ -10761,22 +10796,26 @@ window.ConnErr = (function(){
         <p id="ft-key-manager-subtitle" class="ft-key-manager-sub"></p>
       </div>
     </div>
-    <p class="ft-key-manager-privacy">Keys are encrypted in a <b>.key</b> file on your device. FrogTalk servers never receive your passphrase or private keys.</p>
-    <p id="ft-key-manager-status" class="ft-key-manager-status" aria-live="polite"></p>
+    <p class="ft-key-manager-privacy">Backups use a <b>.key</b> file encrypted with a passphrase you choose. FrogTalk servers never receive your private keys or passphrase.</p>
     <div class="ft-key-manager-tabs" role="tablist">
-      <button type="button" class="ft-key-manager-tab active" id="ft-key-tab-export" role="tab" aria-selected="true">Export</button>
+      <button type="button" class="ft-key-manager-tab active" id="ft-key-tab-keys" role="tab" aria-selected="true">All keys</button>
+      <button type="button" class="ft-key-manager-tab" id="ft-key-tab-export" role="tab" aria-selected="false">Export</button>
       <button type="button" class="ft-key-manager-tab" id="ft-key-tab-import" role="tab" aria-selected="false">Import</button>
     </div>
-    <div id="ft-key-pane-export" class="ft-key-manager-pane">
-      <p class="modal-label">Create a password-protected backup for this browser profile.</p>
-      <input type="password" id="ft-key-export-pass" class="modal-input" autocomplete="new-password" placeholder="Passphrase (min 8 characters)">
+    <div id="ft-key-pane-keys" class="ft-key-manager-pane">
+      <div id="ft-key-inventory-summary"></div>
+      <div id="ft-key-inventory-list" class="ft-key-inv-list" aria-live="polite"></div>
+    </div>
+    <div id="ft-key-pane-export" class="ft-key-manager-pane" hidden>
+      <p class="modal-label">Export selected keys from the <b>All keys</b> tab, or all if everything is checked.</p>
+      <input type="password" id="ft-key-export-pass" class="modal-input" autocomplete="new-password" placeholder="Backup passphrase (min 8 characters)">
       <input type="password" id="ft-key-export-pass2" class="modal-input" autocomplete="new-password" placeholder="Confirm passphrase">
       <button type="button" class="modal-btn primary ft-key-manager-primary" id="ft-key-export-btn">Download .key file</button>
     </div>
     <div id="ft-key-pane-import" class="ft-key-manager-pane" hidden>
-      <p class="modal-label">Restore keys from a <b>.key</b> file you exported earlier.</p>
-      <input type="file" id="ft-key-file-input" class="modal-input ft-key-file-input" accept=".key,.json,application/json">
-      <input type="password" id="ft-key-import-pass" class="modal-input" autocomplete="current-password" placeholder="Passphrase">
+      <p class="modal-label">Restore keys from a <b>.key</b> file. Merges into this browser without uploading anything.</p>
+      <input type="file" id="ft-key-file-input" class="modal-input ft-key-file-input" accept=".key,.frog,.json,application/json">
+      <input type="password" id="ft-key-import-pass" class="modal-input" autocomplete="current-password" placeholder="Backup passphrase">
       <button type="button" class="modal-btn primary ft-key-manager-primary" id="ft-key-import-btn">Import keys</button>
     </div>
     <div id="ft-key-manager-error" class="auth-error ft-key-manager-error" style="display:none" role="alert"></div>
@@ -11759,8 +11798,8 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoa
 })();
 </script>
 <script src="/static/js/crypto.js?v=192"></script>
-<script src="/static/js/signal_store.js?v=3"></script>
-<script src="/static/js/device_crypto.js?v=9"></script>
+<script src="/static/js/signal_store.js?v=4"></script>
+<script src="/static/js/device_crypto.js?v=10"></script>
 <script src="/static/js/signal.js?v=28"></script>
 <script src="/static/js/wall_crypto.js?v=2"></script>
 <script src="/static/js/state.js?v=203"></script>
@@ -11769,7 +11808,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoa
 <script src="/static/js/ws.js?v=260"></script>
 <script src="/static/js/cropper.js?v=191"></script>
 <script src="/static/js/ui.js?v=__APP_ASSET_VERSION__"></script>
-<script src="/static/js/dm_key_manager.js?v=2"></script>
+<script src="/static/js/dm_key_manager.js?v=3"></script>
   <script src="/static/js/rooms.js?v=__APP_ASSET_VERSION__"></script>
 <script src="/static/js/sticker-fx.js?v=2"></script>
 <script src="/static/js/text_format.js?v=2"></script>
@@ -11778,7 +11817,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoa
 <script src="/static/js/users.js?v=202"></script>
 <script src="/static/js/emoji.js?v=193"></script>
 <script src="/static/js/friends.js?v=422"></script>
-<script src="/static/js/dms.js?v=499"></script>
+<script src="/static/js/dms.js?v=500"></script>
 <script src="/static/js/calls.js?v=246"></script>
 <script src="/static/js/media.js?v=423"></script>
 <script src="/static/js/gifs.js?v=205"></script>

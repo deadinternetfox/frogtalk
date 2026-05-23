@@ -7199,6 +7199,19 @@ class GenerateRecoveryKeyRequest(BaseModel):
     password: str  # Verify identity
 
 
+class VerifyPasswordRequest(BaseModel):
+    password: str = Field(min_length=1, max_length=128)
+
+
+@router.post("/verify-password")
+@limiter.limit("20/minute")
+async def verify_password(body: VerifyPasswordRequest, current_user: dict = Depends(get_current_user)):
+    """Confirm account password for sensitive client-only flows (e.g. key manager)."""
+    if not db.verify_user(current_user["nickname"], body.password):
+        return JSONResponse(status_code=401, content={"error": "Incorrect password"})
+    return {"ok": True}
+
+
 @router.get("/recovery-key/info")
 async def recovery_key_info(request: Request, current_user: dict = Depends(get_current_user)):
     """Whether this node has an active recovery key for the signed-in account."""
