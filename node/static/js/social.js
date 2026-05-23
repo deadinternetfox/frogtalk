@@ -367,7 +367,9 @@ const Social = (() => {
     const src = String(raw || '');
     if (!src) return '';
     if (/^https?:\/\//i.test(src)) return src;
-    if (!src.startsWith('/api/social/posts/')) return src;
+    const isSocialPost = src.startsWith('/api/social/posts/')
+      || src.startsWith('/api/social/federation/posts/');
+    if (!isSocialPost) return src;
     const token = String(State?.token || '');
     if (!token) return src;
     try {
@@ -397,11 +399,13 @@ const Social = (() => {
         return '';
       }
     }
-    if (!src.startsWith('/api/social/posts/')) return '';
+    const isSocialPost = src.startsWith('/api/social/posts/')
+      || src.startsWith('/api/social/federation/posts/');
+    if (!isSocialPost) return '';
     const token = String(State?.token || '');
     try {
       const u = new URL(src, window.location.origin);
-      // /api/social/posts/{id}/media → /api/social/posts/{id}/thumb
+      // .../media → .../thumb (local and federation proxy paths)
       u.pathname = u.pathname.replace(/\/media$/, '/thumb');
       if (token && !u.searchParams.get('token')) u.searchParams.set('token', token);
       return `${u.pathname}${u.search}${u.hash}`;
@@ -3263,7 +3267,7 @@ const Social = (() => {
 
   function _socialSyncResyncButtonHtml() {
     if (!_socialAwayFromHome()) return '';
-    return `<button type="button" class="social-sync-card-btn" onclick="App.forceFederationResync()">↻ Sync from home</button>`;
+    return `<button type="button" class="social-sync-card-btn" onclick="App.forceFederationResync({socialOnly:true,lightOverlay:true})">↻ Sync from home</button>`;
   }
 
   function _socialSyncCardHtml(kind, title, bodyHtml, showBtn) {
@@ -3999,7 +4003,7 @@ const Social = (() => {
         <!-- Tabs -->
         <div class="sp-tabs">
           <button class="sp-tab active" data-pt="wall" onclick="Social.switchProfileTab('wall',this)">📝 Wall</button>
-          <button class="sp-tab" data-pt="reels" onclick="Social.switchProfileTab('reels',this)">🎞 Reels</button>
+          <button class="sp-tab" data-pt="reels" onclick="Social.switchProfileTab('reels',this)">🎞️ Reels</button>
           <button class="sp-tab" data-pt="music" onclick="Social.switchProfileTab('music',this)">🎵 Music</button>
           <button class="sp-tab" data-pt="channels" onclick="Social.switchProfileTab('channels',this)">📺 Channels</button>
           ${isSelf ? `<button class="sp-tab" data-pt="reposts" onclick="Social.switchProfileTab('reposts',this)">🔁 Reposts</button>` : ''}
@@ -4757,13 +4761,13 @@ const Social = (() => {
             <div class="reels-empty-sub">Video posts are syncing from your home node.</div>
           </div>` : (awayReels ? `
           <div class="reels-empty">
-            <div class="reels-empty-icon">🎞</div>
+            <div class="reels-empty-icon">🎞️</div>
             <div class="reels-empty-title">No reels on this node yet</div>
             <div class="reels-empty-sub">Video posts from your home node can be imported with account sync.</div>
             ${_socialSyncResyncButtonHtml()}
           </div>` : `
           <div class="reels-empty">
-            <div class="reels-empty-icon">🎞</div>
+            <div class="reels-empty-icon">🎞️</div>
             <div class="reels-empty-title">${scope === 'friends' ? 'No friend reels yet' : 'No reels yet'}</div>
             <div class="reels-empty-sub">${scope === 'friends'
               ? 'Reels posted, reposted, or liked by your friends will appear here.'
@@ -6147,7 +6151,7 @@ const Social = (() => {
 
       if (posts.length === 0) {
         container.innerHTML = `<div class="social-empty social-empty--pad">
-          <div class="se-icon">🎞</div>
+          <div class="se-icon">🎞️</div>
           <div class="se-sub">No reels yet</div>
           <div class="se-hint">Video posts will appear here.</div>
         </div>`;

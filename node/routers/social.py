@@ -214,6 +214,8 @@ from routers.auth import (  # noqa: E402
     hydrate_federation_profile_from_home,
     resolve_server_base_url,
     _fetch_home_profile_posts,
+    _fetch_home_federated_post_media,
+    _wall_post_media_bytes_for_viewer,
 )
 
 
@@ -1539,3 +1541,96 @@ async def mark_social_notifications_read_endpoint(
     affected = db.mark_social_notifications_read(current_user["id"], ids=ids)
     unread = db.get_social_notification_unread_count(current_user["id"])
     return {"ok": True, "marked": affected, "unread": unread}
+
+
+def _federation_origin_allowed(origin_server_id: str) -> bool:
+    sid = str(origin_server_id or "").strip()
+    if not sid:
+        return False
+    try:
+        for row in db.list_federation_servers(official_only=False):
+            if str(row.get("server_id") or "").strip() == sid:
+                return True
+    except Exception:
+        pass
+    return False
+
+
+@router.get("/federation/posts/{origin_server_id}/{global_post_id}/{kind}")
+@limiter.limit("180/minute")
+async def federation_post_media_proxy(
+    origin_server_id: str,
+    global_post_id: str,
+    kind: str,
+    request: Request,
+    token: Optional[str] = Query(None),
+    x_session_token: Optional[str] = Header(None, alias="X-Session-Token"),
+    authorization: Optional[str] = Header(None, alias="Authorization"),
+):
+    """Same-origin media/thumb for posts homed on another federation node."""
+    from routers._media_safety import media_response_headers, safe_media_type
+
+    session_token = (x_session_token or token or "").strip()
+    if not session_token and authorization:
+        auth = authorization.strip()
+        if auth.lower().startswith("bearer "):
+            session_token = auth[7:].strip()
+    if not session_token:
+        return JSONResponse(status_code=401, content={"error": "Not authenticated"})
+
+    origin = str(origin_server_id or "").strip()[:128]
+    post_gid = str(global_post_id or "").strip()[:128]
+    media_kind = str(kind or "media").strip().lower()
+    if media_kind not in ("media", "thumb"):
+        return JSONResponse(status_code=400, content={"error": "Invalid kind"})
+    if not post_gid or not origin or not _federation_origin_allowed(origin):
+        return JSONResponse(status_code=404, content={"error": "Not found"})
+
+    def _resolve():
+        current_user = db.get_user_by_token(session_token)
+        if not current_user:
+            return ("unauth", None, "")
+        viewer_id = int(current_user["id"])
+        viewer_gid = str(current_user.get("global_user_id") or "").strip()
+        local_id = db.resolve_federation_wall_local_id(origin, "post", post_gid)
+        if local_id:
+            if media_kind == "thumb":
+                cached = _thumb_path(int(local_id))
+                if cached.exists() and cached.stat().st_size > 200:
+                    return ("ok", cached.read_bytes(), "image/jpeg")
+                st, raw, _ct = _wall_post_media_bytes_for_viewer(int(local_id), viewer_id)
+                if st != "ok" or not raw:
+                    return (st, None, "")
+                if _generate_thumb_sync(int(local_id), raw) and cached.exists():
+                    return ("ok", cached.read_bytes(), "image/jpeg")
+                return ("notfound", None, "")
+            st, raw, ct = _wall_post_media_bytes_for_viewer(int(local_id), viewer_id)
+            return (st, raw, ct)
+        return _fetch_home_federated_post_media(
+            origin, post_gid, viewer_gid, kind=media_kind,
+        )
+
+    st, raw, ct = await run_in_threadpool(_resolve)
+    if st == "unauth":
+        return JSONResponse(status_code=401, content={"error": "Not authenticated"})
+    if st in ("forbidden",):
+        return JSONResponse(status_code=403, content={"error": "Forbidden"})
+    if st != "ok" or not raw:
+        return JSONResponse(status_code=404, content={"error": "Not found"})
+    if media_kind == "thumb":
+        headers = {
+            "Content-Type": "image/jpeg",
+            "Content-Length": str(len(raw)),
+            "Cache-Control": "private, max-age=86400, immutable",
+            "X-Content-Type-Options": "nosniff",
+            "Vary": "X-Session-Token, Authorization",
+        }
+    else:
+        ct = safe_media_type(ct or "application/octet-stream")
+        headers = {
+            **media_response_headers(ct, filename=f"fed-{post_gid[:12]}"),
+            "Content-Length": str(len(raw)),
+            "Cache-Control": "private, max-age=3600",
+            "Vary": "X-Session-Token, Authorization",
+        }
+    return Response(content=raw, headers=headers)

@@ -233,7 +233,7 @@ function _dmLockMetaFromContext(ctx) {
     home_locked: {
       kind: 'home_locked',
       title: 'Encrypted on your home node',
-      subtitle: 'This message was copied here but needs your home encryption keys. Send a new message for a fresh thread, or import a .frog backup.',
+      subtitle: 'This message was copied here but needs your home encryption keys. Send a new message for a fresh thread, or import a .FrogTalk backup.',
       icon: '🔒',
     },
     peer_unreachable: {
@@ -257,7 +257,7 @@ function _dmLockMetaFromContext(ctx) {
     keys_needed: {
       kind: 'keys_needed',
       title: 'Keys required',
-      subtitle: 'Import a .frog backup you exported from home to read older messages on this node.',
+      subtitle: 'Import a .FrogTalk backup you exported from home to read older messages on this node.',
       icon: '🗝️',
     },
     sync_attempted: {

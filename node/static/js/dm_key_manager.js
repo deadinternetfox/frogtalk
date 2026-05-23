@@ -607,7 +607,7 @@
     const file = fileEl?.files?.[0];
     if (!file) return { error: 'Choose a .FrogTalk backup file.' };
     if (window.DeviceCrypto?.keyfileExtensionOk && !DeviceCrypto.keyfileExtensionOk(file.name)) {
-      return { error: 'Use a .FrogTalk, .frog, or .key backup file.' };
+      return { error: 'Use a .FrogTalk backup file.' };
     }
     if (pass.length < 8) return { error: 'Enter the passphrase from when you exported.' };
     if (file.size > 12 * 1024 * 1024) return { error: 'Backup file is too large.' };

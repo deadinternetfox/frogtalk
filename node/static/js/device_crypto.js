@@ -807,8 +807,7 @@
 
   function _keyfileExtensionOk(filename) {
     const lower = String(filename || '').trim().toLowerCase();
-    return lower.endsWith('.frogtalk') || lower.endsWith('.frog') || lower.endsWith('.key')
-      || lower.endsWith('.json');
+    return lower.endsWith('.frogtalk') || lower.endsWith('.json');
   }
 
   function _isValidKeyFileMagic(magic) {
@@ -885,7 +884,7 @@
     const packed = await _packPlainExport(plain);
     const sealed = await _sealPackedForPassphrase(packed, pass);
     return {
-      magic: KEYFILE_MAGIC_FROG,
+      magic: KEYFILE_MAGIC,
       exported_at: Date.now(),
       node_origin: String(window.location.origin || ''),
       account_nickname: _keyfileNickname(),

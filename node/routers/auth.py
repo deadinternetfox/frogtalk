@@ -217,6 +217,33 @@ _SYNC_EXPORT_MEMBERS_PER_ROOM = 120
 
 _sync_state_lock = _threading.Lock()
 _federation_sync_state: dict[int, dict] = {}
+# Bumped on forced re-sync so an older background import cannot overwrite newer state.
+_sync_generation: dict[int, int] = {}
+
+
+def _bump_sync_generation(user_id: int) -> int:
+    uid = int(user_id or 0)
+    if uid <= 0:
+        return 0
+    with _sync_state_lock:
+        gen = int(_sync_generation.get(uid, 0)) + 1
+        _sync_generation[uid] = gen
+        return gen
+
+
+def _sync_generation_matches(user_id: int, generation: int) -> bool:
+    uid = int(user_id or 0)
+    if uid <= 0:
+        return False
+    with _sync_state_lock:
+        return int(_sync_generation.get(uid, 0)) == int(generation or 0)
+
+
+def _sync_social_post_applied(*, existed: bool, created) -> bool:
+    """True when the post is stored on this node (new or already imported)."""
+    if existed:
+        return True
+    return bool(created)
 
 
 def _sync_persist_enabled() -> bool:
@@ -1412,8 +1439,15 @@ def _fetch_home_profile_posts(
     for p in posts:
         if not isinstance(p, dict):
             continue
+        post_gid = str(p.get("global_post_id") or "").strip()
+        post_origin = str(p.get("origin_server_id") or home_sid or "").strip()
         md = str(p.get("media_data") or "")
-        if md.startswith("/"):
+        if post_gid and post_origin:
+            import urllib.parse as _ulp
+            enc_o = _ulp.quote(post_origin, safe="")
+            enc_g = _ulp.quote(post_gid, safe="")
+            p["media_data"] = f"/api/social/federation/posts/{enc_o}/{enc_g}/media"
+        elif md.startswith("/"):
             p["media_data"] = home_base + md
         elif p.get("has_media") and not md:
             pid = int(p.get("id") or 0)
@@ -1421,6 +1455,106 @@ def _fetch_home_profile_posts(
                 p["media_data"] = f"{home_base}/api/social/posts/{pid}/media"
         p["proxied_from_home"] = True
     return posts
+
+
+def _post_binary(
+    url: str,
+    body: dict,
+    *,
+    sign_path: str = "",
+    timeout: float = 12.0,
+) -> tuple[bytes, str]:
+    """Signed federation POST returning raw response bytes."""
+    _ssrf_guard(url)
+    payload = json.dumps(body).encode("utf-8")
+    merged = {
+        "Content-Type": "application/json",
+        "Accept": "*/*",
+        "User-Agent": FED_UA,
+    }
+    if sign_path:
+        merged.update(_federation_outbound_headers("POST", sign_path, payload))
+    req = urllib.request.Request(url, data=payload, headers=merged, method="POST")
+    with _sync_urlopen(req, timeout=timeout) as resp:  # noqa: S310
+        raw = resp.read()
+        ct = str(resp.headers.get("Content-Type") or "application/octet-stream")
+    return raw, ct
+
+
+def _wall_post_media_bytes_for_viewer(post_id: int, viewer_id: int) -> tuple[str, bytes | None, str]:
+    """Privacy-gated media bytes for a local wall post (federation + local proxy)."""
+    row = db.get_wall_post_media(int(post_id))
+    if not row or not row.get("media_data"):
+        return ("notfound", None, "")
+    owner_id = int(row.get("user_id") or 0)
+    vid = int(viewer_id or 0)
+    privacy = str(row.get("privacy") or "public").strip().lower()
+    if owner_id != vid and vid > 0:
+        if db.is_blocked_either_way(vid, owner_id):
+            return ("notfound", None, "")
+        if privacy == "friends" and not db.are_friends(vid, owner_id):
+            return ("forbidden", None, "")
+        if privacy == "followers" and not (
+            db.are_friends(vid, owner_id) or db.is_following(vid, owner_id)
+        ):
+            return ("forbidden", None, "")
+        if privacy not in ("public", "friends", "followers"):
+            return ("forbidden", None, "")
+        if int(row.get("enc_v") or 0) == 2 and not db.wall_post_viewer_in_audience(int(post_id), vid):
+            return ("forbidden", None, "")
+    media_data = row.get("media_data")
+    media_type = str(row.get("media_type") or "application/octet-stream")
+    if isinstance(media_data, str) and media_data.startswith("data:"):
+        try:
+            import base64 as _b64m
+            header, _, b64 = media_data.partition(",")
+            if ";base64" in header:
+                raw = _b64m.b64decode(b64, validate=False)
+                ct = header[5:].split(";", 1)[0] or media_type
+                return ("ok", raw, ct)
+        except Exception:
+            return ("decode_error", None, "")
+    return ("redirect", None, media_type)
+
+
+def _fetch_home_federated_post_media(
+    origin_server_id: str,
+    global_post_id: str,
+    viewer_global_user_id: str,
+    *,
+    kind: str = "media",
+) -> tuple[str, bytes | None, str]:
+    """Pull post media/thumb from the user's home node (server-side, signed)."""
+    origin = str(origin_server_id or "").strip()
+    post_gid = str(global_post_id or "").strip()
+    if not origin or not post_gid or not _GID_RE.match(post_gid):
+        return ("notfound", None, "")
+    base = resolve_server_base_url(origin)
+    if not base or not (os.getenv("FROGTALK_FEDERATION_TOKEN", "") or "").strip():
+        return ("unavailable", None, "")
+    body = {
+        "global_post_id": post_gid,
+        "origin_server_id": origin,
+        "viewer_global_user_id": str(viewer_global_user_id or "").strip(),
+        "kind": "thumb" if str(kind or "").strip().lower() == "thumb" else "media",
+    }
+    try:
+        raw, ct = _post_binary(
+            f"{base}/api/auth/federation-sync-post-media",
+            body,
+            sign_path="/api/auth/federation-sync-post-media",
+            timeout=14.0,
+        )
+    except urllib.error.HTTPError as e:
+        code = int(getattr(e, "code", 0) or 0)
+        if code in (403, 404):
+            return ("notfound", None, "")
+        return ("unavailable", None, "")
+    except Exception:
+        return ("unavailable", None, "")
+    if not raw:
+        return ("notfound", None, "")
+    return ("ok", raw, ct)
 
 
 def _profile_cache_is_thin(prof: dict) -> bool:
@@ -1630,6 +1764,23 @@ def _sync_stale_for_user(user_id: int) -> bool:
     if finished <= 0:
         return False
     return (time.time() - finished) > (ttl_h * 3600.0)
+
+
+def _sync_wants_social_only(user_id: int) -> bool:
+    """True when core account data is present but FrogSocial backfill is still short."""
+    uid = int(user_id or 0)
+    if uid <= 0 or _user_at_account_home(uid):
+        return False
+    st = _sync_state_get(uid)
+    if not st.get("done") or st.get("in_progress"):
+        return False
+    total = int(st.get("social_posts_total") or 0)
+    imported = int(st.get("social_posts_imported") or 0)
+    if total <= 0 or imported >= total:
+        return False
+    joined = int(st.get("rooms_joined") or 0)
+    dms = int(st.get("dm_linked") or 0)
+    return joined > 0 or dms > 0
 
 
 def _sync_incomplete_for_user(user_id: int) -> bool:
@@ -2226,7 +2377,12 @@ def _paginate_ordered_post_ids(
     return page, has_more, next_cursor
 
 
-def _build_sync_export_for_user(user_id: int, *, social_posts_cursor: str = "") -> dict:
+def _build_sync_export_for_user(
+    user_id: int,
+    *,
+    social_posts_cursor: str = "",
+    social_only: bool = False,
+) -> dict:
     uid = int(user_id or 0)
     if uid <= 0:
         return {"rooms": [], "dm_peers": [], "source_server_id": ""}
@@ -2238,7 +2394,7 @@ def _build_sync_export_for_user(user_id: int, *, social_posts_cursor: str = "") 
     me_row = db.get_user_by_id(uid) or {}
     my_gid = str(me_row.get("global_user_id") or "").strip()
     cursor = str(social_posts_cursor or "").strip()
-    posts_only = bool(cursor)
+    posts_only = bool(cursor) or bool(social_only)
     source_public_url = ""
     try:
         import os as _os_sync
@@ -2811,9 +2967,9 @@ def _apply_sync_social_posts_only(user_id: int, export: dict) -> dict:
             created = db.apply_synced_social_post(
                 payload_post, post_origin, viewer_user_id=uid,
             )
-            if created and not existed:
+            if _sync_social_post_applied(existed=bool(existed), created=created):
                 social_posts_imported += 1
-            elif not created and not existed:
+            else:
                 social_posts_skipped += 1
         except Exception:
             social_posts_skipped += 1
@@ -3537,9 +3693,9 @@ def _apply_sync_export_to_user(user_id: int, export: dict, *, fetch_origin: str 
             created = db.apply_synced_social_post(
                 payload_post, post_origin, viewer_user_id=uid,
             )
-            if created and not existed:
+            if _sync_social_post_applied(existed=bool(existed), created=created):
                 social_posts_imported += 1
-            elif not created and not existed:
+            else:
                 social_posts_skipped += 1
         except Exception:
             social_posts_skipped += 1
@@ -4126,7 +4282,13 @@ def _login_against_peer(base_url: str, nickname: str, password: str):
     return login, ident
 
 
-def _fetch_sync_export_via_session(base_url: str, token: str, cursor: str = "") -> dict | None:
+def _fetch_sync_export_via_session(
+    base_url: str,
+    token: str,
+    cursor: str = "",
+    *,
+    social_only: bool = False,
+) -> dict | None:
     tok = str(token or "").strip()
     if not tok:
         return None
@@ -4135,8 +4297,13 @@ def _fetch_sync_export_via_session(base_url: str, token: str, cursor: str = "") 
         return None
     url = f"{source}/api/auth/federation-sync-export"
     cur = str(cursor or "").strip()
+    params: list[str] = []
     if cur:
-        url = f"{url}?social_posts_cursor={urllib.parse.quote(cur, safe='')}"
+        params.append(f"social_posts_cursor={urllib.parse.quote(cur, safe='')}")
+    if social_only and not cur:
+        params.append("social_only=1")
+    if params:
+        url = f"{url}?{'&'.join(params)}"
     try:
         data = _get_json(url, headers={"X-Session-Token": tok}, timeout=8.0)
     except Exception:
@@ -4144,7 +4311,13 @@ def _fetch_sync_export_via_session(base_url: str, token: str, cursor: str = "") 
     return data if isinstance(data, dict) else None
 
 
-def _fetch_sync_export_via_ticket(base_url: str, ticket: str, cursor: str = "") -> dict | None:
+def _fetch_sync_export_via_ticket(
+    base_url: str,
+    ticket: str,
+    cursor: str = "",
+    *,
+    social_only: bool = False,
+) -> dict | None:
     fed = (os.getenv("FROGTALK_FEDERATION_TOKEN", "") or "").strip()
     if not fed:
         return None
@@ -4155,6 +4328,8 @@ def _fetch_sync_export_via_ticket(base_url: str, ticket: str, cursor: str = "") 
     cur = str(cursor or "").strip()
     if cur:
         body["social_posts_cursor"] = cur
+    elif social_only:
+        body["social_only"] = True
     try:
         data = _post_json(
             f"{base_url}/api/auth/federation-sync-export-ticket",
@@ -4171,6 +4346,8 @@ def _fetch_sync_export_via_federation_gid(
     base_url: str,
     global_user_id: str,
     cursor: str = "",
+    *,
+    social_only: bool = False,
 ) -> dict | None:
     fed = (os.getenv("FROGTALK_FEDERATION_TOKEN", "") or "").strip()
     gid = str(global_user_id or "").strip()
@@ -4183,6 +4360,8 @@ def _fetch_sync_export_via_federation_gid(
     cur = str(cursor or "").strip()
     if cur:
         body["social_posts_cursor"] = cur
+    elif social_only:
+        body["social_only"] = True
     try:
         data = _post_json(
             f"{source}/api/auth/federation-sync-export-gid",
@@ -4195,10 +4374,94 @@ def _fetch_sync_export_via_federation_gid(
     return data if isinstance(data, dict) else None
 
 
+async def _run_social_posts_sync_only_loop(
+    user_id: int,
+    source_base: str,
+    fetcher,
+    *,
+    sync_gen: int = 0,
+) -> dict:
+    """Import FrogSocial posts only (skip channels/DMs/history re-apply)."""
+    uid = int(user_id or 0)
+    source = _norm_base(source_base)
+    if uid <= 0 or not source:
+        return {}
+    cursor = ""
+    total_imported = 0
+    total_posts = 0
+    omitted = 0
+    home_sid, _ = resolve_account_home_base_url(uid)
+    if home_sid:
+        await asyncio.to_thread(_ensure_export_signer_pubkey_pinned, home_sid, source, user_id=uid)
+    while True:
+        if not _sync_generation_matches(uid, sync_gen):
+            return {
+                "social_posts_imported": total_imported,
+                "social_posts_total": total_posts,
+                "social_posts_omitted_at_export": omitted,
+                "superseded": True,
+            }
+        export = await asyncio.to_thread(fetcher, source, cursor)
+        if not isinstance(export, dict):
+            raise ValueError("export_unavailable")
+        src_sid = str(export.get("source_server_id") or home_sid or "").strip()
+        pin_base = _norm_base(str(export.get("source_public_url") or source))
+        await asyncio.to_thread(_ensure_export_signer_pubkey_pinned, src_sid, pin_base, user_id=uid)
+        _verify_sync_export(export, user_id=uid, fetch_origin=pin_base or source)
+        applied = await asyncio.to_thread(_apply_sync_social_posts_only, uid, export)
+        if isinstance(applied, dict) and applied.get("error"):
+            raise ValueError(str(applied.get("error")))
+        total_imported += int((applied or {}).get("social_posts_imported") or 0)
+        total_posts = int(
+            export.get("social_posts_total")
+            or (applied or {}).get("social_posts_total")
+            or total_posts
+        )
+        omitted = int(
+            export.get("social_posts_omitted_at_export")
+            or (applied or {}).get("social_posts_omitted_at_export")
+            or omitted
+        )
+        has_more = bool(export.get("social_posts_has_more")) and _sync_pagination_enabled()
+        cursor = str(export.get("social_posts_next_cursor") or "").strip() if has_more else ""
+        pct = 8
+        if total_posts > 0:
+            pct = min(95, 8 + int(87 * total_imported / max(total_posts, 1)))
+        hint = (
+            f"Importing posts ({total_imported}/{total_posts})…"
+            if has_more
+            else "Applying FrogSocial posts…"
+        )
+        if _sync_generation_matches(uid, sync_gen):
+            _sync_state_set(uid, {
+                "source_base": source,
+                "source_server_id": str(export.get("source_server_id") or home_sid or ""),
+                "in_progress": True,
+                "done": False,
+                "error": "",
+                "progress_pct": pct,
+                "phase": "social_posts",
+                "hint": hint,
+                "social_posts_imported": total_imported,
+                "social_posts_total": total_posts,
+                "social_posts_cursor": cursor,
+                "social_posts_omitted_at_export": omitted,
+            })
+        if not has_more:
+            break
+    return {
+        "social_posts_imported": total_imported,
+        "social_posts_total": total_posts,
+        "social_posts_omitted_at_export": omitted,
+    }
+
+
 async def _run_sync_export_apply_loop(
     user_id: int,
     source_base: str,
     fetcher,
+    *,
+    sync_gen: int = 0,
 ) -> dict:
     """Fetch export page(s) from home and apply with verification."""
     uid = int(user_id or 0)
@@ -4215,6 +4478,13 @@ async def _run_sync_export_apply_loop(
     if home_sid:
         await asyncio.to_thread(_ensure_export_signer_pubkey_pinned, home_sid, source, user_id=uid)
     while True:
+        if not _sync_generation_matches(uid, sync_gen):
+            return {
+                "social_posts_imported": total_imported,
+                "social_posts_total": total_posts,
+                "social_posts_omitted_at_export": omitted,
+                "superseded": True,
+            }
         export = await asyncio.to_thread(fetcher, source, cursor)
         if not isinstance(export, dict):
             raise ValueError("export_unavailable")
@@ -4256,20 +4526,21 @@ async def _run_sync_export_apply_loop(
             if has_more
             else "Applying synced data…"
         )
-        _sync_state_set(uid, {
-            "source_base": source,
-            "source_server_id": str(export.get("source_server_id") or home_sid or ""),
-            "in_progress": True,
-            "done": False,
-            "error": "",
-            "progress_pct": pct,
-            "phase": "social_posts" if has_more else "apply",
-            "hint": hint,
-            "social_posts_imported": total_imported,
-            "social_posts_total": total_posts,
-            "social_posts_cursor": cursor,
-            "social_posts_omitted_at_export": omitted,
-        })
+        if _sync_generation_matches(uid, sync_gen):
+            _sync_state_set(uid, {
+                "source_base": source,
+                "source_server_id": str(export.get("source_server_id") or home_sid or ""),
+                "in_progress": True,
+                "done": False,
+                "error": "",
+                "progress_pct": pct,
+                "phase": "social_posts" if has_more else "apply",
+                "hint": hint,
+                "social_posts_imported": total_imported,
+                "social_posts_total": total_posts,
+                "social_posts_cursor": cursor,
+                "social_posts_omitted_at_export": omitted,
+            })
         if not has_more:
             break
     out = dict(last_applied or {})
@@ -4677,27 +4948,49 @@ def ensure_federated_memberships_current(user_id: int, *, force: bool = False) -
     return 0
 
 
-async def _sync_user_from_peer_gid(user_id: int, source_base: str, global_user_id: str) -> None:
+async def _sync_user_from_peer_gid(
+    user_id: int,
+    source_base: str,
+    global_user_id: str,
+    *,
+    social_only: bool = False,
+    sync_gen: int = 0,
+) -> None:
     uid = int(user_id or 0)
     source = _norm_base(source_base)
     gid = str(global_user_id or "").strip()
     if uid <= 0 or not source or not gid:
         return
+    fetch_hint = (
+        "Importing FrogSocial posts from your home node…"
+        if social_only
+        else "Fetching account data from your home node…"
+    )
     _sync_state_set(uid, {
         "source_base": source,
         "in_progress": True,
         "done": False,
         "error": "",
         "progress_pct": 3,
-        "phase": "fetch",
-        "hint": "Fetching account data from your home node…",
+        "phase": "social_posts" if social_only else "fetch",
+        "hint": fetch_hint,
     })
+    fetcher = lambda base, cur, _gid=gid, _so=social_only: _fetch_sync_export_via_federation_gid(
+        base, _gid, cur, social_only=_so and not cur,
+    )
     try:
-        applied = await _run_sync_export_apply_loop(
-            uid,
-            source,
-            lambda base, cur: _fetch_sync_export_via_federation_gid(base, gid, cur),
-        )
+        if social_only:
+            applied = await _run_social_posts_sync_only_loop(
+                uid, source, fetcher, sync_gen=sync_gen,
+            )
+        else:
+            applied = await _run_sync_export_apply_loop(
+                uid, source, fetcher, sync_gen=sync_gen,
+            )
+        if not _sync_generation_matches(uid, sync_gen):
+            return
+        if (applied or {}).get("superseded"):
+            return
         _sync_state_set(uid, {
             "in_progress": False,
             "done": True,
@@ -4710,30 +5003,53 @@ async def _sync_user_from_peer_gid(user_id: int, source_base: str, global_user_i
             **(applied or {}),
         })
     except Exception as e:
-        _sync_state_set(uid, _sync_failure_state(uid, source, e))
+        if _sync_generation_matches(uid, sync_gen):
+            _sync_state_set(uid, _sync_failure_state(uid, source, e))
 
 
-async def _sync_user_from_peer_session(user_id: int, source_base: str, remote_token: str) -> None:
+async def _sync_user_from_peer_session(
+    user_id: int,
+    source_base: str,
+    remote_token: str,
+    *,
+    social_only: bool = False,
+    sync_gen: int = 0,
+) -> None:
     uid = int(user_id or 0)
     source = _norm_base(source_base)
     tok = str(remote_token or "").strip()
     if uid <= 0 or not source or not tok:
         return
+    fetch_hint = (
+        "Importing FrogSocial posts from your home node…"
+        if social_only
+        else "Fetching account data from your home node…"
+    )
     _sync_state_set(uid, {
         "source_base": source,
         "in_progress": True,
         "done": False,
         "error": "",
         "progress_pct": 3,
-        "phase": "fetch",
-        "hint": "Fetching account data from your home node…",
+        "phase": "social_posts" if social_only else "fetch",
+        "hint": fetch_hint,
     })
+    fetcher = lambda base, cur, _tok=tok, _so=social_only: _fetch_sync_export_via_session(
+        base, _tok, cur, social_only=_so and not cur,
+    )
     try:
-        applied = await _run_sync_export_apply_loop(
-            uid,
-            source,
-            lambda base, cur: _fetch_sync_export_via_session(base, tok, cur),
-        )
+        if social_only:
+            applied = await _run_social_posts_sync_only_loop(
+                uid, source, fetcher, sync_gen=sync_gen,
+            )
+        else:
+            applied = await _run_sync_export_apply_loop(
+                uid, source, fetcher, sync_gen=sync_gen,
+            )
+        if not _sync_generation_matches(uid, sync_gen):
+            return
+        if (applied or {}).get("superseded"):
+            return
         _sync_state_set(uid, {
             "in_progress": False,
             "done": True,
@@ -4746,30 +5062,53 @@ async def _sync_user_from_peer_session(user_id: int, source_base: str, remote_to
             **(applied or {}),
         })
     except Exception as e:
-        _sync_state_set(uid, _sync_failure_state(uid, source, e))
+        if _sync_generation_matches(uid, sync_gen):
+            _sync_state_set(uid, _sync_failure_state(uid, source, e))
 
 
-async def _sync_user_from_peer_ticket(user_id: int, source_base: str, ticket: str) -> None:
+async def _sync_user_from_peer_ticket(
+    user_id: int,
+    source_base: str,
+    ticket: str,
+    *,
+    social_only: bool = False,
+    sync_gen: int = 0,
+) -> None:
     uid = int(user_id or 0)
     source = _norm_base(source_base)
     raw_ticket = str(ticket or "").strip()
     if uid <= 0 or not source or not raw_ticket:
         return
+    fetch_hint = (
+        "Importing FrogSocial posts from your home node…"
+        if social_only
+        else "Fetching account data from your home node…"
+    )
     _sync_state_set(uid, {
         "source_base": source,
         "in_progress": True,
         "done": False,
         "error": "",
         "progress_pct": 3,
-        "phase": "fetch",
-        "hint": "Fetching account data from your home node…",
+        "phase": "social_posts" if social_only else "fetch",
+        "hint": fetch_hint,
     })
+    fetcher = lambda base, cur, _t=raw_ticket, _so=social_only: _fetch_sync_export_via_ticket(
+        base, _t, cur, social_only=_so and not cur,
+    )
     try:
-        applied = await _run_sync_export_apply_loop(
-            uid,
-            source,
-            lambda base, cur: _fetch_sync_export_via_ticket(base, raw_ticket, cur),
-        )
+        if social_only:
+            applied = await _run_social_posts_sync_only_loop(
+                uid, source, fetcher, sync_gen=sync_gen,
+            )
+        else:
+            applied = await _run_sync_export_apply_loop(
+                uid, source, fetcher, sync_gen=sync_gen,
+            )
+        if not _sync_generation_matches(uid, sync_gen):
+            return
+        if (applied or {}).get("superseded"):
+            return
         _sync_state_set(uid, {
             "in_progress": False,
             "done": True,
@@ -4782,7 +5121,8 @@ async def _sync_user_from_peer_ticket(user_id: int, source_base: str, ticket: st
             **(applied or {}),
         })
     except Exception as e:
-        _sync_state_set(uid, _sync_failure_state(uid, source, e))
+        if _sync_generation_matches(uid, sync_gen):
+            _sync_state_set(uid, _sync_failure_state(uid, source, e))
 
 
 async def _try_federated_login_bootstrap(request: Request, nickname: str, password: str):
@@ -4879,10 +5219,12 @@ class FederationSyncResumeRequest(BaseModel):
     source_base: str | None = Field(default=None, max_length=512)
     ticket: str | None = Field(default=None, max_length=8192)
     force: bool = False
+    social_only: bool = False
 
 
 class FederationSyncResetRequest(BaseModel):
     clear_home_pin: bool = False
+    clear_social_posts: bool = False
 
 
 class RepinAccountHomeRequest(BaseModel):
@@ -5318,6 +5660,7 @@ async def _start_federation_sync_for_user(
     global_user_id: str = "",
     here_base: str = "",
     force: bool = False,
+    social_only: bool = False,
 ) -> dict:
     uid = int(user_id or 0)
     if uid <= 0:
@@ -5331,10 +5674,20 @@ async def _start_federation_sync_for_user(
             "skipped": True,
         }
     cur = _sync_state_get(uid)
-    if cur.get("in_progress"):
+    if cur.get("in_progress") and not force:
         return cur
-    if not force and not _sync_incomplete_for_user(uid):
+    if force:
+        social_only = bool(social_only)
+    elif not social_only:
+        social_only = _sync_wants_social_only(uid)
+    if not force and not social_only and not _sync_incomplete_for_user(uid):
         return cur
+    sync_gen = _bump_sync_generation(uid) if force else 0
+    with _sync_state_lock:
+        if not force and uid not in _sync_generation:
+            _sync_generation[uid] = 0
+        if not force:
+            sync_gen = int(_sync_generation.get(uid, 0))
     if force:
         _clear_federation_sync_state(uid)
     source = _resolve_sync_source_base(
@@ -5355,12 +5708,16 @@ async def _start_federation_sync_for_user(
         return {"in_progress": False, "done": False, "error": "source is current node"}
     if raw_ticket:
         try:
-            asyncio.create_task(_sync_user_from_peer_ticket(uid, source, raw_ticket))
+            asyncio.create_task(_sync_user_from_peer_ticket(
+                uid, source, raw_ticket, social_only=social_only, sync_gen=sync_gen,
+            ))
         except Exception:
             _log.exception("federation sync: failed to start peer-ticket task")
     elif gid:
         try:
-            asyncio.create_task(_sync_user_from_peer_gid(uid, source, gid))
+            asyncio.create_task(_sync_user_from_peer_gid(
+                uid, source, gid, social_only=social_only, sync_gen=sync_gen,
+            ))
         except Exception:
             _log.exception("federation sync: failed to start peer-gid task")
     else:
@@ -5767,6 +6124,9 @@ async def federation_sync_resume(
             "skipped": True,
         }
     me = db.get_user_by_id(uid) or current_user
+    social_only = bool(body.social_only)
+    if not social_only and not bool(body.force):
+        social_only = _sync_wants_social_only(uid)
     state = await _start_federation_sync_for_user(
         uid,
         source_base=str(body.source_base or ""),
@@ -5774,6 +6134,7 @@ async def federation_sync_resume(
         global_user_id=str(me.get("global_user_id") or ""),
         here_base=str(request.base_url),
         force=bool(body.force),
+        social_only=social_only and not bool(body.force),
     )
     if state.get("error") and not state.get("in_progress"):
         return JSONResponse(status_code=400, content=state)
@@ -5884,8 +6245,22 @@ async def federation_sync_reset(
         pruned = int(db.prune_federation_sync_room_shells(keep) or 0)
     except Exception:
         pruned = 0
+    social_cleared = 0
+    social_deduped = 0
+    if bool(body and body.clear_social_posts):
+        try:
+            social_cleared = int(db.clear_imported_wall_posts_for_user(uid) or 0)
+            social_deduped = int(db.dedupe_duplicate_wall_posts_for_user(uid) or 0)
+        except Exception:
+            pass
     _clear_federation_sync_state(uid)
-    return {"ok": True, "shells_pruned": pruned, "keep_rooms": sorted(keep)}
+    return {
+        "ok": True,
+        "shells_pruned": pruned,
+        "keep_rooms": sorted(keep),
+        "social_posts_cleared": social_cleared,
+        "social_posts_deduped": social_deduped,
+    }
 
 
 async def _authenticate_federation_peer_request(
@@ -5974,13 +6349,119 @@ async def federation_sync_profile_posts(
             ).fetchone()
         if vrow:
             viewer_id = int(vrow["id"] if hasattr(vrow, "keys") else vrow[0])
+    ident = db.get_or_create_local_server_identity() or {}
+    origin_sid = str(ident.get("server_id") or "").strip()
     posts = db.get_wall_posts(uid, viewer_id, limit, offset, lite=True)
     rmap = db.get_post_reactions_bulk([p["id"] for p in posts])
     for p in posts:
         p["reactions"] = rmap.get(p["id"], [])
+        try:
+            post_gid, post_origin = db.ensure_federation_wall_post_global_id(int(p["id"]))
+            if post_gid:
+                p["global_post_id"] = post_gid
+                p["origin_server_id"] = str(post_origin or origin_sid or "").strip()
+        except Exception:
+            pass
         if p.get("has_media") and not p.get("media_data"):
             p["media_data"] = f"/api/social/posts/{p['id']}/media"
     return {"posts": posts, "limit": limit, "offset": offset}
+
+
+@router.post("/federation-sync-post-media")
+@limiter.limit("480/hour")
+async def federation_sync_post_media(
+    request: Request,
+    x_federation_token: str | None = Header(default=None),
+):
+    """Federation peers: stream wall post media/thumb by global_post_id."""
+    from fastapi.responses import Response
+    from routers._media_safety import media_response_headers, safe_media_type
+    from routers.federation import _read_body_bytes_once
+
+    raw_body = await _read_body_bytes_once(request)
+    auth_ok, _peer_id, reason = await _authenticate_federation_peer_request(
+        request, raw_body, x_federation_token,
+    )
+    if not auth_ok:
+        return JSONResponse(
+            status_code=401,
+            content={"error": "Invalid federation auth", "reason": reason or "auth_failed"},
+        )
+    try:
+        parsed = json.loads(raw_body.decode("utf-8") or "{}")
+    except Exception:
+        return JSONResponse(status_code=400, content={"error": "Bad JSON body"})
+    post_gid = str(parsed.get("global_post_id") or "").strip()
+    origin = str(parsed.get("origin_server_id") or "").strip()
+    viewer_gid = str(parsed.get("viewer_global_user_id") or "").strip()
+    kind = str(parsed.get("kind") or "media").strip().lower()
+    if not post_gid or not _GID_RE.match(post_gid):
+        return JSONResponse(status_code=400, content={"error": "Invalid global_post_id"})
+    if not origin:
+        ident = db.get_or_create_local_server_identity() or {}
+        origin = str(ident.get("server_id") or "").strip()
+    local_id = db.resolve_federation_wall_local_id(origin, "post", post_gid)
+    if not local_id:
+        return JSONResponse(status_code=404, content={"error": "Post not found"})
+    viewer_id = 0
+    if viewer_gid and _GID_RE.match(viewer_gid):
+        with db._conn() as con:
+            vrow = con.execute(
+                "SELECT id FROM users WHERE global_user_id=? LIMIT 1",
+                (viewer_gid,),
+            ).fetchone()
+        if vrow:
+            viewer_id = int(vrow["id"] if hasattr(vrow, "keys") else vrow[0])
+    if kind == "thumb":
+        from routers.social import _thumb_path, _generate_thumb_sync
+        cached = _thumb_path(int(local_id))
+        if cached.exists() and cached.stat().st_size > 200:
+            data = cached.read_bytes()
+            return Response(
+                content=data,
+                headers={
+                    "Content-Type": "image/jpeg",
+                    "Content-Length": str(len(data)),
+                    "Cache-Control": "private, max-age=86400, immutable",
+                    "X-Content-Type-Options": "nosniff",
+                },
+            )
+        st, raw, _ct = await asyncio.to_thread(
+            _wall_post_media_bytes_for_viewer, int(local_id), viewer_id,
+        )
+        if st != "ok" or not raw:
+            return JSONResponse(status_code=404, content={"error": "Thumb unavailable"})
+        ok = await asyncio.to_thread(_generate_thumb_sync, int(local_id), raw)
+        if not ok or not cached.exists():
+            return JSONResponse(status_code=404, content={"error": "Thumb unavailable"})
+        data = cached.read_bytes()
+        return Response(
+            content=data,
+            headers={
+                "Content-Type": "image/jpeg",
+                "Content-Length": str(len(data)),
+                "Cache-Control": "private, max-age=86400, immutable",
+                "X-Content-Type-Options": "nosniff",
+            },
+        )
+    st, raw, ct = await asyncio.to_thread(
+        _wall_post_media_bytes_for_viewer, int(local_id), viewer_id,
+    )
+    if st == "notfound":
+        return JSONResponse(status_code=404, content={"error": "Not found"})
+    if st == "forbidden":
+        return JSONResponse(status_code=403, content={"error": "Forbidden"})
+    if st != "ok" or not raw:
+        return JSONResponse(status_code=404, content={"error": "Media unavailable"})
+    ct = safe_media_type(ct or "application/octet-stream")
+    return Response(
+        content=raw,
+        headers={
+            **media_response_headers(ct, filename=f"fed-post-{post_gid[:12]}"),
+            "Content-Length": str(len(raw)),
+            "Vary": "X-Federation-Token",
+        },
+    )
 
 
 @router.get("/federation/profile-card")
@@ -6041,7 +6522,12 @@ async def federation_sync_export_gid(
     # Intentionally no node-ban gate: peers may still pull export for data portability
     # even when the user cannot sign in or interact on this node locally.
     cursor = str(parsed.get("social_posts_cursor") or "").strip()
-    return _build_sync_export_for_user(int(row["id"]), social_posts_cursor=cursor)
+    social_only = bool(parsed.get("social_only"))
+    return _build_sync_export_for_user(
+        int(row["id"]),
+        social_posts_cursor=cursor,
+        social_only=social_only and not cursor,
+    )
 
 
 @router.post("/federation-sync-memberships-gid")
@@ -6084,9 +6570,13 @@ async def federation_sync_export(
     current_user: dict = Depends(get_current_user),
 ):
     cursor = str(request.query_params.get("social_posts_cursor") or "").strip()
+    social_only = str(request.query_params.get("social_only") or "").strip().lower() in (
+        "1", "true", "yes",
+    )
     return _build_sync_export_for_user(
         int(current_user["id"]),
         social_posts_cursor=cursor,
+        social_only=social_only and not cursor,
     )
 
 
@@ -6126,7 +6616,12 @@ async def federation_sync_export_ticket(
     if claim_gid and user_gid and claim_gid != user_gid:
         return JSONResponse(status_code=409, content={"error": "Ticket identity mismatch"})
     cursor = str(parsed.get("social_posts_cursor") or "").strip()
-    return _build_sync_export_for_user(int(user["id"]), social_posts_cursor=cursor)
+    social_only = bool(parsed.get("social_only"))
+    return _build_sync_export_for_user(
+        int(user["id"]),
+        social_posts_cursor=cursor,
+        social_only=social_only and not cursor,
+    )
 
 
 class FederationProvisionRequest(BaseModel):

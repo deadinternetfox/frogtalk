@@ -612,7 +612,7 @@ class FederationSyncTests(unittest.TestCase):
             "social_posts_total": 3,
         }
         r2 = auth_mod._apply_sync_social_posts_only(viewer, page2)
-        self.assertEqual(int(r2.get("social_posts_imported") or 0), 0)
+        self.assertEqual(int(r2.get("social_posts_imported") or 0), 1)
 
     def test_sync_state_persists_across_restart(self):
         import routers.auth as auth_mod

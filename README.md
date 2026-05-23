@@ -73,7 +73,7 @@ and private channels (AES-GCM) before data reaches your disk.
 | 🔒 **Private Rooms** | Passphrase-protected rooms — only members with the passphrase can decrypt |
 | 💬 **Direct Messages** | Fully encrypted DMs between any two users |
 | 🖼️ **Frog Channel Imageboard** | Anonymous 4chan-style thread board with replies, likes, image/video/audio posts, greentext, live board chat, and moderator approval tools |
-| 🎞 **Reels** | Vertical short-video feed with hot/new/top sorting, reactions, reposts, and comments |
+| 🎞️ **Reels** | Vertical short-video feed with hot/new/top sorting, reactions, reposts, and comments |
 | 📎 **File Sharing** | Images, video, and file attachments up to 8 MB |
 | 🤖 **Discord & Telegram Bridges** | Mirror rooms to/from Discord channels or Telegram chats |
 | 🔔 **Push Notifications** | Web push for mobile and desktop |

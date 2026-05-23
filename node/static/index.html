@@ -10806,7 +10806,7 @@ window.ConnErr = (function(){
         <p id="ft-key-manager-subtitle" class="ft-key-manager-sub"></p>
       </div>
     </div>
-    <p class="ft-key-manager-privacy">Backups use <b>{username}-{date}-full.FrogTalk</b> files (legacy <b>.frog</b> / <b>.key</b> still work). Passphrase-encrypted — never uploaded to the server.</p>
+    <p class="ft-key-manager-privacy"><b>{username}-{date}-full.FrogTalk</b> backups are passphrase-encrypted on your device — never uploaded to the server.</p>
     <div class="ft-key-manager-tabs" role="tablist">
       <button type="button" class="ft-key-manager-tab active" id="ft-key-tab-keys" role="tab" aria-selected="true">All keys</button>
       <button type="button" class="ft-key-manager-tab" id="ft-key-tab-export" role="tab" aria-selected="false">Export</button>
@@ -10824,8 +10824,8 @@ window.ConnErr = (function(){
     </div>
     <div id="ft-key-pane-import" class="ft-key-manager-pane" hidden>
       <div id="ft-key-import-form">
-        <p class="modal-label">Restore keys from a <b>.FrogTalk</b> backup (or legacy <b>.frog</b> / <b>.key</b>). Nothing is uploaded to the server.</p>
-        <input type="file" id="ft-key-file-input" class="modal-input ft-key-file-input" accept=".FrogTalk,.frog,.key,.json,application/json">
+        <p class="modal-label">Restore from a <b>.FrogTalk</b> backup file. Nothing is uploaded to the server.</p>
+        <input type="file" id="ft-key-file-input" class="modal-input ft-key-file-input" accept=".FrogTalk,application/json">
         <input type="password" id="ft-key-import-pass" class="modal-input" autocomplete="current-password" placeholder="Backup passphrase">
         <button type="button" class="modal-btn secondary ft-key-manager-primary" id="ft-key-preview-btn" style="margin-bottom:8px">Review backup</button>
       </div>

@@ -248,7 +248,7 @@ try { window.FtSync = FtSync; } catch {}
 const App = {
   pendingInvite: null,  // Store invite code to process after login
   PENDING_CALL_KEY: 'ft_pending_incoming_call',
-  ASSET_RESET_VERSION: 'federation-sync-v55-bundle-storm-guard',
+  ASSET_RESET_VERSION: 'federation-sync-v57-dedupe-clear',
   _syncOverlayDismissed: false,
   _syncOverlayAutoOpened: false,
   _syncResumeStarting: false,
@@ -547,6 +547,8 @@ const App = {
 
   async _resumeFederationSyncFromHome(opts = {}) {
     const force = !!(opts && opts.force);
+    const socialOnly = !!(opts && opts.socialOnly);
+    const lightOverlay = !!(opts && opts.lightOverlay);
     if (!State.token || this.isAtHomeNode()) return false;
     const here = this._normalizeOrigin(window.location.origin);
     const source = this._normalizeOrigin(
@@ -556,7 +558,11 @@ const App = {
     this._syncOverlayDismissed = false;
     this._syncResumeStarting = true;
     try { sessionStorage.removeItem('ft_sync_overlay_seen'); } catch {}
-    this.openSyncOverlay({ userInitiated: true });
+    if (!lightOverlay) {
+      this.openSyncOverlay({ userInitiated: true });
+    } else if (typeof UI !== 'undefined' && UI.showToast) {
+      UI.showToast('Importing FrogSocial from your home node…', 'info', 5000);
+    }
     let ok = false;
     try {
       const res = await fetch('/api/auth/federation-sync-resume', {
@@ -565,7 +571,7 @@ const App = {
           'Content-Type': 'application/json',
           'X-Session-Token': State.token,
         },
-        body: JSON.stringify({ source_base: source, force }),
+        body: JSON.stringify({ source_base: source, force, social_only: socialOnly }),
       });
       const data = await res.json().catch(() => ({}));
       if (res.ok) {
@@ -709,11 +715,13 @@ const App = {
     return false;
   },
 
-  async forceFederationResync() {
+  async forceFederationResync(opts = {}) {
     if (!State.token || this.isAtHomeNode()) return false;
     const source = this._normalizeOrigin(this.getSyncSourceBase());
     const here = this._normalizeOrigin(window.location.origin);
     if (!source || source === here) return false;
+    const socialOnly = !!(opts && opts.socialOnly);
+    const lightOverlay = !!(opts && opts.lightOverlay);
     try {
       await fetch('/api/auth/federation-sync-reset', {
         method: 'POST',
@@ -721,18 +729,20 @@ const App = {
           'Content-Type': 'application/json',
           'X-Session-Token': State.token,
         },
-        body: JSON.stringify({ clear_home_pin: false }),
+        body: JSON.stringify({ clear_home_pin: false, clear_social_posts: true }),
       });
     } catch {}
     try {
       if (window.Social?.invalidateAllSocialCaches) Social.invalidateAllSocialCaches();
     } catch {}
     try { sessionStorage.removeItem('ft_sync_overlay_seen'); } catch {}
-    return this.probeAccountSyncIfSparse({ force: true });
+    return this.probeAccountSyncIfSparse({ force: true, socialOnly, lightOverlay });
   },
 
   async probeAccountSyncIfSparse(opts = {}) {
     const force = !!(opts && opts.force);
+    const socialOnly = !!(opts && opts.socialOnly);
+    const lightOverlay = !!(opts && opts.lightOverlay);
     if (!State.token) return false;
     if (this.isAtHomeNode()) {
       this.clearFederationSyncClientState();
@@ -779,12 +789,16 @@ const App = {
       try {
         await fetch('/api/auth/federation-sync-reset', {
           method: 'POST',
-          headers: { 'X-Session-Token': State.token },
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Session-Token': State.token,
+          },
+          body: JSON.stringify({ clear_social_posts: true }),
         });
       } catch {}
     }
 
-    return this._resumeFederationSyncFromHome({ force });
+    return this._resumeFederationSyncFromHome({ force, socialOnly, lightOverlay });
   },
 
   applyFederationSyncMeta(meta, opts = {}) {

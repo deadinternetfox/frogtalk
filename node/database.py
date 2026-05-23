@@ -5207,6 +5207,104 @@ def _apply_synced_plaintext_for_author(
     return int(local_id)
 
 
+def _delete_wall_post_cascade(post_id: int) -> None:
+    """Remove a wall post and dependent rows (no ownership check)."""
+    pid = int(post_id or 0)
+    if pid <= 0:
+        return
+    with _conn() as con:
+        con.execute("DELETE FROM wall_post_reactions WHERE post_id=?", (pid,))
+        con.execute("DELETE FROM wall_reposts WHERE post_id=?", (pid,))
+        con.execute("DELETE FROM wall_comments WHERE post_id=?", (pid,))
+        con.execute(
+            "DELETE FROM federation_wall_map WHERE object_kind='post' AND local_id=?",
+            (pid,),
+        )
+        con.execute("DELETE FROM wall_post_keys WHERE post_id=?", (pid,))
+        con.execute("DELETE FROM wall_posts WHERE id=?", (pid,))
+        con.commit()
+
+
+def wall_post_federation_key(post_id: int) -> str:
+    """Stable dedupe key: origin:global_id or local:id."""
+    pid = int(post_id or 0)
+    if pid <= 0:
+        return ""
+    try:
+        with _conn() as con:
+            row = con.execute(
+                """
+                SELECT origin_server_id, global_id FROM federation_wall_map
+                WHERE object_kind='post' AND local_id=?
+                """,
+                (pid,),
+            ).fetchone()
+        if row:
+            o = str(row["origin_server_id"] or "").strip()
+            g = str(row["global_id"] or "").strip()
+            if o and g:
+                return f"{o}:{g}"
+    except Exception:
+        pass
+    return f"local:{pid}"
+
+
+def clear_imported_wall_posts_for_user(user_id: int) -> int:
+    """Remove federated/imported wall posts owned by this account (travel re-sync reset)."""
+    uid = int(user_id or 0)
+    if uid <= 0:
+        return 0
+    with _conn() as con:
+        rows = con.execute(
+            """
+            SELECT fwm.local_id FROM federation_wall_map fwm
+            INNER JOIN wall_posts wp ON wp.id = fwm.local_id
+            WHERE fwm.object_kind='post' AND wp.user_id=?
+            """,
+            (uid,),
+        ).fetchall()
+    removed = 0
+    for row in rows or []:
+        try:
+            pid = int(row["id"] if hasattr(row, "keys") else row[0])
+        except Exception:
+            continue
+        if pid <= 0:
+            continue
+        _delete_wall_post_cascade(pid)
+        removed += 1
+    return removed
+
+
+def dedupe_duplicate_wall_posts_for_user(user_id: int) -> int:
+    """Drop extra local rows that share the same federated global post or duplicate content."""
+    uid = int(user_id or 0)
+    if uid <= 0:
+        return 0
+    with _conn() as con:
+        rows = con.execute(
+            """
+            SELECT id, content, created_at FROM wall_posts
+            WHERE user_id=?
+            ORDER BY created_at DESC, id ASC
+            """,
+            (uid,),
+        ).fetchall()
+    seen: dict[str, int] = {}
+    removed = 0
+    for row in rows or []:
+        pid = int(row["id"] if hasattr(row, "keys") else row[0])
+        gkey = wall_post_federation_key(pid)
+        if not gkey:
+            continue
+        if gkey in seen:
+            _delete_wall_post_cascade(pid)
+            removed += 1
+        else:
+            seen[gkey] = pid
+    return removed
+
+
 def relink_wall_posts_to_account(user_id: int) -> int:
     """Move synced wall posts off duplicate mirror rows onto the signed-in account."""
     uid = int(user_id or 0)
@@ -10413,9 +10511,15 @@ def get_feed_posts(user_id: int, limit: int = 30, offset: int = 0,
 
     merged: List[Dict] = []
     best_by_post: Dict[int, Dict] = {}
+    seen_fed_keys: set[str] = set()
     for row in list(base_rows) + list(repost_rows):
         d = _materialise(row)
         pid = int(d.get("id") or 0)
+        fed_key = wall_post_federation_key(pid)
+        if fed_key and fed_key in seen_fed_keys:
+            continue
+        if fed_key:
+            seen_fed_keys.add(fed_key)
         ts = str(d.get("feed_sort_at") or d.get("created_at") or "")
         existing = best_by_post.get(pid)
         if not existing:
@@ -10478,8 +10582,21 @@ def get_explore_posts(viewer_id: int, limit: int = 30, offset: int = 0,
                             ))
             ORDER BY {order}
             LIMIT ? OFFSET ?
-                """, (viewer_id, viewer_id, viewer_id, mood, mood, limit, offset)).fetchall()
-    return [dict(r) for r in rows]
+                """, (viewer_id, viewer_id, viewer_id, mood, mood, max(limit * 4, 60), offset)).fetchall()
+    out: List[Dict] = []
+    seen_fed: set[str] = set()
+    for row in rows:
+        d = dict(row)
+        pid = int(d.get("id") or 0)
+        fed_key = wall_post_federation_key(pid)
+        if fed_key and fed_key in seen_fed:
+            continue
+        if fed_key:
+            seen_fed.add(fed_key)
+        out.append(d)
+        if len(out) >= max(1, int(limit or 30)):
+            break
+    return out
 
 
 def get_suggested_users(user_id: int, limit: int = 10) -> List[Dict]:
