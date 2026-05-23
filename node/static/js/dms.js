@@ -181,7 +181,7 @@ function _dmIsLegacyLockText(text) {
     || s.includes('Syncing from your home')
     || s.includes('Sync failed')
     || s.includes('Encryption sync incomplete')
-    || s.includes('Import a .key')
+    || s.includes('Import a .key') || s.includes('Import keys')
     || s.includes('import keys')
     || s.includes('Starting encryption')
     || s.includes('Cannot fetch encryption')

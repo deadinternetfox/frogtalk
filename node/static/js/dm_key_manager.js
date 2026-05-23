@@ -16,6 +16,8 @@
   let _inventory = null;
   let _selectedPeerIds = new Set();
   let _selectedRoomKeys = new Set();
+  let _importPreview = null;
+  let _importFileText = null;
 
   function _toast(msg, kind) {
     try {
@@ -61,11 +63,16 @@
     }
   }
 
-  async function _gatePin() {
-    if (!window.Pin) return true;
+  async function _pinIsConfigured() {
+    if (!window.Pin) return false;
     try { await Pin.refreshFromServer(); } catch {}
     const cfg = Pin.config ? Pin.config() : {};
-    if (!cfg.has_pin) return true;
+    return !!cfg.has_pin;
+  }
+
+  async function _gatePin() {
+    if (!window.Pin) return true;
+    if (!(await _pinIsConfigured())) return true;
     if (_pinRecentlyUnlocked() && !Pin.isLocked()) return true;
     return new Promise((resolve) => {
       try { Pin.lockNow(); } catch { resolve(false); return; }
@@ -147,6 +154,11 @@
       _toast('PIN required to open the key manager.', 'warning');
       return false;
     }
+    const hasPin = await _pinIsConfigured();
+    if (hasPin) {
+      try { sessionStorage.setItem(_SS_AUTH_AT, String(Date.now())); } catch {}
+      return true;
+    }
     const pw = await _promptPassword();
     if (!pw) return false;
     try { sessionStorage.setItem(_SS_AUTH_AT, String(Date.now())); } catch {}
@@ -185,6 +197,48 @@
     });
     _setErr('');
     if (t === 'keys') void _renderInventory();
+    if (t === 'import') _hideImportPreview();
+  }
+
+  function _hideImportPreview() {
+    _importPreview = null;
+    _importFileText = null;
+    const form = _el('ft-key-import-form');
+    const prev = _el('ft-key-import-preview');
+    if (form) form.hidden = false;
+    if (prev) prev.hidden = true;
+    const body = _el('ft-key-preview-body');
+    if (body) body.textContent = '';
+  }
+
+  function _showImportPreview(summary) {
+    const form = _el('ft-key-import-form');
+    const prev = _el('ft-key-import-preview');
+    const body = _el('ft-key-preview-body');
+    if (!prev || !body) return;
+    _importPreview = summary;
+    if (form) form.hidden = true;
+    prev.hidden = false;
+    body.textContent = '';
+    const dl = document.createElement('dl');
+    const addRow = (label, value) => {
+      const dt = document.createElement('dt');
+      dt.textContent = label;
+      const dd = document.createElement('dd');
+      dd.textContent = value;
+      dl.appendChild(dt);
+      dl.appendChild(dd);
+    };
+    const scope = summary.exportScope === 'partial' ? 'Selected keys only' : 'Full backup';
+    addRow('Backup type', scope);
+    addRow('Exported', _fmtTime(summary.exportedAt));
+    addRow('From node', summary.nodeOrigin || '—');
+    addRow('Account in file', summary.accountNickname ? `@${summary.accountNickname}` : '—');
+    addRow('DM sessions', String(summary.dmSessionCount || 0));
+    addRow('DM peers', String(summary.dmPeerCount || 0));
+    addRow('Private groups', String(summary.roomSecretCount || 0));
+    addRow('Identity key', summary.identityPresent ? 'Included' : 'Not included');
+    body.appendChild(dl);
   }
 
   function _requireDeviceCrypto() {
@@ -220,6 +274,7 @@
       if (inp) inp.value = '';
     });
     _setErr('');
+    _hideImportPreview();
   }
 
   function _resolveOpenContext(opts) {
@@ -289,70 +344,119 @@
       return;
     }
     const ctx = _openContext || {};
-    const lines = [];
-    lines.push(`<div class="ft-key-inv-meta">Device identity: <b>${_inventory.hasIdentity ? 'present' : 'none'}</b> · Signal sessions: <b>${_inventory.sessionCount || 0}</b></div>`);
-    lines.push(`<div class="ft-key-inv-meta">Last export: <b>${_esc(_fmtTime(_inventory.lastExportAt))}</b> · Last import: <b>${_esc(_fmtTime(_inventory.lastImportAt))}</b></div>`);
-    lines.push(`<div class="ft-key-inv-meta">Node: <b>${_esc(_inventory.nodeOrigin || '')}</b> — keys are not sent to the server.</div>`);
-    if (summary) summary.innerHTML = lines.join('');
+    if (summary) {
+      summary.textContent = '';
+      const addMeta = (text) => {
+        const d = document.createElement('div');
+        d.className = 'ft-key-inv-meta';
+        d.textContent = text;
+        summary.appendChild(d);
+      };
+      addMeta(`Device identity: ${_inventory.hasIdentity ? 'present' : 'none'} · Signal sessions: ${_inventory.sessionCount || 0}`);
+      addMeta(`Last export: ${_fmtTime(_inventory.lastExportAt)} · Last import: ${_fmtTime(_inventory.lastImportAt)}`);
+      addMeta(`Node: ${_inventory.nodeOrigin || ''} — keys are not sent to the server.`);
+    }
 
-    const peerRows = (_inventory.peers || []).map((p) => {
-      const sel = _selectedPeerIds.has(p.localUserId);
-      const highlight = ctx.peerUserId === p.localUserId ? ' ft-key-row-focus' : '';
-      const status = p.sessionCount > 0
-        ? (p.imported ? 'Imported' : 'Active in browser')
-        : 'No session';
-      const badge = p.imported ? '<span class="ft-key-badge ft-key-badge-ok">imported</span>' : '<span class="ft-key-badge">local</span>';
-      return `<label class="ft-key-inv-row${highlight}">
-        <input type="checkbox" class="ft-key-peer-cb" data-peer-id="${p.localUserId}" ${sel ? 'checked' : ''}>
-        <div class="ft-key-inv-row-body">
-          <div class="ft-key-inv-title">@${_esc(p.nickname)} ${badge}</div>
-          <div class="ft-key-inv-sub">${p.sessionCount} session${p.sessionCount !== 1 ? 's' : ''} · ${status}${p.globalUserId ? ` · gid …${_esc(p.globalUserId.slice(-8))}` : ''}</div>
-          <div class="ft-key-inv-sub">Exported: ${_esc(_fmtTime(p.lastExportAt))}</div>
-        </div>
-      </label>`;
-    }).join('');
+    list.textContent = '';
+    const peerSection = document.createElement('div');
+    peerSection.className = 'ft-key-inv-section';
+    const peerHead = document.createElement('div');
+    peerHead.className = 'ft-key-inv-section-head';
+    peerHead.innerHTML = '<span>Direct messages</span><label class="ft-key-select-all"><input type="checkbox" id="ft-key-select-all-peers"> Select all</label>';
+    peerSection.appendChild(peerHead);
+    if (!(_inventory.peers || []).length) {
+      const empty = document.createElement('div');
+      empty.className = 'ft-key-inv-empty';
+      empty.textContent = 'No DM encryption sessions yet — send a message in a DM first.';
+      peerSection.appendChild(empty);
+    } else {
+      for (const p of _inventory.peers) {
+        const label = document.createElement('label');
+        label.className = 'ft-key-inv-row' + (ctx.peerUserId === p.localUserId ? ' ft-key-row-focus' : '');
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.className = 'ft-key-peer-cb';
+        cb.dataset.peerId = String(p.localUserId);
+        cb.checked = _selectedPeerIds.has(p.localUserId);
+        cb.addEventListener('change', () => {
+          const id = Number(p.localUserId);
+          if (cb.checked) _selectedPeerIds.add(id);
+          else _selectedPeerIds.delete(id);
+        });
+        const body = document.createElement('div');
+        body.className = 'ft-key-inv-row-body';
+        const title = document.createElement('div');
+        title.className = 'ft-key-inv-title';
+        title.textContent = `@${p.nickname}`;
+        const badge = document.createElement('span');
+        badge.className = 'ft-key-badge' + (p.imported ? ' ft-key-badge-ok' : '');
+        badge.textContent = p.imported ? 'imported' : 'local';
+        title.appendChild(document.createTextNode(' '));
+        title.appendChild(badge);
+        const sub1 = document.createElement('div');
+        sub1.className = 'ft-key-inv-sub';
+        const gidHint = p.globalUserId ? ` · gid …${p.globalUserId.slice(-8)}` : '';
+        sub1.textContent = `${p.sessionCount} session${p.sessionCount !== 1 ? 's' : ''} · ${p.sessionCount > 0 ? (p.imported ? 'Imported' : 'Active in browser') : 'No session'}${gidHint}`;
+        const sub2 = document.createElement('div');
+        sub2.className = 'ft-key-inv-sub';
+        sub2.textContent = `Exported: ${_fmtTime(p.lastExportAt)}`;
+        body.appendChild(title);
+        body.appendChild(sub1);
+        body.appendChild(sub2);
+        label.appendChild(cb);
+        label.appendChild(body);
+        peerSection.appendChild(label);
+      }
+    }
+    list.appendChild(peerSection);
 
-    const roomRows = (_inventory.rooms || []).map((r) => {
-      const sel = _selectedRoomKeys.has(r.storageKey);
-      return `<label class="ft-key-inv-row">
-        <input type="checkbox" class="ft-key-room-cb" data-room-key="${_esc(r.storageKey)}" ${sel ? 'checked' : ''}>
-        <div class="ft-key-inv-row-body">
-          <div class="ft-key-inv-title">#${_esc(r.roomName)} <span class="ft-key-badge">private group</span></div>
-          <div class="ft-key-inv-sub">Room secret stored locally · server cannot decrypt</div>
-        </div>
-      </label>`;
-    }).join('');
-
-    list.innerHTML = `
-      <div class="ft-key-inv-section">
-        <div class="ft-key-inv-section-head">
-          <span>Direct messages</span>
-          <label class="ft-key-select-all"><input type="checkbox" id="ft-key-select-all-peers"> Select all</label>
-        </div>
-        ${peerRows || '<div class="ft-key-inv-empty">No DM encryption sessions yet — send a message in a DM first.</div>'}
-      </div>
-      <div class="ft-key-inv-section">
-        <div class="ft-key-inv-section-head">
-          <span>Private groups</span>
-          <label class="ft-key-select-all"><input type="checkbox" id="ft-key-select-all-rooms"> Select all</label>
-        </div>
-        ${roomRows || '<div class="ft-key-inv-empty">No room secrets in this browser.</div>'}
-      </div>`;
-
-    list.querySelectorAll('.ft-key-peer-cb').forEach((cb) => {
-      cb.addEventListener('change', () => {
-        const id = Number(cb.dataset.peerId);
-        if (cb.checked) _selectedPeerIds.add(id);
-        else _selectedPeerIds.delete(id);
+    const roomSection = document.createElement('div');
+    roomSection.className = 'ft-key-inv-section';
+    const roomHead = document.createElement('div');
+    roomHead.className = 'ft-key-inv-section-head';
+    roomHead.innerHTML = '<span>Private groups</span><label class="ft-key-select-all"><input type="checkbox" id="ft-key-select-all-rooms"> Select all</label>';
+    roomSection.appendChild(roomHead);
+    if (!(_inventory.rooms || []).length) {
+      const empty = document.createElement('div');
+      empty.className = 'ft-key-inv-empty';
+      empty.textContent = 'No room secrets in this browser.';
+      roomSection.appendChild(empty);
+    } else {
+      (_inventory.rooms || []).forEach((r, idx) => {
+        const label = document.createElement('label');
+        label.className = 'ft-key-inv-row';
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.className = 'ft-key-room-cb';
+        cb.dataset.roomIdx = String(idx);
+        cb.checked = _selectedRoomKeys.has(r.storageKey);
+        cb.addEventListener('change', () => {
+          const room = (_inventory.rooms || [])[idx];
+          if (!room) return;
+          if (cb.checked) _selectedRoomKeys.add(room.storageKey);
+          else _selectedRoomKeys.delete(room.storageKey);
+        });
+        const body = document.createElement('div');
+        body.className = 'ft-key-inv-row-body';
+        const title = document.createElement('div');
+        title.className = 'ft-key-inv-title';
+        title.textContent = `#${r.roomName}`;
+        const badge = document.createElement('span');
+        badge.className = 'ft-key-badge';
+        badge.textContent = 'private group';
+        title.appendChild(document.createTextNode(' '));
+        title.appendChild(badge);
+        const sub = document.createElement('div');
+        sub.className = 'ft-key-inv-sub';
+        sub.textContent = 'Room secret stored locally · server cannot decrypt';
+        body.appendChild(title);
+        body.appendChild(sub);
+        label.appendChild(cb);
+        label.appendChild(body);
+        roomSection.appendChild(label);
       });
-    });
-    list.querySelectorAll('.ft-key-room-cb').forEach((cb) => {
-      cb.addEventListener('change', () => {
-        const k = cb.dataset.roomKey || '';
-        if (cb.checked) _selectedRoomKeys.add(k);
-        else _selectedRoomKeys.delete(k);
-      });
-    });
+    }
+    list.appendChild(roomSection);
     const allP = _el('ft-key-select-all-peers');
     const allR = _el('ft-key-select-all-rooms');
     if (allP) {
@@ -490,7 +594,7 @@
           .filter(Boolean);
         DeviceCrypto.recordKeyExportMeta(gids.length ? gids : (_inventory.peers || []).map((p) => p.globalUserId).filter(Boolean));
       } catch {}
-      _toast('Downloaded .key file — store it somewhere safe.', 'success');
+      _toast('Downloaded .frog backup — store it somewhere safe.', 'success');
       void _loadInventory();
     } catch (e) {
       const code = String((e && e.message) || e || '');
@@ -504,28 +608,71 @@
         _setErr('Export failed — try again after opening a DM.');
       }
     } finally {
-      if (btn) { btn.disabled = false; btn.textContent = 'Download .key file'; }
+      if (btn) { btn.disabled = false; btn.textContent = 'Download .frog file'; }
     }
   }
 
-  async function runImport() {
-    _setErr('');
+  async function _readImportInputs() {
     const fileEl = _el('ft-key-file-input');
     const pass = String(_el('ft-key-import-pass')?.value || '');
     const file = fileEl?.files?.[0];
-    if (!file) {
-      _setErr('Choose a .key file.');
+    if (!file) return { error: 'Choose a .frog or .key file.' };
+    if (pass.length < 8) return { error: 'Enter the passphrase from when you exported.' };
+    if (file.size > 12 * 1024 * 1024) return { error: 'Backup file is too large.' };
+    let text;
+    try {
+      text = await file.text();
+    } catch {
+      return { error: 'Could not read the file.' };
+    }
+    return { text, pass, file };
+  }
+
+  async function runImportPreview() {
+    _setErr('');
+    const inp = await _readImportInputs();
+    if (inp.error) {
+      _setErr(inp.error);
       return;
+    }
+    const btn = _el('ft-key-preview-btn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Reviewing…'; }
+    try {
+      await _ensureCryptoReady();
+      const summary = await DeviceCrypto.previewKeyFileFromText(inp.text, inp.pass);
+      _importFileText = inp.text;
+      _showImportPreview(summary);
+    } catch (e) {
+      const code = String((e && e.message) || e || '');
+      if (code === 'wrong_passphrase') _setErr('Wrong passphrase for this file.');
+      else if (code === 'bad_key_file') _setErr('Not a valid FrogTalk backup file.');
+      else _setErr('Could not read backup — check the file and passphrase.');
+      _hideImportPreview();
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = 'Review backup'; }
+    }
+  }
+
+  async function runImportConfirm() {
+    _setErr('');
+    const pass = String(_el('ft-key-import-pass')?.value || '');
+    let text = _importFileText;
+    if (!text) {
+      const inp = await _readImportInputs();
+      if (inp.error) {
+        _setErr(inp.error);
+        return;
+      }
+      text = inp.text;
     }
     if (pass.length < 8) {
       _setErr('Enter the passphrase from when you exported.');
       return;
     }
-    const btn = _el('ft-key-import-btn');
+    const btn = _el('ft-key-import-confirm');
     if (btn) { btn.disabled = true; btn.textContent = 'Importing…'; }
     try {
       await _ensureCryptoReady();
-      const text = await file.text();
       await DeviceCrypto.importKeyFileFromText(text, pass);
       await _afterImport();
       let toastMsg = 'Keys restored successfully.';
@@ -551,12 +698,12 @@
       if (code === 'wrong_passphrase') {
         _setErr('Wrong passphrase for this file.');
       } else if (code === 'bad_key_file') {
-        _setErr('Not a valid FrogTalk .key file.');
+        _setErr('Not a valid FrogTalk backup file.');
       } else {
         _setErr('Import failed — check the file and passphrase.');
       }
     } finally {
-      if (btn) { btn.disabled = false; btn.textContent = 'Import keys'; }
+      if (btn) { btn.disabled = false; btn.textContent = 'Restore keys'; }
     }
   }
 
@@ -597,7 +744,9 @@
     _el('ft-key-tab-export')?.addEventListener('click', () => _switchTab('export'));
     _el('ft-key-tab-import')?.addEventListener('click', () => _switchTab('import'));
     _el('ft-key-export-btn')?.addEventListener('click', () => { void runExport(); });
-    _el('ft-key-import-btn')?.addEventListener('click', () => { void runImport(); });
+    _el('ft-key-preview-btn')?.addEventListener('click', () => { void runImportPreview(); });
+    _el('ft-key-import-confirm')?.addEventListener('click', () => { void runImportConfirm(); });
+    _el('ft-key-import-back')?.addEventListener('click', () => _hideImportPreview());
     _el('ft-key-manager-close')?.addEventListener('click', () => close());
     _el('ft-key-open-from-privacy')?.addEventListener('click', () => { void open('keys'); });
   }
@@ -625,7 +774,9 @@
     open,
     close,
     runExport,
-    runImport,
+    runImport: runImportConfirm,
+    runImportPreview,
+    runImportConfirm,
     refreshInventory: _loadInventory,
     MODAL_ID,
   };
@@ -635,7 +786,7 @@
     window.showDmCryptoKeysModal = (tab, opts) => open(tab, opts);
     window.openDmKeyManager = (tab, opts) => open(tab, opts);
     window.submitDmKeysExport = () => { void runExport(); };
-    window.submitDmKeysImport = () => { void runImport(); };
+    window.submitDmKeysImport = () => { void runImportConfirm(); };
     window.switchDmKeysModalTab = (tab) => _switchTab(tab);
   } catch {}
 

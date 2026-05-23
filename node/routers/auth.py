@@ -7210,8 +7210,12 @@ async def verify_password(
     body: VerifyPasswordRequest,
     current_user: dict = Depends(get_current_user),
 ):
-    """Confirm account password for sensitive client-only flows (e.g. key manager)."""
-    if not db.verify_user(current_user["nickname"], body.password):
+    """Confirm account password for sensitive client-only flows (e.g. key manager).
+
+    Password is checked with bcrypt and is never stored or logged. Returns only {ok: true}.
+    """
+    nick = str(current_user.get("nickname") or "")
+    if not nick or not db.verify_user(nick, body.password):
         return JSONResponse(status_code=401, content={"error": "Incorrect password"})
     return {"ok": True}
 

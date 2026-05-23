@@ -13,7 +13,10 @@
   const DCT_VERSION = 2;
   const DEFAULT_POLICY = 'fresh_keys';
   const KEYFILE_MAGIC = 'FROGTALK-KEY-v1';
+  const KEYFILE_MAGIC_FROG = 'FROGTALK-FROG-v1';
   const KEYFILE_KDF_ITERS = 210000;
+  const KEYFILE_MAX_BYTES = 12 * 1024 * 1024;
+  const KEYFILE_EXT = '.frog';
 
   function dctPolicy() {
     try {
@@ -786,6 +789,71 @@
     }
   }
 
+  function _isValidKeyFileMagic(magic) {
+    const m = String(magic || '').trim();
+    return m === KEYFILE_MAGIC || m === KEYFILE_MAGIC_FROG;
+  }
+
+  function _parseKeyFileJson(text) {
+    const raw = String(text || '').trim();
+    if (!raw || raw.length > KEYFILE_MAX_BYTES) throw new Error('bad_key_file');
+    let parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      throw new Error('bad_key_file');
+    }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error('bad_key_file');
+    }
+    return parsed;
+  }
+
+  async function _decryptKeyFilePayload(obj, passphrase) {
+    const pass = String(passphrase || '');
+    if (pass.length < 8) throw new Error('passphrase_too_short');
+    let packed;
+    try {
+      packed = await _openPackedFromPassphrase(obj, pass);
+    } catch {
+      throw new Error('wrong_passphrase');
+    }
+    return _unpackPlainExport(packed);
+  }
+
+  function _summarizePlainExport(plain, envelope) {
+    const env = envelope && typeof envelope === 'object' ? envelope : {};
+    const signal = plain?.signal || {};
+    const sessions = Array.isArray(signal.sessions) ? signal.sessions : [];
+    const peerIds = new Set();
+    for (const row of sessions) {
+      const uid = Number(String(row?.key || '').split('.')[0]) || 0;
+      if (uid > 0) peerIds.add(uid);
+    }
+    const book = plain?.address_book || {};
+    const bookPeers = Array.isArray(book.peers) ? book.peers : [];
+    return {
+      magic: String(env.magic || ''),
+      exportScope: String(plain?.dct_mode || 'full'),
+      exportedAt: Number(plain?.exported_at || env.exported_at || 0),
+      nodeOrigin: String(env.node_origin || ''),
+      accountNickname: String(env.account_nickname || '').slice(0, 64),
+      identityPresent: !!(signal.identity),
+      dmSessionCount: sessions.length,
+      dmPeerCount: peerIds.size,
+      addressBookPeers: bookPeers.length,
+      roomSecretCount: Array.isArray(plain?.room_secrets) ? plain.room_secrets.length : 0,
+    };
+  }
+
+  async function previewKeyFileFromText(text, passphrase) {
+    const parsed = _parseKeyFileJson(text);
+    if (!_isValidKeyFileMagic(parsed.magic)) throw new Error('bad_key_file');
+    const plain = await _decryptKeyFilePayload(parsed, passphrase);
+    if (!plain) throw new Error('bad_key_file');
+    return _summarizePlainExport(plain, parsed);
+  }
+
   async function exportKeyFilePayload(passphrase, opts) {
     const pass = String(passphrase || '');
     if (pass.length < 8) throw new Error('passphrase_too_short');
@@ -795,7 +863,7 @@
     const packed = await _packPlainExport(plain);
     const sealed = await _sealPackedForPassphrase(packed, pass);
     return {
-      magic: KEYFILE_MAGIC,
+      magic: KEYFILE_MAGIC_FROG,
       exported_at: Date.now(),
       node_origin: String(window.location.origin || ''),
       account_nickname: _keyfileNickname(),
@@ -815,7 +883,7 @@
     const stamp = new Date().toISOString().slice(0, 10);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `frogtalk-${_keyfileNickname()}-${stamp}.key`;
+    a.download = `frogtalk-${_keyfileNickname()}-${stamp}${KEYFILE_EXT}`;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -825,16 +893,8 @@
 
   async function importKeyFilePayload(payload, passphrase) {
     const obj = (payload && typeof payload === 'object') ? payload : null;
-    if (!obj || String(obj.magic || '') !== KEYFILE_MAGIC) throw new Error('bad_key_file');
-    const pass = String(passphrase || '');
-    if (pass.length < 8) throw new Error('passphrase_too_short');
-    let packed;
-    try {
-      packed = await _openPackedFromPassphrase(obj, pass);
-    } catch {
-      throw new Error('wrong_passphrase');
-    }
-    const plain = await _unpackPlainExport(packed);
+    if (!obj || !_isValidKeyFileMagic(obj.magic)) throw new Error('bad_key_file');
+    const plain = await _decryptKeyFilePayload(obj, passphrase);
     const ok = await _importPlainPayload(plain, '');
     if (!ok) throw new Error('import_failed');
     try {
@@ -854,12 +914,7 @@
   }
 
   async function importKeyFileFromText(text, passphrase) {
-    let parsed;
-    try {
-      parsed = JSON.parse(String(text || '').trim());
-    } catch {
-      throw new Error('bad_key_file');
-    }
+    const parsed = _parseKeyFileJson(text);
     return importKeyFilePayload(parsed, passphrase);
   }
 
@@ -878,7 +933,9 @@
     downloadKeyFile,
     importKeyFilePayload,
     importKeyFileFromText,
+    previewKeyFileFromText,
     buildPlainExport: _buildPlainExport,
+    KEYFILE_EXT,
     ensureReadyForExport: _ensureSignalReadyForExport,
     listKeyInventory,
     recordKeyExportMeta: _recordKeyExportMeta,
