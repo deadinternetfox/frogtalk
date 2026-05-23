@@ -10806,7 +10806,7 @@ window.ConnErr = (function(){
         <p id="ft-key-manager-subtitle" class="ft-key-manager-sub"></p>
       </div>
     </div>
-    <p class="ft-key-manager-privacy">Backups use a <b>.frog</b> file (also accepts legacy <b>.key</b>) encrypted with a passphrase you choose. FrogTalk servers never receive your private keys or passphrase.</p>
+    <p class="ft-key-manager-privacy">Backups use <b>{username}-{date}-full.FrogTalk</b> files (legacy <b>.frog</b> / <b>.key</b> still work). Passphrase-encrypted — never uploaded to the server.</p>
     <div class="ft-key-manager-tabs" role="tablist">
       <button type="button" class="ft-key-manager-tab active" id="ft-key-tab-keys" role="tab" aria-selected="true">All keys</button>
       <button type="button" class="ft-key-manager-tab" id="ft-key-tab-export" role="tab" aria-selected="false">Export</button>
@@ -10820,12 +10820,12 @@ window.ConnErr = (function(){
       <p class="modal-label">Export selected keys from the <b>All keys</b> tab, or all if everything is checked.</p>
       <input type="password" id="ft-key-export-pass" class="modal-input" autocomplete="new-password" placeholder="Backup passphrase (min 8 characters)">
       <input type="password" id="ft-key-export-pass2" class="modal-input" autocomplete="new-password" placeholder="Confirm passphrase">
-      <button type="button" class="modal-btn primary ft-key-manager-primary" id="ft-key-export-btn">Download .frog file</button>
+      <button type="button" class="modal-btn primary ft-key-manager-primary" id="ft-key-export-btn">Download .FrogTalk file</button>
     </div>
     <div id="ft-key-pane-import" class="ft-key-manager-pane" hidden>
       <div id="ft-key-import-form">
-        <p class="modal-label">Restore keys from a <b>.frog</b> or <b>.key</b> backup. Nothing is uploaded to the server.</p>
-        <input type="file" id="ft-key-file-input" class="modal-input ft-key-file-input" accept=".frog,.key,.json,application/json">
+        <p class="modal-label">Restore keys from a <b>.FrogTalk</b> backup (or legacy <b>.frog</b> / <b>.key</b>). Nothing is uploaded to the server.</p>
+        <input type="file" id="ft-key-file-input" class="modal-input ft-key-file-input" accept=".FrogTalk,.frog,.key,.json,application/json">
         <input type="password" id="ft-key-import-pass" class="modal-input" autocomplete="current-password" placeholder="Backup passphrase">
         <button type="button" class="modal-btn secondary ft-key-manager-primary" id="ft-key-preview-btn" style="margin-bottom:8px">Review backup</button>
       </div>
@@ -11818,7 +11818,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoa
 </script>
 <script src="/static/js/crypto.js?v=192"></script>
 <script src="/static/js/signal_store.js?v=4"></script>
-<script src="/static/js/device_crypto.js?v=11"></script>
+<script src="/static/js/device_crypto.js?v=12"></script>
 <script src="/static/js/signal.js?v=28"></script>
 <script src="/static/js/wall_crypto.js?v=2"></script>
 <script src="/static/js/state.js?v=203"></script>
@@ -11836,7 +11836,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoa
 <script src="/static/js/users.js?v=202"></script>
 <script src="/static/js/emoji.js?v=193"></script>
 <script src="/static/js/friends.js?v=422"></script>
-<script src="/static/js/dms.js?v=500"></script>
+<script src="/static/js/dms.js?v=501"></script>
 <script src="/static/js/calls.js?v=246"></script>
 <script src="/static/js/media.js?v=423"></script>
 <script src="/static/js/gifs.js?v=205"></script>

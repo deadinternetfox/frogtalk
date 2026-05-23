@@ -233,7 +233,7 @@ function _dmLockMetaFromContext(ctx) {
     home_locked: {
       kind: 'home_locked',
       title: 'Encrypted on your home node',
-      subtitle: 'This message was copied here but needs your home encryption keys. Send a new message for a fresh thread, or import a .key file.',
+      subtitle: 'This message was copied here but needs your home encryption keys. Send a new message for a fresh thread, or import a .frog backup.',
       icon: '🔒',
     },
     peer_unreachable: {
@@ -257,7 +257,7 @@ function _dmLockMetaFromContext(ctx) {
     keys_needed: {
       kind: 'keys_needed',
       title: 'Keys required',
-      subtitle: 'Import a .key file you exported from home to read older messages on this node.',
+      subtitle: 'Import a .frog backup you exported from home to read older messages on this node.',
       icon: '🗝️',
     },
     sync_attempted: {
@@ -2418,11 +2418,13 @@ function _dmSysLogActionsHtml(kind) {
 }
 
 function _dmLockShowImportBtn(meta, mine) {
-  if (mine) return false;
   const k = String(meta?.kind || '');
-  if (k === 'own_sent_locked' || k === 'unlocking' || k === 'signal_boot' || k === 'sync_in_progress') {
-    return false;
+  if (k === 'unlocking' || k === 'signal_boot' || k === 'sync_in_progress') return false;
+  if (k === 'own_sent_locked' || k === 'keys_needed' || k === 'home_locked'
+      || k === 'decrypt_failed' || k === 'sync_failed' || k === 'sync_attempted') {
+    return true;
   }
+  if (mine) return false;
   return true;
 }
 
@@ -2439,9 +2441,9 @@ function _dmLockPlainLine(meta) {
     peer_unreachable: 'Cannot reach peer node for encryption keys — try again later.',
     unlocking: 'Unlocking…',
     signal_boot: 'Starting encryption…',
-    keys_needed: 'Import a .key file to read older messages from home.',
+    keys_needed: 'Import a .frog backup to read older messages from home.',
     sync_attempted: 'Encryption sync did not complete — send a new message or import keys.',
-    own_sent_locked: 'Sent from another device — cannot be shown on this browser.',
+    own_sent_locked: 'Sent from another device — import a .FrogTalk backup from home to read it here.',
     decrypt_failed: 'Could not unlock this message — send a new message or import keys.',
   };
   if (lines[k]) return lines[k];
@@ -2456,7 +2458,7 @@ function _renderDmLockInBubble(meta, opts = {}) {
   const mine = !!opts.mine;
   const line = esc(_dmLockPlainLine(meta));
   const importBtn = _dmLockShowImportBtn(meta, mine)
-    ? ` <button type="button" class="dm-lock-import-link" data-ft-key-action="import"${_dmKeyTriggerAttrs()}>Import keys</button>`
+    ? ` <button type="button" class="dm-lock-import-link" data-ft-key-action="import"${_dmKeyTriggerAttrs()}>Key manager</button>`
     : '';
   return `\u{1F512} ${line}${importBtn}`;
 }

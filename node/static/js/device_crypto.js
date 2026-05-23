@@ -16,7 +16,7 @@
   const KEYFILE_MAGIC_FROG = 'FROGTALK-FROG-v1';
   const KEYFILE_KDF_ITERS = 210000;
   const KEYFILE_MAX_BYTES = 12 * 1024 * 1024;
-  const KEYFILE_EXT = '.frog';
+  const KEYFILE_EXT = '.FrogTalk';
 
   function dctPolicy() {
     try {
@@ -789,6 +789,28 @@
     }
   }
 
+  /** e.g. frog-2026-05-23-full.FrogTalk or testy-2026-05-23-p2r1.FrogTalk */
+  function _keyfileDownloadName(exportOpts) {
+    const nick = _keyfileNickname();
+    const stamp = new Date().toISOString().slice(0, 10);
+    const opts = exportOpts && typeof exportOpts === 'object' ? exportOpts : {};
+    const partial = !!(opts.peerLocalIds && opts.peerLocalIds.size)
+      || !!(opts.roomStorageKeys && opts.roomStorageKeys.size);
+    let meta = 'full';
+    if (partial) {
+      const p = opts.peerLocalIds ? opts.peerLocalIds.size : 0;
+      const r = opts.roomStorageKeys ? opts.roomStorageKeys.size : 0;
+      meta = `p${p}r${r}`;
+    }
+    return `${nick}-${stamp}-${meta}${KEYFILE_EXT}`;
+  }
+
+  function _keyfileExtensionOk(filename) {
+    const lower = String(filename || '').trim().toLowerCase();
+    return lower.endsWith('.frogtalk') || lower.endsWith('.frog') || lower.endsWith('.key')
+      || lower.endsWith('.json');
+  }
+
   function _isValidKeyFileMagic(magic) {
     const m = String(magic || '').trim();
     return m === KEYFILE_MAGIC || m === KEYFILE_MAGIC_FROG;
@@ -883,7 +905,7 @@
     const stamp = new Date().toISOString().slice(0, 10);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `frogtalk-${_keyfileNickname()}-${stamp}${KEYFILE_EXT}`;
+    a.download = _keyfileDownloadName(opts);
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -936,6 +958,8 @@
     previewKeyFileFromText,
     buildPlainExport: _buildPlainExport,
     KEYFILE_EXT,
+    keyfileDownloadName: _keyfileDownloadName,
+    keyfileExtensionOk: _keyfileExtensionOk,
     ensureReadyForExport: _ensureSignalReadyForExport,
     listKeyInventory,
     recordKeyExportMeta: _recordKeyExportMeta,

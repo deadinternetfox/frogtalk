@@ -594,7 +594,7 @@
           .filter(Boolean);
         DeviceCrypto.recordKeyExportMeta(gids.length ? gids : (_inventory.peers || []).map((p) => p.globalUserId).filter(Boolean));
       } catch {}
-      _toast('Downloaded .frog backup — store it somewhere safe.', 'success');
+      _toast('Downloaded .FrogTalk backup — store it somewhere safe.', 'success');
       void _loadInventory();
     } catch (e) {
       const code = String((e && e.message) || e || '');
@@ -608,7 +608,7 @@
         _setErr('Export failed — try again after opening a DM.');
       }
     } finally {
-      if (btn) { btn.disabled = false; btn.textContent = 'Download .frog file'; }
+      if (btn) { btn.disabled = false; btn.textContent = 'Download .FrogTalk file'; }
     }
   }
 
@@ -616,7 +616,10 @@
     const fileEl = _el('ft-key-file-input');
     const pass = String(_el('ft-key-import-pass')?.value || '');
     const file = fileEl?.files?.[0];
-    if (!file) return { error: 'Choose a .frog or .key file.' };
+    if (!file) return { error: 'Choose a .FrogTalk backup file.' };
+    if (window.DeviceCrypto?.keyfileExtensionOk && !DeviceCrypto.keyfileExtensionOk(file.name)) {
+      return { error: 'Use a .FrogTalk, .frog, or .key backup file.' };
+    }
     if (pass.length < 8) return { error: 'Enter the passphrase from when you exported.' };
     if (file.size > 12 * 1024 * 1024) return { error: 'Backup file is too large.' };
     let text;
