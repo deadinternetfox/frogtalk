@@ -1994,8 +1994,7 @@ async def get_voice_participants(room_name: str,
     local = voice_manager.participants(room_name)
     try:
         import federation_voice as _fv
-        remote = _fv.federated_voice_registry.remotes_for_room(room_name)
-        return {"participants": local + remote}
+        return {"participants": _fv.participants_for_room(room_name, voice_manager)}
     except Exception:
         return {"participants": local}
 

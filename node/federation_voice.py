@@ -33,7 +33,7 @@ import uuid
 from typing import Any
 
 import database as db
-from fed_turn import federation_calls_enabled, voice_sfu_enabled
+from fed_turn import federation_calls_enabled, federation_voice_enabled, voice_sfu_enabled
 
 _log = logging.getLogger(__name__)
 
@@ -343,7 +343,7 @@ def enqueue_voice_signal(
 async def apply_voice_event(event: dict) -> None:
     from routers.federation import _fed_global_id, _fed_nickname, _fed_clip
 
-    if not federation_calls_enabled() or voice_sfu_enabled():
+    if not federation_voice_enabled() or voice_sfu_enabled():
         return
 
     event_type = str(event.get("event_type") or "")
@@ -407,13 +407,20 @@ async def _apply_voice_join(
         return
 
     # Room membership: a peer can only announce voice presence for users
-    # that are room members (or rooms that are public/private=0). Stops
-    # roster spoofing into someone else's voice channel.
+    # that are room members. Travel mirrors may lack full member rows but
+    # still grant access via synced allowlists / local membership checks.
     if int(room.get("private") or 0) == 1:
         members = _room_member_gids(int(room["id"]))
         if gid not in members:
-            _log.info("federation: drop voice.session.join — not a member")
-            return
+            with db._conn() as con:
+                row = con.execute(
+                    "SELECT id FROM users WHERE global_user_id=? LIMIT 1",
+                    (gid,),
+                ).fetchone()
+            uid = int(row["id"]) if row else 0
+            if uid <= 0 or not db.user_can_access_room(uid, room_name):
+                _log.info("federation: drop voice.session.join — not a member")
+                return
 
     nick = _fed_nickname(payload.get("nickname")) or "remote"
     avatar = _safe_avatar(_fed_clip(payload.get("avatar"), 200 * 1024))
@@ -440,7 +447,7 @@ async def _apply_voice_join(
         "nickname": nick,
         "avatar": avatar,
         "federated": True,
-        "participants": _combined_participants(room_name, voice_manager),
+        "participants": participants_for_room(room_name, voice_manager),
     })
 
 
@@ -466,7 +473,7 @@ async def _apply_voice_leave(payload, origin, session_id, room_name, _fed_global
         "user_id": 0,
         "global_user_id": gid,
         "federated": True,
-        "participants": _combined_participants(room_name, voice_manager),
+        "participants": participants_for_room(room_name, voice_manager),
     })
 
 
@@ -483,9 +490,57 @@ def _combined_participants(room_name: str, voice_manager) -> list:
             "nickname": p.get("nickname") or "",
             "avatar": p.get("avatar") or "",
             "global_user_id": gid,
+            "home_server_id": "",
+            "federated": False,
         })
     remote = federated_voice_registry.remotes_for_room(room_name)
     return local + remote
+
+
+def participants_for_room(room_name: str, voice_manager) -> list[dict]:
+    """Local + federated voice roster, rehydrating DB rows into the registry."""
+    room = (room_name or "").strip().lower()
+    combined = _combined_participants(room, voice_manager)
+    sid = federated_voice_registry.session_for_room(room)
+    if not sid:
+        return combined
+    seen = {
+        str(p.get("global_user_id") or "").strip()
+        for p in combined
+        if str(p.get("global_user_id") or "").strip()
+    }
+    try:
+        db_remotes = db.list_federation_voice_remote(sid)
+    except Exception:
+        db_remotes = []
+    for raw in db_remotes:
+        gid = str(raw.get("global_user_id") or "").strip()
+        if not gid or gid in seen:
+            continue
+        nick = str(raw.get("nickname") or "remote").strip() or "remote"
+        home = str(raw.get("home_server_id") or "").strip()
+        avatar = str(raw.get("avatar") or "")
+        federated_voice_registry.add_remote(
+            sid,
+            global_user_id=gid,
+            nickname=nick,
+            home_server_id=home,
+            avatar=avatar,
+            room_name=room,
+        )
+        combined.append(dict(raw))
+        seen.add(gid)
+    return combined
+
+
+def _remote_in_room(room_name: str, global_user_id: str, voice_manager) -> bool:
+    gid = str(global_user_id or "").strip()
+    if not gid:
+        return False
+    if federated_voice_registry.is_remote_in_room(room_name, gid):
+        return True
+    participants_for_room(room_name, voice_manager)
+    return federated_voice_registry.is_remote_in_room(room_name, gid)
 
 
 def _local_user_in_voice(room_name: str, user_id: int, voice_manager) -> bool:
@@ -510,7 +565,7 @@ async def _apply_voice_signal(payload, origin, session_id, room_name, _fed_globa
         return
 
     # Sender must be a registered remote (or the room must accept them).
-    if not federated_voice_registry.is_remote_in_room(room_name, from_gid):
+    if not _remote_in_room(room_name, from_gid, voice_manager):
         _log.info("federation: drop voice.signal — sender not in voice roster")
         return
 

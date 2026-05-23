@@ -392,7 +392,15 @@ class FederatedVoiceTests(unittest.TestCase):
              mock.patch.object(db, "get_federation_user_connection_servers", return_value=["srv_visit"]), \
              mock.patch.object(db, "resolve_global_user_home_server_id", return_value="srv_home"):
             targets = db.resolve_federation_push_targets_for_recipient_gids(["gid-travel"])
-        self.assertEqual(targets, ["srv_visit"])
+        self.assertEqual(set(targets), {"srv_visit", "srv_home"})
+
+    def test_federation_voice_enabled_when_federation_on_calls_off(self):
+        from fed_turn import federation_voice_enabled
+        with mock.patch.dict(os.environ, {
+            "FROGTALK_FEDERATION_CALLS_ENABLED": "0",
+            "FROGTALK_FEDERATION_ENABLED": "1",
+        }, clear=False):
+            self.assertTrue(federation_voice_enabled())
 
     def test_push_targets_fall_back_to_home_when_offline(self):
         with mock.patch.object(db, "get_or_create_local_server_identity", return_value={"server_id": "srv_local"}), \

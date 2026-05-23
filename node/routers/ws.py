@@ -1769,7 +1769,7 @@ async def websocket_endpoint(
                     continue
                 try:
                     import federation_voice as _fv
-                    if _fv.federation_calls_enabled() and not _fv.voice_sfu_enabled():
+                    if _fv.federation_voice_enabled() and not _fv.voice_sfu_enabled():
                         sid = _fv.federated_voice_registry.session_for_room(room_name)
                         anchor = _fv.room_anchor_server_id(room_name)
                         _fv.enqueue_voice_session_join(
@@ -1819,7 +1819,7 @@ async def websocket_endpoint(
                 # User leaves voice channel
                 try:
                     import federation_voice as _fv
-                    if _fv.federation_calls_enabled():
+                    if _fv.federation_voice_enabled():
                         sid = _fv.federated_voice_registry.session_for_room(room_name)
                         _fv.enqueue_voice_session_leave(user, room_name, session_id=sid)
                         # Don't ``clear_room`` here: the remote roster only

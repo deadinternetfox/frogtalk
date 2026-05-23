@@ -12207,14 +12207,12 @@ def resolve_federation_push_targets_for_recipient_gids(
         if not gid:
             continue
         connected = get_federation_user_connection_servers(gid)
-        if connected:
-            for sid in connected:
-                if sid and sid != local_sid:
-                    targets.add(sid)
-        else:
-            home = resolve_global_user_home_server_id(gid)
-            if home and home != local_sid:
-                targets.add(home)
+        for sid in connected:
+            if sid and sid != local_sid:
+                targets.add(sid)
+        home = resolve_global_user_home_server_id(gid)
+        if home and home != local_sid:
+            targets.add(home)
     return sorted(targets)
 
 

@@ -47,6 +47,27 @@ def federation_calls_enabled() -> bool:
     return fed_on
 
 
+def federation_voice_enabled() -> bool:
+    """Cross-node channel voice (voice.* events).
+
+    Channel voice should stay on whenever the federation mesh is enabled.
+    ``FROGTALK_FEDERATION_CALLS_ENABLED=0`` must not silently disable group
+    voice on visit nodes that still participate in federation sync.
+    """
+    explicit = (os.getenv("FROGTALK_FEDERATION_VOICE_ENABLED") or "").strip().lower()
+    if explicit in ("0", "false", "no"):
+        return False
+    if explicit in ("1", "true", "yes"):
+        return True
+    if federation_calls_enabled():
+        return True
+    return (os.getenv("FROGTALK_FEDERATION_ENABLED") or "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+
+
 def voice_sfu_enabled() -> bool:
     return os.getenv("FROGTALK_VOICE_SFU", "0").strip().lower() in ("1", "true", "yes")
 
