@@ -2241,7 +2241,7 @@ function _dmSysLogActionsHtml(kind) {
   ]);
   if (!withImport.has(k)) return '';
   return `<div class="dm-sys-log-actions" role="group" aria-label="Encryption keys">
-    <button type="button" class="dm-sys-log-btn dm-sys-log-btn-primary" onclick="showDmCryptoKeysModal('import')">Import keys</button>
+    <button type="button" class="dm-sys-log-btn dm-sys-log-btn-primary" data-ft-key-action="import">Import keys</button>
   </div>`;
 }
 
@@ -2284,7 +2284,7 @@ function _renderDmLockInBubble(meta, opts = {}) {
   const mine = !!opts.mine;
   const line = esc(_dmLockPlainLine(meta));
   const importBtn = _dmLockShowImportBtn(meta, mine)
-    ? ' <button type="button" class="dm-lock-import-link" onclick="event.stopPropagation();showDmCryptoKeysModal(\'import\')">Import keys</button>'
+    ? ' <button type="button" class="dm-lock-import-link" data-ft-key-action="import">Import keys</button>'
     : '';
   return `\u{1F512} ${line}${importBtn}`;
 }

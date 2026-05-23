@@ -1970,8 +1970,16 @@ function openChatMoreMenu() {
     items.push({ icon: '🔍', label: 'Search messages',       onclick: () => showSearchModal() });
     items.push({ icon: '📌', label: 'Pinned messages',       onclick: () => showPinnedMessages() });
     items.push({ icon: '🔐', label: 'Privacy settings',      onclick: () => showDisappearSettings() });
-    items.push({ icon: '🗝️', label: 'Export encryption keys', onclick: () => showDmCryptoKeysModal('export') });
-    items.push({ icon: '📥', label: 'Import encryption keys', onclick: () => showDmCryptoKeysModal('import') });
+    items.push({
+      icon: '🗝️',
+      label: 'Export encryption keys',
+      onclick: () => (window.DmKeyManager ? DmKeyManager.open('export') : showDmCryptoKeysModal?.('export')),
+    });
+    items.push({
+      icon: '📥',
+      label: 'Import encryption keys',
+      onclick: () => (window.DmKeyManager ? DmKeyManager.open('import') : showDmCryptoKeysModal?.('import')),
+    });
     items.push({ icon: '🔒', label: 'Encryption info',       onclick: () => toggleEncryptionInfo() });
     items.push({ icon: '🚫', label: `Block @${nick}`, danger: true, onclick: () => _blockDmPeer(nick) });
     showActionSheet(`@${nick}`, items);
