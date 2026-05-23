@@ -4338,6 +4338,23 @@ def update_presence(user_id: int, presence: str):
         con.commit()
 
 
+def set_user_presence(user_id: int, presence: str) -> None:
+    """Set presence including offline (used for WS disconnect + federation)."""
+    allowed = {"online", "away", "dnd", "invisible", "offline"}
+    p = str(presence or "").strip().lower()
+    if p not in allowed:
+        return
+    uid = int(user_id or 0)
+    if uid <= 0:
+        return
+    with _conn() as con:
+        con.execute(
+            "UPDATE users SET presence=?, last_seen=datetime('now') WHERE id=?",
+            (p, uid),
+        )
+        con.commit()
+
+
 def update_last_seen(user_id: int):
     with _conn() as con:
         con.execute("UPDATE users SET last_seen=datetime('now') WHERE id=?", (user_id,))

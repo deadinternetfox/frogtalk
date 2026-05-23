@@ -239,6 +239,37 @@ def enqueue_user_profile_updated(user: dict, *, extra: dict | None = None) -> di
     return enqueue_server_event("user.profile.updated", payload)
 
 
+def emit_local_user_presence(user_id: int, presence: str) -> dict:
+    """Persist + federate a user's presence (WS connect/disconnect, manual status)."""
+    uid = int(user_id or 0)
+    if uid <= 0:
+        return {"ok": False, "error": "no_user"}
+    p = str(presence or "").strip().lower()
+    allowed = {"online", "away", "dnd", "invisible", "offline"}
+    if p not in allowed:
+        return {"ok": False, "error": "bad_presence"}
+    try:
+        row = db.get_user_by_id(uid) or {}
+    except Exception:
+        row = {}
+    if not row:
+        return {"ok": False, "error": "no_user"}
+    cur = str(row.get("presence") or "").strip().lower()
+    if cur == p:
+        return {"ok": True, "skipped": True}
+    try:
+        db.set_user_presence(uid, p)
+    except Exception:
+        pass
+    try:
+        prof = db.get_user_profile(str(row.get("nickname") or "")) or {}
+    except Exception:
+        prof = {}
+    merged = {**row, **{k: prof[k] for k in ("status_msg", "mood", "banner") if k in prof}}
+    merged["presence"] = p
+    return enqueue_user_profile_updated(merged)
+
+
 def enqueue_room_message_created(
     sender: dict,
     *,
@@ -4915,9 +4946,26 @@ async def _handle_user_event(event: dict) -> None:
     except Exception:
         local_user = None
     if not local_user:
+        try:
+            from ws_manager import manager
+            allowed_presence = {"online", "away", "dnd", "invisible", "offline"}
+            fp = str(payload.get("presence") or "offline").strip().lower()
+            if fp not in allowed_presence:
+                fp = "offline"
+            broadcast = {
+                "type": "profile_update",
+                "nickname": nick_in,
+                "global_user_id": gid,
+                "presence": fp,
+            }
+            if status_msg_in:
+                broadcast["status_msg"] = status_msg_in
+            await manager.broadcast_all(broadcast)
+        except Exception:
+            pass
         return
 
-    allowed_presence = {"online", "away", "dnd", "invisible"}
+    allowed_presence = {"online", "away", "dnd", "invisible", "offline"}
     presence = str(payload.get("presence") or "").strip().lower()
     if presence not in allowed_presence:
         presence = None

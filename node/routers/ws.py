@@ -341,6 +341,13 @@ async def websocket_endpoint(
     if accepted is False:
         # Per-IP cap reached; manager.connect already closed with 4008.
         return
+    if accepted:
+        try:
+            if len(manager._user_ws.get(user["id"], set())) == 1:
+                from routers.federation import emit_local_user_presence
+                emit_local_user_presence(int(user["id"]), "online")
+        except Exception:
+            pass
     db.update_last_seen(user["id"])
 
     # Drain any ICE candidates that the other side trickled while this user
@@ -1924,6 +1931,13 @@ async def websocket_endpoint(
             })
         
         result = manager.disconnect(websocket)
+        try:
+            uid = int(user.get("id") or 0)
+            if uid > 0 and uid not in manager._user_ws:
+                from routers.federation import emit_local_user_presence
+                emit_local_user_presence(uid, "offline")
+        except Exception:
+            pass
         if result:
             room, nickname = result
             await manager.broadcast_room(room, {

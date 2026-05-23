@@ -436,7 +436,7 @@ const WS = (() => {
         // Sync presence/status changes into member list rows immediately.
         if (data.presence !== undefined || data.status_msg !== undefined) {
           const isSelf = sameUser(State.user);
-          const allowedPresence = new Set(['online', 'away', 'dnd', 'invisible']);
+          const allowedPresence = new Set(['online', 'away', 'dnd', 'invisible', 'offline']);
           const nextPresence = (typeof data.presence === 'string' && allowedPresence.has(data.presence))
             ? data.presence
             : undefined;
@@ -450,7 +450,7 @@ const WS = (() => {
             try { UI.renderSelfStatus && UI.renderSelfStatus(); } catch {}
           }
           if (typeof Users !== 'undefined' && Users.updatePresence) {
-            Users.updatePresence(data.user_id, data.nickname, nextPresence, statusPatch);
+            Users.updatePresence(data.user_id, data.nickname, nextPresence, statusPatch, data.global_user_id);
           }
         }
         // Sync display_name change to member list caches

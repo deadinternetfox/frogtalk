@@ -140,11 +140,15 @@ const Users = (() => {
       onlineSource = [];
       offlineSource = [];
       for (const member of _channelMembers) {
-        // Federated/remote members live in their own section because we
-        // don't have a live WS connection to their home node and can't
-        // report accurate presence.
+        // Federated members: use server-provided live_online / presence.
         if (member.remote === true) {
-          remoteSource.push({ ...member, presence: 'offline', live_online: false });
+          const p = String((member.presence || '')).toLowerCase();
+          const forceOffline = p === 'invisible' || p === 'offline';
+          const liveOnline = member.live_online === true
+            || (!forceOffline && (p === 'online' || p === 'away' || p === 'dnd'));
+          const merged = { ...member, live_online: liveOnline };
+          if (liveOnline && !forceOffline) onlineSource.push(merged);
+          else remoteSource.push({ ...merged, presence: forceOffline ? 'offline' : merged.presence });
           continue;
         }
         const key = String((member.nickname || '')).toLowerCase();
@@ -425,27 +429,35 @@ const Users = (() => {
     if (changed) _renderFiltered();
   }
 
-  function updatePresence(userId, nickname, presence, statusMsg) {
+  function updatePresence(userId, nickname, presence, statusMsg, globalUserId) {
     let changed = false;
     const p = presence === undefined ? undefined : String(presence || '').toLowerCase();
     const nextPresence = p;
+    const gid = globalUserId ? String(globalUserId).trim() : '';
+    const matches = (u) => {
+      if (_sameUser(u.user_id, u.nickname, userId, nickname)) return true;
+      return !!(gid && String(u.global_user_id || '').trim() === gid);
+    };
     for (const u of _allUsers) {
-      if (_sameUser(u.user_id, u.nickname, userId, nickname)) {
+      if (matches(u)) {
         if (nextPresence !== undefined) u.presence = nextPresence;
         if (statusMsg !== undefined) u.status_msg = statusMsg;
         changed = true;
       }
     }
     for (const m of _channelMembers) {
-      if (_sameUser(m.user_id, m.nickname, userId, nickname)) {
-        if (nextPresence !== undefined) m.presence = nextPresence;
+      if (matches(m)) {
+        if (nextPresence !== undefined) {
+          m.presence = nextPresence;
+          m.live_online = nextPresence === 'online' || nextPresence === 'away' || nextPresence === 'dnd';
+        }
         if (statusMsg !== undefined) m.status_msg = statusMsg;
         changed = true;
       }
     }
     if (State.onlineUsers) {
       for (const u of State.onlineUsers) {
-        if (_sameUser(u.user_id, u.nickname, userId, nickname)) {
+        if (matches(u)) {
           if (nextPresence !== undefined) u.presence = nextPresence;
           if (statusMsg !== undefined) u.status_msg = statusMsg;
         }

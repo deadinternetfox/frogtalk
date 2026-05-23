@@ -1738,6 +1738,64 @@ async def join_room(
     return {"ok": True}
 
 
+_FEDERATED_LIVE_PRESENCE = frozenset({"online", "away", "dnd"})
+
+
+def _federated_presence_for_gid(global_user_id: str, fallback: str = "") -> str:
+    gid = str(global_user_id or "").strip()
+    p = str(fallback or "").strip().lower()
+    if gid:
+        try:
+            prof = db.get_federation_user_profile_row(gid) or {}
+            fp = str(prof.get("presence") or "").strip().lower()
+            if fp:
+                p = fp
+        except Exception:
+            pass
+    if p not in {"online", "away", "dnd", "invisible", "offline"}:
+        p = "offline"
+    return p
+
+
+def _apply_channel_member_presence(
+    member: dict,
+    *,
+    local_online_ids: set[int],
+    viewer_user_id: int,
+) -> dict:
+    """Merge local WS presence with federated presence for cross-node members."""
+    uid = int(member.get("user_id") or 0)
+    gid = str(member.get("global_user_id") or "").strip()
+    p = str(member.get("presence") or "").strip().lower()
+  # Active WS on this node wins.
+    locally_live = bool(uid and uid in local_online_ids)
+    if uid and uid == int(viewer_user_id or 0):
+        locally_live = True
+    if locally_live:
+        member["live_online"] = True
+        if p == "invisible":
+            member["presence"] = "offline"
+        elif p in _FEDERATED_LIVE_PRESENCE:
+            member["presence"] = p
+        else:
+            member["presence"] = "online"
+        member["remote"] = False
+        return member
+
+    fed_p = _federated_presence_for_gid(gid, p)
+    member["presence"] = fed_p
+    if fed_p == "invisible":
+        member["live_online"] = False
+        member["presence"] = "offline"
+    elif fed_p in _FEDERATED_LIVE_PRESENCE:
+        member["live_online"] = True
+    else:
+        member["live_online"] = False
+        member["presence"] = "offline"
+    member["remote"] = bool(member.get("remote"))
+    return member
+
+
 @router.get("/{room_name}/members")
 async def get_channel_members(room_name: str,
                               current_user: dict = Depends(get_current_user)):
@@ -1771,9 +1829,9 @@ async def get_channel_members(room_name: str,
     # Track which global_user_ids are already represented locally so we
     # don't re-add them via the federated snapshot index below.
     local_gids: set[str] = set()
+    viewer_uid = int(current_user.get("id") or 0)
     for m in members:
         uid = int(m.get("user_id") or 0)
-        p = str(m.get("presence") or "").strip().lower()
         try:
             gid = str(m.get("global_user_id") or "").strip()
         except Exception:
@@ -1787,23 +1845,11 @@ async def get_channel_members(room_name: str,
         m["global_user_id"] = gid
         if gid:
             local_gids.add(gid)
-
-        # The requester is actively authenticated in this room fetch path.
-        # Treat self as live to avoid a login/channel-switch race where the
-        # WS presence snapshot has not caught up yet.
-        if uid and uid == int(current_user.get("id") or 0):
-            live_online = True
-        else:
-            live_online = uid in online_ids if uid else False
-
-        m["live_online"] = live_online
-        if live_online:
-            if p not in {"away", "dnd", "invisible"}:
-                m["presence"] = "online"
-        else:
-            # Sidebar offline section should always render offline dot/color.
-            m["presence"] = "offline"
-        m["remote"] = False
+        _apply_channel_member_presence(
+            m,
+            local_online_ids=online_ids,
+            viewer_user_id=viewer_uid,
+        )
 
     # Hydrate with federated snapshot rows so other nodes' members show up
     # before incremental events arrive. Federated rows never carry live
@@ -1851,6 +1897,8 @@ async def get_channel_members(room_name: str,
                     mood = str(prof.get("mood") or "").strip()
                 except Exception:
                     pass
+            fed_p = _federated_presence_for_gid(gid, "offline")
+            live = fed_p in _FEDERATED_LIVE_PRESENCE
             federated.append({
                 "user_id": None,
                 "nickname": row.get("nickname") or "",
@@ -1862,8 +1910,8 @@ async def get_channel_members(room_name: str,
                 "home_server_id": row.get("home_server_id") or "",
                 "role": row.get("role") or "member",
                 "is_admin": 0,
-                "presence": "offline",
-                "live_online": False,
+                "presence": "offline" if fed_p == "invisible" else fed_p,
+                "live_online": live,
                 "remote": True,
             })
     except Exception:

@@ -612,6 +612,35 @@ class FederationSyncTests(unittest.TestCase):
         auth_mod._clear_travel_push_retry(uid)
         self.assertFalse(auth_mod._travel_push_needs_client_retry(uid))
 
+    def test_channel_member_federated_presence_when_not_local_ws(self):
+        import routers.rooms as rooms_mod
+
+        db = self.db
+        uid = int(db.create_user("home_viewer", "secret12"))
+        gid = str((db.get_user_by_id(uid) or {}).get("global_user_id") or "")
+        travel_uid = int(db.create_user("travel_peer", "secret12"))
+        travel_gid = str((db.get_user_by_id(travel_uid) or {}).get("global_user_id") or "")
+        db.upsert_federation_user_profile(
+            travel_gid,
+            "travel_peer",
+            presence="online",
+            origin_server_id="srv_au_visit",
+        )
+        db.set_user_presence(travel_uid, "offline")
+        member = {
+            "user_id": travel_uid,
+            "nickname": "travel_peer",
+            "global_user_id": travel_gid,
+            "presence": "offline",
+        }
+        out = rooms_mod._apply_channel_member_presence(
+            member,
+            local_online_ids=set(),
+            viewer_user_id=uid,
+        )
+        self.assertTrue(out.get("live_online"))
+        self.assertEqual(out.get("presence"), "online")
+
 
     def test_list_room_message_participants_excludes_bridges(self):
         db = self.db
