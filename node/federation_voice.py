@@ -210,7 +210,7 @@ def _room_member_gids(room_id: int) -> set[str]:
 
 
 def member_home_servers_for_room(room_name: str) -> list[str]:
-    """Peer server_ids that host at least one member in this room."""
+    """Peer server_ids that may host members currently in this room."""
     room = db.get_room_by_name(room_name)
     if not room:
         return []
@@ -220,9 +220,10 @@ def member_home_servers_for_room(room_name: str) -> list[str]:
     for gid in _room_member_gids(int(room["id"])):
         if not gid:
             continue
-        home = db.resolve_global_user_home_server_id(gid)
-        if home and home != local_sid:
-            targets.add(home)
+        for sid in db.resolve_federation_push_targets_for_recipient_gids([gid]):
+            if sid:
+                targets.add(sid)
+    targets.discard(local_sid)
     return sorted(targets)
 
 
@@ -287,14 +288,17 @@ def voice_signal_target_servers(
     remote roster rows as ``home_server_id``).
     """
     gid = str(to_gid or "").strip()
-    sid = str(session_id or "").strip()
+    vsid = str(session_id or "").strip()
     if not gid:
         return []
     targets: set[str] = set()
     home = db.resolve_global_user_home_server_id(gid)
     if home:
         targets.add(home)
-    for p in federated_voice_registry._remote.get(sid, []):
+    for conn_sid in db.get_federation_user_connection_servers(gid):
+        if conn_sid:
+            targets.add(conn_sid)
+    for p in federated_voice_registry._remote.get(vsid, []):
         if str(p.get("global_user_id") or "").strip() != gid:
             continue
         origin = str(p.get("home_server_id") or "").strip()
@@ -547,6 +551,8 @@ async def _apply_voice_signal(payload, origin, session_id, room_name, _fed_globa
             "room": room_name,
             "session_id": session_id,
             "federated": True,
+            "origin_server_id": origin,
+            "peer_home_server_id": origin,
         }
     elif kind == "answer":
         msg = {

@@ -2485,6 +2485,17 @@ def _migrate():
             "CREATE INDEX IF NOT EXISTS idx_fed_room_presence_room "
             "ON federation_room_presence(room_name, updated_at DESC)"
         )
+        # Which federation node a user is actively connected to (WS session).
+        con.execute("""CREATE TABLE IF NOT EXISTS federation_user_connection (
+            global_user_id       TEXT NOT NULL,
+            connected_server_id  TEXT NOT NULL,
+            updated_at           INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (global_user_id, connected_server_id)
+        )""")
+        con.execute(
+            "CREATE INDEX IF NOT EXISTS idx_fed_user_conn_gid "
+            "ON federation_user_connection(global_user_id, updated_at DESC)"
+        )
         # User blocks table
         con.execute("""CREATE TABLE IF NOT EXISTS user_blocks (
             id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -12099,6 +12110,89 @@ def resolve_global_user_home_server_id(global_user_id: str) -> str:
     return ""
 
 
+_FED_USER_CONNECTION_TTL_SEC = 300
+
+
+def upsert_federation_user_connection(
+    global_user_id: str,
+    connected_server_id: str,
+    *,
+    updated_at: int | None = None,
+) -> bool:
+    gid = str(global_user_id or "").strip()
+    sid = str(connected_server_id or "").strip()
+    if not gid or not sid:
+        return False
+    ts = int(updated_at if updated_at is not None else time.time())
+    try:
+        with _conn() as con:
+            con.execute(
+                """
+                INSERT INTO federation_user_connection
+                    (global_user_id, connected_server_id, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(global_user_id, connected_server_id) DO UPDATE SET
+                    updated_at=excluded.updated_at
+                """,
+                (gid, sid, ts),
+            )
+            con.commit()
+        return True
+    except Exception:
+        return False
+
+
+def clear_federation_user_connection(
+    global_user_id: str,
+    connected_server_id: str,
+) -> bool:
+    gid = str(global_user_id or "").strip()
+    sid = str(connected_server_id or "").strip()
+    if not gid or not sid:
+        return False
+    try:
+        with _conn() as con:
+            con.execute(
+                "DELETE FROM federation_user_connection WHERE global_user_id=? AND connected_server_id=?",
+                (gid, sid),
+            )
+            con.commit()
+        return True
+    except Exception:
+        return False
+
+
+def get_federation_user_connection_servers(
+    global_user_id: str,
+    *,
+    max_age_sec: int | None = None,
+) -> list[str]:
+    """Fresh federation nodes where this user has an active WS session."""
+    gid = str(global_user_id or "").strip()
+    if not gid:
+        return []
+    ttl = max(60, int(max_age_sec if max_age_sec is not None else _FED_USER_CONNECTION_TTL_SEC))
+    cutoff = int(time.time()) - ttl
+    out: list[str] = []
+    try:
+        with _conn() as con:
+            rows = con.execute(
+                """
+                SELECT connected_server_id FROM federation_user_connection
+                WHERE global_user_id=? AND updated_at >= ?
+                ORDER BY updated_at DESC
+                """,
+                (gid, cutoff),
+            ).fetchall()
+        for row in rows:
+            sid = str(row["connected_server_id"] if hasattr(row, "keys") else row[0] or "").strip()
+            if sid:
+                out.append(sid)
+    except Exception:
+        pass
+    return out
+
+
 def resolve_federation_push_targets_for_recipient_gids(
     recipient_global_user_ids: list[str],
 ) -> list[str]:
@@ -12112,9 +12206,15 @@ def resolve_federation_push_targets_for_recipient_gids(
         gid = str(raw or "").strip()
         if not gid:
             continue
-        home = resolve_global_user_home_server_id(gid)
-        if home and home != local_sid:
-            targets.add(home)
+        connected = get_federation_user_connection_servers(gid)
+        if connected:
+            for sid in connected:
+                if sid and sid != local_sid:
+                    targets.add(sid)
+        else:
+            home = resolve_global_user_home_server_id(gid)
+            if home and home != local_sid:
+                targets.add(home)
     return sorted(targets)
 
 

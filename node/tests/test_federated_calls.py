@@ -380,11 +380,25 @@ class FederatedVoiceTests(unittest.TestCase):
         )
         with mock.patch.object(fv, "federated_voice_registry", reg), \
              mock.patch.object(fv.db, "resolve_global_user_home_server_id", return_value="srv_home"), \
+             mock.patch.object(fv.db, "get_federation_user_connection_servers", return_value=[]), \
              mock.patch.object(fv.db, "get_or_create_local_server_identity", return_value={"server_id": "srv_local"}):
             targets = fv.voice_signal_target_servers("gid-traveler", sid)
         self.assertIn("srv_home", targets)
         self.assertIn("srv_travel", targets)
         self.assertNotIn("srv_local", targets)
+
+    def test_push_targets_prefer_active_connection_over_home(self):
+        with mock.patch.object(db, "get_or_create_local_server_identity", return_value={"server_id": "srv_local"}), \
+             mock.patch.object(db, "get_federation_user_connection_servers", return_value=["srv_visit"]), \
+             mock.patch.object(db, "resolve_global_user_home_server_id", return_value="srv_home"):
+            targets = db.resolve_federation_push_targets_for_recipient_gids(["gid-travel"])
+        self.assertEqual(targets, ["srv_visit"])
+
+    def test_push_targets_fall_back_to_home_when_offline(self):
+        with mock.patch.object(db, "get_or_create_local_server_identity", return_value={"server_id": "srv_local"}), \
+             mock.patch.object(db, "resolve_global_user_home_server_id", return_value="srv_home"):
+            targets = db.resolve_federation_push_targets_for_recipient_gids(["gid-offline"])
+        self.assertEqual(targets, ["srv_home"])
 
     def test_federation_bundle_by_gid_proxies_remote_keys(self):
         """EU must not return a stale local bundle when keys live on travel."""

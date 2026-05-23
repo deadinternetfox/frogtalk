@@ -351,6 +351,37 @@ def touch_room_presence(user: dict, room_name: str) -> None:
     emit_room_presence(user, room_name, p, force=False)
 
 
+def emit_user_connection(user: dict, *, online: bool) -> dict:
+    """Publish which node this user is actively connected to (WS session)."""
+    if not isinstance(user, dict):
+        return {"ok": False, "error": "no_user"}
+    gid = str(user.get("global_user_id") or "").strip()
+    uid = int(user.get("id") or 0)
+    if uid <= 0 or not gid:
+        return {"ok": False, "skipped": True}
+    try:
+        ident = db.get_or_create_local_server_identity() or {}
+        local_sid = str(ident.get("server_id") or "").strip()
+    except Exception:
+        local_sid = ""
+    if not local_sid:
+        return {"ok": False, "error": "no_local_server"}
+    now = int(time.time())
+    if online:
+        db.upsert_federation_user_connection(gid, local_sid, updated_at=now)
+    else:
+        db.clear_federation_user_connection(gid, local_sid)
+    return enqueue_server_event(
+        "user.connection.updated",
+        {
+            "global_user_id": gid,
+            "online": bool(online),
+            "connected_server_id": local_sid if online else "",
+            "updated_at": now,
+        },
+    )
+
+
 _MUSIC_QUEUE_SNAPSHOT_MAX = 15
 
 
@@ -5120,6 +5151,23 @@ async def _handle_user_event(event: dict) -> None:
                     db.signal_clear_local_bundles_for_gid(gid)
             except Exception:
                 pass
+        return
+
+    if event_type == "user.connection.updated":
+        gid = str(payload.get("global_user_id") or "").strip()
+        origin_sid = str(event.get("origin_server_id") or "").strip()
+        if not gid or not origin_sid:
+            return
+        try:
+            ts = int(payload.get("updated_at") or 0)
+        except Exception:
+            ts = 0
+        if ts <= 0:
+            ts = int(time.time())
+        if payload.get("online"):
+            db.upsert_federation_user_connection(gid, origin_sid, updated_at=ts)
+        else:
+            db.clear_federation_user_connection(gid, origin_sid)
         return
 
     if event_type not in ("user.profile.updated", "user.created", "user.deleted"):

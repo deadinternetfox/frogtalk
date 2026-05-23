@@ -333,6 +333,7 @@ async def websocket_endpoint(
             await websocket.close(code=4003)
             return
 
+    was_online = manager.is_user_online(user["id"])
     accepted = await manager.connect(
         websocket, room_name, user["nickname"], user["id"],
         avatar=user.get("avatar"), is_admin=user.get("is_admin", False),
@@ -353,6 +354,12 @@ async def websocket_endpoint(
                 db.update_presence(int(user["id"]), "online")
         except Exception:
             pass
+        if not was_online:
+            try:
+                from routers.federation import emit_user_connection
+                emit_user_connection(user, online=True)
+            except Exception:
+                pass
     db.update_last_seen(user["id"])
 
     # Drain any ICE candidates that the other side trickled while this user
@@ -375,6 +382,51 @@ async def websocket_endpoint(
     except Exception:
         logger.exception("drain_pending_ice_candidates failed")
 
+    # Replay ringing offers before call_end/reject drains — otherwise a
+    # cross-node hangup can arrive first and the callee only sees a ghost
+    # missed call with no answer/decline UI.
+    pending_ring_call_id = None
+    try:
+        pending_offer = db.get_latest_pending_call_offer(user["id"])
+        if pending_offer:
+            pending_ring_call_id = int(pending_offer.get("call_id") or 0) or None
+            global_call_id = ""
+            peer_home = ""
+            try:
+                with db._conn() as con:
+                    crow = con.execute(
+                        "SELECT global_call_id FROM calls WHERE id=?",
+                        (int(pending_offer["call_id"]),),
+                    ).fetchone()
+                if crow:
+                    global_call_id = str(crow["global_call_id"] or "").strip()
+            except Exception:
+                pass
+            if global_call_id:
+                try:
+                    caller_row = db.get_user_by_id(int(pending_offer.get("caller_id") or 0)) or {}
+                    caller_gid = str(caller_row.get("global_user_id") or "").strip()
+                    if caller_gid:
+                        peer_home = db.resolve_global_user_home_server_id(caller_gid) or ""
+                except Exception:
+                    pass
+            await manager.send_personal(websocket, {
+                "type": "call_offer",
+                "from_id": int(pending_offer.get("caller_id") or 0),
+                "from_nickname": pending_offer.get("from_nickname") or "",
+                "from_avatar": pending_offer.get("from_avatar") or "",
+                "call_type": pending_offer.get("call_type") or "voice",
+                "call_id": int(pending_offer.get("call_id") or 0),
+                "global_call_id": global_call_id,
+                "sdp": pending_offer.get("sdp") or "",
+                "fp_sig": pending_offer.get("fp_sig") or "",
+                "federated": bool(global_call_id),
+                "peer_home_server_id": peer_home,
+                "origin_server_id": peer_home,
+            })
+    except Exception:
+        logger.exception("drain_pending_call_offer failed")
+
     # Drain queued call control signals (call_end / call_reject) that the
     # other side sent while this user was off-WS. Without this, hangup races
     # against the callee's WS-flap window and the callee gets stuck on a
@@ -384,6 +436,13 @@ async def websocket_endpoint(
         for row in pending_sigs:
             try:
                 kind = str(row.get("kind") or "")
+                sig_call_id = int(row.get("call_id") or 0) or None
+                if (
+                    pending_ring_call_id
+                    and sig_call_id == pending_ring_call_id
+                    and kind in ("call_end", "call_reject")
+                ):
+                    continue
                 payload_str = row.get("payload") or "{}"
                 try:
                     payload = json.loads(payload_str)
@@ -1941,6 +2000,12 @@ async def websocket_endpoint(
             })
         
         result = manager.disconnect(websocket)
+        try:
+            if not manager.is_user_online(user["id"]):
+                from routers.federation import emit_user_connection
+                emit_user_connection(user, online=False)
+        except Exception:
+            pass
         try:
             from routers.federation import emit_room_presence
             emit_room_presence(user, room_name, "offline", force=True)

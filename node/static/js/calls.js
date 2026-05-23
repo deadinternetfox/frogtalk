@@ -1852,6 +1852,7 @@ function _normalizeVoiceParticipant(p) {
     nickname: String(p.nickname || '').trim() || '?',
     avatar: String(p.avatar || ''),
     federated: !!p.federated,
+    home_server_id: String(p.home_server_id || '').trim(),
   };
 }
 
@@ -2144,8 +2145,8 @@ function handleVoiceMute(data) {
 /**
  * Create a peer connection for a specific user in the voice channel.
  */
-async function _createVoicePeer(userId, nickname, avatar, isOfferer, globalUserId) {
-  const ice = await buildIceServers('');
+async function _createVoicePeer(userId, nickname, avatar, isOfferer, globalUserId, homeServerId) {
+  const ice = await buildIceServers(homeServerId || '');
   const pc = new RTCPeerConnection({ iceServers: ice });
   const peerKey = globalUserId ? `g:${globalUserId}` : (userId ? `u:${userId}` : `n:${nickname}`);
   
@@ -2258,7 +2259,9 @@ async function handleVoiceJoined(data) {
 
   for (const p of data.participants || []) {
     if (!p.user_id && !p.global_user_id) continue;
-    const pc = await _createVoicePeer(p.user_id, p.nickname, p.avatar, true, p.global_user_id);
+    const pc = await _createVoicePeer(
+      p.user_id, p.nickname, p.avatar, true, p.global_user_id, p.home_server_id,
+    );
 
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
@@ -2342,7 +2345,10 @@ async function handleVoiceOffer(data) {
   let pc;
 
   if (!peer) {
-    pc = await _createVoicePeer(data.from_id, data.from_nickname, null, false, data.from_global_user_id);
+    pc = await _createVoicePeer(
+      data.from_id, data.from_nickname, null, false, data.from_global_user_id,
+      data.peer_home_server_id || data.origin_server_id || '',
+    );
   } else {
     pc = peer.pc;
   }

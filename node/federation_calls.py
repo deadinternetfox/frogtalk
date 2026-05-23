@@ -966,30 +966,45 @@ async def _apply_call_end(payload, origin, gid_call, _fed_global_id):
     ended_at = datetime.utcnow().isoformat()
     if safe_status == "missed":
         db.update_call_status(local_id, "missed", ended_at=ended_at)
+        had_pending = False
         try:
-            from routers.ws import _push_always
-
-            caller = db.get_user_by_id(int(caller_id)) or {}
-            call_type = "voice"
             with db._conn() as con:
-                row = con.execute(
-                    "SELECT call_type FROM calls WHERE id=?",
+                had_pending = bool(con.execute(
+                    "SELECT 1 FROM pending_call_offers WHERE call_id=? LIMIT 1",
                     (int(local_id),),
-                ).fetchone()
-            if row and row.get("call_type") in _FED_CALL_TYPES:
-                call_type = str(row.get("call_type"))
-            call_label = "video" if call_type == "video" else "voice"
-            _push_always(
-                int(callee_id),
-                "📵 Missed call",
-                f"Missed a {call_label} call from {caller.get('nickname') or 'someone'}",
-                "/app",
-                kind="missed_call",
-                tag=f"ft-missed-{local_id}",
-                require_interaction=False,
-            )
+                ).fetchone())
         except Exception:
-            _log.exception("federation: failed to emit missed-call log/push")
+            had_pending = False
+        if had_pending:
+            _log.info(
+                "federation: suppress missed-call push — offer never delivered call=%s",
+                local_id,
+            )
+        else:
+            try:
+                from routers.ws import _push_always
+
+                caller = db.get_user_by_id(int(caller_id)) or {}
+                call_type = "voice"
+                with db._conn() as con:
+                    row = con.execute(
+                        "SELECT call_type FROM calls WHERE id=?",
+                        (int(local_id),),
+                    ).fetchone()
+                if row and row.get("call_type") in _FED_CALL_TYPES:
+                    call_type = str(row.get("call_type"))
+                call_label = "video" if call_type == "video" else "voice"
+                _push_always(
+                    int(callee_id),
+                    "📵 Missed call",
+                    f"Missed a {call_label} call from {caller.get('nickname') or 'someone'}",
+                    "/app",
+                    kind="missed_call",
+                    tag=f"ft-missed-{local_id}",
+                    require_interaction=False,
+                )
+            except Exception:
+                _log.exception("federation: failed to emit missed-call log/push")
     else:
         db.update_call_status(local_id, "ended", ended_at=ended_at)
     db.delete_pending_call_offer(local_id)
