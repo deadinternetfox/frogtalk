@@ -270,6 +270,87 @@ def emit_local_user_presence(user_id: int, presence: str) -> dict:
     return enqueue_user_profile_updated(merged)
 
 
+_FED_ROOM_PRESENCE_TTL_SEC = 120
+_ROOM_PRESENCE_FED_INTERVAL_SEC = 45.0
+_room_presence_last_fed: dict[tuple[str, int], float] = {}
+
+
+def _local_user_presence_state(user_id: int) -> str:
+    uid = int(user_id or 0)
+    if uid <= 0:
+        return "offline"
+    try:
+        row = db.get_user_by_id(uid) or {}
+    except Exception:
+        row = {}
+    p = str(row.get("presence") or "online").strip().lower()
+    if p not in {"online", "away", "dnd", "invisible", "offline"}:
+        p = "online"
+    return p
+
+
+def emit_room_presence(
+    user: dict,
+    room_name: str,
+    presence: str,
+    *,
+    force: bool = False,
+) -> dict:
+    """Publish per-room presence to federation (WS connect/disconnect/heartbeat)."""
+    if not isinstance(user, dict):
+        return {"ok": False, "error": "no_user"}
+    uid = int(user.get("id") or 0)
+    gid = str(user.get("global_user_id") or "").strip()
+    room = str(room_name or "").strip().lower()
+    if uid <= 0 or not gid or not room or room.startswith("dm-"):
+        return {"ok": False, "skipped": True}
+    p = str(presence or "offline").strip().lower()
+    if p not in {"online", "away", "dnd", "invisible", "offline"}:
+        return {"ok": False, "error": "bad_presence"}
+    now = int(time.time())
+    try:
+        ident = db.get_or_create_local_server_identity() or {}
+        origin = str(ident.get("server_id") or "").strip()
+    except Exception:
+        origin = ""
+    db.upsert_federation_room_presence(
+        room,
+        gid,
+        nickname=str(user.get("nickname") or "").strip(),
+        origin_server_id=origin,
+        presence=p,
+        updated_at=now,
+    )
+    key = (room, uid)
+    if not force and p != "offline":
+        last = float(_room_presence_last_fed.get(key) or 0)
+        if now - last < _ROOM_PRESENCE_FED_INTERVAL_SEC:
+            return {"ok": True, "skipped": True, "local": True}
+    _room_presence_last_fed[key] = float(now)
+    return enqueue_server_event(
+        "room.presence.updated",
+        {
+            "room_name": room,
+            "global_user_id": gid,
+            "nickname": str(user.get("nickname") or "").strip()[:64],
+            "presence": p,
+            "updated_at": now,
+        },
+    )
+
+
+def touch_room_presence(user: dict, room_name: str) -> None:
+    """Refresh room presence lease while WS is active (heartbeat)."""
+    if not isinstance(user, dict):
+        return
+    p = _local_user_presence_state(int(user.get("id") or 0))
+    if p == "invisible":
+        return
+    if p == "offline":
+        p = "online"
+    emit_room_presence(user, room_name, p, force=False)
+
+
 def enqueue_room_message_created(
     sender: dict,
     *,
@@ -4443,6 +4524,46 @@ async def _handle_room_event(event: dict) -> None:
         if not room_name:
             return
         await _apply_federated_room_settings(room_name.lower(), payload)
+        return
+
+    if event_type == "room.presence.updated":
+        room_name = _fed_room_name(payload.get("room_name"))
+        gid = str(payload.get("global_user_id") or "").strip()
+        if not room_name or not gid:
+            return
+        room_name = room_name.lower()
+        if not db.get_room_by_name(room_name):
+            return
+        pres = str(payload.get("presence") or "offline").strip().lower()
+        if pres not in ("online", "away", "dnd", "invisible", "offline"):
+            pres = "offline"
+        try:
+            ts = int(payload.get("updated_at") or 0)
+        except Exception:
+            ts = 0
+        if ts <= 0:
+            ts = int(time.time())
+        origin_sid = str(event.get("origin_server_id") or "").strip()
+        db.upsert_federation_room_presence(
+            room_name,
+            gid,
+            nickname=_fed_nickname(payload.get("nickname")) or "",
+            origin_server_id=origin_sid,
+            presence=pres,
+            updated_at=ts,
+        )
+        try:
+            from ws_manager import manager
+            await manager.broadcast_room(room_name, {
+                "type": "room_presence",
+                "room": room_name,
+                "global_user_id": gid,
+                "nickname": _fed_nickname(payload.get("nickname")) or "",
+                "presence": "offline" if pres == "invisible" else pres,
+                "updated_at": ts,
+            })
+        except Exception:
+            pass
         return
 
     if event_type == "room.members.snapshot":

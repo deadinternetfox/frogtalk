@@ -363,6 +363,21 @@ const WS = (() => {
         try { window.refreshMentionUsers && window.refreshMentionUsers(); } catch {}
         break;
       }
+      case 'room_presence': {
+        if (data.room !== room) break;
+        const p = String(data.presence || 'offline').toLowerCase();
+        const live = p === 'online' || p === 'away' || p === 'dnd';
+        if (typeof Users !== 'undefined' && Users.updatePresence) {
+          Users.updatePresence(
+            null,
+            data.nickname,
+            live ? p : 'offline',
+            undefined,
+            data.global_user_id,
+          );
+        }
+        break;
+      }
       case 'bot_added':
       case 'bot_removed': {
         // A bot was installed in or removed from this room. Refresh the

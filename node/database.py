@@ -2471,6 +2471,20 @@ def _migrate():
             PRIMARY KEY (user_id, room_name),
             FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
         )""")
+        # Per-room federated presence (visit node WS in a channel → peers).
+        con.execute("""CREATE TABLE IF NOT EXISTS federation_room_presence (
+            room_name          TEXT NOT NULL,
+            global_user_id     TEXT NOT NULL,
+            nickname           TEXT NOT NULL DEFAULT '',
+            origin_server_id   TEXT NOT NULL DEFAULT '',
+            presence           TEXT NOT NULL DEFAULT 'offline',
+            updated_at         INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (room_name, global_user_id)
+        )""")
+        con.execute(
+            "CREATE INDEX IF NOT EXISTS idx_fed_room_presence_room "
+            "ON federation_room_presence(room_name, updated_at DESC)"
+        )
         # User blocks table
         con.execute("""CREATE TABLE IF NOT EXISTS user_blocks (
             id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -13374,6 +13388,84 @@ def upsert_federation_user_profile(
         )
         con.commit()
     return True
+
+
+def upsert_federation_room_presence(
+    room_name: str,
+    global_user_id: str,
+    *,
+    nickname: str = "",
+    origin_server_id: str = "",
+    presence: str = "offline",
+    updated_at: int | None = None,
+) -> bool:
+    room = str(room_name or "").strip().lower()
+    gid = str(global_user_id or "").strip()
+    if not room or not gid:
+        return False
+    pres = str(presence or "offline").strip().lower()
+    if pres not in ("online", "away", "dnd", "invisible", "offline"):
+        pres = "offline"
+    ts = int(updated_at if updated_at is not None else time.time())
+    nick = str(nickname or "").strip()[:64]
+    origin = str(origin_server_id or "").strip()[:128]
+    try:
+        with _conn() as con:
+            row = con.execute(
+                """
+                SELECT updated_at FROM federation_room_presence
+                WHERE room_name=? AND global_user_id=? LIMIT 1
+                """,
+                (room, gid),
+            ).fetchone()
+            if row:
+                prev = int(row["updated_at"] if hasattr(row, "keys") else row[0] or 0)
+                if prev > ts:
+                    return False
+            con.execute(
+                """
+                INSERT INTO federation_room_presence
+                    (room_name, global_user_id, nickname, origin_server_id, presence, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(room_name, global_user_id) DO UPDATE SET
+                    nickname=excluded.nickname,
+                    origin_server_id=excluded.origin_server_id,
+                    presence=excluded.presence,
+                    updated_at=excluded.updated_at
+                """,
+                (room, gid, nick, origin, pres, ts),
+            )
+            con.commit()
+        return True
+    except Exception:
+        return False
+
+
+def get_federation_room_presence_map(room_name: str, *, max_age_sec: int = 120) -> dict[str, dict]:
+    """Fresh room-scoped presence keyed by global_user_id."""
+    room = str(room_name or "").strip().lower()
+    if not room:
+        return {}
+    cutoff = int(time.time()) - max(30, int(max_age_sec or 120))
+    out: dict[str, dict] = {}
+    try:
+        with _conn() as con:
+            rows = con.execute(
+                """
+                SELECT room_name, global_user_id, nickname, origin_server_id, presence, updated_at
+                FROM federation_room_presence
+                WHERE room_name=? AND updated_at >= ?
+                """,
+                (room, cutoff),
+            ).fetchall()
+        for row in rows:
+            d = dict(row)
+            gid = str(d.get("global_user_id") or "").strip()
+            if gid:
+                out[gid] = d
+    except Exception:
+        pass
+    return out
 
 
 def _resolve_federated_message_sender(payload: Dict) -> tuple[int, str, Optional[str], Optional[str]]:

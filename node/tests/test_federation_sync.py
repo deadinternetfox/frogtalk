@@ -617,29 +617,63 @@ class FederationSyncTests(unittest.TestCase):
 
         db = self.db
         uid = int(db.create_user("home_viewer", "secret12"))
-        gid = str((db.get_user_by_id(uid) or {}).get("global_user_id") or "")
         travel_uid = int(db.create_user("travel_peer", "secret12"))
         travel_gid = str((db.get_user_by_id(travel_uid) or {}).get("global_user_id") or "")
-        db.upsert_federation_user_profile(
+        db.upsert_federation_room_presence(
+            "myroom",
             travel_gid,
-            "travel_peer",
+            nickname="travel_peer",
             presence="online",
-            origin_server_id="srv_au_visit",
+            updated_at=int(__import__("time").time()),
         )
-        db.set_user_presence(travel_uid, "offline")
         member = {
             "user_id": travel_uid,
             "nickname": "travel_peer",
             "global_user_id": travel_gid,
             "presence": "offline",
         }
+        pres_map = db.get_federation_room_presence_map("myroom")
         out = rooms_mod._apply_channel_member_presence(
             member,
+            room_name="myroom",
             local_online_ids=set(),
             viewer_user_id=uid,
+            room_presence_map=pres_map,
         )
         self.assertTrue(out.get("live_online"))
         self.assertEqual(out.get("presence"), "online")
+
+    def test_stale_room_presence_treated_as_offline(self):
+        import routers.rooms as rooms_mod
+        import time
+
+        db = self.db
+        uid = int(db.create_user("stale_pres_user", "secret12"))
+        gid = str((db.get_user_by_id(uid) or {}).get("global_user_id") or "")
+        db.upsert_federation_room_presence(
+            "stale-room",
+            gid,
+            nickname="stale_pres_user",
+            presence="online",
+            updated_at=int(time.time()) - 600,
+        )
+        pres_map = db.get_federation_room_presence_map("stale-room")
+        self.assertEqual(len(pres_map), 0)
+        member = {
+            "user_id": uid,
+            "nickname": "stale_pres_user",
+            "global_user_id": gid,
+            "presence": "online",
+        }
+        out = rooms_mod._apply_channel_member_presence(
+            member,
+            room_name="stale-room",
+            local_online_ids=set(),
+            viewer_user_id=999,
+            room_presence_map=pres_map,
+        )
+        self.assertFalse(out.get("live_online"))
+        self.assertEqual(out.get("presence"), "offline")
 
 
     def test_list_room_message_participants_excludes_bridges(self):

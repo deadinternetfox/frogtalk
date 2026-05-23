@@ -343,9 +343,8 @@ async def websocket_endpoint(
         return
     if accepted:
         try:
-            if len(manager._user_ws.get(user["id"], set())) == 1:
-                from routers.federation import emit_local_user_presence
-                emit_local_user_presence(int(user["id"]), "online")
+            from routers.federation import emit_room_presence
+            emit_room_presence(user, room_name, "online", force=True)
         except Exception:
             pass
     db.update_last_seen(user["id"])
@@ -559,6 +558,11 @@ async def websocket_endpoint(
 
             # ── Keepalive ping ────────────────────────────────────────
             if msg_type == "ping":
+                try:
+                    from routers.federation import touch_room_presence
+                    touch_room_presence(user, room_name)
+                except Exception:
+                    pass
                 await manager.send_personal(websocket, {"type": "pong"})
                 continue
 
@@ -1932,10 +1936,8 @@ async def websocket_endpoint(
         
         result = manager.disconnect(websocket)
         try:
-            uid = int(user.get("id") or 0)
-            if uid > 0 and uid not in manager._user_ws:
-                from routers.federation import emit_local_user_presence
-                emit_local_user_presence(uid, "offline")
+            from routers.federation import emit_room_presence
+            emit_room_presence(user, room_name, "offline", force=True)
         except Exception:
             pass
         if result:

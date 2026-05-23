@@ -1739,35 +1739,39 @@ async def join_room(
 
 
 _FEDERATED_LIVE_PRESENCE = frozenset({"online", "away", "dnd"})
+_FED_ROOM_PRESENCE_TTL_SEC = 120
 
 
-def _federated_presence_for_gid(global_user_id: str, fallback: str = "") -> str:
-    gid = str(global_user_id or "").strip()
-    p = str(fallback or "").strip().lower()
-    if gid:
-        try:
-            prof = db.get_federation_user_profile_row(gid) or {}
-            fp = str(prof.get("presence") or "").strip().lower()
-            if fp:
-                p = fp
-        except Exception:
-            pass
-    if p not in {"online", "away", "dnd", "invisible", "offline"}:
-        p = "offline"
-    return p
+def _room_presence_is_live(row: dict | None) -> tuple[str, bool]:
+    """Return (presence, live_online) from a federation_room_presence row."""
+    if not isinstance(row, dict):
+        return ("offline", False)
+    p = str(row.get("presence") or "offline").strip().lower()
+    try:
+        ts = int(row.get("updated_at") or 0)
+    except Exception:
+        ts = 0
+    if ts <= 0 or (int(time.time()) - ts) > _FED_ROOM_PRESENCE_TTL_SEC:
+        return ("offline", False)
+    if p == "invisible":
+        return ("offline", False)
+    if p in _FEDERATED_LIVE_PRESENCE:
+        return (p, True)
+    return ("offline", False)
 
 
 def _apply_channel_member_presence(
     member: dict,
     *,
+    room_name: str,
     local_online_ids: set[int],
     viewer_user_id: int,
+    room_presence_map: dict[str, dict] | None = None,
 ) -> dict:
-    """Merge local WS presence with federated presence for cross-node members."""
+    """Local WS wins; otherwise use fresh room-scoped federated presence only."""
     uid = int(member.get("user_id") or 0)
     gid = str(member.get("global_user_id") or "").strip()
     p = str(member.get("presence") or "").strip().lower()
-  # Active WS on this node wins.
     locally_live = bool(uid and uid in local_online_ids)
     if uid and uid == int(viewer_user_id or 0):
         locally_live = True
@@ -1782,16 +1786,10 @@ def _apply_channel_member_presence(
         member["remote"] = False
         return member
 
-    fed_p = _federated_presence_for_gid(gid, p)
+    fed_row = (room_presence_map or {}).get(gid) if gid else None
+    fed_p, live = _room_presence_is_live(fed_row)
     member["presence"] = fed_p
-    if fed_p == "invisible":
-        member["live_online"] = False
-        member["presence"] = "offline"
-    elif fed_p in _FEDERATED_LIVE_PRESENCE:
-        member["live_online"] = True
-    else:
-        member["live_online"] = False
-        member["presence"] = "offline"
+    member["live_online"] = live
     member["remote"] = bool(member.get("remote"))
     return member
 
@@ -1826,6 +1824,11 @@ async def get_channel_members(room_name: str,
     except Exception:
         online_ids = set()
 
+    room_presence_map = db.get_federation_room_presence_map(
+        room["name"],
+        max_age_sec=_FED_ROOM_PRESENCE_TTL_SEC,
+    )
+
     # Track which global_user_ids are already represented locally so we
     # don't re-add them via the federated snapshot index below.
     local_gids: set[str] = set()
@@ -1847,8 +1850,10 @@ async def get_channel_members(room_name: str,
             local_gids.add(gid)
         _apply_channel_member_presence(
             m,
+            room_name=str(room["name"] or ""),
             local_online_ids=online_ids,
             viewer_user_id=viewer_uid,
+            room_presence_map=room_presence_map,
         )
 
     # Hydrate with federated snapshot rows so other nodes' members show up
@@ -1897,8 +1902,8 @@ async def get_channel_members(room_name: str,
                     mood = str(prof.get("mood") or "").strip()
                 except Exception:
                     pass
-            fed_p = _federated_presence_for_gid(gid, "offline")
-            live = fed_p in _FEDERATED_LIVE_PRESENCE
+            fed_row = room_presence_map.get(gid) if gid else None
+            fed_p, live = _room_presence_is_live(fed_row)
             federated.append({
                 "user_id": None,
                 "nickname": row.get("nickname") or "",
@@ -1910,7 +1915,7 @@ async def get_channel_members(room_name: str,
                 "home_server_id": row.get("home_server_id") or "",
                 "role": row.get("role") or "member",
                 "is_admin": 0,
-                "presence": "offline" if fed_p == "invisible" else fed_p,
+                "presence": fed_p,
                 "live_online": live,
                 "remote": True,
             })
