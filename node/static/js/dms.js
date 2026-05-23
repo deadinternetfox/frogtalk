@@ -2235,17 +2235,52 @@ function _scrollDMToBottomStable() {
 
 function _dmSysLogActionsHtml(kind) {
   const k = String(kind || '');
-  const withActions = new Set([
+  const withImport = new Set([
     'history_locked', 'history_import_failed',
-    'home_locked', 'keys_needed', 'sync_failed', 'sync_attempted', 'decrypt_failed',
+    'home_locked', 'keys_needed', 'sync_failed',
   ]);
-  if (!withActions.has(k)) return '';
-  const impPrimary = (k === 'history_locked' || k === 'home_locked' || k === 'keys_needed')
-    ? ' dm-sys-log-btn-primary' : '';
+  if (!withImport.has(k)) return '';
   return `<div class="dm-sys-log-actions" role="group" aria-label="Encryption keys">
-    <button type="button" class="dm-sys-log-btn${impPrimary}" onclick="showDmCryptoKeysModal('import')">Import keys</button>
-    <button type="button" class="dm-sys-log-btn" onclick="showDmCryptoKeysModal('export')">Export keys</button>
-    <button type="button" class="dm-sys-log-btn" onclick="openChatMoreMenu()">More…</button>
+    <button type="button" class="dm-sys-log-btn dm-sys-log-btn-primary" onclick="showDmCryptoKeysModal('import')">Import keys</button>
+  </div>`;
+}
+
+function _dmLockBubbleTone(kind) {
+  const k = String(kind || '');
+  if (k === 'own_sent_locked' || k === 'home_locked' || k === 'keys_needed') return 'locked';
+  if (k === 'sync_failed' || k === 'sync_attempted' || k === 'decrypt_failed' || k === 'peer_unreachable') {
+    return 'warn';
+  }
+  return 'pending';
+}
+
+function _dmLockShowImportBtn(meta, mine) {
+  if (mine) return false;
+  const k = String(meta?.kind || '');
+  if (k === 'own_sent_locked' || k === 'unlocking' || k === 'signal_boot' || k === 'sync_in_progress') {
+    return false;
+  }
+  return true;
+}
+
+/** Compact lock notice inside a normal DM bubble (keeps sender avatar + name). */
+function _renderDmLockInBubble(meta, opts = {}) {
+  const mine = !!opts.mine;
+  const kind = String(meta?.kind || 'decrypt_failed');
+  const tone = _dmLockBubbleTone(kind);
+  const title = esc(meta?.title || 'Encrypted message');
+  const subtitle = esc(meta?.subtitle || '');
+  const icon = esc(meta?.icon || '🔒');
+  const importBtn = _dmLockShowImportBtn(meta, mine)
+    ? '<button type="button" class="dm-lock-in-bubble-btn" onclick="event.stopPropagation();showDmCryptoKeysModal(\'import\')">Import keys</button>'
+    : '';
+  return `<div class="dm-lock-in-bubble dm-lock-in-bubble--${tone}" role="note">
+    <span class="dm-lock-in-bubble-icon" aria-hidden="true">${icon}</span>
+    <div class="dm-lock-in-bubble-body">
+      <div class="dm-lock-in-bubble-title">${title}</div>
+      ${subtitle ? `<div class="dm-lock-in-bubble-sub">${subtitle}</div>` : ''}
+      ${importBtn}
+    </div>
   </div>`;
 }
 
@@ -2283,11 +2318,7 @@ function renderDMMessage (m) {
   const senderNick = m.sender_nick || '';
   const editedTag = (m.edited_at || m.edited) ? '<span class="msg-edited">(edited)</span>' : '';
 
-  // Client-side encryption lock notices ([[DMLOCK]]) — centered system cards, not peer bubbles.
-  const lockMeta = _parseDMLock(m.content);
-  if (lockMeta) {
-    return _renderDmSysLogCard(lockMeta, m.id, time);
-  }
+  const embeddedLock = _parseDMLock(typeof m.content === 'string' ? m.content : '');
 
   // Persisted in-chat system lines: [[DMSYS]]{"kind":"crypto_sync"|"history_locked"|...}
   if (typeof m.content === 'string' && m.content.startsWith('[[DMSYS]]')) {
@@ -2483,11 +2514,12 @@ function renderDMMessage (m) {
     if (ownPlain) _rawContent = ownPlain;
   }
   const _isCipherBlob = _looksEncryptedBlob(_rawContent);
-  const _isLockNotice = _parseDMLock(_rawContent);
-  const safeContent = (m.view_once || isViewOnceConsumed || _isLockNotice)
+  const safeContent = (m.view_once || isViewOnceConsumed || embeddedLock)
     ? ''
     : (_isCipherBlob ? '' : _rawContent);
-  if (safeContent) {
+  if (embeddedLock) {
+    contentHtml = _renderDmLockInBubble(embeddedLock, { mine });
+  } else if (safeContent) {
     contentHtml = esc(safeContent);
     const urlRe = /https?:\/\/[^\s<>"]+/g;
     // Extract URLs to placeholders BEFORE the @mention pass so URLs that
@@ -2540,17 +2572,15 @@ function renderDMMessage (m) {
       const peerForLock = Number(_activeDM?.user_id) || Number(m.sender_id) || 0;
       const lockCtx = _dmDecryptLockContext(peerForLock, false);
       if (mine) {
-        lockCtx.reason = 'decrypt_failed';
-        lockCtx.hint = '';
-        const ownMeta = {
+        contentHtml = _renderDmLockInBubble({
           kind: 'own_sent_locked',
           title: 'Sent from another device',
           subtitle: 'This encrypted message was sent from another browser or node and cannot be shown here.',
           icon: '🔒',
-        };
-        return _renderDmSysLogCard(ownMeta, m.id, time);
+        }, { mine: true });
+      } else {
+        contentHtml = _renderDmLockInBubble(_dmLockMetaFromContext(lockCtx), { mine: false });
       }
-      return _renderDmSysLogCard(_dmLockMetaFromContext(lockCtx), m.id, time);
     } else if (m.has_media) {
       contentHtml = '<em style="color:#444">Media</em>';
     }
