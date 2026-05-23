@@ -219,6 +219,11 @@ async def send_request(request: Request, nickname: str, current_user: dict = Dep
                  kind="friend_request",
                  from_nickname="")
     _emit_friend_graph_event("friend.requested", current_user, profile)
+    try:
+        from routers.auth import schedule_travel_push_to_home
+        schedule_travel_push_to_home(int(current_user["id"]), force=True)
+    except Exception:
+        pass
     return {"ok": True}
 
 
@@ -244,6 +249,11 @@ async def accept_request(request: Request, nickname: str, current_user: dict = D
         await _notify_wall_rewrap_for_new_follower(int(current_user["id"]), int(profile["id"]))
     except Exception:
         pass
+    try:
+        from routers.auth import schedule_travel_push_to_home
+        schedule_travel_push_to_home(int(current_user["id"]), force=True)
+    except Exception:
+        pass
     return {"ok": True}
 
 
@@ -263,6 +273,11 @@ async def remove_friend(nickname: str, current_user: dict = Depends(get_current_
     if not profile:
         return JSONResponse(status_code=404, content={"error": "User not found"})
     db.remove_friend(current_user["id"], profile["id"])
+    try:
+        from routers.auth import schedule_travel_push_to_home
+        schedule_travel_push_to_home(int(current_user["id"]), force=True)
+    except Exception:
+        pass
     return {"ok": True}
 
 
@@ -284,6 +299,11 @@ async def block_user(nickname: str, current_user: dict = Depends(get_current_use
                 "blocked_nickname": profile.get("nickname"),
             },
         })
+    except Exception:
+        pass
+    try:
+        from routers.auth import schedule_travel_push_to_home
+        schedule_travel_push_to_home(int(current_user["id"]), force=True)
     except Exception:
         pass
     return {"ok": True}

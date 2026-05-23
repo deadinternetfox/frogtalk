@@ -362,6 +362,9 @@ const Rooms = (() => {
       return false;
     }
     try { State.roomKeys[roomName] = key; } catch {}
+    if (window.DeviceCrypto && typeof DeviceCrypto.stageRoomSecretsForHomeSync === 'function') {
+      void DeviceCrypto.stageRoomSecretsForHomeSync();
+    }
     return true;
   }
 
@@ -1438,8 +1441,21 @@ const Rooms = (() => {
       else chatHeader.classList.remove('is-dm');
     }
 
-    // Connect WebSocket
-    WS.connect(name);
+    // Connect WebSocket — skip only when this channel isn't in the local list
+    // or isn't joined (stale fc_last_room from another node).
+    const roomRow = (State.rooms || []).find((r) => r.name === name);
+    const joinedHere = type === 'dm' || !!roomRow?.joined;
+    if (joinedHere) {
+      WS.connect(name);
+    } else {
+      try { WS.disconnect && WS.disconnect(); } catch {}
+      if (typeof UI !== 'undefined' && UI.showToast) {
+        const msg = roomRow && !roomRow.joined
+          ? `Join #${name} from the sidebar first`
+          : `#${name} is not on this node — open a channel from your sidebar or wait for account sync`;
+        UI.showToast(msg, 'warning', 7000);
+      }
+    }
 
     // Load full channel member list (online + offline) for the sidebar.
     // DMs don't have this concept, so only fetch for real rooms.
@@ -1632,7 +1648,23 @@ const Rooms = (() => {
     }
     closeModal('modal-create-room');
     await loadRooms();
+    if (!(State.rooms || []).some((r) => r.name === name && r.joined)) {
+      State.rooms = [
+        ...(State.rooms || []),
+        {
+          name,
+          type: _selectedRoomType,
+          joined: true,
+          channel_type: _selectedChannelType,
+          icon: icon || null,
+        },
+      ];
+      renderRooms();
+    }
     switchToRoom(name, _selectedRoomType, null, _selectedChannelType);
+    if (_selectedRoomType === 'private' && window.DeviceCrypto && typeof DeviceCrypto.stageRoomSecretsForHomeSync === 'function') {
+      void DeviceCrypto.stageRoomSecretsForHomeSync();
+    }
   }
 
   async function deleteRoom(name) {

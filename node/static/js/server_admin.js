@@ -36,7 +36,9 @@
   const saveChannelRetentionBtn = document.getElementById('save-channel-retention-btn');
   const channelRetentionStatus = document.getElementById('channel-retention-status');
   const channelRetentionLastSaved = document.getElementById('channel-retention-last-saved');
+  const blockTorPeersWrap = document.getElementById('block-tor-peers-wrap');
   const blockTorPeers = document.getElementById('block-tor-peers');
+  const clearnetFedPolicyNote = document.getElementById('clearnet-federation-policy-note');
   const blockHttpOnlyPeers = document.getElementById('block-http-only-peers');
   const saveFederationPolicyBtn = document.getElementById('save-federation-policy-btn');
   const federationPolicyStatus = document.getElementById('federation-policy-status');
@@ -83,7 +85,7 @@
   }
 
   function federationPolicySig() {
-    const tor = blockTorPeers?.checked ? '1' : '0';
+    const tor = federationPolicyUi.show_block_tor_peers && blockTorPeers?.checked ? '1' : '0';
     const http = blockHttpOnlyPeers?.checked ? '1' : '0';
     return `${tor}|${http}`;
   }
@@ -103,8 +105,36 @@
     }
   }
 
+  let federationPolicyUi = {};
+
+  function applyFederationPolicyControls(ui) {
+    federationPolicyUi = ui && typeof ui === 'object' ? ui : {};
+    const showTor = !!federationPolicyUi.show_block_tor_peers;
+    const mode = String(federationPolicyUi.network_viewer_mode || 'clearnet');
+    if (blockTorPeersWrap) {
+      blockTorPeersWrap.hidden = !showTor;
+      blockTorPeersWrap.style.display = showTor ? '' : 'none';
+    }
+    if (clearnetFedPolicyNote) {
+      if (mode === 'clearnet') {
+        clearnetFedPolicyNote.style.display = '';
+        clearnetFedPolicyNote.textContent =
+          'This node is clearnet-only. Tor federation peers are not used here, so Tor auto-block is hidden. Use HTTP-only auto-block for non-SSL clearnet peers.';
+      } else if (mode === 'tor') {
+        clearnetFedPolicyNote.style.display = '';
+        clearnetFedPolicyNote.textContent =
+          'This node is Tor-only. Tor auto-block is hidden (not applicable). HTTP-only auto-block still applies to clearnet peers in the directory.';
+      } else {
+        clearnetFedPolicyNote.style.display = 'none';
+        clearnetFedPolicyNote.textContent = '';
+      }
+    }
+  }
+
   function syncFederationPolicy(policy) {
-    const block = !!(policy && policy.block_tor_peers);
+    const block = federationPolicyUi.show_block_tor_peers
+      ? !!(policy && policy.block_tor_peers)
+      : false;
     const blockHttp = !!(policy && policy.block_http_only_peers);
     if (blockTorPeers) blockTorPeers.checked = block;
     if (blockHttpOnlyPeers) blockHttpOnlyPeers.checked = blockHttp;
@@ -127,10 +157,13 @@
       const payload = await api('/api/server-admin/federation-policy', {
         method: 'PUT',
         body: JSON.stringify({
-          block_tor_peers: !!blockTorPeers?.checked,
+          block_tor_peers: federationPolicyUi.show_block_tor_peers
+            ? !!blockTorPeers?.checked
+            : false,
           block_http_only_peers: !!blockHttpOnlyPeers?.checked,
         }),
       });
+      if (payload.federation_policy_ui) applyFederationPolicyControls(payload.federation_policy_ui);
       syncFederationPolicy(payload.federation_policy || {});
       const torN = Number(payload.tor_peers_disabled || 0);
       const httpN = Number(payload.http_peers_disabled || 0);
@@ -987,7 +1020,7 @@
       });
     }
 
-    if (torPeers.length && !policy.block_tor_peers) {
+    if (federationPolicyUi.show_block_tor_peers && torPeers.length && !policy.block_tor_peers) {
       alerts.push({
         tone: 'warn',
         title: `Tor peers available (${torPeers.length})`,
@@ -1801,6 +1834,7 @@
     const pingMs = Math.max(1, Math.round(performance.now() - t0));
     latencyBadge.textContent = `Latency: ${pingMs} ms`;
     syncChannelRetention(config.channel_retention || {});
+    applyFederationPolicyControls(config.federation_policy_ui || {});
     syncFederationPolicy(config.federation_policy || {});
     if (config.public_url_meta) applyPublicUrlMeta(config.public_url_meta);
     else if (stats?.server?.public_url_meta) applyPublicUrlMeta(stats.server.public_url_meta);

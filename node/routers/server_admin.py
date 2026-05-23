@@ -658,6 +658,7 @@ async def server_webui_config(request: Request):
         "gate": gate,
         "channel_retention": db.get_channel_retention_settings(),
         "federation_policy": db.get_federation_policy_settings(),
+        "federation_policy_ui": federation_router.federation_policy_admin_ui(),
         "public_url_meta": analyze_public_url(),
         "easter_egg": _current_easter_egg_payload(),
     }
@@ -689,8 +690,10 @@ async def server_admin_put_federation_policy(body: FederationPolicyBody, request
     if auth:
         return auth
 
+    policy_ui = federation_router.federation_policy_admin_ui()
+    block_tor = bool(body.block_tor_peers) if policy_ui.get("show_block_tor_peers") else False
     policy = db.set_federation_policy_settings(
-        bool(body.block_tor_peers),
+        block_tor,
         block_http_only_peers=bool(body.block_http_only_peers),
         redact_clearnet_ips=bool(body.redact_clearnet_ips),
     )
@@ -706,9 +709,16 @@ async def server_admin_put_federation_policy(body: FederationPolicyBody, request
         policy_notes.append(
             "Redact clearnet IPs only masks addresses in Server Admin. Visitors still see this node's IP in the browser bar and on /board/ until you use a domain with trusted TLS."
         )
+    if not policy_ui.get("show_block_tor_peers") and policy.get("block_tor_peers"):
+        policy = db.set_federation_policy_settings(
+            False,
+            block_http_only_peers=bool(policy.get("block_http_only_peers")),
+            redact_clearnet_ips=bool(policy.get("redact_clearnet_ips")),
+        )
     return {
         "ok": True,
         "federation_policy": policy,
+        "federation_policy_ui": policy_ui,
         "tor_peers_disabled": tor_disabled,
         "http_peers_disabled": http_disabled,
         "policy_notes": policy_notes,

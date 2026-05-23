@@ -215,6 +215,63 @@
     return rooms;
   }
 
+  async function _exportRoomSecretsPlain() {
+    const out = [];
+    const seen = new Set();
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (!k || !k.startsWith(ROOM_SECRET_PREFIX)) continue;
+        if (/:v\d+$/i.test(k)) continue;
+        if (seen.has(k)) continue;
+        const wrapped = localStorage.getItem(k) || '';
+        if (!wrapped) continue;
+        let plain = wrapped;
+        if (wrapped.startsWith('ftls1:') && typeof Crypto !== 'undefined' && Crypto.unwrapLocalSecret) {
+          plain = await Crypto.unwrapLocalSecret(wrapped);
+        }
+        if (!plain) continue;
+        const roomName = k.slice(ROOM_SECRET_PREFIX.length).split(':')[0];
+        let kv = 1;
+        try {
+          const vr = localStorage.getItem(`${ROOM_KEYVER_PREFIX}${roomName}`);
+          const n = parseInt(vr, 10);
+          if (Number.isFinite(n) && n > 0) kv = n;
+        } catch {}
+        seen.add(k);
+        out.push({ room_name: roomName, secret: plain, key_version: kv });
+      }
+    } catch {}
+    return out;
+  }
+
+  async function _wrapSecretForLocalStorage(secret) {
+    if (!secret) return '';
+    if (typeof Crypto !== 'undefined' && Crypto.wrapLocalSecret) {
+      return Crypto.wrapLocalSecret(secret);
+    }
+    return secret;
+  }
+
+  async function _importRoomSecretsPlain(rows) {
+    if (!Array.isArray(rows)) return;
+    for (const row of rows) {
+      const name = String(row.room_name || row.name || '').trim().toLowerCase();
+      const secret = String(row.secret || '').trim();
+      if (!name || !secret) continue;
+      const kv = Math.max(1, parseInt(row.key_version, 10) || 1);
+      const baseKey = `${ROOM_SECRET_PREFIX}${name}`;
+      const wrapped = await _wrapSecretForLocalStorage(secret);
+      try {
+        localStorage.setItem(baseKey, wrapped);
+        if (kv > 0) {
+          localStorage.setItem(`${baseKey}:v${kv}`, wrapped);
+          localStorage.setItem(`${ROOM_KEYVER_PREFIX}${name}`, String(kv));
+        }
+      } catch {}
+    }
+  }
+
   function _importRoomSecrets(rows) {
     if (!Array.isArray(rows)) return;
     for (const row of rows) {
@@ -242,7 +299,7 @@
   }
 
   async function _buildRoomSecretsOnlyExport() {
-    const room_secrets = _exportRoomSecrets();
+    const room_secrets = await _exportRoomSecretsPlain();
     if (!room_secrets.length) return null;
     return {
       dct_version: DCT_VERSION,
@@ -306,9 +363,12 @@
       signal = { identity: null, identities: [], sessions: [] };
     }
     const partial = !!(peerLocalIds && peerLocalIds.size) || !!(roomKeys && roomKeys.size);
-    let room_secrets = _exportRoomSecrets();
+    let room_secrets = await _exportRoomSecretsPlain();
     if (roomKeys && roomKeys.size) {
-      room_secrets = _filterRoomSecrets(room_secrets, roomKeys);
+      room_secrets = room_secrets.filter((r) => {
+        const sk = `${ROOM_SECRET_PREFIX}${String(r.room_name || '').toLowerCase()}`;
+        return roomKeys.has(sk);
+      });
     }
     return {
       dct_version: DCT_VERSION,
@@ -653,7 +713,7 @@
     if (ver !== 1 && ver !== 2) return false;
 
     if (mode === 'room_secrets_only') {
-      _importRoomSecrets(plain.room_secrets);
+      await _importRoomSecretsPlain(plain.room_secrets);
       try { window.__ftDctRoomSecretsImported = true; } catch {}
       return true;
     }
@@ -710,7 +770,14 @@
       await store.importSnapshot(signal, (k) => k);
     }
 
-    _importRoomSecrets(plain.room_secrets);
+    if (plain.room_secrets && plain.room_secrets.length) {
+      const first = plain.room_secrets[0] || {};
+      if (first.secret || first.room_name) {
+        await _importRoomSecretsPlain(plain.room_secrets);
+      } else {
+        _importRoomSecrets(plain.room_secrets);
+      }
+    }
     try { window.__ftDctImported = true; } catch {}
     return true;
   }
@@ -939,6 +1006,47 @@
     return importKeyFilePayload(parsed, passphrase);
   }
 
+  async function stageRoomSecretsForHomeSync() {
+    if (!State?.token) return false;
+    if (window.App && typeof App.isAtHomeNode === 'function' && App.isAtHomeNode()) {
+      return false;
+    }
+    const rooms = await _exportRoomSecretsPlain();
+    if (!rooms.length) return true;
+    try {
+      const res = await _api('/api/auth/travel-room-secrets/stage', 'POST', { rooms });
+      return res.ok;
+    } catch {
+      return false;
+    }
+  }
+
+  async function importPendingTravelRoomSecretsFromServer() {
+    if (!State?.token) return false;
+    if (window.App && typeof App.isAtHomeNode === 'function' && !App.isAtHomeNode()) {
+      return false;
+    }
+    try {
+      const res = await _api('/api/auth/travel-room-secrets/pending', 'GET');
+      if (!res.ok) return false;
+      const data = await res.json().catch(() => ({}));
+      const rooms = data.rooms || [];
+      if (!rooms.length) return 0;
+      await _importRoomSecretsPlain(rooms);
+      try { window.__ftTravelRoomSecretsImported = true; } catch {}
+      if (typeof UI !== 'undefined' && UI.showToast) {
+        UI.showToast(
+          `Restored ${rooms.length} private channel secret${rooms.length === 1 ? '' : 's'} from your travel node`,
+          'success',
+          5000,
+        );
+      }
+      return rooms.length;
+    } catch {
+      return 0;
+    }
+  }
+
   const DeviceCrypto = {
     exportAndUploadForSwitch,
     importFromSwitch,
@@ -963,6 +1071,8 @@
     listKeyInventory,
     recordKeyExportMeta: _recordKeyExportMeta,
     recordKeyImportMeta: _recordKeyImportMeta,
+    stageRoomSecretsForHomeSync,
+    importPendingTravelRoomSecretsFromServer,
   };
 
   try {

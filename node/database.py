@@ -2452,6 +2452,25 @@ def _migrate():
             "CREATE INDEX IF NOT EXISTS idx_device_crypto_expires "
             "ON device_crypto_transfers(expires_at)"
         )
+        # Visit-node staging + home pending pickup for private group secrets (travel → home).
+        con.execute("""CREATE TABLE IF NOT EXISTS travel_room_secrets_staging (
+            user_id      INTEGER NOT NULL,
+            room_name    TEXT NOT NULL,
+            secret_text  TEXT NOT NULL,
+            key_version  INTEGER NOT NULL DEFAULT 1,
+            updated_at   INTEGER NOT NULL,
+            PRIMARY KEY (user_id, room_name),
+            FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+        )""")
+        con.execute("""CREATE TABLE IF NOT EXISTS travel_room_secrets_pending (
+            user_id      INTEGER NOT NULL,
+            room_name    TEXT NOT NULL,
+            secret_text  TEXT NOT NULL,
+            key_version  INTEGER NOT NULL DEFAULT 1,
+            updated_at   INTEGER NOT NULL,
+            PRIMARY KEY (user_id, room_name),
+            FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+        )""")
         # User blocks table
         con.execute("""CREATE TABLE IF NOT EXISTS user_blocks (
             id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -4744,6 +4763,13 @@ def upsert_user_federation_sync_state(user_id: int, patch: dict) -> None:
         t = dict(extra.get("totals") or {})
         t.update({k: int(v or 0) for k, v in merged["totals"].items()})
         extra["totals"] = t
+    for k in (
+        "travel_push_needs_retry",
+        "travel_push_last_error",
+        "travel_push_failed_at",
+    ):
+        if k in merged:
+            extra[k] = merged[k]
     counters_json = json.dumps(extra, separators=(",", ":"))
     try:
         with _conn() as con:
@@ -4899,12 +4925,91 @@ def remove_room_from_sync_allowlist(user_id: int, room_name: str) -> None:
         pass
 
 
+def add_room_to_sync_allowlist(user_id: int, room_name: str) -> None:
+    """Keep a visit-node channel visible after home membership refresh."""
+    uid = int(user_id or 0)
+    nm = str(room_name or "").strip().lower()
+    if uid <= 0 or not nm:
+        return
+    allowlist = get_user_sync_room_allowlist(uid)
+    if nm in allowlist:
+        return
+    allowlist.add(nm)
+    try:
+        set_user_sync_room_allowlist(uid, sorted(allowlist))
+    except Exception:
+        pass
+
+
+def get_user_owned_joined_room_names(user_id: int) -> set:
+    """Channel names the user owns and is currently joined to (local travel creates)."""
+    uid = int(user_id or 0)
+    if uid <= 0:
+        return set()
+    out: set = set()
+    try:
+        joined = get_user_joined_room_ids(uid) or set()
+        if not joined:
+            return out
+        with _conn() as con:
+            for rid in joined:
+                row = con.execute(
+                    "SELECT name FROM rooms WHERE id=? AND owner_id=? LIMIT 1",
+                    (int(rid), uid),
+                ).fetchone()
+                if not row:
+                    continue
+                nm = str(row["name"] or "").strip().lower()
+                if nm:
+                    out.add(nm)
+    except Exception:
+        return out
+    return out
+
+
+def user_traveling_on_local_node(user_id: int) -> bool:
+    """True when account home is pinned to a different federation server."""
+    uid = int(user_id or 0)
+    if uid <= 0:
+        return False
+    try:
+        ident = get_or_create_local_server_identity() or {}
+    except Exception:
+        return False
+    local_sid = str(ident.get("server_id") or "").strip()
+    if not local_sid:
+        return False
+    pinned = get_user_account_home_server_id(uid)
+    if pinned:
+        return pinned != local_sid
+    try:
+        st = get_user_federation_sync_state(uid) or {}
+        src_sid = str(st.get("source_server_id") or "").strip()
+        if src_sid and src_sid != local_sid:
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def merge_travel_local_room_allowlist(user_id: int, home_names: set) -> set:
+    """Union home authoritative names with channels created on this visit node."""
+    uid = int(user_id or 0)
+    keep = {str(n or "").strip().lower() for n in (home_names or set()) if n}
+    if uid <= 0:
+        return keep
+    keep |= get_user_owned_joined_room_names(uid)
+    return keep
+
+
 def apply_sync_room_allowlist(user_id: int, keep_names: set) -> int:
     """Reconcile local joins + sidebar order to the home-node allowlist."""
     uid = int(user_id or 0)
     if uid <= 0:
         return 0
     keep = {str(n or "").strip().lower() for n in (keep_names or set()) if n}
+    if user_traveling_on_local_node(uid):
+        keep = merge_travel_local_room_allowlist(uid, keep)
     try:
         set_user_sync_room_allowlist(uid, sorted(keep))
     except Exception:
@@ -7353,6 +7458,138 @@ def queue_pending_room_key_envelope(recipient_id: int, room_name: str,
 
 
 _DEVICE_CRYPTO_BLOB_MAX = 8 * 1024 * 1024
+_TRAVEL_ROOM_SECRET_MAX_LEN = 512
+_TRAVEL_ROOM_SECRET_MAX_ROOMS = 100
+
+
+def stage_travel_room_secrets(user_id: int, rows: list) -> int:
+    """Client-staged private group secrets on a visit node (merged to home on push)."""
+    uid = int(user_id or 0)
+    if uid <= 0 or not isinstance(rows, list):
+        return 0
+    now = int(time.time())
+    n = 0
+    try:
+        with _conn() as con:
+            for raw in rows[:_TRAVEL_ROOM_SECRET_MAX_ROOMS]:
+                if not isinstance(raw, dict):
+                    continue
+                name = str(raw.get("room_name") or raw.get("name") or "").strip().lower()
+                secret = str(raw.get("secret") or "")[:_TRAVEL_ROOM_SECRET_MAX_LEN]
+                if not name or not secret:
+                    continue
+                kv = max(1, min(9999, int(raw.get("key_version") or 1)))
+                con.execute(
+                    """
+                    INSERT OR REPLACE INTO travel_room_secrets_staging
+                        (user_id, room_name, secret_text, key_version, updated_at)
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (uid, name, secret, kv, now),
+                )
+                n += 1
+            con.commit()
+    except Exception:
+        return n
+    return n
+
+
+def list_travel_room_secrets_staging(user_id: int) -> list:
+    uid = int(user_id or 0)
+    if uid <= 0:
+        return []
+    try:
+        with _conn() as con:
+            rows = con.execute(
+                """
+                SELECT room_name, secret_text, key_version
+                FROM travel_room_secrets_staging
+                WHERE user_id=?
+                ORDER BY room_name ASC
+                LIMIT ?
+                """,
+                (uid, _TRAVEL_ROOM_SECRET_MAX_ROOMS),
+            ).fetchall()
+        out = []
+        for row in rows or []:
+            name = str(row["room_name"] or "").strip().lower()
+            secret = str(row["secret_text"] or "")
+            if not name or not secret:
+                continue
+            out.append({
+                "room_name": name,
+                "secret": secret,
+                "key_version": int(row["key_version"] or 1),
+            })
+        return out
+    except Exception:
+        return []
+
+
+def store_travel_room_secrets_pending(user_id: int, rows: list) -> int:
+    """Home node: secrets merged from a visit node, awaiting browser import."""
+    uid = int(user_id or 0)
+    if uid <= 0 or not isinstance(rows, list):
+        return 0
+    now = int(time.time())
+    n = 0
+    try:
+        with _conn() as con:
+            for raw in rows[:_TRAVEL_ROOM_SECRET_MAX_ROOMS]:
+                if not isinstance(raw, dict):
+                    continue
+                name = str(raw.get("room_name") or raw.get("name") or "").strip().lower()
+                secret = str(raw.get("secret") or "")[:_TRAVEL_ROOM_SECRET_MAX_LEN]
+                if not name or not secret:
+                    continue
+                kv = max(1, min(9999, int(raw.get("key_version") or 1)))
+                con.execute(
+                    """
+                    INSERT OR REPLACE INTO travel_room_secrets_pending
+                        (user_id, room_name, secret_text, key_version, updated_at)
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (uid, name, secret, kv, now),
+                )
+                n += 1
+            con.commit()
+    except Exception:
+        return n
+    return n
+
+
+def take_travel_room_secrets_pending(user_id: int) -> list:
+    """Return and clear pending private group secrets for browser import."""
+    uid = int(user_id or 0)
+    if uid <= 0:
+        return []
+    try:
+        with _conn() as con:
+            rows = con.execute(
+                """
+                SELECT room_name, secret_text, key_version
+                FROM travel_room_secrets_pending
+                WHERE user_id=?
+                ORDER BY room_name ASC
+                """,
+                (uid,),
+            ).fetchall()
+            con.execute("DELETE FROM travel_room_secrets_pending WHERE user_id=?", (uid,))
+            con.commit()
+        out = []
+        for row in rows or []:
+            name = str(row["room_name"] or "").strip().lower()
+            secret = str(row["secret_text"] or "")
+            if not name or not secret:
+                continue
+            out.append({
+                "room_name": name,
+                "secret": secret,
+                "key_version": int(row["key_version"] or 1),
+            })
+        return out
+    except Exception:
+        return []
 
 
 def store_device_crypto_transfer(user_id: int, ticket_hash: str, blob_b64: str, expires_at: int) -> bool:
@@ -11808,10 +12045,6 @@ def resolve_global_user_home_server_id(global_user_id: str) -> str:
     ident = get_or_create_local_server_identity() or {}
     local_sid = str(ident.get("server_id") or "").strip()
     profile_origin = get_federation_profile_origin(gid)
-    # Shadow mirrors (account sync / DM federation) pin a remote origin;
-    # they must not be treated as homed here just because a users row exists.
-    if profile_origin and local_sid and profile_origin != local_sid:
-        return profile_origin
     try:
         with _conn() as con:
             row = con.execute(
@@ -11822,9 +12055,14 @@ def resolve_global_user_home_server_id(global_user_id: str) -> str:
             account_home = str(row["account_home_server_id"] or "").strip()
             if account_home:
                 return account_home
-            return local_sid
+            if profile_origin and local_sid and profile_origin != local_sid:
+                return profile_origin
+            if local_sid:
+                return local_sid
     except Exception:
         pass
+    if profile_origin and local_sid and profile_origin != local_sid:
+        return profile_origin
     if profile_origin:
         return profile_origin
     return ""

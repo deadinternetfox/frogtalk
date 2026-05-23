@@ -764,7 +764,58 @@ async def global_exception_handler(request: Request, exc: Exception):
 # credentialed cross-origin in modern browsers. Default to the canonical
 # domain; operators override via ALLOWED_ORIGINS env (comma-separated).
 _default_origins = "https://frogtalk.xyz,https://www.frogtalk.xyz"
-ALLOWED_ORIGINS = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", _default_origins).split(",") if o.strip()]
+
+
+def _normalize_origin_url(raw: str) -> str:
+    """Canonical origin for CORS / credentialed fetch (scheme + host, no path)."""
+    s = (raw or "").strip().rstrip("/")
+    if not s:
+        return ""
+    if not s.startswith(("http://", "https://")):
+        s = f"https://{s}"
+    try:
+        from urllib.parse import urlparse
+
+        p = urlparse(s)
+        if not p.scheme or not p.hostname:
+            return ""
+        host = p.hostname.lower()
+        if p.port and p.port not in (80, 443):
+            host = f"{host}:{p.port}"
+        return f"{p.scheme.lower()}://{host}"
+    except Exception:
+        return ""
+
+
+def _collect_allowed_origins() -> list[str]:
+    """Merge operator ALLOWED_ORIGINS with this node's public URL(s).
+
+    Starlette's CORSMiddleware also gates WebSocket upgrades — community
+    nodes (e.g. AU nip.io) must include their own origin or every
+    ``wss://<this-host>/ws/…`` handshake returns 403.
+    """
+    seen: set[str] = set()
+    out: list[str] = []
+    for o in os.getenv("ALLOWED_ORIGINS", _default_origins).split(","):
+        norm = _normalize_origin_url(o)
+        if norm and norm not in seen:
+            seen.add(norm)
+            out.append(norm)
+    for key in (
+        "PUBLIC_URL",
+        "FROGTALK_BASE_URL",
+        "FROGTALK_SITE_URL",
+        "SITE_URL",
+        "FROGTALK_ONION_URL",
+    ):
+        norm = _normalize_origin_url(os.getenv(key, ""))
+        if norm and norm not in seen:
+            seen.add(norm)
+            out.append(norm)
+    return out
+
+
+ALLOWED_ORIGINS = _collect_allowed_origins()
 _cors_credentials = "*" not in ALLOWED_ORIGINS
 # Tightened from the wildcard defaults so a misbehaving extension or
 # rogue page can't slip exotic headers/methods into a credentialed

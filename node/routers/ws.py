@@ -283,11 +283,35 @@ def _format_duration_secs(total_secs: int | None) -> str | None:
     except Exception:
         return None
 
+
+def _resolve_ws_user(websocket: WebSocket, token: str | None):
+    """Authenticate a WebSocket upgrade — query token, then HttpOnly cookie.
+
+    The SPA usually passes ``?token=`` (State.token). After a federation node
+    switch the HttpOnly ``ft_session`` cookie is often fresher than a stale
+    in-memory token; rejecting the upgrade when only the query param is wrong
+    surfaces in the browser as a generic "WebSocket connection failed" (uvicorn
+    maps pre-accept ``close()`` to HTTP 403).
+    """
+    tried: set[str] = set()
+    for raw in (
+        (token or "").strip(),
+        (websocket.cookies.get("ft_session") or "").strip(),
+    ):
+        if not raw or raw in tried:
+            continue
+        tried.add(raw)
+        user = db.get_user_by_token(raw)
+        if user:
+            return user
+    return None
+
+
 @router.websocket("/ws/{room_name}")
 async def websocket_endpoint(
     websocket: WebSocket,
     room_name: str,
-    token: str = Query(...),
+    token: str = Query(""),
 ):
     # CSWSH defence: refuse browser upgrades that didn't come from one of
     # our own origins. Non-browser clients (mobile, Electron) generally
@@ -295,7 +319,7 @@ async def websocket_endpoint(
     if not _ws_origin_allowed(websocket):
         await websocket.close(code=4007)
         return
-    user = db.get_user_by_token(token)
+    user = _resolve_ws_user(websocket, token)
     if not user:
         await websocket.close(code=4001)
         return

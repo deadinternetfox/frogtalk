@@ -124,6 +124,11 @@ async def open_dm(request: Request, nickname: str, current_user: dict = Depends(
             other_user["peer_home_server_id"] = home_sid
     except Exception:
         pass
+    try:
+        from routers.auth import schedule_travel_push_to_home
+        schedule_travel_push_to_home(int(current_user["id"]), force=True)
+    except Exception:
+        pass
     return {"channel_id": channel_id, "other_user": other_user}
 
 

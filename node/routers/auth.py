@@ -214,6 +214,12 @@ _SYNC_EXPORT_MEMBER_ROOM_LIMIT = 40
 _SYNC_EXPORT_REPOST_LIMIT = 500
 _SYNC_MAX_IN_PROGRESS_SEC = 7200
 _SYNC_EXPORT_MEMBERS_PER_ROOM = 120
+# Visit-node → home merge: channels + lightweight DM metadata only (no social/history blobs).
+_SYNC_TRAVEL_PUSH_DM_LIMIT = 80
+_SYNC_TRAVEL_ROOM_SECRET_MAX = 100
+_SYNC_TRAVEL_PUSH_ROOM_BATCH = 12
+_TRAVEL_PUSH_CHUNK_TARGET_BYTES = 120_000
+_FEDERATION_MERGE_BODY_MAX = 8 * 1024 * 1024
 
 _sync_state_lock = _threading.Lock()
 _federation_sync_state: dict[int, dict] = {}
@@ -1982,6 +1988,781 @@ def _verify_sync_export(
             raise ValueError("export_signature_invalid") from None
 
 
+def _travel_push_home_enabled() -> bool:
+    return os.getenv("FROGTALK_TRAVEL_PUSH_HOME", "1").strip().lower() in (
+        "1", "true", "yes", "on",
+    )
+
+
+def _mark_travel_push_needs_retry(user_id: int, error: str = "") -> None:
+    uid = int(user_id or 0)
+    if uid <= 0:
+        return
+    try:
+        db.upsert_user_federation_sync_state(uid, {
+            "travel_push_needs_retry": True,
+            "travel_push_last_error": str(error or "push_failed")[:160],
+            "travel_push_failed_at": int(time.time()),
+        })
+    except Exception:
+        pass
+
+
+def _clear_travel_push_retry(user_id: int) -> None:
+    uid = int(user_id or 0)
+    if uid <= 0:
+        return
+    try:
+        db.upsert_user_federation_sync_state(uid, {
+            "travel_push_needs_retry": False,
+            "travel_push_last_error": "",
+            "travel_push_failed_at": 0,
+        })
+    except Exception:
+        pass
+
+
+def _travel_push_needs_client_retry(user_id: int) -> bool:
+    uid = int(user_id or 0)
+    if uid <= 0:
+        return False
+    try:
+        st = db.get_user_federation_sync_state(uid) or {}
+        return bool(st.get("travel_push_needs_retry"))
+    except Exception:
+        return False
+
+
+async def _probe_home_node_reachable(home_base: str) -> bool:
+    base = _norm_base(str(home_base or "").strip())
+    if not base:
+        return False
+    try:
+        await asyncio.to_thread(_get_json, f"{base}/api/ping", timeout=4.0)
+        return True
+    except Exception:
+        return False
+
+
+def _union_merge_room_allowlist(user_id: int, export_names: set[str]) -> set[str]:
+    """Never drop home joins when merging a visit-node export onto home."""
+    uid = int(user_id or 0)
+    out = {str(n or "").strip().lower() for n in (export_names or set()) if n}
+    out = {n for n in out if _ROOM_NAME_RE.match(n)}
+    try:
+        out |= db.get_user_sync_room_allowlist(uid)
+    except Exception:
+        pass
+    try:
+        joined = db.get_user_joined_room_ids(uid) or set()
+        if joined:
+            with db._conn() as con:
+                for rid in joined:
+                    row = con.execute(
+                        "SELECT name FROM rooms WHERE id=? LIMIT 1",
+                        (int(rid),),
+                    ).fetchone()
+                    if row:
+                        nm = str(row["name"] or "").strip().lower()
+                        if nm and _ROOM_NAME_RE.match(nm):
+                            out.add(nm)
+    except Exception:
+        pass
+    return out
+
+
+def _verify_travel_merge_export(
+    export: dict,
+    *,
+    user_id: int,
+    peer_server_id: str,
+    fetch_origin: str,
+) -> None:
+    """Visit-node signed export applied on the user's home node (merge, not replace)."""
+    if not _sync_verify_export_enabled():
+        return
+    payload = export if isinstance(export, dict) else {}
+    uid = int(user_id or 0)
+    if uid <= 0 or not _user_at_account_home(uid):
+        raise ValueError("merge_not_at_home")
+    me = db.get_user_by_id(uid) or {}
+    gid = str(me.get("global_user_id") or "").strip()
+    exp_gid = str(payload.get("global_user_id") or gid).strip()
+    if gid and exp_gid and gid != exp_gid:
+        raise ValueError("export_gid_mismatch")
+    src_sid = str(payload.get("source_server_id") or "").strip()
+    peer = str(peer_server_id or "").strip()
+    if not src_sid or not peer or src_sid != peer:
+        raise ValueError("export_peer_mismatch")
+    ident = db.get_or_create_local_server_identity() or {}
+    local_sid = str(ident.get("server_id") or "").strip()
+    if local_sid and src_sid == local_sid:
+        raise ValueError("export_peer_is_home")
+    home_sid = db.get_user_account_home_server_id(uid) or local_sid
+    if home_sid and src_sid == home_sid:
+        raise ValueError("export_source_is_home")
+    src_url = _norm_base(str(payload.get("source_public_url") or ""))
+    origin = _norm_base(fetch_origin)
+    if not payload.get("travel_push"):
+        if src_url and origin and src_url != origin:
+            raise ValueError("export_source_url_mismatch")
+    elif src_url and origin and src_url != origin:
+        # Travel merge: federation auth already verified the peer; allow
+        # equivalent nodes where SITE_URL differs from directory base_url.
+        try:
+            import urllib.parse as _up
+
+            sh = (_up.urlparse(src_url).hostname or "").strip().lower()
+            oh = (_up.urlparse(origin).hostname or "").strip().lower()
+            if sh and oh and sh != oh:
+                raise ValueError("export_source_url_mismatch")
+        except ValueError:
+            raise
+        except Exception:
+            pass
+    sig_b64 = str(payload.get("export_sig_b64") or "").strip()
+    require_sig = (
+        os.getenv("FROGTALK_SYNC_REQUIRE_EXPORT_SIG", "1").strip().lower()
+        in ("1", "true", "yes", "on")
+    )
+    pem = str(db.get_federation_server_pubkey(src_sid) or "").strip() if src_sid else ""
+    pin_origin = origin or src_url or _norm_base(str(payload.get("source_base") or ""))
+    if require_sig and src_sid and not pem:
+        _ensure_export_signer_pubkey_pinned(src_sid, pin_origin, user_id=uid)
+        pem = str(db.get_federation_server_pubkey(src_sid) or "").strip()
+    if require_sig and src_sid:
+        if not pem:
+            raise ValueError("export_signer_pubkey_unpinned")
+        if not sig_b64:
+            raise ValueError("export_signature_required")
+    if sig_b64 and pem:
+        try:
+            import crypto_fed as _cf
+
+            if not _cf.verify_sync_export_signature(payload, pem):
+                raise ValueError("export_signature_invalid")
+        except ValueError:
+            raise
+        except Exception:
+            raise ValueError("export_signature_invalid") from None
+
+
+def _travel_push_peer_stub(profile: dict, source_server_id: str) -> dict | None:
+    """Lightweight peer row for visit→home merge (no avatars/banners)."""
+    if not isinstance(profile, dict):
+        return None
+    gid = str(profile.get("global_user_id") or "").strip()
+    nick = str(profile.get("nickname") or "").strip()
+    if not nick or not _GID_RE.match(gid):
+        return None
+    return {
+        "nickname": nick,
+        "global_user_id": gid,
+        "home_server_id": _peer_home_server_id_for_sync(gid, source_server_id),
+        "display_name": str(profile.get("display_name") or "")[:64],
+    }
+
+
+def _export_travel_push_room_payload(room: dict, source_server_id: str) -> dict | None:
+    """Joined channel metadata only — no icons/banners (keeps merge payload small)."""
+    if not isinstance(room, dict):
+        return None
+    name = str(room.get("name") or "").strip().lower()
+    if not _ROOM_NAME_RE.match(name):
+        return None
+    rtype = str(room.get("type") or "public").strip().lower()
+    if rtype not in ("public", "private"):
+        rtype = "public"
+    ctype = str(room.get("channel_type") or "text").strip().lower()
+    if ctype not in ("text", "music", "voice"):
+        ctype = "text"
+    detail = db.get_room_by_name(name) or room
+    owner_gid = ""
+    try:
+        if detail.get("owner_id"):
+            owner_row = db.get_user_by_id(int(detail.get("owner_id"))) or {}
+            owner_gid = str(owner_row.get("global_user_id") or "")[:64]
+    except Exception:
+        owner_gid = ""
+    vanity = str(detail.get("vanity") or "").strip().lower()[:32]
+    room_payload: dict = {
+        "name": name,
+        "type": rtype,
+        "channel_type": ctype,
+        "member_count": int(detail.get("member_count") or 0),
+        "owner_global_user_id": owner_gid,
+        "vanity": vanity,
+    }
+    if rtype == "private":
+        room_payload["invite_only"] = 1 if int(detail.get("invite_only") or 0) else 0
+        who_inv = str(detail.get("who_can_invite") or "everyone").strip().lower()
+        if who_inv not in ("everyone", "mods", "owner"):
+            who_inv = "owner"
+        room_payload["who_can_invite"] = who_inv
+        hint = re.sub(
+            r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "",
+            str(detail.get("room_key_hint") or ""),
+        )[:512]
+        if hint:
+            room_payload["room_key_hint"] = hint
+    else:
+        room_payload["description"] = str(detail.get("description") or "")[:200]
+    return room_payload
+
+
+def _export_travel_push_rooms(uid: int) -> list[dict]:
+    joined_ids = db.get_user_joined_room_ids(uid) or set()
+    if not joined_ids:
+        return []
+    rooms: list[dict] = []
+    try:
+        with db._conn() as con:
+            for rid in joined_ids:
+                if len(rooms) >= _SYNC_EXPORT_ROOM_LIMIT:
+                    break
+                row = con.execute(
+                    "SELECT * FROM rooms WHERE id=? LIMIT 1",
+                    (int(rid),),
+                ).fetchone()
+                if not row:
+                    continue
+                payload = _export_travel_push_room_payload(dict(row), "")
+                if payload:
+                    rooms.append(payload)
+    except Exception:
+        pass
+    return rooms
+
+
+def _export_travel_push_dm_peers(uid: int, source_server_id: str) -> list[dict]:
+    dm_peers: list[dict] = []
+    for ch in db.get_dm_channels_for_sync(uid):
+        other_id = int(ch.get("other_id") or 0)
+        if other_id <= 0:
+            continue
+        peer = _sync_peer_profile_row(other_id)
+        stub = _travel_push_peer_stub(peer, source_server_id)
+        if not stub:
+            continue
+        is_channel_a = int(ch.get("user_a") or 0) == uid
+        my_read = int(ch.get("last_read_a") or 0) if is_channel_a else int(ch.get("last_read_b") or 0)
+        dm_settings = _sanitize_sync_dm_channel_settings({
+            "disappear_after": ch.get("disappear_after"),
+            "forwarding_disabled": ch.get("forwarding_disabled"),
+            "my_last_read": my_read,
+            "hidden": ch.get("hidden"),
+        })
+        dm_peers.append({**stub, **dm_settings})
+        if len(dm_peers) >= _SYNC_TRAVEL_PUSH_DM_LIMIT:
+            break
+    return dm_peers
+
+
+def _export_travel_push_social_graph(uid: int, source_server_id: str) -> dict[str, list]:
+    following: list[dict] = []
+    for row in db.get_following_list(uid, limit=_SYNC_TRAVEL_PUSH_DM_LIMIT):
+        raw_id = int((row or {}).get("id") or 0)
+        nick_hint = str((row or {}).get("nickname") or "").strip()
+        profile = _sync_peer_profile_row(raw_id, nick_hint)
+        stub = _travel_push_peer_stub(profile, source_server_id)
+        if stub:
+            following.append(stub)
+
+    friends: list[dict] = []
+    for row in db.get_friends(uid):
+        raw_id = int((row or {}).get("id") or 0)
+        nick_hint = str((row or {}).get("nickname") or "").strip()
+        profile = _sync_peer_profile_row(raw_id, nick_hint)
+        stub = _travel_push_peer_stub(profile, source_server_id)
+        if stub:
+            friends.append(stub)
+        if len(friends) >= _SYNC_TRAVEL_PUSH_DM_LIMIT:
+            break
+
+    friend_pending_out: list[dict] = []
+    for row in db.get_friend_requests_out(uid):
+        raw_id = int((row or {}).get("id") or 0)
+        nick_hint = str((row or {}).get("nickname") or "").strip()
+        profile = _sync_peer_profile_row(raw_id, nick_hint)
+        stub = _travel_push_peer_stub(profile, source_server_id)
+        if stub:
+            friend_pending_out.append(stub)
+        if len(friend_pending_out) >= _SYNC_TRAVEL_PUSH_DM_LIMIT:
+            break
+
+    friend_pending_in: list[dict] = []
+    for row in db.get_friend_requests_in(uid):
+        raw_id = int((row or {}).get("id") or 0)
+        nick_hint = str((row or {}).get("nickname") or "").strip()
+        profile = _sync_peer_profile_row(raw_id, nick_hint)
+        stub = _travel_push_peer_stub(profile, source_server_id)
+        if stub:
+            friend_pending_in.append(stub)
+        if len(friend_pending_in) >= _SYNC_TRAVEL_PUSH_DM_LIMIT:
+            break
+
+    blocked_users: list[dict] = []
+    for row in db.get_blocked_users(uid):
+        raw_id = int((row or {}).get("id") or 0)
+        nick_hint = str((row or {}).get("nickname") or "").strip()
+        profile = _sync_peer_profile_row(raw_id, nick_hint)
+        stub = _travel_push_peer_stub(profile, source_server_id)
+        if stub:
+            blocked_users.append(stub)
+        if len(blocked_users) >= _SYNC_EXPORT_BLOCKED_LIMIT:
+            break
+
+    return {
+        "following": following,
+        "friends": friends,
+        "friend_pending_out": friend_pending_out,
+        "friend_pending_in": friend_pending_in,
+        "blocked_users": blocked_users,
+    }
+
+
+def _sanitize_travel_room_secrets(rows) -> list[dict]:
+    """Private group shared secrets staged on visit node (small, no media)."""
+    out: list[dict] = []
+    if not isinstance(rows, list):
+        return out
+    for raw in rows[:_SYNC_TRAVEL_ROOM_SECRET_MAX]:
+        if not isinstance(raw, dict):
+            continue
+        name = str(raw.get("room_name") or raw.get("name") or "").strip().lower()
+        if not _ROOM_NAME_RE.match(name):
+            continue
+        secret = str(raw.get("secret") or "")[:512]
+        if not secret:
+            continue
+        kv = max(1, min(9999, int(raw.get("key_version") or 1)))
+        out.append({"room_name": name, "secret": secret, "key_version": kv})
+    return out
+
+
+def _build_sync_travel_push_export(user_id: int) -> dict:
+    """Signed visit-node snapshot: channels, DMs, and social graph only (no history/media blobs)."""
+    uid = int(user_id or 0)
+    if uid <= 0:
+        return {}
+    try:
+        ident = db.get_or_create_local_server_identity() or {}
+        source_server_id = str(ident.get("server_id") or "").strip()
+    except Exception:
+        source_server_id = ""
+    me = db.get_user_by_id(uid) or {}
+    my_gid = str(me.get("global_user_id") or "").strip()
+    if not my_gid:
+        return {}
+    source_public_url = ""
+    try:
+        source_public_url = str(os.environ.get("SITE_URL") or "").strip()[:256]
+    except Exception:
+        source_public_url = ""
+    if not source_public_url:
+        try:
+            source_public_url = _norm_base(str(ident.get("base_url") or ""))[:256]
+        except Exception:
+            source_public_url = ""
+
+    graph = _export_travel_push_social_graph(uid, source_server_id)
+    room_secrets = _sanitize_travel_room_secrets(db.list_travel_room_secrets_staging(uid))
+    export = {
+        "export_version": _SYNC_EXPORT_VERSION,
+        "sync_export_page": "travel",
+        "global_user_id": my_gid,
+        "rooms": _export_travel_push_rooms(uid),
+        "dm_peers": _export_travel_push_dm_peers(uid, source_server_id),
+        "following": graph["following"],
+        "friends": graph["friends"],
+        "friend_pending_out": graph["friend_pending_out"],
+        "friend_pending_in": graph["friend_pending_in"],
+        "blocked_users": graph["blocked_users"],
+        "room_secrets": room_secrets,
+        "source_server_id": source_server_id,
+        "source_public_url": source_public_url,
+        "travel_push": True,
+        "issued_at": int(time.time()),
+        "exported_at": int(time.time()),
+    }
+    return _attach_sync_export_signature(export)
+
+
+def _travel_push_visit_context(user_id: int) -> dict | None:
+    """Visit-node context for pushing a federated merge to the account home."""
+    uid = int(user_id or 0)
+    if uid <= 0 or not _travel_push_home_enabled() or _user_at_account_home(uid):
+        return None
+    home_base = _resolve_home_base_for_user(uid)
+    if not home_base:
+        return None
+    me = db.get_user_by_id(uid) or {}
+    gid = str(me.get("global_user_id") or "").strip()
+    if not gid or not _GID_RE.match(gid):
+        return None
+    try:
+        ident = db.get_or_create_local_server_identity() or {}
+        source_server_id = str(ident.get("server_id") or "").strip()
+    except Exception:
+        source_server_id = ""
+    source_public_url = ""
+    try:
+        source_public_url = str(os.environ.get("SITE_URL") or "").strip()[:256]
+    except Exception:
+        source_public_url = ""
+    if not source_public_url:
+        try:
+            source_public_url = _norm_base(str(ident.get("base_url") or ""))[:256]
+        except Exception:
+            source_public_url = ""
+    now = int(time.time())
+    return {
+        "uid": uid,
+        "gid": gid,
+        "home_base": home_base,
+        "source_server_id": source_server_id,
+        "source_public_url": source_public_url,
+        "issued_at": now,
+        "exported_at": now,
+    }
+
+
+def _build_travel_export_meta_from_ctx(ctx: dict) -> dict:
+    return {
+        "export_version": _SYNC_EXPORT_VERSION,
+        "sync_export_page": "travel",
+        "global_user_id": str(ctx.get("gid") or "").strip(),
+        "source_server_id": str(ctx.get("source_server_id") or "").strip(),
+        "source_public_url": str(ctx.get("source_public_url") or "").strip(),
+        "travel_push": True,
+        "issued_at": int(ctx.get("issued_at") or time.time()),
+        "exported_at": int(ctx.get("exported_at") or time.time()),
+    }
+
+
+def _build_travel_room_shell_export(ctx: dict, room_name: str) -> dict:
+    """One joined channel — tiny payload for immediate visit→home merge."""
+    name = str(room_name or "").strip().lower()
+    if not _ROOM_NAME_RE.match(name):
+        return {}
+    room = db.get_room_by_name(name)
+    if not room:
+        return {}
+    payload = _export_travel_push_room_payload(dict(room), str(ctx.get("source_server_id") or ""))
+    if not payload:
+        return {}
+    export = {
+        **_build_travel_export_meta_from_ctx(ctx),
+        **_travel_push_empty_lists(),
+        "rooms": [payload],
+        "travel_shell": True,
+    }
+    return _attach_sync_export_signature(export)
+
+
+def _build_travel_room_secrets_export(ctx: dict, room_names: set[str] | None = None) -> dict:
+    uid = int(ctx.get("uid") or 0)
+    secrets = _sanitize_travel_room_secrets(db.list_travel_room_secrets_staging(uid))
+    if room_names:
+        secrets = [s for s in secrets if str(s.get("room_name") or "").lower() in room_names]
+    if not secrets:
+        return {}
+    export = {
+        **_build_travel_export_meta_from_ctx(ctx),
+        **_travel_push_empty_lists(),
+        "room_secrets": secrets,
+        "travel_shell": True,
+    }
+    return _attach_sync_export_signature(export)
+
+
+async def _federate_travel_merge_export(ctx: dict, export: dict) -> dict:
+    """POST one signed travel export chunk to the account home node."""
+    if not isinstance(ctx, dict) or not isinstance(export, dict) or not export:
+        return {"ok": False, "error": "export_empty"}
+    uid = int(ctx.get("uid") or 0)
+    gid = str(ctx.get("gid") or "").strip()
+    home_base = str(ctx.get("home_base") or "").strip()
+    wire_len = len(json.dumps({"global_user_id": gid, "export": export}).encode("utf-8"))
+    try:
+        data = await asyncio.to_thread(
+            _post_json,
+            f"{home_base}/api/auth/federation-sync-merge-gid",
+            {"global_user_id": gid, "export": export},
+            sign_path="/api/auth/federation-sync-merge-gid",
+            timeout=45.0,
+        )
+    except Exception as e:
+        err = str(e)[:160]
+        _log.warning("travel federated merge failed gid=%s bytes=%s: %s", gid, wire_len, err)
+        _mark_travel_push_needs_retry(uid, err)
+        return {"ok": False, "error": err, "bytes": wire_len}
+    if not isinstance(data, dict):
+        _mark_travel_push_needs_retry(uid, "bad_response")
+        return {"ok": False, "error": "bad_response", "bytes": wire_len}
+    if data.get("error"):
+        err = str(data.get("error"))[:120]
+        _mark_travel_push_needs_retry(uid, err)
+        return {"ok": False, "error": err, "bytes": wire_len}
+    _clear_travel_push_retry(uid)
+    return {"ok": True, "applied": data.get("applied") or {}, "bytes": wire_len}
+
+
+async def _push_travel_room_shell_to_home(user_id: int, room_name: str) -> dict:
+    """Immediately mirror one channel shell onto the user's home node."""
+    uid = int(user_id or 0)
+    ctx = _travel_push_visit_context(uid)
+    if not ctx:
+        if uid > 0 and not _user_at_account_home(uid):
+            _mark_travel_push_needs_retry(uid, "home_unreachable")
+        return {"ok": False, "skipped": True}
+    export = _build_travel_room_shell_export(ctx, room_name)
+    if not export.get("rooms"):
+        return {"ok": False, "error": "room_not_found"}
+    result = await _federate_travel_merge_export(ctx, export)
+    if result.get("ok"):
+        _log.info(
+            "travel room shell pushed uid=%s room=%s bytes=%s joined=%s",
+            ctx.get("uid"),
+            str(room_name or "").lower(),
+            result.get("bytes"),
+            (result.get("applied") or {}).get("rooms_joined"),
+        )
+    return result
+
+
+async def _push_travel_room_secrets_to_home(
+    user_id: int,
+    room_names: list[str] | None = None,
+) -> dict:
+    """Push staged private group secrets (optionally filtered) to home."""
+    uid = int(user_id or 0)
+    ctx = _travel_push_visit_context(uid)
+    if not ctx:
+        if uid > 0 and not _user_at_account_home(uid):
+            _mark_travel_push_needs_retry(uid, "home_unreachable")
+        return {"ok": False, "skipped": True}
+    names = {str(n or "").strip().lower() for n in (room_names or []) if n}
+    name_filter = names if names else None
+    export = _build_travel_room_secrets_export(ctx, name_filter)
+    if not export:
+        return {"ok": False, "skipped": True, "reason": "no_secrets"}
+    return await _federate_travel_merge_export(ctx, export)
+
+
+def schedule_travel_room_shell_to_home(user_id: int, room_name: str) -> None:
+    """Fire-and-forget: push one channel shell to home (create/join on visit node)."""
+    uid = int(user_id or 0)
+    name = str(room_name or "").strip().lower()
+    if uid <= 0 or not name or not _ROOM_NAME_RE.match(name):
+        return
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    loop.create_task(_push_travel_room_shell_to_home(uid, name))
+
+
+def schedule_travel_room_secrets_to_home(
+    user_id: int,
+    room_names: list[str] | None = None,
+) -> None:
+    """Fire-and-forget: push staged private group secrets to home."""
+    uid = int(user_id or 0)
+    if uid <= 0:
+        return
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    loop.create_task(_push_travel_room_secrets_to_home(uid, room_names))
+
+
+def _travel_push_empty_lists() -> dict:
+    return {
+        "rooms": [],
+        "dm_peers": [],
+        "following": [],
+        "friends": [],
+        "friend_pending_out": [],
+        "friend_pending_in": [],
+        "blocked_users": [],
+        "room_secrets": [],
+    }
+
+
+def _travel_push_export_meta(export: dict) -> dict:
+    payload = export if isinstance(export, dict) else {}
+    return {
+        k: payload[k]
+        for k in (
+            "export_version",
+            "sync_export_page",
+            "global_user_id",
+            "source_server_id",
+            "source_public_url",
+            "travel_push",
+            "issued_at",
+            "exported_at",
+        )
+        if k in payload
+    }
+
+
+def _split_travel_push_export(export: dict) -> list[dict]:
+    """Split visit→home merge into small federated POSTs (avoids nginx/CF 413)."""
+    payload = export if isinstance(export, dict) else {}
+    if not payload:
+        return []
+    meta = _travel_push_export_meta(payload)
+    rooms = list(payload.get("rooms") or [])
+    secrets = list(payload.get("room_secrets") or [])
+    dm_peers = list(payload.get("dm_peers") or [])
+    following = list(payload.get("following") or [])
+    friends = list(payload.get("friends") or [])
+    fpo = list(payload.get("friend_pending_out") or [])
+    fpi = list(payload.get("friend_pending_in") or [])
+    blocked = list(payload.get("blocked_users") or [])
+
+    raw_chunks: list[dict] = []
+    if rooms:
+        for i in range(0, len(rooms), _SYNC_TRAVEL_PUSH_ROOM_BATCH):
+            raw_chunks.append({
+                **meta,
+                **_travel_push_empty_lists(),
+                "rooms": rooms[i:i + _SYNC_TRAVEL_PUSH_ROOM_BATCH],
+            })
+    if secrets:
+        raw_chunks.append({**meta, **_travel_push_empty_lists(), "room_secrets": secrets})
+    if dm_peers or following or friends or fpo or fpi or blocked:
+        raw_chunks.append({
+            **meta,
+            **_travel_push_empty_lists(),
+            "dm_peers": dm_peers,
+            "following": following,
+            "friends": friends,
+            "friend_pending_out": fpo,
+            "friend_pending_in": fpi,
+            "blocked_users": blocked,
+        })
+    if not raw_chunks:
+        raw_chunks.append({**meta, **_travel_push_empty_lists()})
+
+    total = len(raw_chunks)
+    out: list[dict] = []
+    for idx, chunk in enumerate(raw_chunks):
+        body = dict(chunk)
+        body["travel_push_chunk"] = idx + 1
+        body["travel_push_chunks"] = total
+        wire = json.dumps({"export": body}).encode("utf-8")
+        if len(wire) > _TRAVEL_PUSH_CHUNK_TARGET_BYTES and body.get("rooms"):
+            # Sub-split an oversized room batch (very large channel themes, etc.).
+            sub_rooms = list(body.get("rooms") or [])
+            half = max(1, len(sub_rooms) // 2)
+            for sub in (sub_rooms[:half], sub_rooms[half:]):
+                if not sub:
+                    continue
+                sub_body = {**meta, **_travel_push_empty_lists(), "rooms": sub}
+                sub_body["travel_push_chunk"] = idx + 1
+                sub_body["travel_push_chunks"] = total
+                out.append(_attach_sync_export_signature(sub_body))
+            continue
+        out.append(_attach_sync_export_signature(body))
+    return out or [_attach_sync_export_signature({**meta, **_travel_push_empty_lists()})]
+
+
+def _merge_travel_push_applied(accum: dict, applied: dict) -> dict:
+    out = dict(accum or {})
+    patch = applied if isinstance(applied, dict) else {}
+    for key in (
+        "rooms_joined", "rooms_missing", "rooms_pruned", "rooms_name_collisions",
+        "vanity_collisions", "dm_linked", "following_linked", "friends_linked",
+        "blocked_linked", "room_secrets_stored", "social_posts_imported",
+        "history_messages_applied", "dm_history_messages_applied",
+    ):
+        if key in patch:
+            try:
+                out[key] = int(out.get(key) or 0) + int(patch.get(key) or 0)
+            except Exception:
+                out[key] = patch.get(key)
+    if patch.get("error") and not out.get("error"):
+        out["error"] = patch.get("error")
+    return out
+
+
+_TRAVEL_PUSH_LOCK = _threading.Lock()
+_TRAVEL_PUSH_LAST: dict[int, float] = {}
+_TRAVEL_PUSH_MIN_INTERVAL = 25.0
+
+
+async def _push_travel_state_to_home(user_id: int, *, force: bool = False) -> dict:
+    """Merge visit-node channels/DMs/social onto the user's home node."""
+    uid = int(user_id or 0)
+    if uid <= 0 or not _travel_push_home_enabled() or _user_at_account_home(uid):
+        return {"ok": False, "skipped": True}
+    now = time.time()
+    with _TRAVEL_PUSH_LOCK:
+        if not force:
+            last = float(_TRAVEL_PUSH_LAST.get(uid) or 0)
+            if now - last < _TRAVEL_PUSH_MIN_INTERVAL:
+                return {"ok": False, "skipped": True, "reason": "debounced"}
+        _TRAVEL_PUSH_LAST[uid] = now
+    ctx = _travel_push_visit_context(uid)
+    if not ctx:
+        if not _user_at_account_home(uid):
+            _mark_travel_push_needs_retry(uid, "home_unreachable")
+        return {"ok": False, "error": "home_unreachable"}
+    export = await asyncio.to_thread(_build_sync_travel_push_export, uid)
+    if not export:
+        return {"ok": False, "error": "export_empty"}
+    chunks = _split_travel_push_export(export)
+    merged_applied: dict = {}
+    chunk_errors: list[str] = []
+    for idx, chunk in enumerate(chunks):
+        result = await _federate_travel_merge_export(ctx, chunk)
+        if not result.get("ok"):
+            err = str(result.get("error") or "merge_failed")
+            _log.warning(
+                "travel push chunk %s/%s failed uid=%s bytes=%s: %s",
+                idx + 1, len(chunks), uid, result.get("bytes"), err,
+            )
+            chunk_errors.append(err)
+            if "413" in err:
+                continue
+            return {"ok": False, "error": err, "applied": merged_applied, "bytes": result.get("bytes")}
+        merged_applied = _merge_travel_push_applied(
+            merged_applied,
+            result.get("applied") if isinstance(result.get("applied"), dict) else {},
+        )
+    if chunk_errors and not merged_applied:
+        err = chunk_errors[0]
+        if any("413" in e for e in chunk_errors):
+            return {
+                "ok": False,
+                "error": "payload_too_large",
+                "detail": err,
+                "chunks": len(chunks),
+            }
+        return {"ok": False, "error": err, "applied": merged_applied}
+    if chunk_errors:
+        merged_applied["chunk_warnings"] = len(chunk_errors)
+    if merged_applied:
+        _clear_travel_push_retry(uid)
+    return {"ok": True, "applied": merged_applied, "chunks": len(chunks)}
+
+
+def schedule_travel_push_to_home(user_id: int, *, force: bool = False) -> None:
+    """Fire-and-forget merge of visit-node state onto home."""
+    uid = int(user_id or 0)
+    if uid <= 0 or not _travel_push_home_enabled() or _user_at_account_home(uid):
+        return
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    loop.create_task(_push_travel_state_to_home(uid, force=force))
+
+
 def _account_home_server_id(user_id: int) -> str:
     """Federation home server for account-sync gating (not call routing)."""
     ident = db.get_or_create_local_server_identity() or {}
@@ -2985,7 +3766,25 @@ def _apply_sync_social_posts_only(user_id: int, export: dict) -> dict:
     }
 
 
-def _apply_sync_export_to_user(user_id: int, export: dict, *, fetch_origin: str = "") -> dict:
+def _merge_travel_room_owner_uid(raw, parsed: dict, uid: int, my_gid: str) -> int | None:
+    """When merging a visit-node export onto home, attribute owned channels to the user."""
+    if isinstance(raw, dict):
+        og = str(raw.get("owner_global_user_id") or "").strip()
+        if my_gid and og and og == my_gid:
+            return uid
+    if str(parsed.get("type") or "") == "private":
+        return uid
+    return None
+
+
+def _apply_sync_export_to_user(
+    user_id: int,
+    export: dict,
+    *,
+    fetch_origin: str = "",
+    merge_mode: bool = False,
+    merge_peer_server_id: str = "",
+) -> dict:
     uid = int(user_id or 0)
     if uid <= 0:
         return {"rooms_joined": 0, "rooms_missing": 0, "dm_linked": 0}
@@ -2993,9 +3792,17 @@ def _apply_sync_export_to_user(user_id: int, export: dict, *, fetch_origin: str 
     payload = export if isinstance(export, dict) else {}
     if str(payload.get("sync_export_page") or "").strip().lower() == "social":
         return _apply_sync_social_posts_only(uid, payload)
-    if fetch_origin:
+    if fetch_origin or merge_mode:
         try:
-            _verify_sync_export(payload, user_id=uid, fetch_origin=fetch_origin)
+            if merge_mode:
+                _verify_travel_merge_export(
+                    payload,
+                    user_id=uid,
+                    peer_server_id=str(merge_peer_server_id or payload.get("source_server_id") or ""),
+                    fetch_origin=fetch_origin,
+                )
+            else:
+                _verify_sync_export(payload, user_id=uid, fetch_origin=fetch_origin)
         except ValueError as e:
             return {
                 "rooms_joined": 0,
@@ -3035,10 +3842,11 @@ def _apply_sync_export_to_user(user_id: int, export: dict, *, fetch_origin: str 
     member_snaps = member_snaps_in if isinstance(member_snaps_in, list) else []
     wall_reposts = reposts_in if isinstance(reposts_in, list) else []
     stories = stories_in if isinstance(stories_in, list) else []
+    room_secrets_stored = 0
 
     ident = db.get_or_create_local_server_identity() or {}
     local_sid = str(ident.get("server_id") or "").strip()
-    if source_server_id and source_server_id != local_sid:
+    if not merge_mode and source_server_id and source_server_id != local_sid:
         pinned = db.get_user_account_home_server_id(uid)
         if not pinned:
             db.set_user_account_home_server_id(uid, source_server_id, force=False)
@@ -3080,16 +3888,20 @@ def _apply_sync_export_to_user(user_id: int, export: dict, *, fetch_origin: str 
         if nm and _ROOM_NAME_RE.match(nm):
             keep_room_names.add(nm)
 
-    try:
-        db.prune_federation_sync_room_shells(keep_room_names)
-    except Exception:
-        pass
+    if merge_mode:
+        keep_room_names = _union_merge_room_allowlist(uid, keep_room_names)
+    else:
+        try:
+            db.prune_federation_sync_room_shells(keep_room_names)
+        except Exception:
+            pass
 
     rooms_pruned = 0
-    try:
-        rooms_pruned = int(db.apply_sync_room_allowlist(uid, keep_room_names) or 0)
-    except Exception:
-        rooms_pruned = 0
+    if not merge_mode:
+        try:
+            rooms_pruned = int(db.apply_sync_room_allowlist(uid, keep_room_names) or 0)
+        except Exception:
+            rooms_pruned = 0
 
     n_rooms = len(rooms[:_SYNC_EXPORT_ROOM_LIMIT])
     n_public = len(public_rooms[:_SYNC_EXPORT_PUBLIC_ROOM_LIMIT])
@@ -3146,7 +3958,10 @@ def _apply_sync_export_to_user(user_id: int, export: dict, *, fetch_origin: str 
                 pass
             rooms_name_collisions += 1
             continue
-        room = _materialize_federated_channel(raw)
+        room = _materialize_federated_channel(
+            raw,
+            owner_user_id=_merge_travel_room_owner_uid(raw, parsed, uid, my_gid) if merge_mode else None,
+        )
         if not room:
             rooms_missing += 1
             continue
@@ -3615,7 +4430,8 @@ def _apply_sync_export_to_user(user_id: int, export: dict, *, fetch_origin: str 
                     ),
                 )
                 con.commit()
-            _apply_sync_pin_from_self_profile(uid, self_profile)
+            if not merge_mode:
+                _apply_sync_pin_from_self_profile(uid, self_profile)
         except Exception:
             pass
     _sync_step("profile", "Syncing profile & settings…", "profile", 1)
@@ -4008,8 +4824,14 @@ def _apply_sync_export_to_user(user_id: int, export: dict, *, fetch_origin: str 
     })
 
     try:
-        pruned_final = int(db.apply_sync_room_allowlist(uid, keep_room_names) or 0)
-        rooms_pruned = max(int(rooms_pruned or 0), pruned_final)
+        final_keep = (
+            _union_merge_room_allowlist(uid, keep_room_names)
+            if merge_mode
+            else keep_room_names
+        )
+        pruned_final = int(db.apply_sync_room_allowlist(uid, final_keep) or 0)
+        if not merge_mode:
+            rooms_pruned = max(int(rooms_pruned or 0), pruned_final)
     except Exception:
         pass
 
@@ -4020,6 +4842,18 @@ def _apply_sync_export_to_user(user_id: int, export: dict, *, fetch_origin: str 
         )
     except Exception:
         peer_profiles_cached = 0
+
+    if merge_mode:
+        try:
+            room_secrets_stored = int(
+                db.store_travel_room_secrets_pending(
+                    uid,
+                    _sanitize_travel_room_secrets(payload.get("room_secrets")),
+                )
+                or 0
+            )
+        except Exception:
+            room_secrets_stored = 0
 
     return {
         "rooms_joined": rooms_joined,
@@ -4045,6 +4879,7 @@ def _apply_sync_export_to_user(user_id: int, export: dict, *, fetch_origin: str 
         "dm_history_notices": dm_history_notices,
         "members_snapshots_applied": members_snapshots_applied,
         "peer_profiles_cached": peer_profiles_cached,
+        "room_secrets_stored": room_secrets_stored,
     }
 
 
@@ -4662,7 +5497,7 @@ def _try_apply_sync_room_vanity(room: dict | None, vanity: str) -> bool:
     return bool(db.set_room_vanity(rid, normalized))
 
 
-def _materialize_federated_channel(raw) -> dict | None:
+def _materialize_federated_channel(raw, *, owner_user_id: int | None = None) -> dict | None:
     """Ensure a joined home-node channel exists locally (mirror shell)."""
     parsed = _parse_sync_channel_raw(raw)
     if not parsed:
@@ -4673,7 +5508,7 @@ def _materialize_federated_channel(raw) -> dict | None:
         return None
     if not room and parsed["type"] in ("public", "private"):
         try:
-            owner = db.get_or_create_federation_system_user()
+            owner = int(owner_user_id or 0) or db.get_or_create_federation_system_user()
             db.create_room(
                 name,
                 parsed["description"],
@@ -4684,6 +5519,8 @@ def _materialize_federated_channel(raw) -> dict | None:
                 channel_type=parsed["channel_type"],
             )
             room = db.get_room_by_name(name)
+            if room and parsed["type"] == "private":
+                db.update_room_settings(name, invite_only=1, who_can_invite=parsed.get("who_can_invite") or "owner")
         except Exception:
             room = None
     if room:
@@ -4847,15 +5684,27 @@ def _build_sync_memberships_for_user(user_id: int) -> dict:
 
 
 def _resolve_home_base_for_user(user_id: int) -> str:
-    home_sid = _account_home_server_id(user_id)
+    """Visit node → account home URL for travel push (never treat local as home)."""
+    uid = int(user_id or 0)
+    if uid <= 0:
+        return ""
     ident = db.get_or_create_local_server_identity() or {}
     local_sid = str(ident.get("server_id") or "").strip()
-    if not home_sid or home_sid == local_sid:
-        return ""
+    home_sid, home_base = resolve_account_home_base_url(uid)
+    if home_sid and home_sid != local_sid and home_base:
+        return home_base
+    # Sync state from federated login / prior import names the real home.
     try:
-        for row in db.list_federation_servers(official_only=False):
-            if str(row.get("server_id") or "").strip() == home_sid:
-                return _peer_target(row)
+        st = _sync_state_get(uid) or db.get_user_federation_sync_state(uid) or {}
+        src_sid = str(st.get("source_server_id") or "").strip()
+        src = _norm_base(str(st.get("source_base") or st.get("source_public_url") or ""))
+        if src_sid and local_sid and src_sid != local_sid:
+            resolved = resolve_server_base_url(src_sid)
+            return resolved or src
+        if src:
+            resolved_sid = _resolve_server_id_for_base(src)
+            if resolved_sid and local_sid and resolved_sid != local_sid:
+                return src
     except Exception:
         pass
     return ""
@@ -6562,6 +7411,166 @@ async def federation_sync_memberships_gid(
     if not row:
         return JSONResponse(status_code=404, content={"error": "Account not found on this node"})
     return _build_sync_memberships_for_user(int(row["id"]))
+
+
+@router.post("/federation-sync-merge-gid")
+@limiter.limit("60/hour")
+async def federation_sync_merge_gid(
+    request: Request,
+    x_federation_token: str | None = Header(default=None),
+):
+    """Federated peer merges a visit-node export onto the user's home account."""
+    from routers.federation import _read_body_bytes_once
+
+    raw_body = await _read_body_bytes_once(request)
+    if len(raw_body) > _FEDERATION_MERGE_BODY_MAX:
+        return JSONResponse(
+            status_code=413,
+            content={
+                "error": "Travel merge payload too large",
+                "max_bytes": _FEDERATION_MERGE_BODY_MAX,
+                "got_bytes": len(raw_body),
+            },
+        )
+    auth_ok, peer_id, reason = await _authenticate_federation_peer_request(
+        request, raw_body, x_federation_token,
+    )
+    if not auth_ok:
+        return JSONResponse(
+            status_code=401,
+            content={"error": "Invalid federation auth", "reason": reason or "auth_failed"},
+        )
+    try:
+        parsed = json.loads(raw_body.decode("utf-8") or "{}")
+    except Exception:
+        return JSONResponse(status_code=400, content={"error": "Bad JSON body"})
+    gid = str(parsed.get("global_user_id") or "").strip()
+    if not _GID_RE.match(gid):
+        return JSONResponse(status_code=400, content={"error": "Invalid global_user_id"})
+    export = parsed.get("export")
+    if not isinstance(export, dict):
+        return JSONResponse(status_code=400, content={"error": "export object required"})
+    with db._conn() as con:
+        row = con.execute(
+            "SELECT id FROM users WHERE global_user_id=? LIMIT 1",
+            (gid,),
+        ).fetchone()
+    if not row:
+        return JSONResponse(status_code=404, content={"error": "Account not found on this node"})
+    uid = int(row["id"])
+    if not _user_at_account_home(uid):
+        return JSONResponse(
+            status_code=400,
+            content={"error": "Merge only accepted on the account home node"},
+        )
+    peer_sid = str(peer_id or "").strip()
+    fetch_origin = _norm_base(str(export.get("source_public_url") or ""))
+    if not fetch_origin:
+        try:
+            for srv in db.list_federation_servers(official_only=False):
+                if str(srv.get("server_id") or "").strip() == peer_sid:
+                    fetch_origin = _peer_target(srv)
+                    break
+        except Exception:
+            fetch_origin = ""
+    applied = await asyncio.to_thread(
+        _apply_sync_export_to_user,
+        uid,
+        export,
+        fetch_origin=fetch_origin,
+        merge_mode=True,
+        merge_peer_server_id=peer_sid,
+    )
+    if applied.get("error"):
+        return JSONResponse(status_code=400, content={"error": applied["error"], "applied": applied})
+    return {"ok": True, "applied": applied}
+
+
+@router.post("/travel-room-secrets/stage")
+@limiter.limit("120/hour")
+async def stage_travel_room_secrets(
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+):
+    """Visit node: browser stages private group secrets for the next home merge."""
+    uid = int(current_user.get("id") or 0)
+    if uid <= 0:
+        return JSONResponse(status_code=401, content={"error": "Not authenticated"})
+    if _user_at_account_home(uid):
+        return {"ok": True, "skipped": True, "reason": "at_home"}
+    try:
+        parsed = await request.json()
+    except Exception:
+        return JSONResponse(status_code=400, content={"error": "Bad JSON body"})
+    rows = parsed.get("rooms") if isinstance(parsed, dict) else None
+    if not isinstance(rows, list):
+        return JSONResponse(status_code=400, content={"error": "rooms array required"})
+    clean = _sanitize_travel_room_secrets(rows)
+    if not clean:
+        return {"ok": True, "staged": 0}
+    n = int(db.stage_travel_room_secrets(uid, clean) or 0)
+    if n > 0:
+        schedule_travel_room_secrets_to_home(uid, [r.get("room_name") for r in clean if r.get("room_name")])
+    return {"ok": True, "staged": n}
+
+
+@router.get("/travel-push-status")
+async def travel_push_status(
+    current_user: dict = Depends(get_current_user),
+):
+    """Visit node: whether a background client retry should flush travel data to home."""
+    uid = int(current_user.get("id") or 0)
+    if uid <= 0:
+        return JSONResponse(status_code=401, content={"error": "Not authenticated"})
+    if _user_at_account_home(uid):
+        return {"ok": True, "at_home": True, "needs_client_retry": False}
+    st = db.get_user_federation_sync_state(uid) or {}
+    home_base = _resolve_home_base_for_user(uid)
+    home_reachable = await _probe_home_node_reachable(home_base) if home_base else False
+    staged_secrets = len(db.list_travel_room_secrets_staging(uid))
+    needs_retry = bool(st.get("travel_push_needs_retry"))
+    return {
+        "ok": True,
+        "at_home": False,
+        "needs_client_retry": needs_retry,
+        "home_reachable": home_reachable,
+        "home_base": home_base or "",
+        "staged_secrets": staged_secrets,
+        "last_error": str(st.get("travel_push_last_error") or "").strip(),
+    }
+
+
+@router.get("/travel-room-secrets/pending")
+async def fetch_travel_room_secrets_pending(
+    current_user: dict = Depends(get_current_user),
+):
+    """Home node: browser picks up private group secrets merged from a visit node."""
+    uid = int(current_user.get("id") or 0)
+    if uid <= 0:
+        return JSONResponse(status_code=401, content={"error": "Not authenticated"})
+    if not _user_at_account_home(uid):
+        return JSONResponse(status_code=400, content={"error": "Only available on account home"})
+    rooms = db.take_travel_room_secrets_pending(uid)
+    return {"ok": True, "rooms": rooms}
+
+
+@router.post("/federation-sync-push-home")
+@limiter.limit("24/hour")
+async def federation_sync_push_home(
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+    force: int = 0,
+):
+    """Visit node: merge this session's channels/DMs/social onto home (debounced server-side)."""
+    uid = int(current_user.get("id") or 0)
+    if uid <= 0:
+        return JSONResponse(status_code=401, content={"error": "Not authenticated"})
+    if _user_at_account_home(uid):
+        return {"ok": True, "skipped": True, "reason": "at_home"}
+    result = await _push_travel_state_to_home(uid, force=bool(int(force or 0)))
+    if result.get("error") and not result.get("skipped"):
+        return JSONResponse(status_code=502, content=result)
+    return result
 
 
 @router.get("/federation-sync-export")

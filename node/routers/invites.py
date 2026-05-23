@@ -490,6 +490,16 @@ async def join_via_invite(code: str, current_user: dict = Depends(get_current_us
     except Exception:
         pass
 
+    try:
+        db.add_room_to_sync_allowlist(int(current_user["id"]), room["name"])
+    except Exception:
+        pass
+    try:
+        from routers.auth import schedule_travel_room_shell_to_home
+        schedule_travel_room_shell_to_home(int(current_user["id"]), room["name"])
+    except Exception:
+        pass
+
     full_room = db.get_room_by_name(room["name"]) or {}
     return {
         "ok": True,

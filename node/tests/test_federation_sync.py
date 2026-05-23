@@ -10,6 +10,7 @@ import json
 import os
 import tempfile
 import unittest
+from unittest import mock
 
 
 class FederationSyncTests(unittest.TestCase):
@@ -275,6 +276,23 @@ class FederationSyncTests(unittest.TestCase):
         db.set_user_account_home_server_id(int(traveler_uid), "srv_real_home", force=True)
         self.assertEqual(db.resolve_global_user_home_server_id(traveler_gid), "srv_real_home")
 
+    def test_pinned_home_wins_over_federation_profile_origin(self):
+        db = self.db
+        import bcrypt as _bcrypt
+
+        local_sid = str((db.get_or_create_local_server_identity() or {}).get("server_id") or "")
+        gid = "00000000-0000-4000-8000-000000000097"
+        pw_hash = _bcrypt.hashpw(b"secret12", _bcrypt.gensalt()).decode()
+        uid = db.create_user_with_hash("pinned_traveler", pw_hash, gid)
+        self.assertIsNotNone(uid)
+        db.upsert_federation_user_profile(
+            gid,
+            nickname="pinned_traveler",
+            origin_server_id=local_sid,
+        )
+        db.set_user_account_home_server_id(int(uid), "srv_main_home", force=True)
+        self.assertEqual(db.resolve_global_user_home_server_id(gid), "srv_main_home")
+
     def test_export_includes_peer_home_server_id(self):
         import routers.auth as auth_mod
 
@@ -360,6 +378,239 @@ class FederationSyncTests(unittest.TestCase):
         self.assertEqual(db.get_user_sync_room_allowlist(uid), {"alpha"})
         order = json.loads(db.get_room_order(uid) or "[]")
         self.assertEqual(order, ["alpha"])
+
+    def test_union_merge_room_allowlist_keeps_home_joins(self):
+        import routers.auth as auth_mod
+
+        db = self.db
+        uid = int(db.create_user("merge_union_user", "secret12"))
+        home_id = db.create_room("home-only", "h", "public", uid, None)
+        travel_id = db.create_room("travel-new", "t", "private", uid, "hint only")
+        db.join_room(uid, home_id)
+        db.join_room(uid, travel_id)
+        db.set_user_sync_room_allowlist(uid, ["home-only"])
+        merged = auth_mod._union_merge_room_allowlist(uid, {"travel-new"})
+        self.assertIn("home-only", merged)
+        self.assertIn("travel-new", merged)
+
+    def test_travel_created_room_survives_home_allowlist_prune(self):
+        db = self.db
+        uid = int(db.create_user("travel_creator", "secret12"))
+        db.set_user_account_home_server_id(uid, "srv_home_other", force=True)
+        db.set_config("federation.server_id", "srv_au_visit")
+        travel_id = db.create_room("u", "secret grp", "private", uid, "hint")
+        self.assertIsNotNone(travel_id)
+        db.join_room(uid, int(travel_id))
+        db.add_room_to_sync_allowlist(uid, "u")
+        pruned = db.apply_sync_room_allowlist(uid, {"general"})
+        self.assertEqual(pruned, 0)
+        joined = set(db.get_user_joined_room_ids(uid))
+        self.assertIn(int(travel_id), joined)
+        self.assertIn("u", db.get_user_sync_room_allowlist(uid))
+
+    @mock.patch("routers.auth._verify_travel_merge_export")
+    def test_merge_travel_private_room_owned_on_home(self, _verify):
+        import routers.auth as auth_mod
+
+        db = self.db
+        uid = int(db.create_user("home_user", "secret12"))
+        gid = str((db.get_user_by_id(uid) or {}).get("global_user_id") or "")
+        db.set_config("federation.server_id", "srv_home_main")
+        db.set_user_account_home_server_id(uid, "srv_home_main", force=True)
+        export = {
+            "global_user_id": gid,
+            "source_server_id": "srv_au_visit",
+            "source_public_url": "https://au.example.com",
+            "rooms": [{
+                "name": "u",
+                "type": "private",
+                "channel_type": "text",
+                "owner_global_user_id": gid,
+                "room_key_hint": "my hint",
+                "invite_only": 1,
+                "who_can_invite": "owner",
+            }],
+            "travel_push": True,
+        }
+        applied = auth_mod._apply_sync_export_to_user(
+            uid,
+            export,
+            fetch_origin="https://au.example.com",
+            merge_mode=True,
+            merge_peer_server_id="srv_au_visit",
+        )
+        self.assertGreaterEqual(int(applied.get("rooms_joined") or 0), 1)
+        room = db.get_room_by_name("u")
+        self.assertIsNotNone(room)
+        self.assertEqual(int(room.get("owner_id") or 0), uid)
+        joined = set(db.get_user_joined_room_ids(uid))
+        self.assertIn(int(room["id"]), joined)
+
+    def test_travel_push_export_is_lean(self):
+        import json
+        import routers.auth as auth_mod
+
+        db = self.db
+        uid = int(db.create_user("travel_lean", "secret12"))
+        db.set_config("federation.server_id", "srv_au_visit")
+        db.set_user_account_home_server_id(uid, "srv_home_main", force=True)
+        room_id = db.create_room("leanroom", "Lean", "private", uid, "hint")
+        self.assertIsNotNone(room_id)
+        db.join_room(uid, int(room_id))
+        export = auth_mod._build_sync_travel_push_export(uid)
+        self.assertTrue(export.get("travel_push"))
+        self.assertEqual(export.get("sync_export_page"), "travel")
+        self.assertNotIn("social_posts", export)
+        self.assertNotIn("room_histories", export)
+        self.assertNotIn("stories", export)
+        self.assertNotIn("public_rooms", export)
+        names = [r.get("name") for r in (export.get("rooms") or []) if isinstance(r, dict)]
+        self.assertIn("leanroom", names)
+        blob = json.dumps(export)
+        self.assertLess(len(blob), 512_000)
+
+    def test_travel_push_includes_staged_room_secrets(self):
+        import routers.auth as auth_mod
+
+        db = self.db
+        uid = int(db.create_user("travel_secrets", "secret12"))
+        db.set_config("federation.server_id", "srv_au_visit")
+        db.set_user_account_home_server_id(uid, "srv_home_main", force=True)
+        room_id = db.create_room("secroom", "Secret", "private", uid, "hint")
+        self.assertIsNotNone(room_id)
+        db.join_room(uid, int(room_id))
+        db.stage_travel_room_secrets(uid, [{
+            "room_name": "secroom",
+            "secret": "my-shared-pass",
+            "key_version": 1,
+        }])
+        export = auth_mod._build_sync_travel_push_export(uid)
+        secrets = export.get("room_secrets") or []
+        self.assertEqual(len(secrets), 1)
+        self.assertEqual(secrets[0].get("room_name"), "secroom")
+
+    @mock.patch("routers.auth._verify_travel_merge_export")
+    def test_merge_travel_room_secrets_pending_on_home(self, _verify):
+        import routers.auth as auth_mod
+
+        db = self.db
+        uid = int(db.create_user("home_secrets", "secret12"))
+        gid = str((db.get_user_by_id(uid) or {}).get("global_user_id") or "")
+        db.set_config("federation.server_id", "srv_home_main")
+        db.set_user_account_home_server_id(uid, "srv_home_main", force=True)
+        export = {
+            "global_user_id": gid,
+            "source_server_id": "srv_au_visit",
+            "source_public_url": "https://au.example.com",
+            "rooms": [],
+            "room_secrets": [{
+                "room_name": "secroom",
+                "secret": "my-shared-pass",
+                "key_version": 1,
+            }],
+            "travel_push": True,
+        }
+        applied = auth_mod._apply_sync_export_to_user(
+            uid,
+            export,
+            fetch_origin="https://au.example.com",
+            merge_mode=True,
+            merge_peer_server_id="srv_au_visit",
+        )
+        self.assertEqual(int(applied.get("room_secrets_stored") or 0), 1)
+        pending = db.take_travel_room_secrets_pending(uid)
+        self.assertEqual(len(pending), 1)
+        self.assertEqual(pending[0].get("room_name"), "secroom")
+
+    def test_resolve_home_base_from_sync_state(self):
+        import routers.auth as auth_mod
+
+        db = self.db
+        uid = int(db.create_user("travel_push_user", "secret12"))
+        db.set_config("federation.server_id", "srv_au_visit")
+        db.upsert_user_federation_sync_state(uid, {
+            "source_base": "https://frogtalk.xyz",
+            "source_public_url": "https://frogtalk.xyz",
+            "source_server_id": "srv_home_main",
+            "done": True,
+        })
+        base = auth_mod._resolve_home_base_for_user(uid)
+        self.assertEqual(base, "https://frogtalk.xyz")
+
+    def test_split_travel_push_export_chunks(self):
+        import json
+        import routers.auth as auth_mod
+
+        export = {
+            "export_version": auth_mod._SYNC_EXPORT_VERSION,
+            "sync_export_page": "travel",
+            "global_user_id": "gid_test_user",
+            "source_server_id": "srv_au",
+            "source_public_url": "https://au.example.com",
+            "travel_push": True,
+            "issued_at": 1,
+            "exported_at": 1,
+            "rooms": [{"name": f"r{i}", "type": "private", "channel_type": "text"} for i in range(25)],
+            "room_secrets": [{"room_name": "r0", "secret": "s", "key_version": 1}],
+            "dm_peers": [],
+            "following": [],
+            "friends": [],
+            "friend_pending_out": [],
+            "friend_pending_in": [],
+            "blocked_users": [],
+        }
+        chunks = auth_mod._split_travel_push_export(export)
+        self.assertGreaterEqual(len(chunks), 3)
+        room_count = sum(len(c.get("rooms") or []) for c in chunks)
+        self.assertEqual(room_count, 25)
+        for c in chunks:
+            wire = len(json.dumps({"export": c}).encode("utf-8"))
+            self.assertLess(wire, auth_mod._FEDERATION_MERGE_BODY_MAX)
+
+    def test_travel_room_shell_export_is_small(self):
+        import json
+        import routers.auth as auth_mod
+
+        db = self.db
+        uid = int(db.create_user("shell_push_user", "secret12"))
+        db.set_user_account_home_server_id(uid, "srv_home_main", force=True)
+        db.set_config("federation.server_id", "srv_au_visit")
+        db.upsert_user_federation_sync_state(uid, {
+            "source_base": "https://frogtalk.xyz",
+            "source_public_url": "https://frogtalk.xyz",
+            "source_server_id": "srv_home_main",
+            "done": True,
+        })
+        rid = db.create_room("mygrp", "Secret", "private", uid, "hint")
+        self.assertIsNotNone(rid)
+        db.join_room(uid, int(rid))
+        db.add_room_to_sync_allowlist(uid, "mygrp")
+        ctx = auth_mod._travel_push_visit_context(uid)
+        self.assertIsNotNone(ctx)
+        export = auth_mod._build_travel_room_shell_export(ctx, "mygrp")
+        self.assertTrue(export.get("travel_shell"))
+        self.assertEqual(len(export.get("rooms") or []), 1)
+        self.assertEqual((export.get("rooms") or [{}])[0].get("name"), "mygrp")
+        wire = len(json.dumps({"global_user_id": ctx["gid"], "export": export}).encode("utf-8"))
+        self.assertLess(wire, 4096)
+
+    def test_travel_push_retry_flag_and_status(self):
+        import routers.auth as auth_mod
+
+        db = self.db
+        uid = int(db.create_user("retry_push_user", "secret12"))
+        db.set_user_account_home_server_id(uid, "srv_home_main", force=True)
+        db.set_config("federation.server_id", "srv_au_visit")
+        db.upsert_user_federation_sync_state(uid, {
+            "source_base": "https://frogtalk.xyz",
+            "source_public_url": "https://frogtalk.xyz",
+            "source_server_id": "srv_home_main",
+            "done": True,
+        })
+        auth_mod._mark_travel_push_needs_retry(uid, "home_unreachable")
+        self.assertTrue(auth_mod._travel_push_needs_client_retry(uid))
+        auth_mod._clear_travel_push_retry(uid)
+        self.assertFalse(auth_mod._travel_push_needs_client_retry(uid))
 
 
     def test_list_room_message_participants_excludes_bridges(self):

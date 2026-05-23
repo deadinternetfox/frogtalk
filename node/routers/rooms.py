@@ -636,6 +636,10 @@ async def create_room(request: Request, body: CreateRoomRequest,
     # Auto-join creator
     db.join_room(current_user["id"], room_id)
     try:
+        db.add_room_to_sync_allowlist(int(current_user["id"]), body.name)
+    except Exception:
+        pass
+    try:
         db.insert_federation_outbox_event({
             "event_id": f"evt_{int(time.time() * 1000):016x}_{uuid.uuid4().hex[:8]}",
             "event_type": "room.member.joined",
@@ -644,6 +648,11 @@ async def create_room(request: Request, body: CreateRoomRequest,
                 "nickname": current_user["nickname"],
             },
         })
+    except Exception:
+        pass
+    try:
+        from routers.auth import schedule_travel_room_shell_to_home
+        schedule_travel_room_shell_to_home(int(current_user["id"]), body.name)
     except Exception:
         pass
     return {"ok": True, "id": room_id, "name": body.name}
@@ -850,6 +859,12 @@ async def update_room(room_name: str, body: UpdateRoomRequest,
             await manager.broadcast_room(effective_name, ws_evt)
         except Exception:
             pass
+
+    try:
+        from routers.auth import schedule_travel_push_to_home
+        schedule_travel_push_to_home(int(current_user["id"]), force=bool(renamed_to))
+    except Exception:
+        pass
 
     return {"ok": True, "renamed_to": renamed_to} if renamed_to else {"ok": True}
 
@@ -1711,6 +1726,15 @@ async def join_room(
     # the key — the standard rotate flow then fans the new secret out
     # to every current member, including this joiner.
     await request_private_room_rekey(room, current_user)
+    try:
+        db.add_room_to_sync_allowlist(int(current_user["id"]), name)
+    except Exception:
+        pass
+    try:
+        from routers.auth import schedule_travel_room_shell_to_home
+        schedule_travel_room_shell_to_home(int(current_user["id"]), name)
+    except Exception:
+        pass
     return {"ok": True}
 
 
@@ -1957,9 +1981,24 @@ async def leave_room(room_name: str, current_user: dict = Depends(get_current_us
     if was_owner:
         after = db.get_room_by_name(room_name)
         if not after:
+            try:
+                from routers.auth import schedule_travel_push_to_home
+                schedule_travel_push_to_home(int(current_user["id"]), force=True)
+            except Exception:
+                pass
             return {"ok": True, "owner_action": "deleted"}
+        try:
+            from routers.auth import schedule_travel_push_to_home
+            schedule_travel_push_to_home(int(current_user["id"]), force=True)
+        except Exception:
+            pass
         return {"ok": True, "owner_action": "transferred",
                 "new_owner_id": after.get("owner_id")}
+    try:
+        from routers.auth import schedule_travel_push_to_home
+        schedule_travel_push_to_home(int(current_user["id"]), force=True)
+    except Exception:
+        pass
     return {"ok": True}
 
 

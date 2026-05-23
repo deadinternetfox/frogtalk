@@ -615,6 +615,148 @@ const App = {
     } catch {}
   },
 
+  _travelPushHeartbeat: null,
+  _travelPushPageHideBound: false,
+  _homeTravelRefreshBound: false,
+  _travelOfflineRetryBusy: false,
+
+  async refreshHomeTravelUpdates() {
+    if (!State.token || !this.isAtHomeNode()) return;
+    try {
+      if (window.DeviceCrypto && typeof DeviceCrypto.importPendingTravelRoomSecretsFromServer === 'function') {
+        await DeviceCrypto.importPendingTravelRoomSecretsFromServer();
+      }
+    } catch {}
+    try {
+      if (typeof Rooms !== 'undefined' && Rooms.loadRooms) await Rooms.loadRooms();
+    } catch {}
+  },
+
+  startHomeTravelRefresh() {
+    if (!State.token || !this.isAtHomeNode() || this._homeTravelRefreshBound) return;
+    this._homeTravelRefreshBound = true;
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') void this.refreshHomeTravelUpdates();
+    });
+    window.addEventListener('focus', () => { void this.refreshHomeTravelUpdates(); });
+  },
+
+  scheduleTravelPushToHome(reason = '', opts = {}) {
+    // Server pushes travel state automatically; client export is offline fallback only.
+    if (!State.token || this.isAtHomeNode()) return;
+    if (opts && opts.force) {
+      void this._pushTravelStateToHome(reason, { force: true, silent: !!(opts && opts.silent) });
+    }
+  },
+
+  startTravelPushOfflineRetry() {
+    if (!State.token || this.isAtHomeNode()) return;
+    if (this._travelPushHeartbeat) return;
+  // Poll for failed server pushes; flush once home is reachable again.
+    void this._maybeRetryTravelPushToHome('boot');
+    this._travelPushHeartbeat = setInterval(() => {
+      if (State.token && !this.isAtHomeNode()) {
+        void this._maybeRetryTravelPushToHome('heartbeat');
+      }
+    }, 90000);
+    if (!this._travelPushPageHideBound) {
+      this._travelPushPageHideBound = true;
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+          void this._maybeRetryTravelPushToHome('focus');
+        }
+      });
+    }
+  },
+
+  stopTravelPushAutoSync() {
+    if (this._travelPushHeartbeat) {
+      clearInterval(this._travelPushHeartbeat);
+      this._travelPushHeartbeat = null;
+    }
+  },
+
+  async _maybeRetryTravelPushToHome(reason = '') {
+    if (!State.token || this.isAtHomeNode() || this._travelOfflineRetryBusy) return false;
+    let status = null;
+    try {
+      const res = await fetch('/api/auth/travel-push-status', {
+        headers: { 'X-Session-Token': State.token },
+        credentials: 'include',
+      });
+      status = await res.json().catch(() => ({}));
+      if (!res.ok || !status?.needs_client_retry) return false;
+      if (!status.home_reachable) return false;
+    } catch {
+      return false;
+    }
+    this._travelOfflineRetryBusy = true;
+    try {
+      return await this._pushTravelStateToHome(reason || 'offline_retry', {
+        force: true,
+        silent: true,
+      });
+    } finally {
+      this._travelOfflineRetryBusy = false;
+    }
+  },
+
+  async _pushTravelStateToHome(reason = '', opts = {}) {
+    if (!State.token || this.isAtHomeNode()) return false;
+    const force = !!(opts && opts.force);
+    const silent = !!(opts && opts.silent);
+    try {
+      if (window.DeviceCrypto && typeof DeviceCrypto.stageRoomSecretsForHomeSync === 'function') {
+        await DeviceCrypto.stageRoomSecretsForHomeSync();
+      }
+      const url = force
+        ? '/api/auth/federation-sync-push-home?force=1'
+        : '/api/auth/federation-sync-push-home';
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'X-Session-Token': State.token },
+        credentials: 'include',
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data?.ok && !data?.skipped && !silent && typeof UI !== 'undefined' && UI.showToast) {
+        const joined = Number(data?.applied?.rooms_joined || 0);
+        const secrets = Number(data?.applied?.room_secrets_stored || 0);
+        if (joined > 0 || secrets > 0) {
+          const parts = [];
+          if (joined > 0) {
+            parts.push(`${joined} channel${joined === 1 ? '' : 's'}`);
+          }
+          if (secrets > 0) {
+            parts.push(`${secrets} private secret${secrets === 1 ? '' : 's'}`);
+          }
+          UI.showToast(
+            `Synced ${parts.join(' and ')} to home`,
+            'success',
+            4500,
+          );
+        }
+      }
+      if (!res.ok && force && !silent && typeof UI !== 'undefined' && UI.showToast) {
+        const err = String(data?.error || data?.reason || res.status);
+        if (String(err).includes('413') || err === 'payload_too_large') {
+          UI.showToast(
+            'Sync to home was too large for one request — update AU + home nodes, then retry (travel sync now sends small chunks).',
+            'warn',
+            9000,
+          );
+        } else if (err === 'home_unreachable') {
+          UI.showToast('Home node URL unknown on this server — open Settings → Network and confirm account home is frogtalk.xyz.', 'warn', 9000);
+        } else {
+          UI.showToast(`Could not sync travel data to home: ${err.slice(0, 80)}`, 'warn', 7000);
+        }
+      }
+      return res.ok && data?.ok;
+    } catch (e) {
+      if (!silent) console.warn('[App] travel push to home failed', reason, e);
+      return false;
+    }
+  },
+
   async clearAccountHomePin() {
     if (!State.token) return false;
     const ok = (typeof UI !== 'undefined' && UI.confirm)
@@ -1297,6 +1439,8 @@ const App = {
     if (atHomeNode) {
       this.clearFederationSyncClientState();
       this._applyFederationSyncUiState({ in_progress: false, done: false, hint: '' });
+      try { await this.refreshHomeTravelUpdates(); } catch {}
+      try { this.startHomeTravelRefresh(); } catch {}
     }
 
     const justSwitchedNode = !atHomeNode && (
@@ -1351,6 +1495,9 @@ const App = {
 
     if (!atHomeNode) {
       try { await this.ensureSignalReadyForDecrypt({ patient: justSwitchedNode, timeoutMs: 15000 }); } catch {}
+      try { this.startTravelPushOfflineRetry(); } catch {}
+    } else {
+      try { this.stopTravelPushAutoSync(); } catch {}
     }
 
     // Cold-boot from FCM: recover the offer before the permissions wizard can block Accept.
@@ -1999,6 +2146,13 @@ const App = {
     try {
       if (typeof Rooms !== 'undefined' && Rooms.loadRooms) await Rooms.loadRooms();
     } catch {}
+    if (this.isAtHomeNode()) {
+      try {
+        if (window.DeviceCrypto && typeof DeviceCrypto.importPendingTravelRoomSecretsFromServer === 'function') {
+          await DeviceCrypto.importPendingTravelRoomSecretsFromServer();
+        }
+      } catch {}
+    }
     try {
       if (typeof Rooms !== 'undefined' && Rooms.warnPrivateRoomsMissingSecrets) {
         Rooms.warnPrivateRoomsMissingSecrets();
@@ -2258,8 +2412,9 @@ const App = {
       } catch {}
       if (!target) target = joined[0] || null;
       if (target) {
-        const type = (target.channel_type === 'voice') ? 'music' : (target.channel_type || 'public');
-        Rooms.switchToRoom(target.name, type);
+        const roomType = target.type || 'public';
+        const chType = (target.channel_type === 'voice') ? 'music' : (target.channel_type || 'text');
+        Rooms.switchToRoom(target.name, roomType, null, chType);
         return;
       }
     } catch {}

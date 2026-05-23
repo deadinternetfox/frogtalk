@@ -994,6 +994,205 @@ def _server_advertises_onion_only(server: dict) -> bool:
     return transport == "onion"
 
 
+# Production directory pair (main clearnet hub + Tor mirror).
+_OFFICIAL_MAIN_SERVER_ID = "srv_ee3f0ff0c6e74fadb542"
+_TOR_MIRROR_SERVER_ID = "srv_c93cf598b239402c8452"
+_TOR_MIRROR_ONION_URL = (
+    "http://icn3a43nb6byhdmon4rqzeqswkskk2bnvf54l6at3iskmqlture3blqd.onion"
+)
+_OFFICIAL_MESH_PEERS: list[dict] = [
+    {
+        "server_id": _TOR_MIRROR_SERVER_ID,
+        "display_name": "FrogTalk Tor Mirror",
+        "base_url": "",
+        "onion_url": _TOR_MIRROR_ONION_URL,
+        "region": "Tor Hidden Service",
+        "capabilities": ["federation-v1"],
+        "transport_preference": "onion",
+    },
+]
+
+
+def _is_official_main_hub() -> bool:
+    """True when this process is the frogtalk.xyz clearnet directory hub."""
+    if _tor_mode_enabled():
+        return False
+    try:
+        local = db.get_or_create_local_server_identity() or {}
+    except Exception:
+        return False
+    sid = str(local.get("server_id") or "").strip()
+    if sid == _OFFICIAL_MAIN_SERVER_ID:
+        return True
+    base = _normalize_base_url(str(local.get("base_url") or ""))
+    site = _normalize_base_url(
+        os.getenv("FROGTALK_SITE_URL", "") or os.getenv("SITE_URL", "") or "",
+    )
+    hosts: set[str] = set()
+    for url in (base, site):
+        host = (_url_hostname(url) or "").strip().lower()
+        if host:
+            hosts.add(host)
+    return "frogtalk.xyz" in hosts
+
+
+def ensure_official_mesh_peers() -> int:
+    """Upsert built-in Tor mirror on the main hub when missing from the directory DB."""
+    if not _is_official_main_hub():
+        return 0
+    ensured = 0
+    for item in _OFFICIAL_MESH_PEERS:
+        row = _coerce_server_row(item)
+        if not row:
+            continue
+        sid = row["server_id"]
+        existing = db.get_federation_server_row(sid)
+        onion_ok = bool(_normalize_base_url(str((existing or {}).get("onion_url") or "")))
+        enabled = int((existing or {}).get("enabled") or 0)
+        if existing and onion_ok and enabled:
+            continue
+        region = row["region"] or _resolved_server_region(row)
+        db.upsert_federation_server(
+            server_id=sid,
+            display_name=row["display_name"],
+            base_url=row["base_url"],
+            onion_url=row["onion_url"],
+            region=region,
+            official=True,
+            trust_tier="official",
+            capabilities=row["capabilities"],
+        )
+        ensured += 1
+    return ensured
+
+
+def _builtin_tor_mirror_directory_row() -> dict:
+    """Canonical Tor mirror row for the public network picker (onion-only view)."""
+    item = dict(_OFFICIAL_MESH_PEERS[0])
+    item["official"] = 1
+    item["enabled"] = 1
+    item["trust_tier"] = "official"
+    return _public_server_view_for_client(item)
+
+
+def _hybrid_node_enabled() -> bool:
+    """Clearnet hub that federates with Tor peers (e.g. frogtalk.xyz + onion relay)."""
+    for key in ("FROGTALK_HYBRID_NODE", "FROGTALK_TOR_RELAY_NODE"):
+        raw = (os.getenv(key, "") or "").strip().lower()
+        if raw in ("1", "true", "yes", "on"):
+            return True
+    if _tor_mode_enabled():
+        return False
+    if _is_official_main_hub():
+        return True
+    try:
+        local = db.get_or_create_local_server_identity() or {}
+    except Exception:
+        return False
+    onion_env = _normalize_base_url(os.getenv("FROGTALK_ONION_URL", ""))
+    if not onion_env:
+        return False
+    site = _normalize_base_url(
+        os.getenv("FROGTALK_SITE_URL", "") or os.getenv("SITE_URL", "") or "",
+    )
+    local_base = _normalize_base_url(str(local.get("base_url") or ""))
+    if site and local_base and site.rstrip("/") != local_base.rstrip("/"):
+        return False
+    return bool(int(local.get("official") or 0))
+
+
+def _network_viewer_mode() -> str:
+    """How this node participates in the public network picker (tor | hybrid | clearnet)."""
+    if _tor_mode_enabled():
+        return "tor"
+    if _hybrid_node_enabled():
+        return "hybrid"
+    return "clearnet"
+
+
+def _is_tor_directory_listing(server: dict) -> bool:
+    """True when the app must never show a clearnet IP for this directory row."""
+    if _server_advertises_onion_only(server):
+        return True
+    onion = _normalize_base_url(str(server.get("onion_url") or ""))
+    if not onion:
+        return False
+    sid = str(server.get("server_id") or "").strip()
+    if sid == _TOR_MIRROR_SERVER_ID:
+        return True
+    transport = str(server.get("transport_preference") or "").strip().lower()
+    if transport == "onion":
+        return True
+    name = str(server.get("display_name") or "").lower()
+    if "tor" in name and any(tok in name for tok in ("mirror", "hidden", "onion")):
+        return True
+    base = _normalize_base_url(str(server.get("base_url") or ""))
+    if not base:
+        return True
+    try:
+        host = (_url_hostname(base) or "").strip()
+        if host and ipaddress.ip_address(host):
+            return True
+    except ValueError:
+        pass
+    return False
+
+
+def _is_hybrid_directory_listing(server: dict) -> bool:
+    """Clearnet hub with optional onion relay (visible to Tor and hybrid viewers)."""
+    if _is_tor_directory_listing(server):
+        return False
+    base = _normalize_base_url(str(server.get("base_url") or ""))
+    onion = _normalize_base_url(str(server.get("onion_url") or ""))
+    if base and onion:
+        return True
+    if base and int(server.get("official") or 0):
+        return True
+    return False
+
+
+def _peer_visible_in_network_picker(server: dict) -> bool:
+    """Tor → hybrid+tor listings; hybrid → all; clearnet-only → clearnet peers only."""
+    mode = _network_viewer_mode()
+    tor_peer = bool(server.get("tor_listing"))
+    hybrid_peer = bool(server.get("hybrid_listing"))
+    if mode == "hybrid":
+        return True
+    if mode == "tor":
+        return tor_peer or hybrid_peer
+    return not tor_peer
+
+
+def _filter_network_picker_servers(servers: list[dict]) -> list[dict]:
+    return [s for s in servers if _peer_visible_in_network_picker(s)]
+
+
+def federation_policy_admin_ui() -> dict:
+    """Server-admin toggles: Tor auto-block only applies on hybrid hubs."""
+    mode = _network_viewer_mode()
+    return {
+        "network_viewer_mode": mode,
+        "show_block_tor_peers": mode == "hybrid",
+        "show_block_http_only_peers": mode in ("hybrid", "clearnet"),
+        "block_tor_peers_applicable": mode == "hybrid",
+    }
+
+
+def _public_server_view_for_client(server: dict) -> dict:
+    """Public directory row for the SPA — Tor listings never expose clearnet IPs."""
+    raw = dict(server or {})
+    tor_listing = _is_tor_directory_listing(raw)
+    if tor_listing:
+        public = _public_server_view(raw, onion_only=True)
+        public["tor_listing"] = True
+        public["hybrid_listing"] = False
+        return public
+    public = _public_server_view(raw, onion_only=_tor_mode_enabled())
+    public["tor_listing"] = False
+    public["hybrid_listing"] = _is_hybrid_directory_listing(raw)
+    return public
+
+
 def _select_peer_push_target(server: dict) -> str:
     """Outbound federation push URL — prefer clearnet inbox over Tor."""
     base = _normalize_base_url(str((server or {}).get("base_url") or ""))
@@ -1005,6 +1204,8 @@ def _select_peer_push_target(server: dict) -> str:
 def _public_server_target(server: dict) -> str:
     onion_url = _normalize_base_url(str(server.get("onion_url") or ""))
     base_url = _normalize_base_url(str(server.get("base_url") or ""))
+    if _is_tor_directory_listing(server):
+        return onion_url or base_url
     if _server_advertises_onion_only(server):
         return onion_url or base_url
     return base_url or onion_url
@@ -1855,6 +2056,8 @@ async def sync_official_directory_once(directory_url: str | None = None) -> dict
     if not url:
         return {"ok": False, "imported": 0, "skipped": 0, "error": "directory_url_not_set"}
 
+    mesh_ensured = await asyncio.to_thread(ensure_official_mesh_peers)
+
     try:
         entries = await asyncio.to_thread(_load_directory_entries, url)
     except Exception as e:
@@ -1897,6 +2100,7 @@ async def sync_official_directory_once(directory_url: str | None = None) -> dict
         "imported": imported,
         "skipped": skipped,
         "total": len(entries),
+        "mesh_peers_ensured": mesh_ensured,
         "tor_peers_disabled": tor_disabled,
         "http_peers_disabled": http_disabled,
         "duplicates_pruned": pruned,
@@ -1987,11 +2191,15 @@ async def ice_config(
 
 @router.get("/network/servers")
 async def list_network_servers(request: Request, official_only: int = 0):
-    rows = [_public_server_view(row) for row in db.list_federation_servers(official_only=bool(official_only))]
+    ensure_official_mesh_peers()
+    rows = [
+        _public_server_view_for_client(row)
+        for row in db.list_federation_servers(official_only=bool(official_only))
+    ]
     local = db.get_or_create_local_server_identity()
     request_base = _normalize_base_url(str(request.base_url))
     local_base = _normalize_base_url(local.get("base_url") or request_base)
-    local_public = _public_server_view({
+    local_public = _public_server_view_for_client({
         "server_id": local["server_id"],
         "display_name": local["display_name"],
         "base_url": local_base,
@@ -2002,11 +2210,16 @@ async def list_network_servers(request: Request, official_only: int = 0):
         "capabilities": ["federation-v1"],
         "enabled": 1,
         "last_seen": None,
-    }, onion_only=_tor_mode_enabled())
+    })
     local_target = _public_server_target(local_public)
     if local_target and not any((s.get("server_id") == local["server_id"] or _public_server_target(s) == local_target) for s in rows):
         rows.insert(0, local_public)
-    return {"servers": _dedupe_public_servers(rows)}
+    if _is_official_main_hub() and not any(
+        s.get("server_id") == _TOR_MIRROR_SERVER_ID for s in rows
+    ):
+        rows.append(_builtin_tor_mirror_directory_row())
+    rows = _filter_network_picker_servers(_dedupe_public_servers(rows))
+    return {"servers": rows, "network_viewer_mode": _network_viewer_mode()}
 
 
 @router.get("/network/verify")
@@ -2053,7 +2266,12 @@ async def probe_network_servers(
     servers = (await list_network_servers(request=request, official_only=official_only)).get("servers", [])
 
     async def probe_one(server: dict):
-        target = server.get("onion_url") if (include_onion and server.get("onion_url")) else _public_server_target(server)
+        if server.get("tor_listing") and server.get("onion_url"):
+            target = _normalize_base_url(str(server.get("onion_url") or ""))
+        elif include_onion and server.get("onion_url"):
+            target = _normalize_base_url(str(server.get("onion_url") or ""))
+        else:
+            target = _public_server_target(server)
         result = await asyncio.to_thread(_probe_url, target, timeout_ms / 1000.0)
         probe_status = _network_probe_status(target, result)
         return {

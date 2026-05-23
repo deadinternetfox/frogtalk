@@ -54,7 +54,12 @@ const WS = (() => {
     }
     _room = room;
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    const url = `${proto}://${location.host}/ws/${encodeURIComponent(room)}?token=${encodeURIComponent(State.token)}`;
+    let url = `${proto}://${location.host}/ws/${encodeURIComponent(room)}`;
+    // Prefer in-memory token; same-origin WS also sends the HttpOnly
+    // ft_session cookie, which the server accepts if the query token is stale
+    // (common right after a federation node switch).
+    const tok = String((typeof State !== 'undefined' && State.token) || '').trim();
+    if (tok) url += `?token=${encodeURIComponent(tok)}`;
     const ws = new WebSocket(url);
     _ws = ws;
 

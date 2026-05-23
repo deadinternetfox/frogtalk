@@ -1287,13 +1287,16 @@ input, select {
           <div class="control-stack">
             <div class="control-group">
               <div class="control-title">Federation Directory</div>
-              <label class="policy-toggle" for="block-tor-peers">
-                <input type="checkbox" id="block-tor-peers" autocomplete="off">
-                <span class="policy-toggle-copy">
-                  <strong>Block Tor federation peers automatically</strong>
-                  <span class="field-hint">When enabled, peers reached via .onion are disabled for sync, inbox delivery, and outbound push. Does not re-enable peers when turned off. Default: off.</span>
-                </span>
-              </label>
+              <div id="block-tor-peers-wrap">
+                <label class="policy-toggle" for="block-tor-peers">
+                  <input type="checkbox" id="block-tor-peers" autocomplete="off">
+                  <span class="policy-toggle-copy">
+                    <strong>Block Tor federation peers automatically</strong>
+                    <span class="field-hint">Hybrid hubs only: disables .onion peers for sync and push. Not shown on clearnet-only or Tor-only nodes (those meshes do not mix with Tor the same way).</span>
+                  </span>
+                </label>
+              </div>
+              <div id="clearnet-federation-policy-note" class="inline-note" style="display:none;margin-top:8px;"></div>
               <label class="policy-toggle" for="block-http-only-peers" style="margin-top:10px;">
                 <input type="checkbox" id="block-http-only-peers" autocomplete="off">
                 <span class="policy-toggle-copy">

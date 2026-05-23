@@ -78,8 +78,20 @@ This is a living report — not a promise that everything below is finished.
 
 ### Account sync
 
-- Profiles, friends, room lists, **DM ciphertext history** (for UI continuity).
+- **Home → visit:** profiles, friends, room lists, **DM ciphertext history** (for UI continuity).
+- **Visit → home (merge):** channels you create or join on a travel node are pushed to your home node (signed federation merge); the next home→visit import spreads them to other peers.
 - Travel: historical DM ciphertext is **display-only locked**, not decrypted.
+- **Private channel secrets** stay in the browser (`localStorage` / Key Manager export) — merge copies channel metadata and hints, not the shared secret itself.
+
+### Network picker visibility (Settings → Network)
+
+| This node type | Sees in picker |
+|----------------|----------------|
+| **Clearnet-only** (e.g. AU) | Other clearnet nodes + official hub (HTTPS) |
+| **Hybrid** (`FROGTALK_HYBRID_NODE=1`, frogtalk.xyz) | Clearnet + Tor mirror (.onion) |
+| **Tor-only** | Tor mirror + hybrid hub (not clearnet-only community nodes) |
+
+Server Admin **Block Tor federation peers** toggle appears only on **hybrid** hubs (not on clearnet-only or Tor-only nodes).
 
 ---
 

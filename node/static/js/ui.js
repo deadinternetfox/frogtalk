@@ -2623,7 +2623,7 @@ function ensureNetworkPaneContent() {
     <div style="background:#121816;border:1px solid #2a3a32;border-radius:8px;padding:10px;margin-bottom:12px;font-size:11px;color:#8da59b;line-height:1.5">
       <strong style="color:#9ec59e">Routing vs account home</strong><br>
       <span style="color:#7a8a82">Preferred routing</span> (mode + server list below) chooses which node you open by default — travel convenience only.<br>
-      <span style="color:#7a8a82">Account home</span> (sync panel above) is your federation identity and the server that exports channels, DMs, and FrogSocial when you visit peers. Changing routing does <em>not</em> change home; use <strong>Set home node…</strong> in the sync panel when needed.
+      <span style="color:#7a8a82">Account home</span> (sync panel above) is your federation identity: peers import from it, and changes you make while traveling merge back to it. Changing routing does <em>not</em> change home; use <strong>Set home node…</strong> in the sync panel when needed.
     </div>
 
     <label class="modal-label" style="margin-top:0">Connection Mode</label>
@@ -2719,10 +2719,7 @@ function _paintNetworkTabInstant() {
   }
   const saved = localStorage.getItem('ft_network_selected') || '';
   if (_networkHydrateProbeFromCache()) {
-    _networkSelectedServer = _networkProbeResults.find(s => _normalizeNetworkUrl(s.onion_url || s.base_url || '') === saved)
-      || _networkProbeResults.find(s => s.healthy)
-      || _networkProbeResults[0]
-      || null;
+    _networkSelectedServer = _pickDefaultNetworkServer();
     _renderNetworkServersList();
     _renderNetworkSelection();
     _updateNetworkProbeHint();
@@ -2847,6 +2844,8 @@ function _isTorPreferred() {
 function _preferredNetworkUrl(server) {
   const onion = _normalizeNetworkUrl(server?.onion_url || '');
   const base = _normalizeNetworkUrl(server?.base_url || '');
+  if (server?.tor_listing && onion) return onion;
+  if (onion && !base) return onion;
   return (_isTorPreferred() && onion) ? onion : (base || onion);
 }
 
@@ -2877,6 +2876,25 @@ function _getConnectedServerBaseUrl() {
   } catch {
     return '';
   }
+}
+
+/** Prefer the node this browser is on, then saved preference, then first healthy. */
+function _pickDefaultNetworkServer() {
+  const connectedBase = _getConnectedServerBaseUrl();
+  if (connectedBase && _networkProbeResults.length) {
+    const here = _networkProbeResults.find((s) => _preferredNetworkUrl(s) === connectedBase);
+    if (here) return here;
+  }
+  const saved = _normalizeNetworkUrl(localStorage.getItem('ft_network_selected') || '');
+  if (saved && _networkProbeResults.length) {
+    const picked = _networkProbeResults.find(
+      (s) => _normalizeNetworkUrl(s.onion_url || s.base_url || '') === saved,
+    );
+    if (picked) return picked;
+  }
+  const current = _networkCurrentServerEntry();
+  if (current) return current;
+  return _networkProbeResults.find((s) => s && s.healthy) || _networkProbeResults[0] || null;
 }
 
 async function _loadCurrentNetworkStatus() {
@@ -3664,13 +3682,13 @@ function _renderNetworkServersList() {
   list.innerHTML = _networkProbeResults.map((s) => {
     const publicAddr = _preferredNetworkUrl(s);
     const torPreferred = _isTorPreferred();
-    const isOnion = _isOnionNetworkUrl(publicAddr) || !!s.onion_url;
+    const isOnion = _isOnionNetworkUrl(publicAddr) || !!s.tor_listing || (!!s.onion_url && !s.base_url);
     const healthy = !!s.healthy;
     const probeStatus = String(s.probe_status || '').toLowerCase();
     const probeError = String(s.probe_error || '');
     const probeErrorLower = probeError.toLowerCase();
     const advertisedBase = String(s.base_url || '').trim().toLowerCase();
-    const isHttpOnly = advertisedBase.startsWith('http://');
+    const isHttpOnly = !s.tor_listing && advertisedBase.startsWith('http://');
     const latency = s.latency_ms == null ? 'n/a' : `${s.latency_ms} ms`;
     const region = _networkRegionLabel(s, s.base_url || publicAddr);
     let statusColor = healthy ? '#4caf50' : '#f44336';
@@ -3912,7 +3930,7 @@ async function refreshNetworkServers(opts) {
       _networkProbeResults.unshift(currentServer);
     }
     if (!_networkSelectedServer && _networkProbeResults.length) {
-      _networkSelectedServer = _networkProbeResults.find(s => s.healthy) || _networkProbeResults[0];
+      _networkSelectedServer = _pickDefaultNetworkServer();
     }
     const healthy = _networkProbeResults.filter(s => s && s.healthy).length;
     const total = _networkProbeResults.length;
@@ -4163,12 +4181,27 @@ async function _fetchFederationSwitchTicket(targetBase) {
   return '';
 }
 
-/** Pre-switch encryption step (fresh-keys policy = info only; transfer = legacy upload). */
+/** Pre-switch encryption step (switch blob is backup when home was offline). */
 async function _dctBeforeNodeSwitch(switchTicket) {
   const t = String(switchTicket || '').trim();
   if (!t || !window.DeviceCrypto || !State.user?.id) return true;
   if (DeviceCrypto.usesFreshKeysOnTravel && DeviceCrypto.usesFreshKeysOnTravel()) {
-    return DeviceCrypto.exportAndUploadForSwitch(t);
+    try { sessionStorage.setItem('ft_switch_ticket_dct', t); } catch {}
+    try {
+      if (typeof DeviceCrypto.exportAndUploadForSwitch === 'function') {
+        await DeviceCrypto.exportAndUploadForSwitch(t);
+      }
+    } catch (e) {
+      if (window.__ftDctDebug) console.info('[DCT] switch blob backup skipped', e);
+    }
+    if (typeof UI !== 'undefined' && UI.showToast) {
+      UI.showToast(
+        'Switching — channels sync to home automatically on the server. Key file backup helps if home was offline.',
+        'info',
+        5500,
+      );
+    }
+    return true;
   }
   try {
     if (window.Signal && typeof Signal.init === 'function' && !Signal.isReady()) {
@@ -4204,6 +4237,43 @@ async function _dctBeforeNodeSwitch(switchTicket) {
   }
   return true;
 }
+
+/** Clickable “🌐 Federated · host” pill on visit-node profiles (opens home-node profile). */
+function renderFederatedHomeBadgeHtml(u, escFn, styleExtra = '') {
+  if (!u || !u.federated) return '';
+  const esc = escFn || ((t) => (typeof UI !== 'undefined' && UI.escHtml ? UI.escHtml(t) : String(t || '')));
+  const homeUrl = String(u.home_base_url || '').trim();
+  const hostLabel = homeUrl.replace(/^https?:\/\//i, '').replace(/\/$/, '');
+  const here = _normalizeNetworkUrl(window.location.origin || '');
+  const homeNorm = homeUrl ? _normalizeNetworkUrl(homeUrl) : '';
+  const clickable = !!(homeNorm && here && homeNorm !== here);
+  const inner = `🌐${hostLabel ? ' ' + esc(hostLabel) : ''}`;
+  const baseStyle = `display:inline-flex;align-items:center;gap:3px;font-size:9px;font-weight:600;color:#7fd6a2;background:rgba(127,214,162,.08);border:1px solid rgba(127,214,162,.22);padding:1px 6px;border-radius:6px;line-height:1.35;vertical-align:middle;${styleExtra}`;
+  if (!clickable) {
+    return `<span class="ft-fed-home-badge" style="${baseStyle}" title="Federated identity">${inner}</span>`;
+  }
+  const payload = encodeURIComponent(JSON.stringify({
+    global_user_id: String(u.global_user_id || ''),
+    nickname: String(u.nickname || ''),
+    home_base_url: homeUrl,
+    home_server_id: String(u.home_server_id || ''),
+  }));
+  const nickTitle = esc(String(u.nickname || 'user'));
+  const hostTitle = esc(hostLabel || 'home node');
+  return `<button type="button" class="ft-fed-home-badge" style="${baseStyle};cursor:pointer;font:inherit" title="Open @${nickTitle} on ${hostTitle}" data-ft-home-open="${payload}" onclick="event.stopPropagation();void _openFedBadgeHome(this)">${inner}</button>`;
+}
+
+function _openFedBadgeHome(el) {
+  if (!el || !el.dataset) return;
+  let o = {};
+  try {
+    o = JSON.parse(decodeURIComponent(el.dataset.ftHomeOpen || '%7B%7D'));
+  } catch {}
+  void openFederatedUserOnHomeNode(o);
+}
+
+window.renderFederatedHomeBadgeHtml = renderFederatedHomeBadgeHtml;
+window._openFedBadgeHome = _openFedBadgeHome;
 
 /** Open a federated user's profile on their home node (ticket + profile deep link). */
 async function openFederatedUserOnHomeNode(opts = {}) {
@@ -4374,7 +4444,7 @@ async function _loadNetworkSettingsAsync(seq) {
   const currentServer = _networkCurrentServerEntry();
   if (!_networkHydrateProbeFromCache()) {
     _networkProbeResults = currentServer ? [currentServer] : [];
-    _networkSelectedServer = _networkProbeResults[0] || null;
+    _networkSelectedServer = _pickDefaultNetworkServer();
     _renderNetworkServersList();
     _renderNetworkSelection();
   } else if (currentServer) {
@@ -4382,16 +4452,13 @@ async function _loadNetworkSettingsAsync(seq) {
     if (connectedBase && !_networkProbeResults.some(s => _preferredNetworkUrl(s) === connectedBase)) {
       _networkProbeResults.unshift(currentServer);
     }
+    _networkSelectedServer = _pickDefaultNetworkServer();
   }
   _renderNetworkSelection();
   _renderNetworkSyncState(
     (window.App && App.federationSyncState) ? App.federationSyncState : (window.__ftFederationSync || {})
   );
-  const saved = localStorage.getItem('ft_network_selected') || '';
-  _networkSelectedServer = _networkProbeResults.find(s => _normalizeNetworkUrl(s.onion_url || s.base_url || '') === saved)
-    || _networkProbeResults.find(s => s.healthy)
-    || _networkProbeResults[0]
-    || _networkSelectedServer;
+  _networkSelectedServer = _pickDefaultNetworkServer();
   _renderNetworkServersList();
   _renderNetworkSelection();
   _updateNetworkProbeHint();
@@ -7233,7 +7300,6 @@ async function showFederatedProfileCard(opts) {
 
   const displayLabel = u.display_name || u.nickname || nick;
   const handle = u.nickname || nick;
-  const homeHost = String(u.home_base_url || '').replace(/^https?:\/\//, '').replace(/\/$/, '');
   const css = String(u.custom_style || '');
   if (css && typeof applyProfileCustomCss === 'function') applyProfileCustomCss(css);
 
@@ -7248,7 +7314,7 @@ async function showFederatedProfileCard(opts) {
         <div style="flex:1;min-width:0">
           <div style="font-size:20px;font-weight:700;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(displayLabel)}</div>
           <div style="font-size:13px;color:#8ab89a;margin-top:2px">@${esc(handle)}</div>
-          <span style="display:inline-flex;align-items:center;gap:4px;margin-top:6px;font-size:10px;color:#7fd6a2;background:rgba(127,214,162,.1);border:1px solid rgba(127,214,162,.3);padding:2px 8px;border-radius:8px">🌐 Federated${homeHost ? ' · ' + esc(homeHost) : ''}</span>
+          ${renderFederatedHomeBadgeHtml(u, esc, 'margin-top:6px;')}
         </div>
       </div>`;
   }
@@ -7261,35 +7327,17 @@ async function showFederatedProfileCard(opts) {
     ? `<button type="button" class="modal-btn primary" style="flex:1;min-width:120px" onclick="closeModal('modal-federated-profile');showUserInfo('${esc(handle).replace(/'/g, "\\'")}',${u.local_user_id})">Full profile</button>`
     : `<div style="font-size:12px;color:#7a9a82;line-height:1.45">DM, call, and friend actions need a local account on this node. Re-sync from your home node to mirror contacts.</div>`;
 
-  const hereNorm = _normalizeNetworkUrl(window.location.origin || '');
-  const homeNorm = _normalizeNetworkUrl(String(u.home_base_url || ''));
-  const homeLink = (homeNorm && hereNorm && homeNorm !== hereNorm)
-    ? `<button type="button" class="modal-btn secondary" id="fedprof-home-btn" style="width:100%;margin-top:10px;padding:8px 12px;font-size:12px">Visit on home node ↗</button>`
-    : '';
-
   host.querySelector('#fedprof-body').innerHTML = `
     ${warn}
     <div style="font-size:14px;color:#ccc;line-height:1.5;margin-bottom:12px">${esc(u.bio || 'No bio set.')}</div>
     ${_renderFederatedProfileStatusHtml(u, esc)}
     <div style="margin-top:14px;padding-top:12px;border-top:1px solid #2a2a2a;display:flex;flex-direction:column;gap:8px">${actions}</div>
-    ${homeLink}
   `;
   const retryBtn = host.querySelector('#fedprof-retry-btn');
   const refreshBtn = host.querySelector('#fedprof-refresh-btn');
-  const homeBtn = host.querySelector('#fedprof-home-btn');
   const retryOpts = { ...o, refresh: true };
   if (retryBtn) retryBtn.onclick = () => { void showFederatedProfileCard(retryOpts); };
   if (refreshBtn) refreshBtn.onclick = () => { void showFederatedProfileCard(retryOpts); };
-  if (homeBtn) {
-    homeBtn.onclick = () => {
-      void openFederatedUserOnHomeNode({
-        global_user_id: u.global_user_id || gid,
-        nickname: u.nickname || nick,
-        home_base_url: u.home_base_url,
-        home_server_id: u.home_server_id || homeSid,
-      });
-    };
-  }
   return u;
 }
 

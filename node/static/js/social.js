@@ -1140,12 +1140,27 @@ const Social = (() => {
   // Shared posts fetch with per-nickname cache.
   // Wall, music, reels, and public media tabs all hit the same /posts endpoint
   // — caching means switching between them is instant after the first load.
+  function _profileUsesHomeProxy(prof, isSelf) {
+    const p = prof || {};
+    if (p.wall_on_home) return true;
+    const homeUrl = String(
+      (isSelf && State.user && State.user.account_home_base_url)
+        ? State.user.account_home_base_url
+        : (p.home_base_url || '')
+    ).trim();
+    if (!homeUrl || typeof App === 'undefined' || !App._normalizeOrigin) return !!p.federated;
+    const here = App._normalizeOrigin(window.location.origin || '');
+    const home = App._normalizeOrigin(homeUrl);
+    return !!(home && here && home !== here);
+  }
+
   async function _fetchProfilePostsCached(nickname, loadToken, tabKey) {
     const cacheKey = String(nickname || '').toLowerCase();
     const cached = _profilePostsCache.get(cacheKey);
     if (_cacheFresh(cached)) return cached.posts;
     const prof = _profileData || {};
-    const proxyHome = !!(prof.federated && (prof.wall_on_home || prof.home_base_url));
+    const isSelf = !!(State.user && String(nickname || '').toLowerCase() === String(State.user.nickname || '').toLowerCase());
+    const proxyHome = _profileUsesHomeProxy(prof, isSelf);
     const postsQs = proxyHome ? '?proxy_home=1' : '';
     let res = null;
     for (let i = 0; i < 2; i += 1) {
@@ -3910,9 +3925,27 @@ const Social = (() => {
 
       _updateTabLoadUi(loadUi, 86, 'Rendering profile', 'Preparing wall and tabs');
 
-      const fedHomeLabel = (u.federated && u.home_base_url)
-        ? esc(String(u.home_base_url).replace(/^https?:\/\//i, ''))
-        : '';
+      const _badgeUser = (() => {
+        const row = { ...u };
+        if (isSelf && State.user && State.user.account_home_base_url && typeof App !== 'undefined' && App._normalizeOrigin) {
+          const pinned = App._normalizeOrigin(State.user.account_home_base_url);
+          const here = App._normalizeOrigin(window.location.origin || '');
+          if (pinned && here && pinned !== here) {
+            row.federated = true;
+            row.home_base_url = State.user.account_home_base_url;
+            row.home_server_id = State.user.account_home_server_id || row.home_server_id;
+            row.wall_on_home = true;
+          } else if (pinned && here && pinned === here) {
+            row.federated = false;
+          }
+        }
+        return row;
+      })();
+      const fedHomeBadge = (typeof renderFederatedHomeBadgeHtml === 'function')
+        ? renderFederatedHomeBadgeHtml(_badgeUser, esc, '')
+        : (_badgeUser.federated
+          ? `<span class="ft-fed-home-badge">🌐 Federated</span>`
+          : '');
       let spBannerBg = 'linear-gradient(135deg,#1a3a1a 0%,#0d1f0d 50%,#1a2a1a 100%)';
       if (typeof UI !== 'undefined' && UI.profileBannerBackground) {
         spBannerBg = UI.profileBannerBackground(u.banner);
@@ -3938,9 +3971,8 @@ const Social = (() => {
             <div class="sp-name-row">
               <span class="sp-nick">${u.is_admin ? '<span class="sf-admin-crown" title="FrogTalk Admin" aria-label="Admin">👑</span> ' : ''}${esc(u.display_name || u.nickname)}${isSelf && u.profile_public === false ? ' <span class="sp-privacy-badge" title="Your profile is private — only friends can view it">🔒 Private</span>' : ''}</span>
             </div>
-            <div class="sp-handle-row" style="margin-top:3px;margin-bottom:8px">
-              <span class="sp-handle">@${esc(u.nickname)}</span>
-              ${u.federated ? `<span style="display:inline-flex;align-items:center;gap:4px;margin-left:8px;font-size:10px;color:#7fd6a2;background:rgba(127,214,162,.1);border:1px solid rgba(127,214,162,.28);padding:2px 8px;border-radius:8px;vertical-align:middle">🌐 Federated${fedHomeLabel ? ' · ' + fedHomeLabel : ''}</span>` : ''}
+            <div class="sp-handle-row">
+              <span class="sp-handle">@${esc(u.nickname)}</span>${fedHomeBadge}
             </div>
             ${u.federated && u.home_unreachable ? `<div style="font-size:11px;color:#f6d27a;margin:-4px 0 8px;line-height:1.4">Home node unreachable — showing cached profile. <button type="button" class="sp-action-btn secondary" style="padding:4px 8px;font-size:11px;margin-top:6px" onclick="Social.openProfile('${esc(u.nickname)}',{refresh:true})">↻ Refresh</button></div>` : ''}
             <div class="sp-actions-row" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px">

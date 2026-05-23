@@ -182,6 +182,11 @@ async def follow_user(request: Request, nickname: str, current_user: dict = Depe
                 })
         except Exception:
             _log.debug("follow notif failed", exc_info=True)
+        try:
+            from routers.auth import schedule_travel_push_to_home
+            schedule_travel_push_to_home(int(current_user["id"]), force=True)
+        except Exception:
+            pass
     return {
         "ok": True,
         "following": True,
@@ -200,6 +205,11 @@ async def unfollow_user(nickname: str, current_user: dict = Depends(get_current_
         federation_mod.enqueue_social_follow_changed(
             current_user, target, action="unfollow",
         )
+    except Exception:
+        pass
+    try:
+        from routers.auth import schedule_travel_push_to_home
+        schedule_travel_push_to_home(int(current_user["id"]), force=True)
     except Exception:
         pass
     return {
@@ -266,15 +276,17 @@ def _federation_subject_meta(user: dict) -> dict:
         gid = db.find_federation_profile_gid_by_nickname(str(user.get("nickname") or ""))
     if not gid:
         return {}
-    origin = str(db.get_federation_profile_origin(gid) or "").strip()
+    from routers.auth import resolve_server_base_url
+
+    home_sid = str(db.resolve_global_user_home_server_id(gid) or "").strip()
     local_sid = _local_server_id()
-    if not origin or (local_sid and origin == local_sid):
+    if not home_sid or (local_sid and home_sid == local_sid):
         return {"global_user_id": gid}
-    home_base = resolve_server_base_url(origin)
+    home_base = resolve_server_base_url(home_sid)
     return {
         "global_user_id": gid,
         "federated": True,
-        "home_server_id": origin,
+        "home_server_id": home_sid,
         "home_base_url": home_base,
         "wall_on_home": True,
         "home_unreachable": False,
@@ -492,13 +504,13 @@ async def profile_posts(
             gid = str(user.get("global_user_id") or "").strip()
             if not gid:
                 gid = db.find_federation_profile_gid_by_nickname(nickname)
-            origin = str(db.get_federation_profile_origin(gid) or "").strip() if gid else ""
+            home_sid = str(db.resolve_global_user_home_server_id(gid) or "").strip() if gid else ""
             local_sid = _local_server_id()
-            if gid and origin and local_sid and origin != local_sid:
+            if gid and home_sid and local_sid and home_sid != local_sid:
                 meta["home_proxy_attempted"] = True
                 remote = _fetch_home_profile_posts(
                     gid,
-                    origin,
+                    home_sid,
                     limit=limit,
                     offset=offset,
                     viewer_global_user_id=viewer_gid,
