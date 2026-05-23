@@ -3249,7 +3249,7 @@ body.ft-incoming-call-active #incoming-call{z-index:20000}
   background:linear-gradient(135deg,#ff6d64,#e1473d);
   color:#fff;box-shadow:0 6px 16px rgba(248,81,73,.3);
 }
-.dm-sys-log-wrap{display:flex;justify-content:center;padding:10px 4px;width:100%}
+.dm-sys-log-wrap{display:flex;justify-content:center;padding:10px 4px;width:100%;max-width:100%;box-sizing:border-box}
 .dm-sys-log-card{
   width:min(96%,480px);
   display:flex;align-items:flex-start;gap:12px;
@@ -3275,8 +3275,10 @@ body.ft-incoming-call-active #incoming-call{z-index:20000}
   border:1px solid color-mix(in srgb, var(--accent-color) 50%, var(--border-color));
   background:color-mix(in srgb, var(--accent-color) 18%, var(--surface-color));
   color:var(--text-color);
+  transition:background .15s ease,border-color .15s ease;
 }
 .dm-sys-log-btn:hover{background:color-mix(in srgb, var(--accent-color) 28%, var(--surface-color))}
+.dm-sys-log-btn:focus-visible{outline:2px solid color-mix(in srgb, var(--accent-color) 60%, #fff);outline-offset:2px}
 .dm-sys-log-btn-primary{
   background:var(--accent-color);
   color:color-mix(in srgb, var(--accent-color) 12%, #000);
@@ -11739,7 +11741,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoa
 <script src="/static/js/users.js?v=202"></script>
 <script src="/static/js/emoji.js?v=193"></script>
 <script src="/static/js/friends.js?v=422"></script>
-<script src="/static/js/dms.js?v=493"></script>
+<script src="/static/js/dms.js?v=495"></script>
 <script src="/static/js/calls.js?v=246"></script>
 <script src="/static/js/media.js?v=423"></script>
 <script src="/static/js/gifs.js?v=205"></script>

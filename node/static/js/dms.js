@@ -159,16 +159,128 @@ function _parseDMCallLog(content) {
   try { return JSON.parse(content.slice('[[CALLLOG]]'.length)); } catch { return null; }
 }
 
+const DMLOCK_PREFIX = '[[DMLOCK]]';
+
 function _parseDMSysLog(content) {
   if (typeof content !== 'string' || !content.startsWith('[[DMSYS]]')) return null;
   try { return JSON.parse(content.slice('[[DMSYS]]'.length)); } catch { return null; }
+}
+
+function _dmIsLegacyLockText(text) {
+  const s = String(text || '');
+  if (!s || s.startsWith(DMLOCK_PREFIX) || s.startsWith('[[DMSYS]]') || s.startsWith('[[CALLLOG]]')) {
+    return false;
+  }
+  return s.includes('\u{1F512}') && (
+    s.includes('keys not available')
+    || s.includes('From home node')
+    || s.includes('Encrypted on your home node')
+    || s.includes('keys out of sync')
+    || s.includes('Could not unlock')
+    || s.includes('waiting for encryption sync')
+    || s.includes('Syncing from your home')
+    || s.includes('Sync failed')
+    || s.includes('Encryption sync incomplete')
+    || s.includes('Import a .key')
+    || s.includes('import keys')
+    || s.includes('Starting encryption')
+    || s.includes('Cannot fetch encryption')
+    || s.includes('Unlocking')
+  );
+}
+
+function _parseDMLock(content) {
+  if (typeof content !== 'string') return null;
+  if (content.startsWith(DMLOCK_PREFIX)) {
+    try { return JSON.parse(content.slice(DMLOCK_PREFIX.length)); } catch { return null; }
+  }
+  if (_dmIsLegacyLockText(content)) {
+    return _dmLockMetaFromLegacyText(content);
+  }
+  return null;
+}
+
+function _dmLockMetaFromLegacyText(text) {
+  const s = String(text || '');
+  if (s.includes('Sync failed')) return _dmLockMetaFromContext({ reason: 'sync_failed', hint: '' });
+  if (s.includes('Syncing from your home')) return _dmLockMetaFromContext({ reason: 'sync_in_progress' });
+  if (s.includes('Encrypted on your home node') || s.includes('From home node')) {
+    return _dmLockMetaFromContext({ reason: 'home_locked' });
+  }
+  if (s.includes('Import a .key')) return _dmLockMetaFromContext({ reason: 'keys_needed' });
+  if (s.includes('Encryption sync did not complete')) return _dmLockMetaFromContext({ reason: 'sync_attempted' });
+  if (s.includes('Cannot reach peer')) return _dmLockMetaFromContext({ reason: 'peer_unreachable' });
+  if (s.includes('Unlocking')) return _dmLockMetaFromContext({ reason: 'unlocking' });
+  return _dmLockMetaFromContext({ reason: 'decrypt_failed' });
+}
+
+function _dmLockMetaFromContext(ctx) {
+  const reason = String((ctx && ctx.reason) || 'decrypt_failed');
+  const hint = String((ctx && ctx.hint) || '').trim();
+  const rows = {
+    sync_in_progress: {
+      kind: 'sync_in_progress',
+      title: 'Syncing encryption',
+      subtitle: hint || 'Importing account data from your home node…',
+      icon: '↻',
+    },
+    sync_failed: {
+      kind: 'sync_failed',
+      title: 'Sync failed',
+      subtitle: `${hint || 'Home node unreachable'}. Re-sync in Settings → Network or import keys.`,
+      icon: '⚠️',
+    },
+    home_locked: {
+      kind: 'home_locked',
+      title: 'Encrypted on your home node',
+      subtitle: 'This message was copied here but needs your home encryption keys. Send a new message for a fresh thread, or import a .key file.',
+      icon: '🔒',
+    },
+    peer_unreachable: {
+      kind: 'peer_unreachable',
+      title: 'Peer encryption unavailable',
+      subtitle: 'Could not fetch encryption keys from your contact\'s node. Try again later or send a new message.',
+      icon: '⚠️',
+    },
+    unlocking: {
+      kind: 'unlocking',
+      title: 'Unlocking message',
+      subtitle: 'Setting up encryption for this chat…',
+      icon: '🔐',
+    },
+    signal_boot: {
+      kind: 'signal_boot',
+      title: 'Starting encryption',
+      subtitle: 'Encryption is initializing in this browser…',
+      icon: '🔐',
+    },
+    keys_needed: {
+      kind: 'keys_needed',
+      title: 'Keys required',
+      subtitle: 'Import a .key file you exported from home to read older messages on this node.',
+      icon: '🗝️',
+    },
+    sync_attempted: {
+      kind: 'sync_attempted',
+      title: 'Encryption sync incomplete',
+      subtitle: 'Automatic key sync did not finish. Send a new message or import keys manually.',
+      icon: '⚠️',
+    },
+    decrypt_failed: {
+      kind: 'decrypt_failed',
+      title: 'Could not unlock',
+      subtitle: 'This message could not be decrypted. Send a new message or import encryption keys.',
+      icon: '🔒',
+    },
+  };
+  return rows[reason] || rows.decrypt_failed;
 }
 
 function _looksEncryptedBlob(content) {
   if (typeof content !== 'string') return false;
   const s = content.trim();
   if (!s || s.length < 40) return false;
-  if (s.startsWith('[[CALLLOG]]') || s.startsWith('[[DMSYS]]')) return false;
+  if (s.startsWith('[[CALLLOG]]') || s.startsWith('[[DMSYS]]') || s.startsWith(DMLOCK_PREFIX)) return false;
   if (s.startsWith('{') || s.startsWith('[')) {
     try {
       const obj = JSON.parse(s);
@@ -209,6 +321,8 @@ function _looksEncryptedBlob(content) {
 }
 
 function _dmPreviewText(content, hasMedia, mediaType) {
+  const lock = _parseDMLock(content);
+  if (lock) return lock.title || 'Encrypted message';
   const sys = _parseDMSysLog(content);
   if (sys) return sys.title || 'Encryption synced';
   const c = _parseDMCallLog(content);
@@ -651,6 +765,7 @@ function _dmPtCacheGet(cipher) {
 }
 
 function _dmPtCachePut(cipher, plain) {
+  if (typeof plain === 'string' && _dmIsLockPlaceholder(plain)) return;
   _dmPtCacheLoad();
   const k = _dmPtCacheKey(cipher);
   // Refresh insertion order.
@@ -708,21 +823,7 @@ const _DM_DECRYPT_LOCKED_HOME = '\u{1F512} Encrypted on your home node';
 
 function _dmIsLockPlaceholder(text) {
   const s = String(text || '');
-  return s.includes('\u{1F512}') && (
-    s.includes('keys not available')
-    || s.includes('From home node')
-    || s.includes('Encrypted on your home node')
-    || s.includes('keys out of sync')
-    || s.includes('Could not unlock')
-    || s.includes('waiting for encryption sync')
-    || s.includes('Syncing from your home')
-    || s.includes('Sync failed')
-    || s.includes('Encryption sync incomplete')
-    || s.includes('Import a .key')
-    || s.includes('import keys')
-    || s.includes('Starting encryption')
-    || s.includes('Cannot fetch encryption')
-  );
+  return s.startsWith(DMLOCK_PREFIX) || _dmIsLegacyLockText(s);
 }
 
 function _federationSyncSnapshot() {
@@ -794,26 +895,23 @@ function _dmDecryptLockContext(peerId, live) {
 
 function _dmLockedBubbleText(live, peerId) {
   const ctx = _dmDecryptLockContext(peerId, live);
-  switch (ctx.reason) {
-    case 'sync_in_progress':
-      return '🔒 Syncing from your home node…';
-    case 'sync_failed':
-      return `🔒 Sync failed — ${ctx.hint || 'home node unreachable'}. Re-sync in Settings → Network or import keys (🗝️).`;
-    case 'home_locked':
-      return `${_DM_DECRYPT_LOCKED_HOME} — send a new message or import keys (🗝️).`;
-    case 'peer_unreachable':
-      return '🔒 Cannot reach peer node for encryption keys — try again later.';
-    case 'unlocking':
-      return '🔒 Unlocking…';
-    case 'signal_boot':
-      return '🔒 Starting encryption…';
-    case 'keys_needed':
-      return '🔒 Import a .key file (🗝️) to unlock older messages from home.';
-    case 'sync_attempted':
-      return '🔒 Encryption sync did not complete — send a new message or import keys (🗝️).';
-    default:
-      return '🔒 Could not unlock — send a new message or use 🗝️ Import keys.';
+  const meta = _dmLockMetaFromContext(ctx);
+  return DMLOCK_PREFIX + JSON.stringify(meta);
+}
+
+function _dmSysLogCardClass(kind) {
+  const k = String(kind || '');
+  if (k === 'history_locked' || k === 'home_locked' || k === 'keys_needed' || k === 'own_sent_locked') {
+    return 'dm-sys-log-locked';
   }
+  if (k === 'history_import_ok') return 'dm-sys-log-ok';
+  if (k === 'history_import_failed' || k === 'sync_failed' || k === 'sync_attempted'
+      || k === 'peer_unreachable' || k === 'decrypt_failed') return 'dm-sys-log-warn';
+  return 'dm-sys-log-crypto';
+}
+
+function _isDmLockPlaceholder(text) {
+  return !!_parseDMLock(text);
 }
 
 async function _refreshDmLockPlaceholders() {
@@ -822,10 +920,11 @@ async function _refreshDmLockPlaceholders() {
   let changed = false;
   for (const m of _dmMessages) {
     if (!m || m.deleted) continue;
-    if (!_isDmLockPlaceholder(m.content) && !_dmIsLockPlaceholder(m.content)) continue;
+    if (!_isDmLockPlaceholder(m.content)) continue;
     const next = _dmLockedBubbleText(false, peerId);
     if (next && next !== m.content) {
       m.content = next;
+      m._dmLockNotice = true;
       changed = true;
     }
   }
@@ -2136,12 +2235,41 @@ function _scrollDMToBottomStable() {
 
 function _dmSysLogActionsHtml(kind) {
   const k = String(kind || '');
-  if (k !== 'history_locked' && k !== 'history_import_failed') return '';
-  const impPrimary = k === 'history_locked' ? ' dm-sys-log-btn-primary' : '';
+  const withActions = new Set([
+    'history_locked', 'history_import_failed',
+    'home_locked', 'keys_needed', 'sync_failed', 'sync_attempted', 'decrypt_failed',
+  ]);
+  if (!withActions.has(k)) return '';
+  const impPrimary = (k === 'history_locked' || k === 'home_locked' || k === 'keys_needed')
+    ? ' dm-sys-log-btn-primary' : '';
   return `<div class="dm-sys-log-actions" role="group" aria-label="Encryption keys">
     <button type="button" class="dm-sys-log-btn${impPrimary}" onclick="showDmCryptoKeysModal('import')">Import keys</button>
     <button type="button" class="dm-sys-log-btn" onclick="showDmCryptoKeysModal('export')">Export keys</button>
     <button type="button" class="dm-sys-log-btn" onclick="openChatMoreMenu()">More…</button>
+  </div>`;
+}
+
+function _renderDmSysLogCard(meta, msgId, time) {
+  const kind = String(meta?.kind || 'info');
+  const cardClass = _dmSysLogCardClass(kind);
+  const title = esc(meta?.title || 'Notice');
+  const subtitle = esc(meta?.subtitle || '');
+  const icon = esc(meta?.icon || 'ℹ️');
+  const actions = _dmSysLogActionsHtml(kind);
+  const idAttr = msgId ? `msg-${msgId}` : `dm-lock-${Date.now()}`;
+  const dmid = msgId ? ` data-dmid="${msgId}"` : '';
+  const liveKinds = new Set(['unlocking', 'signal_boot', 'sync_in_progress']);
+  const ariaLive = liveKinds.has(kind) ? ' aria-live="polite"' : '';
+  return `<div class="dm-sys-log-wrap" id="${idAttr}"${dmid} data-dm-sys="1" role="status"${ariaLive}>
+    <div class="dm-sys-log-card ${cardClass}">
+      <div class="dm-sys-log-icon">${icon}</div>
+      <div class="dm-sys-log-text" style="flex:1;min-width:0">
+        <div class="dm-sys-log-title">${title}</div>
+        ${subtitle ? `<div class="dm-sys-log-sub">${subtitle}</div>` : ''}
+        ${actions}
+        <div class="dm-sys-log-time">${time}</div>
+      </div>
+    </div>
   </div>`;
 }
 
@@ -2155,29 +2283,17 @@ function renderDMMessage (m) {
   const senderNick = m.sender_nick || '';
   const editedTag = (m.edited_at || m.edited) ? '<span class="msg-edited">(edited)</span>' : '';
 
-  // In-chat system lines: [[DMSYS]]{"kind":"crypto_sync"|"history_locked"|...}
+  // Client-side encryption lock notices ([[DMLOCK]]) — centered system cards, not peer bubbles.
+  const lockMeta = _parseDMLock(m.content);
+  if (lockMeta) {
+    return _renderDmSysLogCard(lockMeta, m.id, time);
+  }
+
+  // Persisted in-chat system lines: [[DMSYS]]{"kind":"crypto_sync"|"history_locked"|...}
   if (typeof m.content === 'string' && m.content.startsWith('[[DMSYS]]')) {
     let meta = null;
     try { meta = JSON.parse(m.content.slice('[[DMSYS]]'.length)); } catch {}
-    const kind = String(meta?.kind || 'info');
-    const cardClass = kind === 'history_locked' ? 'dm-sys-log-locked'
-      : (kind === 'history_import_ok' ? 'dm-sys-log-ok'
-        : (kind === 'history_import_failed' ? 'dm-sys-log-warn' : 'dm-sys-log-crypto'));
-    const title = esc(meta?.title || 'Notice');
-    const subtitle = esc(meta?.subtitle || '');
-    const icon = esc(meta?.icon || 'ℹ️');
-    const actions = _dmSysLogActionsHtml(kind);
-    return `<div class="dm-sys-log-wrap" id="msg-${m.id}" data-dmid="${m.id}">
-      <div class="dm-sys-log-card ${cardClass}">
-        <div class="dm-sys-log-icon">${icon}</div>
-        <div class="dm-sys-log-text" style="flex:1;min-width:0">
-          <div class="dm-sys-log-title">${title}</div>
-          ${subtitle ? `<div class="dm-sys-log-sub">${subtitle}</div>` : ''}
-          ${actions}
-          <div class="dm-sys-log-time">${time}</div>
-        </div>
-      </div>
-    </div>`;
+    return _renderDmSysLogCard(meta || {}, m.id, time);
   }
 
   // Special persisted call-log entries: [[CALLLOG]]{"title":"...","subtitle":"...","icon":"..."}
@@ -2367,7 +2483,8 @@ function renderDMMessage (m) {
     if (ownPlain) _rawContent = ownPlain;
   }
   const _isCipherBlob = _looksEncryptedBlob(_rawContent);
-  const safeContent = (m.view_once || isViewOnceConsumed)
+  const _isLockNotice = _parseDMLock(_rawContent);
+  const safeContent = (m.view_once || isViewOnceConsumed || _isLockNotice)
     ? ''
     : (_isCipherBlob ? '' : _rawContent);
   if (safeContent) {
@@ -2420,17 +2537,20 @@ function renderDMMessage (m) {
   }
   if (!contentHtml && !mediaHtml) {
     if (_isCipherBlob || m._decryptPending) {
-      const _preEnvelope = (() => {
-        try {
-          const o = JSON.parse(_rawContentOrig);
-          return o && o.v === 2 && o.t === 'pre';
-        } catch { return false; }
-      })();
-      contentHtml = mine
-        ? '<em style="color:#888">\uD83D\uDD12 Couldn\u2019t show your sent message on this device</em>'
-        : (_preEnvelope
-          ? '<em style="color:#888">\uD83D\uDD12 Couldn\u2019t unlock this message — ask them to send a new one, or open the chat on the device that received it first</em>'
-          : '<em style="color:#888">\uD83D\uDD12 Older message — encrypted on a previous device</em>');
+      const peerForLock = Number(_activeDM?.user_id) || Number(m.sender_id) || 0;
+      const lockCtx = _dmDecryptLockContext(peerForLock, false);
+      if (mine) {
+        lockCtx.reason = 'decrypt_failed';
+        lockCtx.hint = '';
+        const ownMeta = {
+          kind: 'own_sent_locked',
+          title: 'Sent from another device',
+          subtitle: 'This encrypted message was sent from another browser or node and cannot be shown here.',
+          icon: '🔒',
+        };
+        return _renderDmSysLogCard(ownMeta, m.id, time);
+      }
+      return _renderDmSysLogCard(_dmLockMetaFromContext(lockCtx), m.id, time);
     } else if (m.has_media) {
       contentHtml = '<em style="color:#444">Media</em>';
     }
@@ -3424,7 +3544,10 @@ function handleWSDMMessage (data) {
     }
   }
   const _isDMSys = typeof data.content === 'string' && data.content.startsWith('[[DMSYS]]');
-  const _plainPromise = (_isMine || _isDMSys)
+  const _isDMLock = typeof data.content === 'string' && (
+    data.content.startsWith(DMLOCK_PREFIX) || _dmIsLockPlaceholder(data.content)
+  );
+  const _plainPromise = (_isMine || _isDMSys || _isDMLock)
     ? Promise.resolve(String(data.content || ''))
     : _decryptDMPreviewContent(data.content || '', _peerForDecrypt, _peerNick0, {
       retry: true,
