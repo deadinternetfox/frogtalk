@@ -609,6 +609,45 @@ const WS = (() => {
         if (typeof handleWSDMForwarding === 'function') handleWSDMForwarding(data);
         break;
       }
+      case 'dm_send_warning': {
+        try {
+          if (typeof window.handleDMSendWarning === 'function') window.handleDMSendWarning(data);
+        } catch {}
+        break;
+      }
+      case 'signal_publish_keys': {
+        (async () => {
+          try {
+            if (window.Signal && typeof window.Signal.ensureMyBundleFresh === 'function') {
+              await window.Signal.ensureMyBundleFresh();
+            }
+          } catch (e) {
+            console.warn('[ws] signal_publish_keys failed', e);
+          }
+        })();
+        break;
+      }
+      case 'dm_crypto_resync': {
+        (async () => {
+          const fromId = Number(data.from_id) || 0;
+          if (!fromId || !window.Signal) return;
+          try {
+            if (typeof window.Signal.applyDmCryptoResync === 'function') {
+              await window.Signal.applyDmCryptoResync(fromId);
+            }
+            const nick = String(data.from_nickname || '').trim();
+            const who = nick ? `@${nick}` : 'Your contact';
+            window.UI?.showToast?.(
+              `${who} refreshed encryption — send a new message to continue.`,
+              'info',
+              6000,
+            );
+          } catch (e) {
+            console.warn('[ws] dm_crypto_resync failed', e);
+          }
+        })();
+        break;
+      }
       case 'dm_send_error': {
         // Server rejected a WS dm_message (currently: blocked either way).
         // Hand off to dms.js which knows about optimistic bubbles + nonces.

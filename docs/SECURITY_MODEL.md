@@ -168,11 +168,12 @@ wraps, and often a re-wrap after the relationship exists on both sides. Details:
 ### Account sync (visiting another node)
 
 When you use the same account on a **foreign** node, the app can pull a bounded
-snapshot from your **home** node (`GET/POST /api/auth/federation-sync-*`). On
-**node switch in the same browser**, Device Crypto Transfer (DCT) exports the
-Signal IndexedDB state and wrapped private-room secrets before redirect, stores
-an AES-GCM blob on the source node keyed by the switch ticket, and imports on
-the destination before publishing a new identity (`device_crypto.js`,
+snapshot from your **home** node (`GET/POST /api/auth/federation-sync-*`). On **node switch in the same browser**, the default policy is **fresh DM keys**
+on the travel node: DM ciphertext from home is not migrated (new messages use
+new Signal sessions). Optional **room-secrets-only** transfer stores wrapped
+private-channel secrets in a ticket-keyed AES-GCM blob on the source node
+(small payload; no Signal sessions). Legacy full Signal export remains available
+with `window.FT_DCT_POLICY = 'transfer'` (`device_crypto.js`,
 `/api/auth/device-crypto-blob`, `/api/auth/federation-device-crypto-pull`).
 
 Account sync still pulls: joined

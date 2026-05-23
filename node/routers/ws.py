@@ -148,9 +148,30 @@ def _validate_call_participant(call_id: int, sender_id: int, to_id: int) -> bool
 
 
 def _resolve_to_id(data: dict) -> int:
-    """Get target user_id from to_id or to_nickname field.
-    Nickname lookup is case-insensitive."""
+    """Resolve callee/call peer local user id from WS payload.
+
+    Travel-node shells often have the correct ``global_user_id`` but a stale
+    or missing ``to_id`` — prefer ``to_global_user_id`` when present.
+    """
+    to_gid = str(data.get("to_global_user_id") or "").strip()
     uid = int(data.get("to_id", 0) or 0)
+    if to_gid:
+        with db._conn() as con:
+            row = con.execute(
+                "SELECT id FROM users WHERE global_user_id=? LIMIT 1",
+                (to_gid,),
+            ).fetchone()
+            if row:
+                gid_uid = int(row["id"])
+                if not uid or uid == gid_uid:
+                    return gid_uid
+                # Stale local id from another node — trust global id.
+                check = con.execute(
+                    "SELECT global_user_id FROM users WHERE id=? LIMIT 1",
+                    (uid,),
+                ).fetchone()
+                if not check or str(check["global_user_id"] or "").strip() != to_gid:
+                    return gid_uid
     if not uid:
         nick = (data.get("to_nickname") or data.get("to_nick") or "").strip()
         if nick:
@@ -160,7 +181,7 @@ def _resolve_to_id(data: dict) -> int:
                     (nick,),
                 ).fetchone()
                 if row:
-                    uid = row["id"]
+                    uid = int(row["id"])
     return uid
 
 
@@ -427,6 +448,17 @@ async def websocket_endpoint(
             await manager.send_to_user(caller_id, payload)
             if callee_id != caller_id:
                 await manager.send_to_user(callee_id, payload)
+            try:
+                import federation_calls as _fc
+                _fc.fanout_dm_call_log(
+                    caller_id,
+                    callee_id,
+                    channel_id=channel_id,
+                    content=content,
+                    created_at=payload.get("created_at"),
+                )
+            except Exception:
+                pass
         except Exception:
             pass
 
@@ -876,11 +908,14 @@ async def websocket_endpoint(
                     ch = con.execute(
                         "SELECT user_a, user_b FROM dm_channels WHERE id=?", (channel_id,)
                     ).fetchone()
+                peer_ws_delivered = False
                 if ch:
                     other_id = ch["user_b"] if ch["user_a"] == user["id"] else ch["user_a"]
                     # Don't double-send if DMing yourself
                     if other_id != user["id"]:
-                        await manager.send_to_user(other_id, dm_broadcast)
+                        peer_ws_delivered = bool(
+                            await manager.send_to_user(other_id, dm_broadcast)
+                        )
                     # ALWAYS push, even if the recipient is online via WS:
                     # otherwise the only path to a tray notification is the
                     # JS bridge (window.Android.showNotification) and on
@@ -932,15 +967,34 @@ async def websocket_endpoint(
                             view_once=int(data.get("view_once") or 0),
                             created_at=payload["created_at"],
                         )
-                        if isinstance(dm_enq, dict) and not dm_enq.get("ok") and dm_enq.get("error"):
-                            logger.warning(
-                                "federation: DM enqueue failed (%s) ch=%s peer=%s",
-                                dm_enq.get("error"),
-                                channel_id,
-                                other_id,
-                            )
+                        if isinstance(dm_enq, dict) and not dm_enq.get("ok"):
+                            err_code = str(dm_enq.get("error") or "federation_enqueue_failed")
+                            if err_code == "no_dm_route" and peer_ws_delivered:
+                                pass
+                            else:
+                                logger.warning(
+                                    "federation: DM enqueue failed (%s) ch=%s peer=%s",
+                                    err_code,
+                                    channel_id,
+                                    other_id,
+                                )
+                                await manager.send_personal(websocket, {
+                                    "type": "dm_send_warning",
+                                    "channel_id": channel_id,
+                                    "client_nonce": data.get("client_nonce"),
+                                    "code": err_code,
+                                })
                     except Exception:
                         logger.exception("federation: failed to enqueue DM message")
+                        try:
+                            await manager.send_personal(websocket, {
+                                "type": "dm_send_warning",
+                                "channel_id": channel_id,
+                                "client_nonce": data.get("client_nonce"),
+                                "code": "federation_enqueue_exception",
+                            })
+                        except Exception:
+                            pass
 
             # ── DM typing indicator ───────────────────────────────────
             elif msg_type == "dm_typing":
@@ -1329,7 +1383,7 @@ async def websocket_endpoint(
                         ).fetchone()
                         if crow and crow["global_call_id"]:
                             peer = db.get_user_by_id(to_id) or {}
-                            if _fc.needs_federated_call_delivery(peer):
+                            if _fc.is_remote_peer(peer):
                                 caller_u = db.get_user_by_id(int(crow["caller_id"])) or {}
                                 caller_gid = str(caller_u.get("global_user_id") or "")
                                 if caller_gid:
@@ -1404,7 +1458,7 @@ async def websocket_endpoint(
                 try:
                     import federation_calls as _fc
                     peer = db.get_user_by_id(to_id) or {}
-                    if call_row and call_row["global_call_id"] and _fc.needs_federated_call_delivery(peer):
+                    if call_row and call_row["global_call_id"] and _fc.is_remote_peer(peer):
                         caller_gid = str(peer.get("global_user_id") or "")
                         if caller_gid:
                             _fc.enqueue_call_reject(
@@ -1516,7 +1570,7 @@ async def websocket_endpoint(
                     try:
                         import federation_calls as _fc
                         peer = db.get_user_by_id(to_id) or {}
-                        if call_row["global_call_id"] and _fc.needs_federated_call_delivery(peer):
+                        if call_row["global_call_id"] and _fc.is_remote_peer(peer):
                             peer_gid = str(peer.get("global_user_id") or "")
                             if peer_gid:
                                 _fc.enqueue_call_end(
@@ -1573,7 +1627,7 @@ async def websocket_endpoint(
                             (int(data.get("call_id") or 0),),
                         ).fetchone()
                     peer = db.get_user_by_id(to_id) or {}
-                    if crow and crow["global_call_id"] and _fc.needs_federated_call_delivery(peer):
+                    if crow and crow["global_call_id"] and _fc.is_remote_peer(peer):
                         pgid = str(peer.get("global_user_id") or "")
                         if pgid:
                             _fc.enqueue_call_ice(

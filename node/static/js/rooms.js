@@ -3209,10 +3209,13 @@ const Rooms = (() => {
       if (!missing.length || typeof UI === 'undefined' || !UI.showToast) return;
       const sample = missing.slice(0, 3).map((n) => '#' + n).join(', ');
       const more = missing.length > 3 ? ` (+${missing.length - 3} more)` : '';
+      const onTravel = !!(window.App && typeof App.isAtHomeNode === 'function' && !App.isAtHomeNode());
       UI.showToast(
-        `Private channels still need the shared secret${sample ? ': ' + sample : ''}${more}. `
-        + 'Open each channel to enter it — account sync copies hints only; use node switch in this browser to move saved secrets.',
-        'warning',
+        `Private channel secrets stay on the device where you entered them${sample ? ': ' + sample : ''}${more}. `
+        + (onTravel
+          ? 'On a travel node, open each channel and enter the shared password again.'
+          : 'Open each channel to enter the shared secret.'),
+        'warn',
         10000,
       );
     } catch {}

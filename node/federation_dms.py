@@ -34,17 +34,19 @@ def _party_homed_elsewhere(user: dict | None) -> bool:
 def should_federate_dm(sender: dict | None, peer: dict | None) -> bool:
     """Push to federation when the DM cannot be satisfied only on this node.
 
-    Cross-home threads always fan out (travelers may be connected elsewhere).
-    Same-home DMs skip federation when the recipient is on our WebSocket now.
+    If the recipient is on our WebSocket, delivery is already local — do not
+    require a federation outbox route (avoids false "no_dm_route" warnings when
+    both users are on the same node but account_home points elsewhere).
 
-    ``global_user_id`` is not required here — nicknames in the signed
-    ``dm.message.created`` payload still resolve on the receiver. Requiring
-    GIDs caused "only my messages visible" when a travel session had not yet
-    adopted a global id but the peer was on another node.
+    When the peer is offline here, fan out so other nodes (travel / home) can
+    deliver. ``global_user_id`` is not required on the sender row — nicknames
+    in the signed payload still resolve on receivers.
     """
+    if peer_session_on_local_node(peer):
+        return False
     if _party_homed_elsewhere(sender) or _party_homed_elsewhere(peer):
         return True
-    return not peer_session_on_local_node(peer)
+    return True
 
 
 def dm_parties_have_global_ids(sender: dict | None, peer: dict | None) -> bool:

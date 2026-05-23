@@ -5452,8 +5452,8 @@ def _device_crypto_ticket_hash(ticket: str) -> str:
 
 class DeviceCryptoBlobRequest(BaseModel):
     ticket: str = Field(min_length=16, max_length=8192)
-    # Must match database._DEVICE_CRYPTO_BLOB_MAX (opaque AES-GCM ciphertext).
-    blob_b64: str = Field(min_length=8, max_length=db._DEVICE_CRYPTO_BLOB_MAX)
+    # Pydantic cap must be >= database._DEVICE_CRYPTO_BLOB_MAX (handler returns 413 if over DB max).
+    blob_b64: str = Field(min_length=8, max_length=10 * 1024 * 1024)
 
 
 @router.post("/device-crypto-blob")

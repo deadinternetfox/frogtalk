@@ -114,6 +114,7 @@ let _callState    = 'idle'; // idle | calling | ringing | active
 let _callType     = 'voice';
 let _callPeerNick = null;
 let _callPeerUID  = null;
+let _callPeerGid  = '';
 let _callId       = null;
 let _callTimer    = null;
 let _callSeconds  = 0;
@@ -157,6 +158,29 @@ function _wsLooksOpen() {
   try { return (typeof WS !== 'undefined' && typeof WS.isOpen === 'function') ? WS.isOpen() : true; }
   catch { return true; }
 }
+
+/** Stable peer routing for WS call.* — travel nodes must send global_user_id. */
+function _callPeerRoutingFields() {
+  let gid = '';
+  try {
+    const ch = (typeof _dmChannels !== 'undefined' && Array.isArray(_dmChannels))
+      ? _dmChannels.find(c => String(c.nickname || '').toLowerCase() === String(_callPeerNick || '').toLowerCase())
+      : null;
+    gid = String(
+      _callPeerGid
+      || _activeDM?.global_user_id || _activeDM?.peer_global_user_id
+      || ch?.global_user_id || ch?.other_global_user_id || '',
+    ).trim();
+  } catch {}
+  const out = {
+    to_nickname: _callPeerNick || undefined,
+    to_id: _callPeerUID || undefined,
+  };
+  if (gid) out.to_global_user_id = gid;
+  if (_callGlobalId) out.global_call_id = _callGlobalId;
+  return out;
+}
+
 function _sendCallSignal(payload) {
   if (!payload) return;
   if (_wsLooksOpen()) {
@@ -178,8 +202,7 @@ function _queueIceUntilCallId(candidate) {
   if (!candidate || !_callPeerNick) return;
   _preCallIdIceQueue.push({
     type: 'ice_candidate',
-    to_nickname: _callPeerNick,
-    to_id: _callPeerUID || undefined,
+    ..._callPeerRoutingFields(),
     candidate: JSON.stringify(candidate),
   });
   if (_preCallIdIceQueue.length > 64) _preCallIdIceQueue.splice(0, _preCallIdIceQueue.length - 64);
@@ -555,15 +578,25 @@ async function startCall (type, nick, uid) {
   // cross-node — feed it into the ICE config so RTC negotiates with the
   // peer's TURN as well as ours. Cleared on every fresh startCall so we
   // don't reuse a stale id from a previous call.
-  _peerHomeServerId = String(_activeDM?.peer_home_server_id || '');
-  if (_callPeerNick && !_peerHomeServerId) {
+  const _dmChanForCall = (typeof _dmChannels !== 'undefined' && Array.isArray(_dmChannels))
+    ? _dmChannels.find(c => String(c.nickname || '').toLowerCase() === String(_callPeerNick || '').toLowerCase())
+    : null;
+  _peerHomeServerId = String(
+    _activeDM?.peer_home_server_id || _dmChanForCall?.peer_home_server_id || '',
+  );
+  _callPeerGid = String(
+    _activeDM?.global_user_id || _activeDM?.peer_global_user_id
+    || _dmChanForCall?.global_user_id || _dmChanForCall?.other_global_user_id || '',
+  ).trim();
+  if (_callPeerNick && (!_peerHomeServerId || !_callPeerGid || !_callPeerUID)) {
     try {
       const rp = await apiFetch('/api/users/profile/' + encodeURIComponent(_callPeerNick));
       if (rp.ok) {
         const u = await rp.json();
-        const sid = String(u.peer_home_server_id || '').trim();
+        const sid = String(u.peer_home_server_id || u.home_server_id || '').trim();
         if (sid) _peerHomeServerId = sid;
         if (u.id && !_callPeerUID) _callPeerUID = u.id;
+        if (u.global_user_id) _callPeerGid = String(u.global_user_id || '').trim();
       }
     } catch {}
   }
@@ -620,15 +653,13 @@ async function startCall (type, nick, uid) {
 
     _maybeWarnIdentityRotation(_callPeerUID);
 
-    const peerGid = _activeDM?.global_user_id || _activeDM?.peer_global_user_id || '';
     _sendCallSignal({
-      type         : 'call_offer',
-      to_id        : _callPeerUID || undefined,
-      to_nickname  : _callPeerNick,
-      to_global_user_id: peerGid || undefined,
-      call_type    : type,
-      sdp          : offer.sdp,
-      fp_sig       : fp_sig || undefined,
+      type: 'call_offer',
+      ..._callPeerRoutingFields(),
+      to_global_user_id: _callPeerGid || _callPeerRoutingFields().to_global_user_id,
+      call_type: type,
+      sdp: offer.sdp,
+      fp_sig: fp_sig || undefined,
     });
 
     // Auto-cancel if the callee never answers — prevents the "Calling…"
@@ -677,7 +708,7 @@ async function handleCallOffer (data) {
         const renegFp = await _signCallFp(data.call_id || _callId || 0, _callPeerUID || data.from_id || 0, ans.sdp);
         _sendCallSignal({
           type: 'call_answer',
-          to_nickname: _callPeerNick,
+          ..._callPeerRoutingFields(),
           call_id: data.call_id,
           sdp: ans.sdp,
           renegotiate: true,
@@ -836,12 +867,12 @@ async function acceptCall () {
     const fp_sig = await _signCallFp(answerCallId, peerUid, answer.sdp);
 
     _sendCallAnswerReliable({
-      type        : 'call_answer',
-      to_nickname : _callPeerNick,
-      to_id       : peerUid || undefined,
-      call_id     : offer.call_id || _callId || undefined,
-      sdp         : answer.sdp,
-      fp_sig      : fp_sig || undefined,
+      type: 'call_answer',
+      ..._callPeerRoutingFields(),
+      to_id: peerUid || _callPeerRoutingFields().to_id,
+      call_id: offer.call_id || _callId || undefined,
+      sdp: answer.sdp,
+      fp_sig: fp_sig || undefined,
     });
     _callState = 'active';
     _armConnectingHardCap();
@@ -875,7 +906,12 @@ async function acceptCall () {
 
 function rejectCall () {
   _clearPersistedIncomingCall();
-  _sendCallSignal({ type: 'call_reject', to_nickname: _callPeerNick, call_id: _callId || undefined, reason: 'declined' });
+  _sendCallSignal({
+    type: 'call_reject',
+    ..._callPeerRoutingFields(),
+    call_id: _callId || undefined,
+    reason: 'declined',
+  });
   hideIncomingCall();
   try { Notifications.stopRinging(); } catch {}
   try { window.Android?.dismissRing?.(); } catch {}
@@ -1016,7 +1052,7 @@ function _armConnectingHardCap () {
         const restartFp = await _signCallFp(_callId || 0, _callPeerUID || 0, offer.sdp);
         _sendCallSignal({
           type: 'call_offer',
-          to_nickname: _callPeerNick,
+          ..._callPeerRoutingFields(),
           call_id: _callId || undefined,
           call_type: _callType,
           sdp: offer.sdp,
@@ -1070,11 +1106,11 @@ function handleCallError(data) {
   } else if (reason === 'user_not_found') {
     toast('Could not find that user', 'error');
   } else if (reason === 'federation_route_failed' || reason === 'no_callee_route') {
-    toast('Cannot reach that user on the network — try again after refresh', 'error');
+    toast('Cannot reach that user across nodes — check you are friends and both nodes are online, then try again.', 'error', 8000);
+  } else if (reason === 'not_friends') {
+    toast('Cross-node calls require being friends — add them on this node or wait for sync to finish.', 'error', 8000);
   } else if (reason === 'blocked') {
     toast('Call blocked', 'error');
-  } else if (reason === 'not_friends') {
-    toast('You must be friends to call across nodes', 'error');
   } else if (reason === 'tampering') {
     toast('Call blocked: signalling verification failed', 'error');
   } else {
@@ -1153,8 +1189,7 @@ function endCall (notifyPeer = true, opts) {
     try {
       _sendCallSignal({
         type: 'call_end',
-        to_nickname: _callPeerNick,
-        to_id: _callPeerUID || undefined,
+        ..._callPeerRoutingFields(),
         call_id: _callId || undefined,
         was_connected: wasConnected,
         duration_seconds: durationSecs,
@@ -1234,7 +1269,8 @@ function resetCall () {
     _callUnverified = false;
     _didRelayRetry = false;
     _autoAcceptPending = false;
-    _callState = 'idle'; _callPeerNick = null; _callPeerUID = null; _callId = null;
+    _callState = 'idle'; _callPeerNick = null; _callPeerUID = null; _callPeerGid = '';
+    _callId = null; _callGlobalId = '';
     _callPeerAvatar = null;
     _mutedAudio = false; _mutedVideo = false; _speakerMuted = false;
     try { _stopVAD(); } catch {}
@@ -1279,10 +1315,8 @@ async function createPC () {
     }
     _sendCallSignal({
       type: 'ice_candidate',
-      to_nickname: _callPeerNick,
-      to_id: _callPeerUID || undefined,
+      ..._callPeerRoutingFields(),
       call_id: _callId,
-      global_call_id: _callGlobalId || undefined,
       candidate: JSON.stringify(e.candidate),
     });
   };
@@ -1410,9 +1444,8 @@ async function _renegotiate () {
     const fp_sig = await _signCallFp(_callId || 0, _callPeerUID || 0, offer.sdp);
     _sendCallSignal({
       type: 'call_offer',
-      to_nickname: _callPeerNick,
+      ..._callPeerRoutingFields(),
       call_id: _callId || undefined,
-      global_call_id: _callGlobalId || undefined,
       call_type: _callType,
       sdp: offer.sdp,
       renegotiate: true,

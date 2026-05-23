@@ -52,7 +52,7 @@ function _getChannelPlainMap(channelId) {
 }
 function _rememberDMPlaintext(channelId, msgId, plaintext) {
   if (!channelId || !msgId || typeof plaintext !== 'string' || !plaintext) return;
-  if (_looksEncryptedBlob(plaintext)) return;
+  if (_looksEncryptedBlob(plaintext) || _dmIsLockPlaceholder(plaintext)) return;
   const map = _getChannelPlainMap(channelId);
   const key = String(msgId);
   if (map.get(key) === plaintext) return;
@@ -72,7 +72,8 @@ function _recallDMPlaintext(channelId, msgId) {
   const map = _DM_PLAINTEXT_CACHE.get(String(channelId));
   if (!map) return null;
   const v = map.get(String(msgId));
-  return (typeof v === 'string') ? v : null;
+  if (typeof v !== 'string' || _dmIsLockPlaceholder(v)) return null;
+  return v;
 }
 const _dmPreviewCache = {};
 
@@ -204,8 +205,14 @@ function _looksEncryptedBlob(content) {
 
 function _dmPreviewText(content, hasMedia, mediaType) {
   const c = _parseDMCallLog(content);
-  if (c) return c.subtitle || c.title || 'Call update';
-  if (_looksEncryptedBlob(content)) return 'Encrypted message';
+  if (c) {
+    if (c.kind === 'missed') return c.subtitle || c.title || 'Missed call';
+    return c.subtitle || c.title || 'Call update';
+  }
+  if (_looksEncryptedBlob(content)) {
+    if (_dmSkipHistoricalDecrypt()) return '🔒 From home node';
+    return 'Encrypted message';
+  }
   if (content) return content;
   return (hasMedia || mediaType) ? 'Media' : '';
 }
@@ -687,11 +694,64 @@ function _resolveOwnDMPlaintext(cipher, msgId, channelId) {
 
 const _dmDecryptWarned = new Set();
 const _dmDecryptPermafail = new Set();
-const _DM_DECRYPT_LOCKED = '\u{1F512} Encrypted (keys not available on this node)';
+const _dmPeerRecoveryAttempted = new Set();
+const _dmCryptoResyncAt = new Map(); // peerUserId -> last attempt ms
+const _DM_CRYPTO_RESYNC_COOLDOWN_MS = 10 * 60 * 1000;
+const _DM_DECRYPT_LOCKED_HOME = '\u{1F512} Encrypted on your home node';
+
+function _dmIsLockPlaceholder(text) {
+  const s = String(text || '');
+  return s.includes('\u{1F512}') && (
+    s.includes('keys not available')
+    || s.includes('From home node')
+    || s.includes('Encrypted on your home node')
+    || s.includes('keys out of sync')
+    || s.includes('Could not unlock')
+  );
+}
+
+function _dmLockedBubbleText(live) {
+  if (_dmSkipHistoricalDecrypt()) {
+    return _DM_DECRYPT_LOCKED_HOME + ' — send a new message to start a fresh thread here.';
+  }
+  if (live) {
+    return '🔒 Could not unlock — encryption is re-syncing; send a new message in a moment.';
+  }
+  return '🔒 Encrypted — keys out of sync across nodes. Send a new message or open Settings → Reset encryption keys.';
+}
 
 function _resetDmDecryptWarnings() {
   _dmDecryptWarned.clear();
   _dmDecryptPermafail.clear();
+  _dmPeerRecoveryAttempted.clear();
+}
+
+/** Ask both sides to refresh Signal sessions + prekeys after a live decrypt failure. */
+async function _dmTryCoordinatedResync(peerUserId) {
+  const pid = Number(peerUserId) || 0;
+  if (!pid || _dmSkipHistoricalDecrypt()) return;
+  if (window.Signal && typeof window.Signal.isPeerBundleBackedOff === 'function'
+      && window.Signal.isPeerBundleBackedOff(pid)) {
+    return;
+  }
+  const now = Date.now();
+  const last = _dmCryptoResyncAt.get(pid) || 0;
+  if (now - last < _DM_CRYPTO_RESYNC_COOLDOWN_MS) return;
+  _dmCryptoResyncAt.set(pid, now);
+  try {
+    if (window.Signal && typeof window.Signal.requestDmCryptoResync === 'function') {
+      await window.Signal.requestDmCryptoResync(pid);
+      try {
+        window.UI?.showToast?.(
+          'Encryption reset with this contact — send a new message to continue.',
+          'info',
+          6000,
+        );
+      } catch {}
+    }
+  } catch (e) {
+    if (window.__ftDctDebug) console.info('[dms] coordinated resync failed', e);
+  }
 }
 
 function _dmMarkDecryptPermafail(cipher) {
@@ -703,7 +763,7 @@ try {
   window.__ftDmDecryptReset = _resetDmDecryptWarnings;
   window.addEventListener('ft:crypto-ready', () => {
     _resetDmDecryptWarnings();
-    if (_activeDM?.id && _dmMessages.length) {
+    if (_activeDM?.id && _dmMessages.length && !_dmSkipHistoricalDecrypt()) {
       void _redecryptStaleDMMessages().then(() => {
         if (typeof renderDMChannels === 'function') renderDMChannels();
       });
@@ -725,8 +785,41 @@ function _federationSyncInProgress() {
 
 function _dmEncryptedPreviewLabel() {
   if (_federationSyncInProgress()) return '🔒 Syncing encryption…';
+  if (_dmSkipHistoricalDecrypt()) return '🔒 From home node';
   if (!window.Signal || !Signal.isReady()) return '🔒 Encrypted';
   return '🔒 Encrypted message';
+}
+
+function _isTravelNode() {
+  try {
+    if (window.App && typeof App.isAtHomeNode === 'function' && !App.isAtHomeNode()) {
+      return true;
+    }
+    const here = String(window.location?.origin || '').replace(/\/$/, '').toLowerCase();
+    const syncFrom = String(
+      (window.App && App.getSyncSourceBase && App.getSyncSourceBase()) || ''
+    ).replace(/\/$/, '').toLowerCase();
+    if (syncFrom && here && syncFrom !== here) return true;
+    const homeUrl = String(STATE?.user?.account_home_base_url || '').replace(/\/$/, '').toLowerCase();
+    if (homeUrl && here && homeUrl !== here) return true;
+    if (STATE?.user?.at_home_node === false) return true;
+  } catch {}
+  return false;
+}
+
+/** On travel nodes without full DCT transfer, home ciphertext stays locked here. */
+function _dmSkipHistoricalDecrypt() {
+  if (!_isTravelNode()) return false;
+  if (window.__ftDctImported) return false;
+  return true;
+}
+
+function _dmExpectedDecryptFailure(errMsg, env) {
+  const msg = String(errMsg || '');
+  if (msg.includes('No record for device')) return true;
+  if (msg.includes('Bad MAC')) return true;
+  if (env && env.t === 'pre' && _dmSkipHistoricalDecrypt()) return true;
+  return false;
 }
 
 async function _decryptDMPreviewContent(cipher, peerId, _peerNick, opts = {}) {
@@ -744,7 +837,13 @@ async function _decryptDMPreviewContent(cipher, peerId, _peerNick, opts = {}) {
   if (_cached !== undefined) return _cached;
   if (_dmDecryptPermafail.has(_cacheKey)) {
     if (opts.sidebar) return _dmEncryptedPreviewLabel();
-    return _DM_DECRYPT_LOCKED;
+    return _dmLockedBubbleText(!!opts.live);
+  }
+
+  if (_dmSkipHistoricalDecrypt() && !opts.live && _looksEncryptedBlob(raw)) {
+    _dmMarkDecryptPermafail(raw);
+    if (opts.sidebar) return _dmEncryptedPreviewLabel();
+    return _dmLockedBubbleText(false);
   }
 
   const inflight = _dmDecryptInflight.get(_cacheKey);
@@ -783,6 +882,20 @@ async function _decryptDMPreviewContent(cipher, peerId, _peerNick, opts = {}) {
       }
     } catch {}
     if (!window.Signal.isReady() || !peerNum) return null;
+
+    const _recoverPeerKeys = async () => {
+      if (env.t === 'pre') return false;
+      const rk = `live:${peerNum}`;
+      if (!opts.live || _dmPeerRecoveryAttempted.has(rk)) return false;
+      _dmPeerRecoveryAttempted.add(rk);
+      try {
+        if (typeof window.Signal.refreshPeerForDecrypt === 'function') {
+          await window.Signal.refreshPeerForDecrypt(peerNum);
+          return true;
+        }
+      } catch {}
+      return false;
+    };
     // Never call ensureSessionWith before decrypt — it builds an outbound
     // X3DH session and breaks inbound t:'pre' envelopes (Bad MAC).
     const _attempt = async () => {
@@ -798,24 +911,29 @@ async function _decryptDMPreviewContent(cipher, peerId, _peerNick, opts = {}) {
       if (plain !== null) return plain;
     } catch (e) {
       const errMsg = String((e && e.message) || e || '');
+      const expected = _dmExpectedDecryptFailure(errMsg, env) && !opts.live;
       const warnKey = `${peerNum}:${env.t || 'msg'}:${errMsg.slice(0, 40)}`;
-      if (!opts.silent && !_dmDecryptWarned.has(warnKey)) {
+      if (!opts.silent && !expected && !_dmDecryptWarned.has(warnKey)) {
         _dmDecryptWarned.add(warnKey);
-        console.warn(
-          '[dms.decryptDM] FAIL',
-          't=', env.t,
-          'from', peerNum,
-          errMsg.slice(0, 120),
-        );
+        if (window.__ftDctDebug) {
+          console.info('[dms.decryptDM] FAIL', 't=', env.t, 'from', peerNum, errMsg.slice(0, 120));
+        }
       }
       const noDevice = errMsg.includes('No record for device');
       const isPre = env.t === 'pre';
-      // Never reset sessions for historical pre-key envelopes or unmapped
-      // peer device ids — that spams Bad MAC and can break live sessions.
+      const recoverable = errMsg.includes('Bad MAC') || errMsg.includes('Message key not found')
+        || noDevice || isPre;
+      if (opts.live && recoverable && await _recoverPeerKeys()) {
+        try {
+          const out3 = await _attempt();
+          if (out3 !== null) return out3;
+        } catch {}
+      }
       if (
         allowSessionReset
-        && !isPre
         && !noDevice
+        && !isPre
+        && (opts.live || !_dmSkipHistoricalDecrypt())
         && (errMsg.includes('Bad MAC') || errMsg.includes('Message key not found'))
       ) {
         try {
@@ -827,13 +945,13 @@ async function _decryptDMPreviewContent(cipher, peerId, _peerNick, opts = {}) {
         } catch (e2) {
           const err2 = String((e2 && e2.message) || e2 || '').slice(0, 120);
           const rk = `${peerNum}:retry:${err2.slice(0, 40)}`;
-          if (!opts.silent && !_dmDecryptWarned.has(rk)) {
+          if (!opts.silent && !expected && !_dmDecryptWarned.has(rk)) {
             _dmDecryptWarned.add(rk);
-            console.warn('[dms.decryptDM] retry FAIL', err2);
+            if (window.__ftDctDebug) console.info('[dms.decryptDM] retry FAIL', err2);
           }
         }
       }
-      if (noDevice || isPre || errMsg.includes('Bad MAC')) {
+      if (!opts.live && (noDevice || isPre || errMsg.includes('Bad MAC') || expected)) {
         _dmMarkDecryptPermafail(raw);
       }
     }
@@ -843,9 +961,16 @@ async function _decryptDMPreviewContent(cipher, peerId, _peerNick, opts = {}) {
   const work = (async () => {
     const plain = await _tryDecrypt(!!opts.retry);
     if (plain !== null) return plain;
+    if (opts.live && peerNum && !_dmSkipHistoricalDecrypt()
+        && !(window.Signal?.isPeerBundleBackedOff?.(peerNum))) {
+      void _dmTryCoordinatedResync(peerNum);
+    }
     if (_dmDecryptPermafail.has(_cacheKey)) {
       if (opts.sidebar) return _dmEncryptedPreviewLabel();
-      return _DM_DECRYPT_LOCKED;
+      return _dmLockedBubbleText(!!opts.live);
+    }
+    if (_looksEncryptedBlob(raw) && !opts.sidebar) {
+      return _dmLockedBubbleText(!!opts.live);
     }
     if (opts.sidebar && _looksEncryptedBlob(raw)) {
       return _dmEncryptedPreviewLabel();
@@ -855,14 +980,11 @@ async function _decryptDMPreviewContent(cipher, peerId, _peerNick, opts = {}) {
       if (!_dmDecryptWarned.has(warnKey)) {
         _dmDecryptWarned.add(warnKey);
         try {
-          const switched = !!window.__ftDctImported || sessionStorage.getItem('ft_just_switched') === '1';
-          let msg = opts.federated
-            ? 'Encrypted message from another node — open your home node or re-sync in this browser.'
-            : 'Could not decrypt — ask your contact to send a new message.';
-          if (switched && !window.__ftDctImported) {
-            msg = 'DM history could not be unlocked — switch nodes in the same browser so encryption keys can transfer, or ask for a new message.';
-          } else if (window.__ftDctImported) {
-            msg = 'Some older messages use keys from before this node switch and stay locked.';
+          let msg = 'Could not decrypt — ask your contact to send a new message.';
+          if (_dmSkipHistoricalDecrypt()) {
+            msg = 'Older messages from your home node stay locked here — send a new message to start a fresh encrypted thread on this node.';
+          } else if (opts.federated) {
+            msg = 'Encrypted message from another node — open your home node or wait for sync.';
           }
           window.UI?.showToast?.(msg, 'warning', 7000);
         } catch {}
@@ -891,10 +1013,11 @@ async function _decryptDMSidebarPreview(content, peerId, peerNick, lastSenderId)
     return raw;
   }
   return _decryptDMPreviewContent(raw, peerId, peerNick, {
-    retry: true,
+    retry: false,
     silent: true,
     sidebar: true,
     waitForSignal: true,
+    live: false,
   });
 }
 
@@ -927,28 +1050,35 @@ async function _ensureActiveDMPeerUserId() {
 async function _redecryptStaleDMMessages() {
   const dm = _activeDM;
   if (!dm?.id || !_dmMessages.length) return;
+  if (_dmSkipHistoricalDecrypt()) return;
   const peerId = Number(dm.user_id) || 0;
   const myId = Number(STATE?.user?.id) || 0;
   if (!peerId) return;
+  const peerNick = String(dm.nickname || '');
   let changed = false;
-  for (const m of _dmMessages) {
-    if (!m?.content || !_looksEncryptedBlob(m.content)) continue;
-    const mine = !!(m.sender_id != null && myId && +m.sender_id === +myId);
-    let plain = '';
-    if (mine) {
-      plain = _resolveOwnDMPlaintext(m.content, m.id, m.channel_id || _activeDM.id);
-    } else {
-      plain = await _decryptDMPreviewContent(
-        m.content, peerId, dm.nickname || '', { retry: true, silent: true },
-      );
+  try {
+    for (const m of _dmMessages) {
+      if (!dm?.id || _activeDM?.id !== dm.id) break;
+      if (!m?.content || !_looksEncryptedBlob(m.content)) continue;
+      const mine = !!(m.sender_id != null && myId && +m.sender_id === +myId);
+      let plain = '';
+      if (mine) {
+        plain = _resolveOwnDMPlaintext(m.content, m.id, m.channel_id || dm.id);
+      } else {
+        plain = await _decryptDMPreviewContent(
+          m.content, peerId, peerNick, { retry: false, silent: true, live: false },
+        );
+      }
+      if (plain && !_looksEncryptedBlob(plain)) {
+        m.content = plain;
+        _rememberDMPlaintext(dm.id, m.id, plain);
+        changed = true;
+      }
     }
-    if (plain && !_looksEncryptedBlob(plain)) {
-      m.content = plain;
-      _rememberDMPlaintext(dm.id, m.id, plain);
-      changed = true;
-    }
+  } catch (e) {
+    if (window.__ftDctDebug) console.info('[dms] redecrypt stale skipped', e);
   }
-  if (!changed) return;
+  if (!changed || !dm?.id) return;
   _dmHistoryCache.set(dm.id, _dmMessages.map((x) => ({ ...x })));
   if (State.currentRoomType === 'dm' && _activeDM?.id === dm.id) renderDMChat();
 }
@@ -961,18 +1091,11 @@ async function _retryDecryptDMMessageInPlace(m) {
   if (mine) return;
   const raw = String(m.content || '');
   if (!_looksEncryptedBlob(raw)) return;
+  if (_dmSkipHistoricalDecrypt()) return;
   const peerId = Number(_activeDM.user_id) || 0;
   if (!peerId) return;
-  let isPre = false;
-  try {
-    const o = JSON.parse(raw);
-    isPre = !!(o && o.v === 2 && o.t === 'pre');
-  } catch {}
-  if (isPre && window.Signal?.resetSessionWith) {
-    try { await window.Signal.resetSessionWith(peerId); } catch {}
-  }
   const plain = await _decryptDMPreviewContent(
-    raw, peerId, _activeDM.nickname || '', { retry: true, silent: true },
+    raw, peerId, String(_activeDM.nickname || ''), { retry: false, silent: true, live: true },
   );
   if (!plain || _looksEncryptedBlob(plain)) return;
   const idx = _dmMessages.findIndex(x => Number(x.id) === Number(m.id));
@@ -1231,7 +1354,7 @@ async function openDMChannel (id, nickname, avatar) {
   if (_dmMessages.length) {
     renderDMChat();
     scrollChatBottom();
-    void _redecryptStaleDMMessages();
+    if (!_dmSkipHistoricalDecrypt()) void _redecryptStaleDMMessages();
   }
 
   // Switch app to DM view
@@ -1337,12 +1460,14 @@ async function openDMChannel (id, nickname, avatar) {
       // races inbound `t:'pre'` envelopes and causes Bad MAC on the same
       // node. Sessions are created lazily on send via encryptDM().
       try {
-        if (typeof window.Signal?.isReady === 'function' && window.Signal.isReady()) {
-          void _redecryptStaleDMMessages();
-        } else if (typeof window.Signal?.ensureReady === 'function' && State?.user?.id) {
-          window.Signal.ensureReady(State.user.id, { timeoutMs: 8000 })
-            .then(() => _redecryptStaleDMMessages())
-            .catch(() => {});
+        if (!_dmSkipHistoricalDecrypt()) {
+          if (typeof window.Signal?.isReady === 'function' && window.Signal.isReady()) {
+            void _redecryptStaleDMMessages();
+          } else if (typeof window.Signal?.ensureReady === 'function' && State?.user?.id) {
+            window.Signal.ensureReady(State.user.id, { timeoutMs: 8000 })
+              .then(() => _redecryptStaleDMMessages())
+              .catch(() => {});
+          }
         }
       } catch {}
     } catch (e) { /* silent — encryption is best-effort */ }
@@ -1350,7 +1475,7 @@ async function openDMChannel (id, nickname, avatar) {
 
   await msgsP;
   await timerP;
-  if (_activeDM?.user_id) void _redecryptStaleDMMessages();
+  if (_activeDM?.user_id && !_dmSkipHistoricalDecrypt()) void _redecryptStaleDMMessages();
   // Only mark as read when the app is actually visible + focused. If the user
   // tapped a notification or we're restoring state in the background, defer
   // until the tab becomes visible so peers don't get a false ✓✓ read receipt.
@@ -1596,8 +1721,15 @@ async function loadDMMessages (pageOffset = 0, options = {}) {
       if (mine) {
         const own = _resolveOwnDMPlaintext(next.content, next.id, _reqRoomId);
         if (own && !_looksEncryptedBlob(own)) next.content = own;
+      } else if (_dmSkipHistoricalDecrypt()) {
+        next.content = _dmLockedBubbleText();
+        _dmMarkDecryptPermafail(String(msg.content || ''));
       } else {
-        try { next.content = await _decryptDMPreviewContent(next.content, _peerUserId, _peerNick, { retry: true }); } catch {}
+        try {
+          next.content = await _decryptDMPreviewContent(next.content, _peerUserId, _peerNick, {
+            retry: false, silent: true, live: false,
+          });
+        } catch {}
       }
       // If decrypt didn't yield plaintext, fall back to per-device cache so
       // history that was previously decrypted on this browser stays readable.
@@ -1642,7 +1774,7 @@ async function loadDMMessages (pageOffset = 0, options = {}) {
     if (!isDelta || msgs.length) {
       renderDMChat();
       scrollChatBottom();
-      void _redecryptStaleDMMessages();
+      if (!_dmSkipHistoricalDecrypt()) void _redecryptStaleDMMessages();
     }
   } else {
     _dmMessages = [...msgs, ..._dmMessages];
@@ -1660,12 +1792,17 @@ async function loadDMMessages (pageOffset = 0, options = {}) {
 /* ── Render DM chat ──────────────────────────────────────────────────────────── */
 function renderDMChat () {
   const area = document.getElementById('messages-area');
-  if (!area) return;
+  if (!area || !_activeDM) return;
   if (!_dmMessages.length) {
+    const onTravel = !!(window.App && typeof App.isAtHomeNode === 'function' && !App.isAtHomeNode());
+    const travelNote = onTravel
+      ? `<div style="font-size:12px;color:#7ba88f;max-width:340px;margin:14px auto 0;line-height:1.5">On a travel node, new messages use fresh encryption in this browser. Older chat history from your home node is not decrypted here — that is expected.</div>`
+      : '';
     area.innerHTML = `<div style="text-align:center;color:#555;padding:48px 16px">
       <div style="display:flex;justify-content:center;margin-bottom:10px">${fmtAv(_activeDM.avatar, _activeDM.nickname, 64)}</div>
       <div style="font-size:18px;font-weight:700;margin:8px 0">This is the beginning of your DM with ${esc(_activeDM.nickname)}</div>
       <div style="font-size:13px;color:#444">Messages are end-to-end encrypted 🔒</div>
+      ${travelNote}
     </div>`;
     return;
   }
@@ -1701,7 +1838,13 @@ function renderDMChat () {
           UI.notice({
             icon: '🔒',
             title: `${undec} older message${undec===1?'':'s'} can't be read on this device`,
-            message: `${undec===1?'This message was':'These messages were'} encrypted to an encryption key this device doesn't hold, so ${undec===1?'it':'they'} can't be unlocked here.\n\nThis usually happens when either you or the other person signed in on a new device, reinstalled the app, or cleared local data — FrogTalk then issues fresh end-to-end keys, and older ciphertext stays readable only on the device it was originally delivered to.\n\nNew messages in this chat will work normally going forward.`,
+            message: (() => {
+              const onTravel = !!(window.App && typeof App.isAtHomeNode === 'function' && !App.isAtHomeNode());
+              if (onTravel) {
+                return `${undec===1?'This message was':'These messages were'} encrypted on your home node (or an earlier device) and are not shown decrypted on this travel node.\n\nSend a new message here to start a fresh encrypted thread on this node. Calls to this contact should still work after sync.`;
+              }
+              return `${undec===1?'This message was':'These messages were'} encrypted to an encryption key this device doesn't hold, so ${undec===1?'it':'they'} can't be unlocked here.\n\nNew messages in this chat will work normally going forward.`;
+            })(),
             primaryLabel: 'Got it',
             actionLabel: 'Learn more',
           }).then(r => {
@@ -2658,6 +2801,101 @@ async function _sendDMFileMessage (fileData, payload) {
   return r.json();
 }
 
+const _dmOutboundQueue = [];
+const _DM_OUTBOUND_MAX = 24;
+
+function _dmWsLooksOpen() {
+  try {
+    return !!(typeof WS !== 'undefined' && typeof WS.isOpen === 'function' && WS.isOpen());
+  } catch {
+    return false;
+  }
+}
+
+function _dmQueueOutbound(item) {
+  if (_dmOutboundQueue.length >= _DM_OUTBOUND_MAX) _dmOutboundQueue.shift();
+  _dmOutboundQueue.push(item);
+}
+
+async function _dmFlushOutboundQueue() {
+  if (!_dmOutboundQueue.length || !_dmWsLooksOpen()) return;
+  const batch = _dmOutboundQueue.splice(0, _dmOutboundQueue.length);
+  for (const item of batch) {
+    try {
+      wsSend({
+        type: 'dm_message',
+        channel_id: item.channelId,
+        content: item.content,
+        reply_to: item.replyTo || null,
+        client_nonce: item.nonce,
+      });
+    } catch {}
+  }
+}
+
+try {
+  window.addEventListener('ws:open', () => { void _dmFlushOutboundQueue(); });
+} catch {}
+
+async function _dmEncryptErrorHint(peerUid, errMsg) {
+  const em = String(errMsg || '');
+  if (em.includes('federation_token') || em.includes('503')) {
+    return 'This node cannot reach peer encryption keys — federation token must be set on every node.';
+  }
+  if (em.includes('timeout') || em.includes('peer_bundle') || em.includes('signal_session')) {
+    let extra = '';
+    try {
+      if (window.Signal?.peerKeysDiagnostics && peerUid) {
+        const d = await window.Signal.peerKeysDiagnostics(peerUid);
+        if (d?.bundle_is_remote && d.bundle_source_server) {
+          extra = ' (keys on ' + String(d.bundle_source_server) + ')';
+        }
+      }
+    } catch {}
+    return 'Fetching encryption keys from another node timed out' + extra
+      + ' — wait for Frog\'s travel message to arrive, dismiss sync, hard-refresh, then retry.';
+  }
+  if (em.includes('404') || em.includes('no_bundle')) {
+    return 'Peer encryption keys are not ready yet — we asked their device to sync. Try again in a few seconds.';
+  }
+  return 'Could not encrypt message — peer may need to refresh or reset keys in Settings.';
+}
+
+function handleDMSendWarning(data) {
+  const code = String(data?.code || '').trim();
+  if (!code || code === 'peer_online_local') return;
+  const labels = {
+    no_dm_route: 'Message saved here but cannot reach peer node (no federation route).',
+    federation_enqueue_failed: 'Message may not reach other nodes — federation queue failed.',
+    federation_enqueue_exception: 'Message may not reach other nodes — federation error.',
+  };
+  const msg = labels[code] || ('Delivery warning: ' + code);
+  try { (window.toast || window.UI?.showToast)?.(msg, 'warn', 8000); } catch {}
+}
+try { window.handleDMSendWarning = handleDMSendWarning; } catch {}
+
+async function _sendDMTextHttp(channelId, encryptedContent, replyToId) {
+  const r = await apiFetch(`/api/dms/${channelId}/messages`, 'POST', {
+    content: encryptedContent || '',
+    reply_to: replyToId || null,
+  });
+  if (!r.ok) {
+    const errBody = await r.json().catch(() => ({}));
+    if (r.status === 403 && errBody?.code === 'blocked') {
+      handleDMSendError({
+        channel_id: channelId,
+        code: 'blocked',
+        i_blocked: !!errBody.i_blocked,
+        blocked_by_them: !!errBody.blocked_by_them,
+        peer_nickname: errBody.peer_nickname || '',
+      });
+      return null;
+    }
+    throw new Error(errBody?.error || ('HTTP ' + r.status));
+  }
+  return r.json();
+}
+
 /* ── Send DM ─────────────────────────────────────────────────────────────────── */
 let _dmSending = false;
 async function sendDMMessage () {
@@ -2682,6 +2920,11 @@ async function sendDMMessage () {
 
   if (!content && !fileData) return;
 
+  const sendBtn = document.getElementById('send-btn');
+  const prevBtnText = sendBtn ? sendBtn.textContent : '';
+  _dmSending = true;
+  if (sendBtn) { sendBtn.disabled = true; sendBtn.textContent = '⏳'; }
+
   // Resolve peer for v2 (Signal/libsignal) encryption preference.
   const _dmChanEntry = _dmChannels.find(c => c.id === _activeDM?.id);
   const _peerUidForEnc = _activeDM?.user_id || _dmChanEntry?.with_user_id || 0;
@@ -2692,6 +2935,7 @@ async function sendDMMessage () {
   // or has no bundle for this peer, we hard-fail rather than silently
   // sending plaintext.
   let encryptedContent = content;
+  try {
   if (content && _peerUidForEnc) {
     // Lazy-await Signal boot — a send fired before App.launch()'s
     // fire-and-forget init resolves no longer throws "Encryption layer
@@ -2701,19 +2945,48 @@ async function sendDMMessage () {
       let ok = false;
       try {
         if (window.Signal && typeof Signal.ensureReady === 'function') {
-          ok = await Signal.ensureReady(State.user && State.user.id);
+          ok = await Signal.ensureReady(State.user && State.user.id, { timeoutMs: 12000 });
         }
       } catch {}
       if (!ok) {
         try { UI.showToast('Encryption layer not ready — please refresh.', 'error'); } catch {}
-        _dmSending = false;
         return;
       }
     }
-    try {
-      const env = await Signal.encryptDM(_peerUidForEnc, content, {
-        peerHomeServerId: _activeDM?.peer_home_server_id || _dmChanEntry?.peer_home_server_id || '',
+    const _peerHomeForEnc = _activeDM?.peer_home_server_id || _dmChanEntry?.peer_home_server_id || '';
+    const _runEncrypt = async () => {
+      let encTimeoutMs = 22000;
+      try {
+        const diag = (typeof Signal.warmPeerBundleForSend === 'function')
+          ? await Signal.warmPeerBundleForSend(_peerUidForEnc)
+          : ((typeof Signal.peerKeysDiagnostics === 'function')
+            ? await Signal.peerKeysDiagnostics(_peerUidForEnc)
+            : null);
+        if (diag?.bundle_is_remote) encTimeoutMs = 45000;
+      } catch {}
+      const encPromise = Signal.encryptDM(_peerUidForEnc, content, {
+        peerHomeServerId: _peerHomeForEnc,
       });
+      const encTimeout = new Promise((_, rej) => {
+        setTimeout(() => rej(new Error('encrypt_timeout')), encTimeoutMs);
+      });
+      return Promise.race([encPromise, encTimeout]);
+    };
+    try {
+      let env;
+      try {
+        env = await _runEncrypt();
+      } catch (e1) {
+        const em1 = String((e1 && e1.message) || e1 || '');
+        const missingKeys = em1.includes('404') || em1.includes('no_bundle')
+          || em1.includes('peer bundle fetch failed');
+        if (missingKeys) {
+          await new Promise((r) => setTimeout(r, 3000));
+          env = await _runEncrypt();
+        } else {
+          throw e1;
+        }
+      }
       encryptedContent = JSON.stringify(env);
       // Seed plaintext cache: we can NEVER decrypt our own outgoing
       // ciphertext (libsignal has a sending chain only). When the server
@@ -2723,8 +2996,9 @@ async function sendDMMessage () {
       try { _dmPtCachePut(encryptedContent, content); } catch {}
     } catch (e) {
       console.error('[dms] Signal.encryptDM failed:', e);
-      try { UI.showToast('Could not encrypt message — peer may need to open the app.', 'error'); } catch {}
-      _dmSending = false;
+      const em = String((e && e.message) || e || '');
+      const hint = await _dmEncryptErrorHint(_peerUidForEnc, em);
+      try { UI.showToast(hint, 'error', 9000); } catch {}
       return;
     }
   }
@@ -2734,9 +3008,6 @@ async function sendDMMessage () {
     : (window._pendingAttachment ? [window._pendingAttachment] : State.pendingAttachment ? [State.pendingAttachment] : []);
 
   if (pendingAttachments.length) {
-    _dmSending = true;
-    const sendBtn = document.getElementById('send-btn');
-    if (sendBtn) { sendBtn.disabled = true; sendBtn.textContent = '⏳'; }
     try {
       for (let i = 0; i < pendingAttachments.length; i++) {
         const fileItem = pendingAttachments[i];
@@ -2760,15 +3031,43 @@ async function sendDMMessage () {
       toast('Failed to send file', 'error');
     } finally {
       _dmSending = false;
-      if (sendBtn) { sendBtn.disabled = false; sendBtn.textContent = '➤'; }
+      if (sendBtn) { sendBtn.disabled = false; sendBtn.textContent = prevBtnText || '➤'; }
     }
     return;
   }
 
-  // Send over WebSocket for speed. Include a client_nonce so we can reconcile
+  // Send over WebSocket when connected; otherwise HTTP (sync overlay / reconnect).
   const _nonce = 'n' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
-  wsSend({ type: 'dm_message', channel_id: _activeDM.id, content: encryptedContent || content,
-           reply_to: _dmReplyTo?.id || null, client_nonce: _nonce });
+  const _wsUp = _dmWsLooksOpen();
+  if (_wsUp) {
+    wsSend({ type: 'dm_message', channel_id: _activeDM.id, content: encryptedContent || content,
+             reply_to: _dmReplyTo?.id || null, client_nonce: _nonce });
+  } else {
+    try {
+      const saved = await _sendDMTextHttp(
+        _activeDM.id,
+        encryptedContent || content,
+        _dmReplyTo?.id || null,
+      );
+      if (!saved) return;
+      appendDMMessage(saved);
+      clearReplyToDM();
+      input.value = '';
+      autoResize(input);
+      return;
+    } catch (e) {
+      console.error('[dms] HTTP DM send failed', e);
+      _dmQueueOutbound({
+        channelId: _activeDM.id,
+        content: encryptedContent || content,
+        replyTo: _dmReplyTo?.id || null,
+        nonce: _nonce,
+      });
+      try {
+        UI.showToast('Queued — will send when connection is back.', 'warn', 6000);
+      } catch {}
+    }
+  }
 
   // Optimistic local append \u2014 the user sees their message instantly instead of
   // waiting for the WS round-trip. The echo handler will swap the temp id for
@@ -2823,6 +3122,13 @@ async function sendDMMessage () {
   // this because the soft keyboard collapse + input shrink happen after
   // the optimistic append, pushing the new bubble below the viewport.
   _scrollDMToBottomStable();
+  } finally {
+    _dmSending = false;
+    if (sendBtn) {
+      sendBtn.disabled = false;
+      sendBtn.textContent = prevBtnText || '➤';
+    }
+  }
 }
 
 /* ── Incoming WS DM message ─────────────────────────────────────────────────── */
@@ -2863,7 +3169,9 @@ function handleWSDMMessage (data) {
     ? Promise.resolve(String(data.content || ''))
     : _decryptDMPreviewContent(data.content || '', _peerForDecrypt, _peerNick0, {
       retry: true,
+      live: true,
       federated: _fedInbound,
+      peerHomeServerId: _senderHome,
     });
 
   // Cheap in-place sidebar update (avoid round-tripping /api/dms on every message

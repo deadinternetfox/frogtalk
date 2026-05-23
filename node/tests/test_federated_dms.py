@@ -30,11 +30,11 @@ class FederatedDMsTests(unittest.TestCase):
 
     @mock.patch("federation_dms._party_homed_elsewhere", return_value=True)
     @mock.patch("federation_dms.fc.callee_session_on_local_node", return_value=True)
-    def test_should_federate_cross_home_even_if_peer_online(self, _local, _remote):
-        """Traveler on this node still needs outbox when account home is elsewhere."""
+    def test_should_not_federate_when_peer_online_even_if_homed_elsewhere(self, _local, _remote):
+        """WS delivery on this node is enough — avoids false no_dm_route warnings."""
         sender = {"global_user_id": "00000000-0000-4000-8000-000000000001"}
         peer = {"id": 2, "global_user_id": "00000000-0000-4000-8000-000000000002"}
-        self.assertTrue(fd.should_federate_dm(sender, peer))
+        self.assertFalse(fd.should_federate_dm(sender, peer))
 
     def test_dm_parties_need_global_ids(self):
         self.assertTrue(fd.dm_parties_have_global_ids(

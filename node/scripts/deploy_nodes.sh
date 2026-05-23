@@ -3,9 +3,13 @@
 # Normal installs use install.sh setup + federation — not this script.
 #
 #   cp node/scripts/deploy_fleet.local.example.sh node/scripts/deploy_fleet.local.sh
-#   node/scripts/deploy_nodes.sh sync               # federation-sync hotfix only (fast)
-#   node/scripts/deploy_nodes.sh                    # full default bundle (large APKs, etc.)
-#   node/scripts/deploy_nodes.sh node/routers/federation.py
+#   node/scripts/deploy_nodes.sh                    # git-changed deployable files only (default)
+#   node/scripts/deploy_nodes.sh changed              # same as default
+#   node/scripts/deploy_nodes.sh sync               # changed files in federation hotfix set only
+#   node/scripts/deploy_nodes.sh full               # legacy full bundle (APKs, etc.)
+#   node/scripts/deploy_nodes.sh node/routers/federation.py   # explicit paths only
+#   FT_DEPLOY_BASE=origin/master node/scripts/deploy_nodes.sh   # diff vs remote branch
+#   node/scripts/deploy_nodes.sh --dry-run                      # list files, no SCP
 #
 # Local paths live under node/; remote tree is /opt/frogtalk/node/.
 # Bare static/... or routers/... args are rewritten to node/... automatically.
@@ -102,6 +106,7 @@ SYNC_UPDATE_FILES=(
   "node/database.py:node/database.py"
   "node/crypto_fed.py:node/crypto_fed.py"
   "node/federation_calls.py:node/federation_calls.py"
+  "node/federation_dms.py:node/federation_dms.py"
   "node/federation_voice.py:node/federation_voice.py"
   "node/fed_turn.py:node/fed_turn.py"
   "node/routers/auth.py:node/routers/auth.py"
@@ -166,6 +171,7 @@ DEFAULT_FILES=(
   "node/database.py:node/database.py"
   "node/crypto_fed.py:node/crypto_fed.py"
   "node/federation_calls.py:node/federation_calls.py"
+  "node/federation_dms.py:node/federation_dms.py"
   "node/federation_voice.py:node/federation_voice.py"
   "node/fed_turn.py:node/fed_turn.py"
   "node/routers/auth.py:node/routers/auth.py"
@@ -218,22 +224,98 @@ DEFAULT_FILES=(
 # memory keeps working post-restructure.
 rewrite_path() {
   local p="$1"
+  if [[ "$p" != */* ]] && [[ -f "$REPO_ROOT/node/$p" ]]; then
+    printf "node/%s" "$p"
+    return
+  fi
   case "$p" in
     node/*|client/*|bot-examples/*|docs/*|github-build-mirror/*|flatpak/*)
       printf "%s" "$p" ;;
-    static/*|routers/*|deploy/*|main.py|database.py|deps.py|crypto_fed.py|requirements.txt|Dockerfile|geoip.py|media_storage.py|log_redaction.py|ws_manager.py|bridge_*.py|telegram_bridge.py)
+    static/*|routers/*|deploy/*|main.py|database.py|deps.py|crypto_fed.py|requirements.txt|Dockerfile|geoip.py|media_storage.py|log_redaction.py|ws_manager.py|bridge_*.py|telegram_bridge.py|federation_*.py|fed_*.py|ws_manager.py)
       printf "node/%s" "$p" ;;
     *)
       printf "%s" "$p" ;;
   esac
 }
 
-USE_SYNC_BUNDLE=0
+# True when a repo-relative path should be auto-deployed from git status.
+is_deployable_path() {
+  local p="$1"
+  [[ "$p" == node/* ]] || return 1
+  [[ -f "$REPO_ROOT/$p" ]] || return 1
+  case "$p" in
+    node/tests/*|node/scripts/deploy_*|node/scripts/deploy_fleet*)
+      return 1
+      ;;
+  esac
+  return 0
+}
+
+add_file_pair() {
+  local rw="$1"
+  FILES+=("$rw:$rw")
+}
+
+# Paths from git: unstaged vs base, staged, and new files under node/.
+collect_changed_paths() {
+  local base="${FT_DEPLOY_BASE:-HEAD}"
+  local -a raw=() p rw
+  if [[ "$base" == "HEAD" ]]; then
+    mapfile -t raw < <(
+      git -C "$REPO_ROOT" diff --name-only HEAD 2>/dev/null
+      git -C "$REPO_ROOT" diff --name-only --cached 2>/dev/null
+      git -C "$REPO_ROOT" ls-files --others --exclude-standard node/ 2>/dev/null
+    )
+  else
+    mapfile -t raw < <(
+      git -C "$REPO_ROOT" diff --name-only "$base"...HEAD 2>/dev/null
+      git -C "$REPO_ROOT" diff --name-only "$base" -- 2>/dev/null
+      git -C "$REPO_ROOT" diff --name-only --cached 2>/dev/null
+      git -C "$REPO_ROOT" ls-files --others --exclude-standard node/ 2>/dev/null
+    )
+  fi
+  local -A seen=()
+  for p in "${raw[@]}"; do
+    [[ -n "$p" ]] || continue
+    rw="$(rewrite_path "$p")"
+    is_deployable_path "$rw" || continue
+    [[ -n "${seen[$rw]:-}" ]] && continue
+    seen["$rw"]=1
+    CHANGED_PATHS+=("$rw")
+  done
+}
+
+# ``sync``: only changed files that appear in SYNC_UPDATE_FILES (not the whole bundle).
+collect_sync_changed_paths() {
+  local -a allowed=() rw
+  local -A allow=()
+  for pair in "${SYNC_UPDATE_FILES[@]}"; do
+    rw="${pair%%:*}"
+    allow["$rw"]=1
+  done
+  collect_changed_paths
+  for rw in "${CHANGED_PATHS[@]}"; do
+    [[ -n "${allow[$rw]:-}" ]] || continue
+    SYNC_CHANGED_PATHS+=("$rw")
+  done
+}
+
+USE_SYNC_FILTER=0
+USE_FULL_BUNDLE=0
+DRY_RUN=0
 ARGS=()
 for arg in "$@"; do
   case "$arg" in
     sync|--sync|federation-sync)
-      USE_SYNC_BUNDLE=1
+      USE_SYNC_FILTER=1
+      ;;
+    changed|--changed)
+      ;;
+    full|--full)
+      USE_FULL_BUNDLE=1
+      ;;
+    dry-run|--dry-run|-n)
+      DRY_RUN=1
       ;;
     *)
       ARGS+=("$arg")
@@ -241,11 +323,11 @@ for arg in "$@"; do
   esac
 done
 
-if (( USE_SYNC_BUNDLE )); then
-  FILES=("${SYNC_UPDATE_FILES[@]}")
-  echo "Deploy bundle: federation-sync update (${#FILES[@]} files, no APKs/binaries)"
-elif (( ${#ARGS[@]} > 0 )); then
-  FILES=()
+FILES=()
+CHANGED_PATHS=()
+SYNC_CHANGED_PATHS=()
+
+if (( ${#ARGS[@]} > 0 )); then
   for f in "${ARGS[@]}"; do
     if [[ "$f" == *:* ]]; then
       local_part="${f%%:*}"
@@ -256,9 +338,40 @@ elif (( ${#ARGS[@]} > 0 )); then
       FILES+=("$rw:$rw")
     fi
   done
-else
+  echo "Deploy bundle: explicit (${#FILES[@]} file(s))"
+elif (( USE_FULL_BUNDLE )); then
   FILES=("${DEFAULT_FILES[@]}")
-  echo "Deploy bundle: default (${#FILES[@]} files). For sync-only: deploy_nodes.sh sync"
+  echo "Deploy bundle: full legacy (${#FILES[@]} files)"
+elif (( USE_SYNC_FILTER )); then
+  collect_sync_changed_paths
+  if (( ${#SYNC_CHANGED_PATHS[@]} == 0 )); then
+    echo "No changed files in federation hotfix set (git clean or only tests/scripts)." >&2
+    echo "  Pass explicit paths, or use: deploy_nodes.sh changed" >&2
+    exit 3
+  fi
+  for rw in "${SYNC_CHANGED_PATHS[@]}"; do
+    add_file_pair "$rw"
+  done
+  echo "Deploy bundle: sync/changed (${#FILES[@]} file(s) from git, federation hotfix set)"
+else
+  collect_changed_paths
+  if (( ${#CHANGED_PATHS[@]} == 0 )); then
+    echo "No deployable changed files under node/ (working tree clean vs ${FT_DEPLOY_BASE:-HEAD})." >&2
+    echo "  Pass explicit paths, or: deploy_nodes.sh full" >&2
+    exit 3
+  fi
+  for rw in "${CHANGED_PATHS[@]}"; do
+    add_file_pair "$rw"
+  done
+  echo "Deploy bundle: changed only (${#FILES[@]} file(s) from git)"
+fi
+
+if (( DRY_RUN )); then
+  echo "--- dry-run (no upload) ---"
+  for pair in "${FILES[@]}"; do
+    echo "  ${pair%%:*}"
+  done
+  exit 0
 fi
 
 probe_port() {

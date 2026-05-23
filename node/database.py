@@ -1684,6 +1684,8 @@ def _migrate():
             con.execute("ALTER TABLE users ADD COLUMN identity_pubkey TEXT")
         if "account_home_server_id" not in cols:
             con.execute("ALTER TABLE users ADD COLUMN account_home_server_id TEXT DEFAULT ''")
+        if "signal_keys_server_id" not in cols:
+            con.execute("ALTER TABLE users ADD COLUMN signal_keys_server_id TEXT DEFAULT ''")
         if "federation_sync_room_allowlist" not in cols:
             con.execute("ALTER TABLE users ADD COLUMN federation_sync_room_allowlist TEXT DEFAULT ''")
         if "federation_sync_room_allowlist_at" not in cols:
@@ -3249,7 +3251,84 @@ def signal_publish_bundle(user_id: int, registration_id: int,
             except (KeyError, TypeError, ValueError):
                 continue
         con.commit()
+    ident = get_or_create_local_server_identity() or {}
+    keys_sid = str(ident.get("server_id") or "").strip()
+    if keys_sid:
+        set_user_signal_keys_server_id(int(user_id), keys_sid)
     return {"ok": True, "otpks_added": appended}
+
+
+def set_user_signal_keys_server_id(user_id: int, server_id: str) -> None:
+    """Record which federation node holds this user's latest Signal bundle."""
+    uid = int(user_id or 0)
+    sid = str(server_id or "").strip()
+    if uid <= 0:
+        return
+    with _conn() as con:
+        con.execute(
+            "UPDATE users SET signal_keys_server_id=? WHERE id=?",
+            (sid, uid),
+        )
+        con.commit()
+
+
+def get_user_signal_keys_server_id(user_id: int) -> str:
+    uid = int(user_id or 0)
+    if uid <= 0:
+        return ""
+    with _conn() as con:
+        row = con.execute(
+            "SELECT signal_keys_server_id FROM users WHERE id=?",
+            (uid,),
+        ).fetchone()
+    return str(row["signal_keys_server_id"] or "").strip() if row else ""
+
+
+def set_signal_keys_server_for_gid(global_user_id: str, server_id: str) -> bool:
+    gid = str(global_user_id or "").strip()
+    sid = str(server_id or "").strip()
+    if not gid or not sid:
+        return False
+    with _conn() as con:
+        cur = con.execute(
+            "UPDATE users SET signal_keys_server_id=? WHERE global_user_id=?",
+            (sid, gid),
+        )
+        con.commit()
+        return cur.rowcount > 0
+
+
+def get_signal_keys_server_for_gid(global_user_id: str) -> str:
+    """Return pinned keys server for a global user, if any row has one set."""
+    gid = str(global_user_id or "").strip()
+    if not gid:
+        return ""
+    with _conn() as con:
+        row = con.execute(
+            "SELECT signal_keys_server_id FROM users WHERE global_user_id=? "
+            "AND COALESCE(signal_keys_server_id, '') != '' LIMIT 1",
+            (gid,),
+        ).fetchone()
+    return str(row["signal_keys_server_id"] or "").strip() if row else ""
+
+
+def signal_has_published_bundle(user_id: int) -> bool:
+    """True when `user_id` has identity + signed prekey on this node (no OTPK consume)."""
+    uid = int(user_id or 0)
+    if uid <= 0:
+        return False
+    with _conn() as con:
+        row = con.execute(
+            "SELECT 1 FROM signal_identity_keys WHERE user_id=? LIMIT 1",
+            (uid,),
+        ).fetchone()
+        if not row:
+            return False
+        sp = con.execute(
+            "SELECT 1 FROM signal_signed_prekeys WHERE user_id=? LIMIT 1",
+            (uid,),
+        ).fetchone()
+    return bool(sp)
 
 
 def signal_fetch_bundle(user_id: int) -> Optional[Dict]:
@@ -3331,6 +3410,31 @@ def signal_get_identity_pub(user_id: int) -> Optional[bytes]:
             (user_id,)
         ).fetchone()
     return bytes(row["identity_pub"]) if row else None
+
+
+def signal_clear_local_bundles_for_gid(global_user_id: str) -> int:
+    """Drop local Signal rows for a GID so peers fetch keys from the travel node.
+
+    Mirrored users often keep stale home-node bundles after the account
+    publishes fresh keys elsewhere. Clearing forces bundle proxy routing.
+    """
+    gid = str(global_user_id or "").strip()
+    if not gid:
+        return 0
+    cleared = 0
+    with _conn() as con:
+        rows = con.execute(
+            "SELECT id FROM users WHERE global_user_id=?",
+            (gid,),
+        ).fetchall()
+        for row in rows:
+            uid = int(row["id"])
+            con.execute("DELETE FROM signal_one_time_prekeys WHERE user_id=?", (uid,))
+            con.execute("DELETE FROM signal_signed_prekeys WHERE user_id=?", (uid,))
+            con.execute("DELETE FROM signal_identity_keys WHERE user_id=?", (uid,))
+            cleared += 1
+        con.commit()
+    return cleared
 
 
 # ---------------------------------------------------------------------------
@@ -7150,7 +7254,7 @@ def queue_pending_room_key_envelope(recipient_id: int, room_name: str,
         return False
 
 
-_DEVICE_CRYPTO_BLOB_MAX = 4 * 1024 * 1024
+_DEVICE_CRYPTO_BLOB_MAX = 8 * 1024 * 1024
 
 
 def store_device_crypto_transfer(user_id: int, ticket_hash: str, blob_b64: str, expires_at: int) -> bool:

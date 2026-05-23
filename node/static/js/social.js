@@ -1984,8 +1984,9 @@ const Social = (() => {
   }
 
   function renderStoriesBar() {
-    const stories = Array.isArray(_storyData) ? _storyData : [];
-    if (stories.length === 0 && !State.user) return '';
+    if (!Array.isArray(_storyData)) _storyData = [];
+    const stories = _storyData;
+    if (!stories.length && !State.user) return '';
     const myStory = stories.find(u => u && u.user_id === State.user?.id);
     let html = '<div class="stories-bar"><div class="stories-scroll">';
     // "Add story" circle
@@ -3438,7 +3439,7 @@ const Social = (() => {
     {
       const _force = !!opts.force;
       if (!_force && _cacheFresh(_feedCache) && Array.isArray(_feedCache.posts)) {
-        const _storiesHtml = (_storyData && _storyData.length) ? renderStoriesBar() : '';
+        const _storiesHtml = (Array.isArray(_storyData) && _storyData.length) ? renderStoriesBar() : '';
         const _sugHtml = (_suggestedCache && _cacheFresh(_suggestedCache))
           ? _renderSuggestedUsers(_suggestedCache.users || [])
           : '';
@@ -3908,11 +3909,18 @@ const Social = (() => {
       const fedHomeLabel = (u.federated && u.home_base_url)
         ? esc(String(u.home_base_url).replace(/^https?:\/\//i, ''))
         : '';
+      let spBannerBg = 'linear-gradient(135deg,#1a3a1a 0%,#0d1f0d 50%,#1a2a1a 100%)';
+      if (typeof UI !== 'undefined' && UI.profileBannerBackground) {
+        spBannerBg = UI.profileBannerBackground(u.banner);
+      } else if (u.banner) {
+        const b = String(u.banner).replace(/\\/g, '\\\\').replace(/'/g, '%27');
+        spBannerBg = `url('${b}') center/cover`;
+      }
 
       content.innerHTML = `
       <div class="social-profile fade-in">
         <!-- Banner -->
-        <div class="sp-banner" style="background:${(typeof UI !== 'undefined' && UI.profileBannerBackground) ? UI.profileBannerBackground(u.banner) : (u.banner ? `url('${String(u.banner).replace(/\\/g, '\\\\').replace(/'/g, '%27')}') center/cover` : 'linear-gradient(135deg,#1a3a1a 0%,#0d1f0d 50%,#1a2a1a 100%)')}">
+        <div class="sp-banner" style="background:${spBannerBg}">
           ${isSelf ? `<button class="sp-edit-btn" onclick="showProfile()" title="Edit Profile">✏️</button>` : ''}
         </div>
 

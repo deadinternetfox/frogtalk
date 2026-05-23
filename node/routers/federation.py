@@ -21,6 +21,7 @@ import subprocess
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, Header, Request
 from fastapi.responses import JSONResponse
+from starlette.concurrency import run_in_threadpool
 
 from deps import get_current_user
 from pydantic import BaseModel
@@ -2375,12 +2376,62 @@ async def federation_signal_bundle_by_gid(
     if not row:
         return JSONResponse(status_code=404, content={"error": "user_not_found"})
     uid = int(row["id"])
-    bundle = db.signal_fetch_bundle(uid)
+    from routers.signal import (
+        _peer_signal_bundle_is_remote,
+        fetch_peer_bundle_from_home_sync,
+        bundle_api_dict,
+    )
+
+    if await run_in_threadpool(_peer_signal_bundle_is_remote, uid):
+        try:
+            return await run_in_threadpool(fetch_peer_bundle_from_home_sync, uid)
+        except ValueError as e:
+            code = str(e).split(":", 1)[0]
+            if code == "federation_token_missing":
+                return JSONResponse(status_code=503, content={"error": "federation_not_configured"})
+            if code in (
+                "peer_bundle_circuit_open",
+                "peer_bundle_inflight_timeout",
+                "peer_bundle_slot_busy",
+            ):
+                return JSONResponse(
+                    status_code=503,
+                    content={"error": code},
+                    headers={"Retry-After": "60"},
+                )
+            return JSONResponse(status_code=404, content={"error": code})
+    bundle = await run_in_threadpool(db.signal_fetch_bundle, uid)
     if bundle is None:
         return JSONResponse(status_code=404, content={"error": "no_bundle"})
-    from routers.signal import bundle_api_dict
-
     return bundle_api_dict(uid, bundle)
+
+
+@router.post("/federation/signal/nudge-publish/{global_user_id}")
+async def federation_signal_nudge_publish(
+    global_user_id: str,
+    x_federation_token: str | None = Header(default=None),
+):
+    """Ask a federated user (if connected here) to publish Signal prekeys."""
+    if not _fed_token_ok(x_federation_token):
+        return JSONResponse(status_code=401, content={"error": "Invalid federation auth"})
+    gid = str(global_user_id or "").strip()
+    if not gid:
+        return JSONResponse(status_code=400, content={"error": "bad_global_user_id"})
+    with db._conn() as con:
+        row = con.execute(
+            "SELECT id FROM users WHERE global_user_id=? LIMIT 1",
+            (gid,),
+        ).fetchone()
+    if not row:
+        return JSONResponse(status_code=404, content={"error": "user_not_found"})
+    uid = int(row["id"])
+    from ws_manager import manager
+
+    delivered = await manager.send_to_user(
+        uid,
+        {"type": "signal_publish_keys", "reason": "peer_dm"},
+    )
+    return {"ok": True, "delivered": bool(delivered)}
 
 
 @router.get("/federation/signal/identity/{global_user_id}")
@@ -2401,15 +2452,34 @@ async def federation_signal_identity_by_gid(
         ).fetchone()
     if not row:
         return JSONResponse(status_code=404, content={"error": "user_not_found"})
-    ident = db.signal_get_identity_pub(int(row["id"]))
-    if ident is None:
-        return JSONResponse(status_code=404, content={"error": "no_identity"})
+    uid = int(row["id"])
+    from routers.signal import (
+        _peer_signal_bundle_is_remote,
+        fetch_peer_identity_from_home_sync,
+        _local_server_id,
+    )
     import base64
 
+    keys_sid = db.get_user_signal_keys_server_id(uid)
+    if await run_in_threadpool(_peer_signal_bundle_is_remote, uid):
+        b64 = await run_in_threadpool(fetch_peer_identity_from_home_sync, uid)
+        if not b64:
+            return JSONResponse(status_code=404, content={"error": "no_identity"})
+        return {
+            "user_id": uid,
+            "global_user_id": gid,
+            "identity_pub": b64,
+            "keys_server_id": keys_sid or "",
+        }
+    ident = await run_in_threadpool(db.signal_get_identity_pub, uid)
+    if ident is None:
+        return JSONResponse(status_code=404, content={"error": "no_identity"})
+    local_sid = _local_server_id()
     return {
-        "user_id": int(row["id"]),
+        "user_id": uid,
         "global_user_id": gid,
         "identity_pub": base64.b64encode(bytes(ident)).decode("ascii"),
+        "keys_server_id": keys_sid or local_sid,
     }
 
 
@@ -4534,6 +4604,22 @@ async def _handle_user_event(event: dict) -> None:
     if event_type in ("user.blocked", "user.unblocked"):
         await _handle_user_block_event(event_type, payload)
         return
+    if event_type == "user.signal.keys_updated":
+        gid = str((payload or {}).get("global_user_id") or "").strip()
+        keys_sid = str((payload or {}).get("keys_server_id") or "").strip()
+        origin = str(event.get("origin_server_id") or "").strip()
+        if gid and keys_sid and origin and keys_sid == origin:
+            try:
+                ident = db.get_or_create_local_server_identity() or {}
+                local_sid = str(ident.get("server_id") or "").strip()
+                prev = db.get_signal_keys_server_for_gid(gid)
+                db.set_signal_keys_server_for_gid(gid, keys_sid)
+                if local_sid and keys_sid != local_sid and prev != keys_sid:
+                    db.signal_clear_local_bundles_for_gid(gid)
+            except Exception:
+                pass
+        return
+
     if event_type not in ("user.profile.updated", "user.created", "user.deleted"):
         return
     gid = str(payload.get("global_user_id") or "").strip()
@@ -4821,6 +4907,9 @@ async def _handle_dm_event(event: dict) -> None:
             event.get("origin_server_id"),
         )
         return
+    # Do not pin signal_keys_server_id from DM ciphertext origin — each node
+    # keeps its own published keys; cross-node decrypt uses per-node lanes
+    # (see user.signal.keys_updated when a peer uploads a bundle).
     content = _fed_clip(payload.get("content"), _FED_CONTENT_MAX)
     mt = _fed_media_type(payload.get("media_type"))
     md = _fed_media_data(payload.get("media_data"))

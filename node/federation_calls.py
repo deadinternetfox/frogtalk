@@ -357,6 +357,20 @@ def can_call_user(caller_id: int, callee_id: int) -> str | None:
     if db.is_blocked_either_way(int(caller_id), int(callee_id)):
         return "blocked"
     if require_friend_for_calls() and not db.are_friends(int(caller_id), int(callee_id)):
+        try:
+            with db._conn() as con:
+                row = con.execute(
+                    """
+                    SELECT id FROM dm_channels
+                    WHERE (user_a=? AND user_b=?) OR (user_a=? AND user_b=?)
+                    LIMIT 1
+                    """,
+                    (int(caller_id), int(callee_id), int(callee_id), int(caller_id)),
+                ).fetchone()
+            if row:
+                return None
+        except Exception:
+            pass
         return "not_friends"
     return None
 
@@ -534,6 +548,61 @@ def enqueue_call_end(
         "status": safe_status,
     }
     return _enqueue("call.end", payload, targets)
+
+
+def fanout_dm_call_log(
+    caller_id: int,
+    callee_id: int,
+    *,
+    channel_id: int,
+    content: str,
+    created_at: str | None = None,
+) -> None:
+    """Mirror a [[CALLLOG]] DM row to peer nodes (missed/declined/ended on travel)."""
+    if not federation_calls_enabled():
+        return
+    try:
+        from datetime import datetime
+        from routers.federation import enqueue_server_event
+
+        caller = db.get_user_by_id(int(caller_id)) or {}
+        callee = db.get_user_by_id(int(callee_id)) or {}
+        if not caller or not callee:
+            return
+        targets: set[str] = set()
+        for u in (caller, callee):
+            gid = str(u.get("global_user_id") or "").strip()
+            if gid:
+                for sid in db.resolve_federation_push_targets_for_recipient_gids([gid]):
+                    if sid:
+                        targets.add(sid)
+            for sid in call_offer_target_servers(u):
+                if sid:
+                    targets.add(sid)
+        if not targets:
+            return
+        ts = created_at or (datetime.utcnow().isoformat() + "Z")
+        enqueue_server_event(
+            "dm.message.created",
+            {
+                "channel_id": int(channel_id or 0),
+                "sender_nickname": str(caller.get("nickname") or "").strip(),
+                "peer_nickname": str(callee.get("nickname") or "").strip(),
+                "sender_global_user_id": str(caller.get("global_user_id") or "").strip(),
+                "peer_global_user_id": str(callee.get("global_user_id") or "").strip(),
+                "content": str(content or ""),
+                "media_data": None,
+                "media_type": None,
+                "media_name": None,
+                "reply_to": None,
+                "media_blur": 0,
+                "view_once": 0,
+                "created_at": ts,
+            },
+            target_server_ids=sorted(targets),
+        )
+    except Exception:
+        _log.exception("federation: fanout dm call log failed")
 
 
 def enqueue_call_reject(
@@ -898,7 +967,7 @@ async def _apply_call_end(payload, origin, gid_call, _fed_global_id):
     if safe_status == "missed":
         db.update_call_status(local_id, "missed", ended_at=ended_at)
         try:
-            from routers.ws import _emit_dm_call_log, _push_always
+            from routers.ws import _push_always
 
             caller = db.get_user_by_id(int(caller_id)) or {}
             call_type = "voice"
@@ -910,15 +979,6 @@ async def _apply_call_end(payload, origin, gid_call, _fed_global_id):
             if row and row.get("call_type") in _FED_CALL_TYPES:
                 call_type = str(row.get("call_type"))
             call_label = "video" if call_type == "video" else "voice"
-            await _emit_dm_call_log(
-                int(caller_id),
-                int(callee_id),
-                call_type,
-                "Missed call",
-                f"Missed a {call_label} call from {caller.get('nickname') or 'someone'}",
-                "📵",
-                "missed",
-            )
             _push_always(
                 int(callee_id),
                 "📵 Missed call",

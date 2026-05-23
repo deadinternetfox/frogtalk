@@ -3460,10 +3460,17 @@ function openAccountHomeRepinModal() {
   }
   if (prefEl) prefEl.textContent = preferred ? _hostLabelFromUrl(preferred) : 'Not set (auto routing)';
   input.value = _hostLabelFromUrl(def);
+  const syncRow = startSyncEl && startSyncEl.closest('label');
   if (startSyncEl) {
     const atHome = (typeof App !== 'undefined' && App.isAtHomeNode && App.isAtHomeNode());
-    startSyncEl.checked = !atHome;
-    startSyncEl.disabled = !!atHome;
+    if (atHome) {
+      startSyncEl.checked = false;
+      if (syncRow) syncRow.style.display = 'none';
+    } else {
+      startSyncEl.checked = true;
+      startSyncEl.disabled = false;
+      if (syncRow) syncRow.style.display = '';
+    }
   }
   if (errEl) {
     errEl.style.display = 'none';
@@ -3501,7 +3508,8 @@ async function submitAccountHomeRepin() {
     submitBtn.disabled = true;
     submitBtn.textContent = 'Saving…';
   }
-  const startSync = !!(startSyncEl && startSyncEl.checked);
+  const atHome = (typeof App !== 'undefined' && App.isAtHomeNode && App.isAtHomeNode());
+  const startSync = !atHome && !!(startSyncEl && startSyncEl.checked);
   const result = await App.repinAccountHome(parsed.source, { startSync });
   if (submitBtn) {
     submitBtn.disabled = false;
@@ -4155,6 +4163,48 @@ async function _fetchFederationSwitchTicket(targetBase) {
   return '';
 }
 
+/** Pre-switch encryption step (fresh-keys policy = info only; transfer = legacy upload). */
+async function _dctBeforeNodeSwitch(switchTicket) {
+  const t = String(switchTicket || '').trim();
+  if (!t || !window.DeviceCrypto || !State.user?.id) return true;
+  if (DeviceCrypto.usesFreshKeysOnTravel && DeviceCrypto.usesFreshKeysOnTravel()) {
+    return DeviceCrypto.exportAndUploadForSwitch(t);
+  }
+  try {
+    if (window.Signal && typeof Signal.init === 'function' && !Signal.isReady()) {
+      await Signal.init(State.user.id);
+    }
+    if (window.Signal && typeof Signal.ensureReady === 'function') {
+      await Signal.ensureReady(State.user.id, { timeoutMs: 15000 });
+    }
+  } catch {}
+  let ok = false;
+  try {
+    ok = await DeviceCrypto.exportAndUploadForSwitch(t);
+  } catch (e) {
+    if (window.__ftDctDebug) console.info('[DCT] pre-switch export failed', e);
+  }
+  if (ok) return true;
+  if (typeof UI !== 'undefined' && UI.confirm) {
+    let msg = 'Encryption backup failed. Old DM history will not carry to the other node; new messages will use fresh keys there.';
+    try {
+      const err = DeviceCrypto.getLastExportError && DeviceCrypto.getLastExportError();
+      if (err && DeviceCrypto.publicExportErrorMessage) {
+        msg = DeviceCrypto.publicExportErrorMessage(err.status, err.detail, '');
+      }
+    } catch {}
+    const cont = await UI.confirm({
+      title: 'Continue switch?',
+      message: `${msg}\n\nContinue anyway?`,
+      confirmLabel: 'Continue',
+      cancelLabel: 'Stay here',
+      danger: false,
+    });
+    return !!cont;
+  }
+  return true;
+}
+
 /** Open a federated user's profile on their home node (ticket + profile deep link). */
 async function openFederatedUserOnHomeNode(opts = {}) {
   const o = opts && typeof opts === 'object' ? opts : {};
@@ -4188,20 +4238,11 @@ async function openFederatedUserOnHomeNode(opts = {}) {
     try {
       window.name = JSON.stringify({ ft_switch_ticket: switchTicket, ts: Date.now() });
     } catch {}
-  }
-  if (switchTicket && window.DeviceCrypto && State.user && State.user.id) {
     try {
-      if (window.Signal && typeof Signal.init === 'function' && !Signal.isReady()) {
-        await Signal.init(State.user.id);
-      }
-      if (window.Signal && typeof Signal.ensureReady === 'function') {
-        await Signal.ensureReady();
-      }
-      await DeviceCrypto.exportAndUploadForSwitch(switchTicket);
-    } catch (e) {
-      console.warn('[DCT] pre-switch export failed', e);
-    }
+      sessionStorage.setItem('ft_switch_ticket_dct', switchTicket);
+    } catch {}
   }
+  if (!(await _dctBeforeNodeSwitch(switchTicket))) return;
   try {
     State.clear();
   } catch {}
@@ -4282,21 +4323,12 @@ async function connectToSelectedServer() {
         ts: Date.now(),
       });
     } catch {}
+    try {
+      sessionStorage.setItem('ft_switch_ticket_dct', switchTicket);
+    } catch {}
   }
 
-  if (switchTicket && window.DeviceCrypto && State.user && State.user.id) {
-    try {
-      if (window.Signal && typeof Signal.init === 'function' && !Signal.isReady()) {
-        await Signal.init(State.user.id);
-      }
-      if (window.Signal && typeof Signal.ensureReady === 'function') {
-        await Signal.ensureReady();
-      }
-      await DeviceCrypto.exportAndUploadForSwitch(switchTicket);
-    } catch (e) {
-      console.warn('[DCT] pre-switch export failed', e);
-    }
-  }
+  if (!(await _dctBeforeNodeSwitch(switchTicket))) return;
 
   try {
     // Sessions are per-node; clear stale token before hopping servers so the
@@ -7048,6 +7080,9 @@ async function resetEncryptionKeys() {
     // bundle. The legacy ECDH publish endpoint is gone.
     if (window.Signal && typeof window.Signal.resetIdentity === 'function') {
       await window.Signal.resetIdentity();
+      try {
+        if (typeof window.__ftDmDecryptReset === 'function') window.__ftDmDecryptReset();
+      } catch {}
     } else if (typeof Crypto !== 'undefined' && Crypto.resetIdentityKey) {
       // Fallback for builds that ship before Signal.resetIdentity.
       await Crypto.resetIdentityKey();
@@ -7055,7 +7090,11 @@ async function resetEncryptionKeys() {
       UI.showToast('Crypto module not ready.', 'error');
       return;
     }
-    UI.showToast('Keys reset. Reloading…', 'success');
+    UI.showToast(
+      'Keys reset on this device. Contacts must send a new message to match your new keys. Reloading…',
+      'success',
+      9000,
+    );
     setTimeout(() => location.reload(), 600);
   } catch (e) {
     console.error('resetEncryptionKeys', e);

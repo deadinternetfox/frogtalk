@@ -21,12 +21,18 @@ Security notes:
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import binascii
 import json
+import logging
 import os
+import threading
+import time
 import urllib.parse
-from typing import Optional
+from typing import Any, Optional
+
+_log = logging.getLogger(__name__)
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -91,6 +97,32 @@ def _local_server_id() -> str:
     return str((db.get_or_create_local_server_identity() or {}).get("server_id") or "").strip()
 
 
+def _enqueue_signal_keys_updated(user: dict, identity_pub: bytes) -> None:
+    """Tell peer nodes which server now holds this user's active Signal bundle."""
+    gid = str((user or {}).get("global_user_id") or "").strip()
+    local_sid = _local_server_id()
+    if not gid or not local_sid:
+        return
+    try:
+        import federation_calls as fc
+        from routers import federation as fed
+
+        targets = fc._clearnet_federation_peer_ids()
+        if not targets:
+            return
+        fed.enqueue_server_event(
+            "user.signal.keys_updated",
+            {
+                "global_user_id": gid,
+                "keys_server_id": local_sid,
+                "identity_pub": _b64_encode(identity_pub),
+            },
+            target_server_ids=targets,
+        )
+    except Exception:
+        pass
+
+
 def _peer_home_candidates(peer_user_id: int, gid: str, local_sid: str) -> list[str]:
     """Ordered remote server_ids that may host this peer's Signal keys."""
     uid = int(peer_user_id or 0)
@@ -140,50 +172,166 @@ def _peer_home_and_gid(peer_user_id: int) -> tuple[str, str]:
     return "", gid
 
 
-def _peer_signal_bundle_is_remote(peer_user_id: int) -> bool:
-    """True when this peer's Signal keys should be loaded from another node.
+def _peer_signal_bundle_source_server(peer_user_id: int) -> str:
+    """Federation server_id that should serve this peer's active prekey bundle.
 
-    Do not treat a user as remote merely because a federation profile row
-    pins a foreign ``origin_server_id`` — local accounts on this node often
-    keep that metadata while publishing bundles here. Prefer the local bundle
-    when one exists unless ``account_home`` explicitly points elsewhere.
+    Node-local first: if the peer published keys on *this* node, never proxy
+  to another server (avoids stale ``signal_keys_server_id`` pins from federated
+    DMs causing same-node timeouts).
     """
     local_sid = _local_server_id()
-    if not local_sid:
-        return False
     uid = int(peer_user_id or 0)
-    if uid <= 0:
-        return False
-    peer = db.get_user_by_id(uid) or {}
-    gid = str(peer.get("global_user_id") or "").strip()
-    account_home = db.get_user_account_home_server_id(uid) if uid else ""
-    if account_home == local_sid:
-        return False
+    if uid <= 0 or not local_sid:
+        return ""
+    if db.signal_has_published_bundle(uid):
+        return ""
+    keys_sid = db.get_user_signal_keys_server_id(uid)
+    if keys_sid and keys_sid != local_sid:
+        return keys_sid
+    account_home = db.get_user_account_home_server_id(uid)
     if account_home and account_home != local_sid:
-        return True
-    if db.signal_fetch_bundle(uid) is not None:
-        # Keys published on this node — same-node DMs must use them.
-        return False
+        return account_home
+    gid = str((db.get_user_by_id(uid) or {}).get("global_user_id") or "").strip()
     if gid:
         origin = db.get_federation_profile_origin(gid)
         if origin and origin != local_sid:
-            return True
+            return origin
     home_sid, _gid = _peer_home_and_gid(uid)
-    return bool(home_sid and home_sid != local_sid)
+    if home_sid and home_sid != local_sid:
+        return home_sid
+    return ""
 
 
-def fetch_peer_bundle_from_home_sync(peer_user_id: int) -> dict:
-    """Pull a peer's prekey bundle from their federation home node."""
-    from routers.auth import resolve_server_base_url
+def _peer_signal_bundle_is_remote(peer_user_id: int) -> bool:
+    """True when this peer's bundle must be fetched from another federation node."""
+    return bool(_peer_signal_bundle_source_server(peer_user_id))
+
+
+# Cross-node bundle proxy guardrails. Without these, many tabs retrying
+# encrypt/decrypt can spawn hundreds of blocking federation HTTP calls
+# (each up to ~30s) and stall the single uvicorn worker → site 502.
+_REMOTE_BUNDLE_MAX_CONCURRENT = 8
+_REMOTE_BUNDLE_SEM = threading.BoundedSemaphore(_REMOTE_BUNDLE_MAX_CONCURRENT)
+_REMOTE_BUNDLE_INFLIGHT_LOCK = threading.Lock()
+_REMOTE_BUNDLE_INFLIGHT: dict[str, dict[str, Any]] = {}
+_CIRCUIT_LOCK = threading.Lock()
+_CIRCUIT_FAILS: dict[str, int] = {}
+_CIRCUIT_OPEN_UNTIL: dict[str, float] = {}
+_CIRCUIT_FAIL_THRESHOLD = 4
+_CIRCUIT_OPEN_SEC = 90.0
+_CIRCUIT_WAIT_SEC = 22.0
+
+
+def _remote_bundle_circuit_key(server_id: str, gid: str) -> str:
+    return f"{str(server_id or '').strip()}:{str(gid or '').strip()}"
+
+
+def _remote_bundle_circuit_open(server_id: str, gid: str) -> bool:
+    key = _remote_bundle_circuit_key(server_id, gid)
+    now = time.monotonic()
+    with _CIRCUIT_LOCK:
+        until = float(_CIRCUIT_OPEN_UNTIL.get(key) or 0.0)
+        return until > now
+
+
+def _remote_bundle_record_failure(server_id: str, gid: str) -> None:
+    key = _remote_bundle_circuit_key(server_id, gid)
+    now = time.monotonic()
+    with _CIRCUIT_LOCK:
+        n = int(_CIRCUIT_FAILS.get(key) or 0) + 1
+        _CIRCUIT_FAILS[key] = n
+        if n >= _CIRCUIT_FAIL_THRESHOLD:
+            _CIRCUIT_OPEN_UNTIL[key] = now + _CIRCUIT_OPEN_SEC
+            _CIRCUIT_FAILS[key] = 0
+            _log.warning(
+                "signal: remote bundle circuit OPEN gid=%s src=%s for %.0fs",
+                gid[:8] + "…" if len(gid) > 8 else gid,
+                server_id,
+                _CIRCUIT_OPEN_SEC,
+            )
+
+
+def _remote_bundle_record_success(server_id: str, gid: str) -> None:
+    key = _remote_bundle_circuit_key(server_id, gid)
+    with _CIRCUIT_LOCK:
+        _CIRCUIT_FAILS.pop(key, None)
+        _CIRCUIT_OPEN_UNTIL.pop(key, None)
+
+
+def _fetch_remote_bundle_http(
+    *,
+    peer_user_id: int,
+    gid: str,
+    home_sid: str,
+    url: str,
+    tok: str,
+) -> dict:
     from routers.federation import _fetch_url_bytes
 
-    local_sid = _local_server_id()
+    last_exc: Exception | None = None
+    for attempt in range(2):
+        t0 = time.monotonic()
+        timeout_s = 5.0 if attempt < 1 else 8.0
+        try:
+            if not _REMOTE_BUNDLE_SEM.acquire(timeout=3.0):
+                raise TimeoutError("remote_bundle_slot_busy")
+            try:
+                raw = _fetch_url_bytes(
+                    url,
+                    timeout_s=timeout_s,
+                    method="GET",
+                    headers={
+                        "Accept": "application/json",
+                        "User-Agent": "FrogTalk-SignalFederation/1.0",
+                        "x-federation-token": tok,
+                    },
+                )
+            finally:
+                _REMOTE_BUNDLE_SEM.release()
+            data = json.loads(raw.decode("utf-8", errors="replace") or "{}")
+            if not isinstance(data, dict) or not data.get("identity_pub"):
+                raise ValueError("peer_bundle_bad_response")
+            ms = int((time.monotonic() - t0) * 1000)
+            _log.info(
+                "signal: remote bundle ok peer_uid=%s gid=%s src=%s ms=%d attempt=%d",
+                int(peer_user_id or 0),
+                gid[:8] + "…" if len(gid) > 8 else gid,
+                home_sid,
+                ms,
+                attempt + 1,
+            )
+            _remote_bundle_record_success(home_sid, gid)
+            return data
+        except Exception as exc:
+            last_exc = exc
+            ms = int((time.monotonic() - t0) * 1000)
+            _log.warning(
+                "signal: remote bundle attempt FAIL peer_uid=%s gid=%s src=%s ms=%d attempt=%d err=%s",
+                int(peer_user_id or 0),
+                gid[:8] + "…" if len(gid) > 8 else gid,
+                home_sid,
+                ms,
+                attempt + 1,
+                type(exc).__name__,
+            )
+            if attempt < 1:
+                time.sleep(0.2)
+    _remote_bundle_record_failure(home_sid, gid)
+    raise ValueError(f"peer_bundle_fetch_failed:{home_sid}:{last_exc}") from last_exc
+
+
+def fetch_peer_bundle_from_server_sync(peer_user_id: int, server_id: str) -> dict:
+    """Pull a peer's prekey bundle from a specific federation node."""
+    from routers.auth import resolve_server_base_url
+
     gid = str((db.get_user_by_id(int(peer_user_id or 0)) or {}).get("global_user_id") or "").strip()
     if not gid:
         raise ValueError("peer_no_global_id")
-    home_sid, _gid = _peer_home_and_gid(peer_user_id)
+    home_sid = str(server_id or "").strip()
     if not home_sid:
         raise ValueError("peer_home_unreachable")
+    if _remote_bundle_circuit_open(home_sid, gid):
+        raise ValueError("peer_bundle_circuit_open")
     base = resolve_server_base_url(home_sid)
     if not base:
         raise ValueError("peer_home_unreachable")
@@ -192,23 +340,53 @@ def fetch_peer_bundle_from_home_sync(peer_user_id: int) -> dict:
         raise ValueError("federation_token_missing")
     gid_q = urllib.parse.quote(gid, safe="")
     url = f"{base}/api/federation/signal/bundle/{gid_q}"
+    inflight_key = _remote_bundle_circuit_key(home_sid, gid)
+    leader = False
+    slot: dict[str, Any] | None = None
+    with _REMOTE_BUNDLE_INFLIGHT_LOCK:
+        slot = _REMOTE_BUNDLE_INFLIGHT.get(inflight_key)
+        if slot is None:
+            slot = {"event": threading.Event(), "result": None, "error": None}
+            _REMOTE_BUNDLE_INFLIGHT[inflight_key] = slot
+            leader = True
+    if not leader and slot is not None:
+        if not slot["event"].wait(timeout=_CIRCUIT_WAIT_SEC):
+            raise ValueError("peer_bundle_inflight_timeout")
+        if slot["error"] is not None:
+            raise slot["error"]
+        return slot["result"]
     try:
-        raw = _fetch_url_bytes(
-            url,
-            timeout_s=20.0,
-            method="GET",
-            headers={
-                "Accept": "application/json",
-                "User-Agent": "FrogTalk-SignalFederation/1.0",
-                "x-federation-token": tok,
-            },
+        result = _fetch_remote_bundle_http(
+            peer_user_id=int(peer_user_id or 0),
+            gid=gid,
+            home_sid=home_sid,
+            url=url,
+            tok=tok,
         )
+        if slot is not None:
+            slot["result"] = result
+        return result
     except Exception as exc:
-        raise ValueError(f"peer_bundle_fetch_failed:{home_sid}:{exc}") from exc
-    data = json.loads(raw.decode("utf-8", errors="replace") or "{}")
-    if not isinstance(data, dict) or not data.get("identity_pub"):
-        raise ValueError("peer_bundle_bad_response")
-    return data
+        if slot is not None:
+            slot["error"] = exc
+        raise
+    finally:
+        if slot is not None:
+            slot["event"].set()
+            with _REMOTE_BUNDLE_INFLIGHT_LOCK:
+                if _REMOTE_BUNDLE_INFLIGHT.get(inflight_key) is slot:
+                    _REMOTE_BUNDLE_INFLIGHT.pop(inflight_key, None)
+
+
+def fetch_peer_bundle_from_home_sync(peer_user_id: int) -> dict:
+    """Pull a peer's prekey bundle from their active or home federation node."""
+    src = _peer_signal_bundle_source_server(peer_user_id)
+    if not src:
+        home_sid, _gid = _peer_home_and_gid(peer_user_id)
+        src = home_sid
+    if not src:
+        raise ValueError("peer_home_unreachable")
+    return fetch_peer_bundle_from_server_sync(peer_user_id, src)
 
 
 def fetch_peer_identity_from_home_sync(peer_user_id: int) -> str | None:
@@ -216,12 +394,15 @@ def fetch_peer_identity_from_home_sync(peer_user_id: int) -> str | None:
     from routers.auth import resolve_server_base_url
     from routers.federation import _fetch_url_bytes
 
-    home_sid, gid = _peer_home_and_gid(peer_user_id)
     local_sid = _local_server_id()
-    if not home_sid or not gid or (local_sid and home_sid == local_sid):
+    src = _peer_signal_bundle_source_server(peer_user_id)
+    if not src:
         ident = db.signal_get_identity_pub(int(peer_user_id))
         return _b64_encode(ident) if ident else None
-    base = resolve_server_base_url(home_sid)
+    gid = str((db.get_user_by_id(int(peer_user_id or 0)) or {}).get("global_user_id") or "").strip()
+    if not gid:
+        return None
+    base = resolve_server_base_url(src)
     tok = (os.getenv("FROGTALK_FEDERATION_TOKEN") or "").strip()
     if not base or not tok:
         return None
@@ -267,6 +448,10 @@ class BundlePublish(BaseModel):
     one_time_prekeys: list[OneTimePreKeyIn] = Field(default_factory=list, max_length=100)
 
 
+class DmResyncRequest(BaseModel):
+    peer_user_id: int = Field(..., ge=1)
+
+
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
@@ -309,11 +494,117 @@ async def publish_bundle(
         spk_sig,
         otpks,
     )
+    try:
+        await run_in_threadpool(_enqueue_signal_keys_updated, user, identity_pub)
+    except Exception:
+        pass
     return {
         "ok": True,
         "otpks_added": int(result.get("otpks_added", 0)),
         "otpks_available": await run_in_threadpool(db.signal_otpk_count, int(user["id"])),
     }
+
+
+_NUDGE_KEYS_AT: dict[str, float] = {}
+_NUDGE_KEYS_LOCK = threading.Lock()
+_NUDGE_KEYS_COOLDOWN_SEC = 45.0
+_NUDGE_KEYS_RETRY_WAIT_SEC = 2.5
+
+
+def _peer_keys_server_id_for_uid(uid: int) -> str:
+    keys_sid = str(db.get_user_signal_keys_server_id(int(uid)) or "").strip()
+    if keys_sid:
+        return keys_sid
+    src = _peer_signal_bundle_source_server(int(uid))
+    if src:
+        return src
+    return _local_server_id()
+
+
+def _nudge_bundle_retryable(code: str) -> bool:
+    return code in (
+        "no_bundle",
+        "peer_bundle_fetch_failed",
+        "peer_bundle_bad_response",
+        "user_not_found",
+    )
+
+
+def _nudge_peer_keys_publish_remote_sync(gid: str, keys_sid: str) -> bool:
+    from routers.auth import resolve_server_base_url
+    from routers.federation import _fetch_url_bytes
+
+    base = resolve_server_base_url(keys_sid)
+    tok = (os.getenv("FROGTALK_FEDERATION_TOKEN") or "").strip()
+    if not base or not tok or not gid:
+        return False
+    gid_q = urllib.parse.quote(gid, safe="")
+    url = f"{base}/api/federation/signal/nudge-publish/{gid_q}"
+    try:
+        raw = _fetch_url_bytes(
+            url,
+            timeout_s=4.0,
+            method="POST",
+            headers={
+                "Accept": "application/json",
+                "User-Agent": "FrogTalk-SignalFederation/1.0",
+                "x-federation-token": tok,
+            },
+        )
+        data = json.loads(raw.decode("utf-8", errors="replace") or "{}")
+        return bool((data or {}).get("delivered"))
+    except Exception:
+        return False
+
+
+async def nudge_peer_keys_publish(peer_user_id: int) -> bool:
+    """Ask peer's browser (via WS) to publish Signal prekeys — local or federated."""
+    uid = int(peer_user_id or 0)
+    if uid <= 0:
+        return False
+    peer = db.get_user_by_id(uid) or {}
+    gid = str(peer.get("global_user_id") or "").strip()
+    if not gid:
+        return False
+    now = time.monotonic()
+    with _NUDGE_KEYS_LOCK:
+        if now - float(_NUDGE_KEYS_AT.get(gid) or 0.0) < _NUDGE_KEYS_COOLDOWN_SEC:
+            return False
+        _NUDGE_KEYS_AT[gid] = now
+    keys_sid = _peer_keys_server_id_for_uid(uid)
+    local_sid = _local_server_id()
+    payload = {"type": "signal_publish_keys", "reason": "peer_dm"}
+    if keys_sid == local_sid:
+        from ws_manager import manager
+
+        return bool(await manager.send_to_user(uid, payload))
+    return await run_in_threadpool(_nudge_peer_keys_publish_remote_sync, gid, keys_sid)
+
+
+async def _fetch_peer_bundle_payload(uid: int) -> dict:
+    if await run_in_threadpool(_peer_signal_bundle_is_remote, uid):
+        return await run_in_threadpool(fetch_peer_bundle_from_home_sync, uid)
+    bundle = await run_in_threadpool(db.signal_fetch_bundle, uid)
+    if bundle is None:
+        raise ValueError("no_bundle")
+    return bundle_api_dict(uid, bundle)
+
+
+def _bundle_http_error(exc: ValueError) -> HTTPException:
+    code = str(exc).split(":", 1)[0]
+    if code == "federation_token_missing":
+        return HTTPException(status_code=503, detail="federation_not_configured")
+    if code in (
+        "peer_bundle_circuit_open",
+        "peer_bundle_inflight_timeout",
+        "peer_bundle_slot_busy",
+    ):
+        return HTTPException(
+            status_code=503,
+            detail=code,
+            headers={"Retry-After": "60"},
+        )
+    return HTTPException(status_code=404, detail=code)
 
 
 @router.get("/bundle/{user_id}")
@@ -325,24 +616,23 @@ async def fetch_bundle(
 ):
     """Return one prekey bundle for `user_id` and atomically consume one OTPK."""
     del user
-    if user_id <= 0:
+    uid = int(user_id)
+    if uid <= 0:
         raise HTTPException(status_code=400, detail="bad_user_id")
 
-    if await run_in_threadpool(_peer_signal_bundle_is_remote, int(user_id)):
-        try:
-            data = await run_in_threadpool(fetch_peer_bundle_from_home_sync, int(user_id))
-            return data
-        except ValueError as e:
-            code = str(e).split(":", 1)[0]
-            if code == "federation_token_missing":
-                raise HTTPException(status_code=503, detail="federation_not_configured")
-            raise HTTPException(status_code=404, detail=code)
+    try:
+        return await _fetch_peer_bundle_payload(uid)
+    except ValueError as e:
+        code = str(e).split(":", 1)[0]
+        if not _nudge_bundle_retryable(code):
+            raise _bundle_http_error(e) from e
 
-    bundle = await run_in_threadpool(db.signal_fetch_bundle, int(user_id))
-    if bundle is None:
-        raise HTTPException(status_code=404, detail="no_bundle")
-
-    return bundle_api_dict(int(user_id), bundle)
+    await nudge_peer_keys_publish(uid)
+    await asyncio.sleep(_NUDGE_KEYS_RETRY_WAIT_SEC)
+    try:
+        return await _fetch_peer_bundle_payload(uid)
+    except ValueError as e:
+        raise _bundle_http_error(e) from e
 
 
 @router.get("/identity/{user_id}")
@@ -359,15 +649,75 @@ async def fetch_identity(
     """
     if user_id <= 0:
         raise HTTPException(status_code=400, detail="bad_user_id")
-    if await run_in_threadpool(_peer_signal_bundle_is_remote, int(user_id)):
-        ident_b64 = await run_in_threadpool(fetch_peer_identity_from_home_sync, int(user_id))
-        if not ident_b64:
+    uid = int(user_id)
+    ident_b64 = None
+    if await run_in_threadpool(_peer_signal_bundle_is_remote, uid):
+        ident_b64 = await run_in_threadpool(fetch_peer_identity_from_home_sync, uid)
+    if not ident_b64:
+        ident = await run_in_threadpool(db.signal_get_identity_pub, uid)
+        if ident is None:
             raise HTTPException(status_code=404, detail="no_identity")
-        return {"user_id": int(user_id), "identity_pub": ident_b64}
-    ident = await run_in_threadpool(db.signal_get_identity_pub, int(user_id))
-    if ident is None:
-        raise HTTPException(status_code=404, detail="no_identity")
-    return {"user_id": int(user_id), "identity_pub": _b64_encode(ident)}
+        ident_b64 = _b64_encode(ident)
+    keys_sid = await run_in_threadpool(db.get_user_signal_keys_server_id, uid)
+    return {
+        "user_id": uid,
+        "identity_pub": ident_b64,
+        "keys_server_id": keys_sid or _local_server_id(),
+    }
+
+
+@router.post("/dm-resync-request")
+@limiter.limit("20/minute")
+async def dm_resync_request(
+    request: Request,
+    body: DmResyncRequest,
+    user: dict = Depends(get_current_user),
+):
+    """Ask a DM peer to drop stale Signal state and refresh prekeys (cross-node recovery)."""
+    del request
+    peer_id = int(body.peer_user_id)
+    me_id = int(user["id"])
+    if peer_id == me_id:
+        raise HTTPException(status_code=400, detail="bad_peer")
+    if not await run_in_threadpool(db.dm_channel_exists, me_id, peer_id):
+        raise HTTPException(status_code=403, detail="no_dm_channel")
+    from ws_manager import manager
+
+    delivered = await manager.send_to_user(
+        peer_id,
+        {
+            "type": "dm_crypto_resync",
+            "from_id": me_id,
+            "from_nickname": str(user.get("nickname") or ""),
+            "from_global_user_id": str(user.get("global_user_id") or "").strip(),
+        },
+    )
+    return {"ok": True, "delivered": bool(delivered)}
+
+
+@router.get("/peer-keys/{user_id}")
+@limiter.limit("60/minute")
+async def peer_keys_status(
+    request: Request,
+    user_id: int,
+    user: dict = Depends(get_current_user),
+):
+    """Diagnostics for cross-node DM encrypt (no OTPK consume)."""
+    del user
+    uid = int(user_id or 0)
+    if uid <= 0:
+        raise HTTPException(status_code=400, detail="bad_user_id")
+    local_sid = _local_server_id()
+    keys_sid = await run_in_threadpool(db.get_user_signal_keys_server_id, uid)
+    src = await run_in_threadpool(_peer_signal_bundle_source_server, uid)
+    has_local = await run_in_threadpool(db.signal_has_published_bundle, uid)
+    return {
+        "user_id": uid,
+        "keys_server_id": keys_sid or local_sid,
+        "bundle_source_server": src or local_sid,
+        "bundle_is_remote": bool(src),
+        "has_local_bundle": bool(has_local),
+    }
 
 
 @router.get("/otpk-count")

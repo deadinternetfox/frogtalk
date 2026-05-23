@@ -1,16 +1,33 @@
-// device_crypto.js — Device Crypto Transfer (DCT) for node switch.
+// device_crypto.js — Travel / node-switch encryption policy.
 //
-// Before leaving a node, export Signal IndexedDB + room secrets, encrypt
-// with a key derived from the switch ticket, and POST to the source node.
-// After landing on the destination, pull the blob from source via the
-// destination API and import before Signal.init publishes a new identity.
+// Default policy is `fresh_keys`: each federated (travel) node uses new
+// end-to-end keys in this browser. DM history ciphertext from your home
+// node is not migrated — new messages work after sync; old bubbles stay locked.
+//
+// Legacy `transfer` policy (full Signal export via switch ticket) remains in
+// code for operators who set window.FT_DCT_POLICY = 'transfer'.
 
 (function () {
   'use strict';
 
-  const DCT_VERSION = 1;
+  const DCT_VERSION = 2;
+  const DEFAULT_POLICY = 'fresh_keys';
+
+  function dctPolicy() {
+    try {
+      const p = String(window.FT_DCT_POLICY || DEFAULT_POLICY).trim().toLowerCase();
+      return p === 'transfer' ? 'transfer' : 'fresh_keys';
+    } catch {
+      return DEFAULT_POLICY;
+    }
+  }
+
+  function usesFreshKeysOnTravel() {
+    return dctPolicy() === 'fresh_keys';
+  }
   const ROOM_SECRET_PREFIX = 'ft-room-secret-v1:';
   const ROOM_KEYVER_PREFIX = 'ft-room-keyver:';
+  const DCT_PLAIN_MAX = 6 * 1024 * 1024;
 
   function _api(path, method, body) {
     const fn = (typeof apiFetch === 'function') ? apiFetch : fetch;
@@ -55,6 +72,26 @@
     return out;
   }
 
+  async function _gzipBytes(u8) {
+    if (typeof CompressionStream === 'undefined') return null;
+    try {
+      const stream = new Blob([u8]).stream().pipeThrough(new CompressionStream('gzip'));
+      return new Uint8Array(await new Response(stream).arrayBuffer());
+    } catch {
+      return null;
+    }
+  }
+
+  async function _gunzipBytes(u8) {
+    if (typeof DecompressionStream === 'undefined') return null;
+    try {
+      const stream = new Blob([u8]).stream().pipeThrough(new DecompressionStream('gzip'));
+      return new Uint8Array(await new Response(stream).arrayBuffer());
+    } catch {
+      return null;
+    }
+  }
+
   async function _encryptJson(obj, ticket) {
     const key = await _deriveAesKeyFromTicket(ticket);
     const iv = crypto.getRandomValues(new Uint8Array(12));
@@ -71,6 +108,51 @@
     const key = await _deriveAesKeyFromTicket(ticket);
     const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, ct);
     return JSON.parse(new TextDecoder().decode(plain));
+  }
+
+  async function _unpackPlainExport(wrap) {
+    if (!wrap || typeof wrap !== 'object') return null;
+    if (wrap.compression === 'gzip' && wrap.body_b64) {
+      const gz = _bytesFromB64(wrap.body_b64);
+      const raw = await _gunzipBytes(gz);
+      if (!raw) throw new Error('dct gunzip failed');
+      return JSON.parse(new TextDecoder().decode(raw));
+    }
+    if (wrap.compression === 'none' && wrap.body_b64) {
+      return JSON.parse(new TextDecoder().decode(_bytesFromB64(wrap.body_b64)));
+    }
+    if (wrap.dct_version) return wrap;
+    return wrap;
+  }
+
+  async function _packPlainExport(plain) {
+    const json = JSON.stringify(plain);
+    let bytes = new TextEncoder().encode(json);
+    let compression = 'none';
+    if (bytes.length > 200000) {
+      const gz = await _gzipBytes(bytes);
+      if (gz && gz.length + 64 < bytes.length) {
+        bytes = gz;
+        compression = 'gzip';
+      }
+    }
+    if (bytes.length > DCT_PLAIN_MAX) {
+      throw new Error('dct_export_too_large');
+    }
+    return {
+      dct_wrap_version: 1,
+      compression,
+      body_b64: _b64FromBytes(bytes),
+    };
+  }
+
+  function _slimSignalForDct(signal) {
+    if (!signal || typeof signal !== 'object') return null;
+    return {
+      identity: signal.identity,
+      identities: Array.isArray(signal.identities) ? signal.identities : [],
+      sessions: Array.isArray(signal.sessions) ? signal.sessions : [],
+    };
   }
 
   async function _collectAddressBook() {
@@ -120,14 +202,9 @@
       for (let i = 0; i < localStorage.length; i++) {
         const k = localStorage.key(i);
         if (!k || !k.startsWith(ROOM_SECRET_PREFIX)) continue;
-        const val = localStorage.getItem(k) || '';
-        if (!val) continue;
-        rooms.push({ storage_key: k, wrapped: val });
-      }
-      for (let i = 0; i < localStorage.length; i++) {
-        const k = localStorage.key(i);
-        if (!k || !k.startsWith(ROOM_KEYVER_PREFIX)) continue;
-        rooms.push({ storage_key: k, wrapped: localStorage.getItem(k) || '' });
+        const wrapped = localStorage.getItem(k) || '';
+        if (!wrapped) continue;
+        rooms.push({ storage_key: k, wrapped });
       }
     } catch {}
     return rooms;
@@ -159,6 +236,22 @@
     }
   }
 
+  async function _buildRoomSecretsOnlyExport() {
+    const room_secrets = _exportRoomSecrets();
+    if (!room_secrets.length) return null;
+    return {
+      dct_version: DCT_VERSION,
+      dct_mode: 'room_secrets_only',
+      exported_at: Date.now(),
+      address_book: {
+        source_user_id: Number((window.State && State.user && State.user.id) || 0) || 0,
+        peers: [],
+      },
+      signal: null,
+      room_secrets,
+    };
+  }
+
   async function _buildPlainExport() {
     if (!window.SignalStore) throw new Error('SignalStore missing');
     const store = new window.SignalStore();
@@ -168,9 +261,10 @@
     }
     return {
       dct_version: DCT_VERSION,
+      dct_mode: 'full',
       exported_at: Date.now(),
       address_book: await _collectAddressBook(),
-      signal,
+      signal: _slimSignalForDct(signal),
       room_secrets: _exportRoomSecrets(),
     };
   }
@@ -231,38 +325,145 @@
     return destId ? `${destId}.${dev}` : addrKey;
   }
 
+  let _lastExportError = null;
+
+  function _dctPublicMessage(status, detail, errMsg) {
+    const code = String(detail || errMsg || '').trim();
+    if (status === 422 || code === 'dct_export_too_large') {
+      return 'Encryption backup is too large for one switch (too many DM sessions). Switch from your home node in the same browser, or ask contacts to send a new message after you land.';
+    }
+    if (status === 413) {
+      return 'Encryption backup exceeded server size limit — try again from your home node with fewer open DMs.';
+    }
+    if (status === 400 || status === 401 || status === 403) {
+      return 'Switch ticket rejected — wait a moment and try switching again.';
+    }
+    return 'Could not save encryption keys for this switch — DMs and private channels may need new secrets on the other node.';
+  }
+
+  function _dctErrorToast(status, detail, errMsg) {
+    if (window.__ftDctAwaitingSwitchConfirm) return;
+    const msg = _dctPublicMessage(status, detail, errMsg);
+    try {
+      if (typeof UI !== 'undefined' && UI.showToast) UI.showToast(msg, 'warn', 12000);
+    } catch {}
+  }
+
+  async function _ensureSignalReadyForExport() {
+    if (!window.Signal || !State?.user?.id) return;
+    try {
+      if (typeof Signal.init === 'function' && !Signal.isReady()) {
+        await Signal.init(State.user.id);
+      }
+      if (typeof Signal.ensureReady === 'function') {
+        await Signal.ensureReady(State.user.id, { timeoutMs: 15000 });
+      }
+    } catch {}
+  }
+
   async function exportAndUploadForSwitch(ticket) {
     const t = String(ticket || '').trim();
     if (!t) return false;
+    if (usesFreshKeysOnTravel()) {
+      try { sessionStorage.setItem('ft_switch_ticket_dct', t); } catch {}
+      try {
+        const plain = await _buildRoomSecretsOnlyExport();
+        if (plain) {
+          const packed = await _packPlainExport(plain);
+          const sealed = await _encryptJson(packed, t);
+          const res = await _api('/api/auth/device-crypto-blob', 'POST', {
+            ticket: t,
+            blob_b64: sealed,
+          });
+          if (res.ok) {
+            try { window.__ftDctRoomSecretsQueued = true; } catch {}
+            if (typeof UI !== 'undefined' && UI.showToast) {
+              UI.showToast(
+                'Switching nodes — fresh DM encryption here; private channel secrets saved for this browser.',
+                'info',
+                7000,
+              );
+            }
+            return true;
+          }
+        }
+        if (typeof UI !== 'undefined' && UI.showToast) {
+          UI.showToast(
+            'Switching nodes — fresh DM encryption here. Chat history stays on your home node.',
+            'info',
+            7000,
+          );
+        }
+      } catch (e) {
+        if (window.__ftDctDebug) console.info('[DCT] room-secrets-only export failed', e);
+        try {
+          if (typeof UI !== 'undefined' && UI.showToast) {
+            UI.showToast(
+              'Switching nodes — fresh DM encryption here. Chat history stays on your home node.',
+              'info',
+              7000,
+            );
+          }
+        } catch {}
+      }
+      return true;
+    }
     if (!(await _hasExportableCrypto())) {
-      console.warn('[DCT] skip export — no Signal identity on this device');
+      if (window.__ftDctDebug) console.info('[DCT] skip export — no Signal identity on this device');
       return false;
     }
+    try { window.__ftDctAwaitingSwitchConfirm = true; } catch {}
+    try {
+      sessionStorage.setItem('ft_switch_ticket_dct', t);
+    } catch {}
     try {
       if (typeof UI !== 'undefined' && UI.showToast) {
-        UI.showToast('Saving encryption keys for node switch…', 'info', 2800);
+        UI.showToast('Saving encryption keys for node switch…', 'info', 4000);
       }
+    } catch {}
+    try {
+      await _ensureSignalReadyForExport();
       const plain = await _buildPlainExport();
-      const sealed = await _encryptJson(plain, t);
+      const packed = await _packPlainExport(plain);
+      const sealed = await _encryptJson(packed, t);
+      if (sealed.length > 9 * 1024 * 1024) {
+        throw new Error('dct_export_too_large');
+      }
       const res = await _api('/api/auth/device-crypto-blob', 'POST', {
         ticket: t,
         blob_b64: sealed,
       });
       if (!res.ok) {
         const detail = await res.json().catch(() => ({}));
-        console.warn('[DCT] upload failed', res.status, detail.error || '');
-        try {
-          if (typeof UI !== 'undefined' && UI.showToast) {
-            UI.showToast('Could not save encryption keys for switch — DMs may need a new message after landing.', 'warning', 6000);
-          }
-        } catch {}
+        const errText = String(detail.error || detail.detail || '').trim();
+        _lastExportError = { status: res.status, detail: errText };
+        if (window.__ftDctDebug) {
+          console.info('[DCT] upload failed', res.status, errText || res.statusText);
+        }
         return false;
       }
+      try {
+        if (typeof UI !== 'undefined' && UI.showToast) {
+          UI.showToast('Encryption keys saved for node switch', 'success', 3500);
+        }
+      } catch {}
       return true;
     } catch (e) {
-      console.warn('[DCT] export failed', e);
+      const errMsg = String((e && e.message) || e || '');
+      _lastExportError = { status: 0, detail: errMsg };
+      if (window.__ftDctDebug) console.info('[DCT] export failed', errMsg);
+      if (errMsg === 'dct_export_too_large') {
+        _lastExportError = { status: 422, detail: 'dct_export_too_large' };
+        _dctErrorToast(422, 'dct_export_too_large', errMsg);
+      }
       return false;
+    } finally {
+      try { window.__ftDctAwaitingSwitchConfirm = false; } catch {}
     }
+  }
+
+  function getLastExportError() {
+    return _lastExportError;
   }
 
   async function fetchBlobForSwitch(ticket) {
@@ -277,65 +478,79 @@
     return String(data.blob_b64 || '').trim() || null;
   }
 
+  async function _importPlainPayload(plain, ticket) {
+    if (!plain) return false;
+    const mode = String(plain.dct_mode || 'full').trim();
+    const ver = Number(plain.dct_version || 0);
+    if (ver !== 1 && ver !== 2) return false;
+
+    if (mode === 'room_secrets_only') {
+      _importRoomSecrets(plain.room_secrets);
+      try { window.__ftDctRoomSecretsImported = true; } catch {}
+      return true;
+    }
+
+    if (!plain.signal || !plain.signal.identity) return false;
+    const idMap = new Map();
+    const book = plain.address_book || {};
+    const meId = Number((window.State && State.user && State.user.id) || 0);
+    const srcMe = Number(book.source_user_id || 0);
+    if (srcMe > 0 && meId > 0) idMap.set(srcMe, meId);
+
+    for (const p of (book.peers || [])) {
+      const src = Number(p.source_local_id) || 0;
+      const gid = String(p.gid || '').trim();
+      if (!gid || src <= 0 || idMap.has(src)) continue;
+      const dest = await _resolveGidToLocalId(gid);
+      idMap.set(src, dest);
+    }
+
+    if (!window.SignalStore) return false;
+    const store = new window.SignalStore();
+    const signal = plain.signal;
+    const _remapRowKey = async (key) => {
+      const mapped = await _remapAddressKey(String(key || ''), book, idMap);
+      const uid = Number(String(mapped || '').split('.')[0]) || 0;
+      return uid > 0 ? mapped : '';
+    };
+    if (signal.sessions) {
+      const kept = [];
+      for (const row of signal.sessions) {
+        const nk = await _remapRowKey(row.key);
+        if (!nk) continue;
+        row.key = nk;
+        kept.push(row);
+      }
+      signal.sessions = kept;
+    }
+    if (signal.identities) {
+      const keptId = [];
+      for (const row of signal.identities) {
+        const nk = await _remapRowKey(row.key);
+        if (!nk) continue;
+        row.key = nk;
+        keptId.push(row);
+      }
+      signal.identities = keptId;
+    }
+    await store.importSnapshot(signal, (k) => k);
+
+    _importRoomSecrets(plain.room_secrets);
+    try { window.__ftDctImported = true; } catch {}
+    return true;
+  }
+
   async function importFromSwitch(ticket) {
     const t = String(ticket || '').trim();
     if (!t) return false;
     try {
       const sealed = await fetchBlobForSwitch(t);
       if (!sealed) return false;
-      const plain = await _decryptJson(sealed, t);
-      if (!plain || plain.dct_version !== DCT_VERSION) return false;
-
-      const idMap = new Map();
-      const book = plain.address_book || {};
-      const meId = Number((window.State && State.user && State.user.id) || 0);
-      const srcMe = Number(book.source_user_id || 0);
-      if (srcMe > 0 && meId > 0) idMap.set(srcMe, meId);
-
-      // Map exported source user ids → destination local ids via global_user_id.
-      for (const p of (book.peers || [])) {
-        const src = Number(p.source_local_id) || 0;
-        const gid = String(p.gid || '').trim();
-        if (!gid || src <= 0 || idMap.has(src)) continue;
-        const dest = await _resolveGidToLocalId(gid);
-        idMap.set(src, dest);
-      }
-
-      if (!window.SignalStore) return false;
-      const store = new window.SignalStore();
-      const signal = plain.signal;
-      const _remapRowKey = async (key) => {
-        const mapped = await _remapAddressKey(String(key || ''), book, idMap);
-        const uid = Number(String(mapped || '').split('.')[0]) || 0;
-        return uid > 0 ? mapped : '';
-      };
-      if (signal && signal.sessions) {
-        const kept = [];
-        for (const row of signal.sessions) {
-          const nk = await _remapRowKey(row.key);
-          if (!nk) continue;
-          row.key = nk;
-          kept.push(row);
-        }
-        signal.sessions = kept;
-      }
-      if (signal && signal.identities) {
-        const keptId = [];
-        for (const row of signal.identities) {
-          const nk = await _remapRowKey(row.key);
-          if (!nk) continue;
-          row.key = nk;
-          keptId.push(row);
-        }
-        signal.identities = keptId;
-      }
-      await store.importSnapshot(signal, (k) => k);
-
-      _importRoomSecrets(plain.room_secrets);
-      try { window.__ftDctImported = true; } catch {}
-      return true;
+      const wrap = await _decryptJson(sealed, t);
+      const plain = await _unpackPlainExport(wrap);
+      return await _importPlainPayload(plain, t);
     } catch (e) {
-      console.warn('[DCT] import failed', e);
+      if (window.__ftDctDebug) console.warn('[DCT] import failed', e);
       return false;
     }
   }
@@ -344,12 +559,22 @@
     return importFromSwitch(ticket);
   }
 
+  async function tryImportRoomSecretsAfterSwitch(ticket) {
+    if (!usesFreshKeysOnTravel()) return importFromSwitch(ticket);
+    return importFromSwitch(ticket);
+  }
+
   const DeviceCrypto = {
     exportAndUploadForSwitch,
     importFromSwitch,
     tryImportAfterSwitch,
+    tryImportRoomSecretsAfterSwitch,
     fetchBlobForSwitch,
     hasExportableCrypto: _hasExportableCrypto,
+    getLastExportError,
+    publicExportErrorMessage: _dctPublicMessage,
+    policy: dctPolicy,
+    usesFreshKeysOnTravel,
   };
 
   try {

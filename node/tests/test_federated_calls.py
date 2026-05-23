@@ -19,6 +19,18 @@ class FederatedCallsTests(unittest.TestCase):
             self.assertTrue(federation_calls_enabled())
         with mock.patch.dict(os.environ, {"FROGTALK_FEDERATION_CALLS_ENABLED": "0"}):
             self.assertFalse(federation_calls_enabled())
+        with mock.patch.dict(
+            os.environ,
+            {"FROGTALK_FEDERATION_CALLS_ENABLED": "", "FROGTALK_FEDERATION_ENABLED": "1"},
+            clear=False,
+        ):
+            self.assertTrue(federation_calls_enabled())
+        with mock.patch.dict(
+            os.environ,
+            {"FROGTALK_FEDERATION_CALLS_ENABLED": "", "FROGTALK_FEDERATION_ENABLED": "0"},
+            clear=False,
+        ):
+            self.assertFalse(federation_calls_enabled())
 
     def test_turn_ice_servers_stun_and_turn(self):
         servers = turn_ice_servers(
@@ -128,6 +140,39 @@ class FederatedCallsTests(unittest.TestCase):
             self.assertEqual(fc.can_call_user(1, 2), "not_friends")
         with mock.patch("database.is_blocked_either_way", return_value=False), \
              mock.patch("federation_calls.require_friend_for_calls", return_value=False):
+            self.assertIsNone(fc.can_call_user(1, 2))
+
+    def test_peer_signal_bundle_source_prefers_keys_server(self):
+        from routers import signal as sig_mod
+
+        with mock.patch.object(sig_mod.db, "get_or_create_local_server_identity",
+                               return_value={"server_id": "srv_local"}), \
+             mock.patch.object(sig_mod.db, "get_user_signal_keys_server_id",
+                               return_value="srv_travel"), \
+             mock.patch.object(sig_mod.db, "get_user_account_home_server_id",
+                               return_value="srv_home"), \
+             mock.patch.object(sig_mod.db, "signal_fetch_bundle", return_value={"x": 1}), \
+             mock.patch.object(sig_mod.db, "get_user_by_id", return_value={"global_user_id": "g1"}):
+            self.assertEqual(sig_mod._peer_signal_bundle_source_server(42), "srv_travel")
+            self.assertTrue(sig_mod._peer_signal_bundle_is_remote(42))
+
+    def test_can_call_user_allows_existing_dm_without_friend(self):
+        class _Row:
+            def __init__(self):
+                self._data = {"id": 99}
+
+            def fetchone(self):
+                return self._data
+
+        class _Con:
+            def execute(self, *_a, **_k):
+                return _Row()
+
+        with mock.patch("database.is_blocked_either_way", return_value=False), \
+             mock.patch("federation_calls.require_friend_for_calls", return_value=True), \
+             mock.patch("database.are_friends", return_value=False), \
+             mock.patch.object(db, "_conn") as mock_conn:
+            mock_conn.return_value.__enter__.return_value = _Con()
             self.assertIsNone(fc.can_call_user(1, 2))
 
     def test_relay_origin_allowed_for_enabled_peer(self):
@@ -340,6 +385,85 @@ class FederatedVoiceTests(unittest.TestCase):
         self.assertIn("srv_home", targets)
         self.assertIn("srv_travel", targets)
         self.assertNotIn("srv_local", targets)
+
+    def test_federation_bundle_by_gid_proxies_remote_keys(self):
+        """EU must not return a stale local bundle when keys live on travel."""
+        from routers import federation as fed_mod
+        from routers import signal as sig_mod
+
+        remote_bundle = {
+            "user_id": 42,
+            "identity_pub": "dGVzdA==",
+            "registration_id": 1,
+            "signed_prekey": {"id": 1, "pub": "cA==", "sig": "cQ=="},
+            "one_time_prekey": None,
+        }
+
+        class _Con:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_a):
+                return False
+
+            def execute(self, *_a, **_k):
+                class _Cur:
+                    def fetchone(self):
+                        return {"id": 42}
+
+                return _Cur()
+
+        async def _run():
+            with mock.patch.object(fed_mod, "_fed_token_ok", return_value=True), \
+                 mock.patch.object(db, "_conn", return_value=_Con()), \
+                 mock.patch.object(sig_mod, "_peer_signal_bundle_is_remote", return_value=True), \
+                 mock.patch.object(sig_mod, "fetch_peer_bundle_from_home_sync", return_value=remote_bundle) as prox:
+                out = await fed_mod.federation_signal_bundle_by_gid(
+                    "00000000-0000-4000-8000-000000000042",
+                    x_federation_token="tok",
+                )
+                prox.assert_called_once_with(42)
+                return out
+
+        out = asyncio.run(_run())
+        self.assertEqual(out, remote_bundle)
+
+
+class SignalBundleRoutingTests(unittest.TestCase):
+    def test_bundle_source_prefers_local_publish_over_keys_pin(self):
+        from routers import signal as sig_mod
+
+        with mock.patch.object(sig_mod.db, "signal_has_published_bundle", return_value=True), \
+             mock.patch.object(sig_mod.db, "get_user_signal_keys_server_id", return_value="srv_travel"), \
+             mock.patch.object(sig_mod, "_local_server_id", return_value="srv_home"):
+            self.assertEqual(sig_mod._peer_signal_bundle_source_server(42), "")
+            self.assertFalse(sig_mod._peer_signal_bundle_is_remote(42))
+
+
+class RemoteBundleGuardTests(unittest.TestCase):
+    def setUp(self):
+        from routers import signal as sig
+
+        sig._CIRCUIT_FAILS.clear()
+        sig._CIRCUIT_OPEN_UNTIL.clear()
+        with sig._REMOTE_BUNDLE_INFLIGHT_LOCK:
+            sig._REMOTE_BUNDLE_INFLIGHT.clear()
+
+    def test_circuit_opens_after_repeated_failures(self):
+        from routers import signal as sig
+
+        sid, gid = "srv_test", "gid-test"
+        for _ in range(sig._CIRCUIT_FAIL_THRESHOLD):
+            sig._remote_bundle_record_failure(sid, gid)
+        self.assertTrue(sig._remote_bundle_circuit_open(sid, gid))
+
+    def test_success_clears_circuit(self):
+        from routers import signal as sig
+
+        sid, gid = "srv_test", "gid-test"
+        sig._remote_bundle_record_failure(sid, gid)
+        sig._remote_bundle_record_success(sid, gid)
+        self.assertFalse(sig._remote_bundle_circuit_open(sid, gid))
 
 
 if __name__ == "__main__":

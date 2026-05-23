@@ -246,9 +246,11 @@ try { window.FtSync = FtSync; } catch {}
 const App = {
   pendingInvite: null,  // Store invite code to process after login
   PENDING_CALL_KEY: 'ft_pending_incoming_call',
-  ASSET_RESET_VERSION: 'federation-sync-v41-dm-decrypt-polish',
+  ASSET_RESET_VERSION: 'federation-sync-v55-bundle-storm-guard',
   _syncOverlayDismissed: false,
+  _syncOverlayAutoOpened: false,
   _syncResumeStarting: false,
+  _switchSyncBootstrapped: false,
   easterEgg: null,
   easterTapCount: 0,
   easterTapTimer: null,
@@ -395,6 +397,17 @@ const App = {
     }
   },
 
+  _switchWindowMeta() {
+    try {
+      const raw = String(window.name || '').trim();
+      if (!raw) return {};
+      const obj = JSON.parse(raw);
+      return (obj && typeof obj === 'object') ? obj : {};
+    } catch {
+      return {};
+    }
+  },
+
   maybeShowTravelerCryptoNotice(opts = {}) {
     if (this.isAtHomeNode()) return;
     const switched = !!(opts.justSwitched || opts.afterSwitch);
@@ -402,26 +415,46 @@ const App = {
       if (!switched && sessionStorage.getItem('ft_traveler_crypto_notice') === '1') return;
       sessionStorage.setItem('ft_traveler_crypto_notice', '1');
     } catch {}
+    const freshKeys = !!(window.DeviceCrypto && DeviceCrypto.usesFreshKeysOnTravel
+      && DeviceCrypto.usesFreshKeysOnTravel());
     const dctOk = !!window.__ftDctImported;
-    let msg = 'You are on a travel node. DMs and private channels use keys from this browser — avoid messaging from home at the same time or encryption can break.';
-    if (switched && !dctOk) {
-      msg = 'Connected on this node. Encryption keys were not restored from your previous node — old DM history may stay locked until you switch back in the same browser, or send new messages after sync.';
+    let msg = 'You are on a travel node. New direct messages use fresh encryption in this browser. Older DM text from your home node is not copied here by design.';
+    const roomSecretsOk = !!window.__ftDctRoomSecretsImported;
+    if (switched && freshKeys) {
+      msg = roomSecretsOk
+        ? 'You are connected on this travel node.\n\n• New direct messages and calls use fresh encryption here.\n• Older DM history from your home node stays there — locked bubbles here are normal.\n• Private channel secrets from this browser were restored.'
+        : 'You are connected on this travel node.\n\n• New direct messages and calls use fresh encryption here.\n• Older DM history from your home node stays there — locked bubbles here are normal.\n• Private channels may need their room password entered again on this node.';
+    } else if (switched && !dctOk) {
+      msg = 'Connected on this node. Encryption keys were not restored — older DM history may stay locked; new messages after sync should work.';
     } else if (switched && dctOk) {
-      msg = 'Connected on this node. Encryption keys were restored — synced DMs and private room secrets should work here.';
+      msg = 'Connected on this node. Encryption keys were restored from your previous node.';
     }
     try {
-      if (typeof UI !== 'undefined' && UI.showToast) UI.showToast(msg, switched ? 'info' : 'warning', switched ? 10000 : 8000);
+      if (switched && typeof UI !== 'undefined' && UI.notice) {
+        UI.notice({
+          title: freshKeys ? 'Travel node — fresh encryption' : 'Encryption after node switch',
+          icon: '🔐',
+          message: msg,
+          primaryLabel: 'Got it',
+        });
+      } else if (typeof UI !== 'undefined' && UI.showToast) {
+        UI.showToast(msg.replace(/\n+/g, ' '), switched ? 'info' : 'warn', switched ? 10000 : 8000);
+      }
     } catch {}
   },
 
   isAtHomeNode() {
-    if (State.user && State.user.at_home_node === true) return true;
     const here = this._normalizeOrigin(window.location.origin);
+    // After node switch, trust the origin we left (frogtalk.xyz) over a
+    // mistaken account_home pin on the travel mirror.
+    const syncFrom = this._normalizeOrigin(this.getSyncSourceBase());
+    if (syncFrom && here && syncFrom !== here) return false;
+    if (State.user && State.user.at_home_node === true) return true;
+    if (State.user && State.user.at_home_node === false) return false;
     const home = this._normalizeOrigin(
-      (State.user && State.user.account_home_base_url) || this.getSyncSourceBase()
+      (State.user && State.user.account_home_base_url) || syncFrom
     );
     if (home && here && home === here) return true;
-    if (State.user && State.user.at_home_node === false) return false;
     return false;
   },
 
@@ -460,7 +493,6 @@ const App = {
         const st = await stRes.json().catch(() => ({}));
         if (st.in_progress) {
           this.applyFederationSyncMeta(st);
-          this.openSyncOverlay();
           return true;
         }
         const err = String(st.error || '').trim();
@@ -724,7 +756,6 @@ const App = {
         const st = await stRes.json().catch(() => ({}));
         if (st.in_progress) {
           this.applyFederationSyncMeta(st);
-          this.openSyncOverlay();
           return true;
         }
         const err = String(st.error || '').trim();
@@ -751,7 +782,7 @@ const App = {
     return this._resumeFederationSyncFromHome({ force });
   },
 
-  applyFederationSyncMeta(meta) {
+  applyFederationSyncMeta(meta, opts = {}) {
     if (!meta || typeof meta !== 'object') return;
     if (this.isAtHomeNode() && !meta.done) return;
     const normalized = window.FtSync && FtSync.normalizeState
@@ -770,6 +801,10 @@ const App = {
       hint: hint || (inProgress ? 'Syncing from your home node…' : (normalized.done ? 'Sync complete' : '')),
       phase: String(normalized.phase || ''),
     };
+    if (opts.hintOnly) {
+      this._setLoadingSyncHint(payload.hint || '');
+      return;
+    }
     this._applyFederationSyncUiState(payload);
   },
 
@@ -985,8 +1020,18 @@ const App = {
     //  OS notification action buttons no longer exist — the in-page
     //  #incoming-call popup is the single Accept/Decline surface.)
 
+    // Federation switch ticket must win over a stale travel-node session cookie.
+    if (switchedParam && this.peekSwitchTicket()) {
+      const ticketOk = await this.tryAutoLoginFromSwitchTicket();
+      if (ticketOk) {
+        hideSplash();
+        try { await this.launch(); } catch (e) { console.error('[App] launch failed', e); }
+        return;
+      }
+    }
+
     if (!State.token || !State.user) {
-      const switched = params.get('switched') === '1';
+      const switched = switchedParam;
       const switchedTor = params.get('tor') === '1';
       if (switched) {
         const ok = await this.tryAutoLoginFromSwitchTicket();
@@ -1168,7 +1213,12 @@ const App = {
     );
     if (justSwitchedEarly && !atHomeNodeEarly && window.DeviceCrypto) {
       let dctTicket = '';
-      try { dctTicket = String(sessionStorage.getItem('ft_switch_ticket_dct') || '').trim(); } catch {}
+      try {
+        dctTicket = String(sessionStorage.getItem('ft_switch_ticket_dct') || '').trim();
+      } catch {}
+      if (!dctTicket) {
+        try { dctTicket = String(this.peekSwitchTicket() || '').trim(); } catch {}
+      }
       if (dctTicket) {
         try {
           this.applyFederationSyncMeta({
@@ -1176,12 +1226,12 @@ const App = {
             progress_pct: 2,
             hint: 'Restoring encryption keys from your previous node…',
             phase: 'crypto',
-          });
+          }, { hintOnly: true });
         } catch {}
         try {
           await DeviceCrypto.tryImportAfterSwitch(dctTicket);
         } catch (e) {
-          console.warn('[DCT] launch import failed', e);
+          if (window.__ftDctDebug) console.warn('[DCT] launch import failed', e);
         }
         try { sessionStorage.removeItem('ft_switch_ticket_dct'); } catch {}
       }
@@ -1232,14 +1282,21 @@ const App = {
     );
 
     if (justSwitchedNode) {
+      this._switchSyncBootstrapped = true;
       try { sessionStorage.removeItem('ft_sync_overlay_seen'); } catch {}
-      this.applyFederationSyncMeta({
-        in_progress: true,
-        progress_pct: 1,
-        hint: 'Connecting to this node — preparing sync…',
-        phase: 'boot',
-      });
-      await this.ensureFederationSyncAfterSwitch();
+      try {
+        await this.ensureFederationSyncAfterSwitch();
+      } catch (e) {
+        console.warn('[App] federation sync after switch failed', e);
+        try {
+          this.applyFederationSyncMeta({
+            in_progress: false,
+            done: false,
+            error: 'sync_start_failed',
+            hint: 'Could not reach your home node — you can still use this node; try Re-sync in Settings → Network.',
+          });
+        } catch {}
+      }
     }
 
     try {
@@ -1249,22 +1306,23 @@ const App = {
       try { State.rooms = []; } catch {}
     }
 
-    if (!atHomeNode) {
+    if (!atHomeNode && !this._switchSyncBootstrapped) {
       await this.ensureFederationSyncOnLogin();
+    } else if (!atHomeNode && this._switchSyncBootstrapped && this.federationSyncState?.in_progress) {
+      this.startFederationSyncWatcher();
     }
     const sparseAccount = ((State.rooms || []).filter((r) => r.joined).length < 2);
     if (!atHomeNode && sparseAccount && justSwitchedNode) {
       await this.probeAccountSyncIfSparse({ force: true });
     }
 
-    let syncApplied = false;
     if (!atHomeNode) {
-      syncApplied = await this.waitForFederationSyncIfNeeded(
-        (justSwitchedNode || sparseAccount) ? 60000 : 22000
-      );
-    }
-    if (syncApplied) {
-      try { await Rooms.loadRooms(); } catch {}
+      const syncWaitMs = justSwitchedNode ? 6000 : 3500;
+      void this.waitForFederationSyncIfNeeded(syncWaitMs).then((syncApplied) => {
+        if (syncApplied) {
+          try { Rooms.loadRooms(); } catch {}
+        }
+      });
     }
 
     if (!atHomeNode) {
@@ -1777,7 +1835,7 @@ const App = {
   _renderGlobalSyncChip(state) {
     const inProgress = !!(state && state.in_progress);
     let chip = document.getElementById('ft-sync-chip');
-    if (!inProgress) {
+    if (!inProgress || document.getElementById('ft-sync-overlay')) {
       if (chip) chip.remove();
       return;
     }
@@ -1811,6 +1869,7 @@ const App = {
     let overlay = document.getElementById('ft-sync-overlay');
     if (overlay) {
       overlay.classList.add('ft-sync-overlay-open');
+      this._syncOverlayAutoOpened = true;
       this._refreshSyncOverlay();
       return;
     }
@@ -1825,6 +1884,11 @@ const App = {
     });
     overlay.querySelector('#ft-sync-overlay-close').addEventListener('click', () => App.closeSyncOverlay());
     document.body.appendChild(overlay);
+    this._syncOverlayAutoOpened = true;
+    try {
+      const chip = document.getElementById('ft-sync-chip');
+      if (chip) chip.remove();
+    } catch {}
     this._refreshSyncOverlay();
   },
 
@@ -1901,6 +1965,9 @@ const App = {
     if (this._syncOverlayDismissed) return;
     if (this.isAtHomeNode()) return;
     if (!state?.in_progress) return;
+    if (String(state.phase || '') === 'crypto') return;
+    if (this._syncOverlayAutoOpened || document.getElementById('ft-sync-overlay')) return;
+    this._syncOverlayAutoOpened = true;
     this.openSyncOverlay();
   },
 

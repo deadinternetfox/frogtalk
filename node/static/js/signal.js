@@ -291,26 +291,112 @@
     }
   }
 
+  function _signalDebug(...args) {
+    try {
+      if (window.__ftSignalDebug || window.__ftDctDebug) {
+        console.info('[Signal]', ...args);
+      }
+    } catch {}
+  }
+
+  const _bundleInflight = new Map();
+  const _bundleBackoffUntil = new Map();
+
+  function isPeerBundleBackedOff(peerUserId) {
+    const pid = Number(peerUserId) || 0;
+    if (!pid) return false;
+    return Date.now() < (_bundleBackoffUntil.get(pid) || 0);
+  }
+
   async function _fetchPeerBundle(peerUserId) {
-    const apiFetch = window.apiFetch || ((u) => fetch(u, { credentials: 'include' }));
-    const path = `/api/signal/bundle/${encodeURIComponent(peerUserId)}`;
-    const res = await apiFetch(path);
-    if (!res.ok) throw new Error('peer bundle fetch failed: ' + res.status);
-    return res.json();
+    const pid = Number(peerUserId) || 0;
+    if (!pid) throw new Error('bad_peer');
+    const backoffUntil = _bundleBackoffUntil.get(pid) || 0;
+    if (Date.now() < backoffUntil) {
+      throw new Error('peer_bundle_backoff');
+    }
+    if (_bundleInflight.has(pid)) {
+      return _bundleInflight.get(pid);
+    }
+    const t0 = Date.now();
+    _signalDebug('fetchPeerBundle start', pid);
+    const work = (async () => {
+      const apiFetch = window.apiFetch || ((u) => fetch(u, { credentials: 'include' }));
+      const path = `/api/signal/bundle/${encodeURIComponent(pid)}`;
+      let lastErr = null;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const timeoutMs = attempt < 1 ? 9000 : 14000;
+        try {
+          const res = await _withTimeout(
+            apiFetch(path),
+            timeoutMs,
+            'peer_bundle_fetch_timeout',
+          );
+          if (res.status === 503) {
+            const ra = parseInt(res.headers.get('Retry-After') || '60', 10);
+            _bundleBackoffUntil.set(pid, Date.now() + (Number.isFinite(ra) ? ra : 60) * 1000);
+            throw new Error('peer_bundle_busy');
+          }
+          if (!res.ok) throw new Error('peer bundle fetch failed: ' + res.status);
+          const data = await res.json();
+          _bundleBackoffUntil.delete(pid);
+          _signalDebug('fetchPeerBundle ok', pid, (Date.now() - t0) + 'ms', 'try', attempt + 1);
+          return data;
+        } catch (e) {
+          lastErr = e;
+          _signalDebug('fetchPeerBundle try fail', pid, attempt + 1, e);
+          if (attempt < 1) {
+            await new Promise((r) => setTimeout(r, 500 * (attempt + 1)));
+          }
+        }
+      }
+      _bundleBackoffUntil.set(pid, Date.now() + 60000);
+      _signalDebug('fetchPeerBundle fail', pid, (Date.now() - t0) + 'ms', lastErr);
+      throw lastErr;
+    })();
+    _bundleInflight.set(pid, work);
+    try {
+      return await work;
+    } finally {
+      if (_bundleInflight.get(pid) === work) _bundleInflight.delete(pid);
+    }
+  }
+
+  /** Hint for send path: whether encrypt must reach a remote keys node (no OTPK consume). */
+  async function warmPeerBundleForSend(peerUserId) {
+    const pid = Number(peerUserId) || 0;
+    if (!pid) return null;
+    try {
+      const diag = await peerKeysDiagnostics(pid);
+      _signalDebug('warmPeerBundleForSend', pid, diag);
+      return diag;
+    } catch (e) {
+      _signalDebug('warmPeerBundleForSend fail', pid, e);
+      return null;
+    }
+  }
+
+  function _withTimeout(promise, ms, label) {
+    const limit = Number(ms) || 12000;
+    return Promise.race([
+      promise,
+      new Promise((_, rej) => {
+        setTimeout(() => rej(new Error(String(label || 'timeout'))), limit);
+      }),
+    ]);
   }
 
   // Lightweight peer identity_pub fetch — does NOT consume an OTPK.
   // Returns base64 of the raw 32-byte identity key, or null on 404 /
   // network error. Used to detect peer-side identity rotation before
   // we reuse a (possibly stale) local Signal session.
-  const _peerIdentCache = new Map(); // peerUserId -> { b64, ts }
+  const _peerIdentCache = new Map(); // peerUserId -> { b64, ts, keysServerId }
   const _PEER_IDENT_TTL_MS = 60 * 1000; // 60s — short enough to catch a
                                         // recent peer reset, long
                                         // enough not to spam the API.
   async function _fetchPeerIdentityPub(peerUserId, { noCache = false, peerHomeServerId = '' } = {}) {
     // Identity drift check uses /api/signal/identity/{id}; the server proxies
     // to the peer's home node when keys are not stored locally.
-    void peerHomeServerId;
     const key = String(peerUserId);
     const now = Date.now();
     if (!noCache) {
@@ -320,12 +406,27 @@
     const apiFetch = window.apiFetch || ((u) => fetch(u, { credentials: 'include' }));
     const path = `/api/signal/identity/${encodeURIComponent(peerUserId)}`;
     try {
-      const res = await apiFetch(path);
+      const res = await _withTimeout(apiFetch(path), 8000, 'peer_identity_timeout');
       if (!res.ok) return null;
       const data = await res.json();
       const b64 = data && typeof data.identity_pub === 'string' ? data.identity_pub : null;
-      if (b64) _peerIdentCache.set(key, { b64, ts: now });
+      const keysSid = data && typeof data.keys_server_id === 'string' ? data.keys_server_id : '';
+      if (b64) {
+        _peerIdentCache.set(key, { b64, ts: now, keysServerId: keysSid });
+      }
+      void peerHomeServerId;
       return b64;
+    } catch {
+      return null;
+    }
+  }
+
+  async function peerKeysDiagnostics(peerUserId) {
+    const apiFetch = window.apiFetch || ((u) => fetch(u, { credentials: 'include' }));
+    try {
+      const res = await apiFetch(`/api/signal/peer-keys/${encodeURIComponent(peerUserId)}`);
+      if (!res.ok) return null;
+      return await res.json();
     } catch {
       return null;
     }
@@ -433,7 +534,11 @@
       }
     }
     // No session yet \u2014 fetch a bundle and run X3DH.
-    const bundle = await _fetchPeerBundle(peerUserId);
+    const bundle = await _withTimeout(
+      _fetchPeerBundle(peerUserId),
+      15000,
+      'peer_bundle_timeout',
+    );
     // Re-attach the DJB type byte stripped at publish time so
     // libsignal's processPreKey accepts the 33-byte representation it
     // expects internally.
@@ -458,20 +563,29 @@
 
   async function encryptDM(peerUserId, plaintext, opts = {}) {
     if (!_libsignal || !_store) throw new Error('Signal not initialised');
-    await _ensureSessionWith(peerUserId, opts);
+    const t0 = Date.now();
+    _signalDebug('encryptDM start', peerUserId);
+    await _withTimeout(
+      _ensureSessionWith(peerUserId, opts),
+      18000,
+      'signal_session_timeout',
+    );
+    _signalDebug('encryptDM session ready', peerUserId, (Date.now() - t0) + 'ms');
     const addr = _addr(peerUserId);
     const cipher = new _libsignal.SessionCipher(_store, addr);
     const ptBytes = new TextEncoder().encode(String(plaintext));
     const ct = await cipher.encrypt(ptBytes.buffer);
     // ct.type is 3 (PREKEY) on first message, 1 (WHISPER) thereafter.
     const tag = (ct.type === TYPE_PREKEY) ? 'pre' : 'msg';
-    return {
+    const out = {
       v: ENVELOPE_VERSION,
       t: tag,
       // ct.body is a binary STRING (libsignal API quirk); convert via
       // charCode to Uint8Array.
       b: _binaryStringToB64(ct.body),
     };
+    _signalDebug('encryptDM done', peerUserId, tag, (Date.now() - t0) + 'ms');
+    return out;
   }
 
   function _binaryStringToB64(s) {
@@ -523,7 +637,19 @@
         }
       }
     } else if (envelope.t === 'msg') {
-      ptBuf = await cipher.decryptWhisperMessage(binaryBody, 'binary');
+      try {
+        ptBuf = await cipher.decryptWhisperMessage(binaryBody, 'binary');
+      } catch (e1) {
+        const em = String((e1 && e1.message) || e1 || '');
+        if (em.includes('Bad MAC') || em.includes('UntrustedIdentity')
+            || em.includes('Message key not found')) {
+          await _clearPeerSession(peerUserId);
+          const cipher2 = new _libsignal.SessionCipher(_store, addr);
+          ptBuf = await cipher2.decryptWhisperMessage(binaryBody, 'binary');
+        } else {
+          throw e1;
+        }
+      }
     } else {
       throw new Error('unknown envelope type: ' + envelope.t);
     }
@@ -532,6 +658,72 @@
 
   async function resetSessionWith(peerUserId) {
     await _clearPeerSession(peerUserId);
+  }
+
+  /**
+   * Cross-node DM recovery: refresh our prekeys, drop the peer session, and
+   * ask the peer (via WS) to do the same so the next message uses a fresh
+   * prekey handshake on both sides.
+   */
+  async function requestDmCryptoResync(peerUserId) {
+    const pid = Number(peerUserId) || 0;
+    if (!pid || !_store) return { ok: false };
+    _peerIdentCache.delete(String(pid));
+    await _clearPeerSession(pid);
+    try {
+      await ensureMyBundleFresh();
+    } catch (e) {
+      console.warn('[Signal] ensureMyBundleFresh during resync failed', e);
+    }
+    const apiFetch = window.apiFetch || ((u, m, b) => fetch(u, {
+      method: m || 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: b ? JSON.stringify(b) : undefined,
+    }));
+    try {
+      const res = await _withTimeout(
+        apiFetch('/api/signal/dm-resync-request', 'POST', { peer_user_id: pid }),
+        10000,
+        'dm_resync_request_timeout',
+      );
+      if (!res.ok) return { ok: false };
+      const data = await res.json().catch(() => ({}));
+      return { ok: true, delivered: !!data.delivered };
+    } catch (e) {
+      console.warn('[Signal] dm-resync-request failed', e);
+      return { ok: false };
+    }
+  }
+
+  async function applyDmCryptoResync(fromUserId) {
+    const pid = Number(fromUserId) || 0;
+    if (!pid || !_store) return;
+    _peerIdentCache.delete(String(pid));
+    await _clearPeerSession(pid);
+    try {
+      await ensureMyBundleFresh();
+    } catch (e) {
+      console.warn('[Signal] ensureMyBundleFresh on inbound resync failed', e);
+    }
+    try {
+      if (typeof window.__ftDmDecryptReset === 'function') window.__ftDmDecryptReset();
+    } catch {}
+    try { window.dispatchEvent(new CustomEvent('ft:crypto-ready')); } catch {}
+  }
+
+  /** Refresh cached peer identity from the server without tearing down sessions.
+
+  Clearing the session here breaks inbound t:'pre' decrypt (Bad MAC) after a
+  single failed whisper — the prekey handshake state lives in the session store.
+  */
+  async function refreshPeerForDecrypt(peerUserId) {
+    const pid = Number(peerUserId) || 0;
+    if (!pid || !_store) return;
+    _peerIdentCache.delete(String(pid));
+    try {
+      await _fetchPeerIdentityPub(pid, { noCache: true });
+    } catch {}
   }
 
   // ── Track E — signed DTLS fingerprint envelope ───────────────────────
@@ -811,6 +1003,12 @@
     encryptDM,
     decryptDM,
     resetSessionWith,
+    requestDmCryptoResync,
+    applyDmCryptoResync,
+    isPeerBundleBackedOff,
+    refreshPeerForDecrypt,
+    peerKeysDiagnostics,
+    warmPeerBundleForSend,
     // Eager session pre-warm (e.g. on DM open). Builds an outbound
     // session via X3DH if none exists, OR verifies the peer's
     // identity_pub against the local session and resets on drift —
@@ -839,13 +1037,24 @@
         try { await _store._wipe(); } catch (e) { console.warn('[Signal] wipe failed', e); }
       }
       _store = null;
-      _ready = false;
+      _initPromise = null;
+      _bundlePromise = null;
       _bundleHealthy = false;
+      let uid = Number(_ourUserId) || 0;
+      if (!uid) {
+        try { uid = Number(window.State && window.State.user && window.State.user.id) || 0; } catch {}
+      }
+      _ourUserId = uid || null;
       _idkCache.clear();
       _peerIdentCache.clear();
       _idkSeen.clear();
-      await init();
+      _identityRotateLogged.clear();
+      if (uid) await init(uid);
       await ensureMyBundleFresh();
+      try {
+        if (typeof window.__ftDmDecryptReset === 'function') window.__ftDmDecryptReset();
+      } catch {}
+      try { window.dispatchEvent(new CustomEvent('ft:crypto-ready')); } catch {}
     },
   };
 

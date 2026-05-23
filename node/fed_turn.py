@@ -28,11 +28,23 @@ def local_turn_credential() -> str:
 
 
 def federation_calls_enabled() -> bool:
-    return os.getenv("FROGTALK_FEDERATION_CALLS_ENABLED", "0").strip().lower() in (
+    """Cross-node DM voice/video signaling.
+
+    Explicit ``FROGTALK_FEDERATION_CALLS_ENABLED`` wins. When unset, calls
+    follow ``FROGTALK_FEDERATION_ENABLED`` so a federated mesh rings across
+    nodes without a separate operator toggle (set CALLS=0 to disable).
+    """
+    explicit = (os.getenv("FROGTALK_FEDERATION_CALLS_ENABLED") or "").strip().lower()
+    if explicit in ("0", "false", "no"):
+        return False
+    if explicit in ("1", "true", "yes"):
+        return True
+    fed_on = (os.getenv("FROGTALK_FEDERATION_ENABLED") or "").strip().lower() in (
         "1",
         "true",
         "yes",
     )
+    return fed_on
 
 
 def voice_sfu_enabled() -> bool:
