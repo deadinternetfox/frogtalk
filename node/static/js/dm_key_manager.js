@@ -8,8 +8,6 @@
   const MODAL_ID = 'modal-ft-key-manager';
   const GATE_MODAL_ID = 'modal-ft-key-gate';
   const AUTH_TTL_MS = 8 * 60 * 1000;
-  const PIN_RECENT_MS = 2 * 60 * 1000;
-  const _SS_PIN_UNLOCKED = 'frogtalk-pin-unlocked-at';
   const _SS_AUTH_AT = 'ft_keymgr_auth_at';
 
   let _openContext = null;
@@ -54,15 +52,6 @@
     }
   }
 
-  function _pinRecentlyUnlocked() {
-    try {
-      const at = Number(sessionStorage.getItem(_SS_PIN_UNLOCKED) || 0);
-      return at > 0 && (Date.now() - at) < PIN_RECENT_MS;
-    } catch {
-      return false;
-    }
-  }
-
   async function _pinIsConfigured() {
     if (!window.Pin) return false;
     try { await Pin.refreshFromServer(); } catch {}
@@ -71,11 +60,11 @@
   }
 
   async function _gatePin() {
-    if (!window.Pin) return true;
+    if (!window.Pin) return false;
     if (!(await _pinIsConfigured())) return true;
-    if (_pinRecentlyUnlocked() && !Pin.isLocked()) return true;
+    if (typeof Pin.gateKeyManager === 'function') return Pin.gateKeyManager();
+    try { Pin.lockNow(); } catch { return false; }
     return new Promise((resolve) => {
-      try { Pin.lockNow(); } catch { resolve(false); return; }
       const start = Date.now();
       const iv = setInterval(() => {
         if (!Pin.isLocked()) {
@@ -149,13 +138,13 @@
 
   async function _gateAccess() {
     if (_authFresh()) return true;
-    const pinOk = await _gatePin();
-    if (!pinOk) {
-      _toast('PIN required to open the key manager.', 'warning');
-      return false;
-    }
     const hasPin = await _pinIsConfigured();
     if (hasPin) {
+      const pinOk = await _gatePin();
+      if (!pinOk) {
+        _toast('PIN required to open the key manager.', 'warning');
+        return false;
+      }
       try { sessionStorage.setItem(_SS_AUTH_AT, String(Date.now())); } catch {}
       return true;
     }

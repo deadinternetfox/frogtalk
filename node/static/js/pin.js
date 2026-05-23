@@ -9,6 +9,7 @@
  *   Pin.openOptions()          — render PIN sub-options in privacy panel
  *   Pin.gateAutoLogin()        — Promise<boolean>: must succeed to launch app
  *   Pin.gateAdmin()            — Promise<boolean>: must succeed to open admin
+ *   Pin.gateKeyManager()       — Promise<boolean>: must succeed to open key manager
  *   Pin.lockNow()              — show lock screen immediately
  *   Pin.isLocked()             — true while lock screen is active
  *
@@ -719,6 +720,14 @@
     });
   }
 
+  function gateKeyManager () {
+    return new Promise((resolve) => {
+      if (!_cfg.has_pin) { resolve(true); return; }
+      _unlockResolvers.push(resolve);
+      lockNow();
+    });
+  }
+
   function gateAdmin () {
     return new Promise((resolve) => {
       if (!_cfg.has_pin || !_cfg.pin_require_for_admin) { resolve(true); return; }
@@ -1145,6 +1154,7 @@
     openSettings,
     gateAutoLogin,
     gateAdmin,
+    gateKeyManager,
     gateRequest,
     lockNow,
     reset,
