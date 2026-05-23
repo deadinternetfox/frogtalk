@@ -1683,6 +1683,19 @@ def _sync_failure_state(uid: int, source: str, exc: Exception, cur: dict | None 
     """Persist terminal sync state after an exception (preserve partial import counts)."""
     cur = dict(cur or _sync_state_get(uid) or {})
     err = str(exc)[:200]
+    low_err = err.lower()
+    if uid > 0 and int(cur.get("dm_linked") or 0) > 0:
+        if (
+            "export_unavailable" in low_err
+            or "connection" in low_err
+            or "timed out" in low_err
+        ):
+            try:
+                from dm_system_messages import insert_connection_failure_notices_for_user
+
+                insert_connection_failure_notices_for_user(uid, limit=12)
+            except Exception:
+                pass
     hint = "Sync failed"
     low = err.lower()
     joined = int(cur.get("rooms_joined") or 0)
@@ -3676,6 +3689,13 @@ def _apply_sync_export_to_user(user_id: int, export: dict, *, fetch_origin: str 
     if n_dm_history:
         _sync_step("dm_messages", f"Restoring DM history… (0/{n_dm_history})", "dm_messages", 0)
     dm_history_done = 0
+    dm_history_notices = 0
+    is_travel_import = bool(source_server_id and local_sid and source_server_id != local_sid)
+    source_label = str(payload.get("source_public_url") or fetch_origin or "your home node").strip()[:80]
+    try:
+        from dm_system_messages import maybe_history_sync_notice
+    except Exception:
+        maybe_history_sync_notice = None  # type: ignore[assignment,misc]
     for entry in dm_histories:
         if not isinstance(entry, dict):
             continue
@@ -3685,13 +3705,43 @@ def _apply_sync_export_to_user(user_id: int, export: dict, *, fetch_origin: str 
         msgs = entry.get("messages")
         if not isinstance(msgs, list) or not msgs:
             continue
+        offered = len(msgs)
         # The DM channel must exist locally before we can stitch messages
         # into it. The DM-peer pass earlier in this function provisions a
         # stub for every peer in `dm_peers`; if a DM channel is missing
         # we skip rather than create rogue channels here.
         peer_local = db.find_user_by_global_id(peer_gid)
         if not peer_local:
-            continue
+            if maybe_history_sync_notice:
+                try:
+                    stub = db.ensure_federated_dm_local_user(
+                        peer_gid,
+                        str(entry.get("peer_nickname") or entry.get("nickname") or "user")[:64],
+                        origin_server_id=source_server_id,
+                    )
+                    if stub:
+                        peer_local = stub
+                except Exception:
+                    peer_local = None
+            if not peer_local:
+                if maybe_history_sync_notice:
+                    try:
+                        for peer_item in dm_peers:
+                            if not isinstance(peer_item, dict):
+                                continue
+                            if str(peer_item.get("global_user_id") or "").strip() != peer_gid:
+                                continue
+                            nick = str(peer_item.get("nickname") or "").strip()
+                            if nick:
+                                peer_local = db.ensure_federated_dm_local_user(
+                                    peer_gid, nick, origin_server_id=source_server_id,
+                                )
+                            break
+                    except Exception:
+                        pass
+            if not peer_local:
+                dm_history_done += 1
+                continue
         peer_uid = int(peer_local.get("id") or 0)
         if peer_uid <= 0 or peer_uid == uid:
             continue
@@ -3736,6 +3786,21 @@ def _apply_sync_export_to_user(user_id: int, export: dict, *, fetch_origin: str 
                 continue
         dm_history_messages_applied += applied
         dm_history_done += 1
+        if maybe_history_sync_notice and cid > 0:
+            try:
+                notice = maybe_history_sync_notice(
+                    channel_id=cid,
+                    actor_user_id=uid,
+                    messages_applied=applied,
+                    messages_offered=offered,
+                    is_travel_import=is_travel_import,
+                    peer_missing=False,
+                    source_label=source_label,
+                )
+                if notice.get("inserted"):
+                    dm_history_notices += 1
+            except Exception:
+                pass
         if dm_history_done % 3 == 0:
             _sync_step(
                 "dm_messages",
@@ -3821,6 +3886,7 @@ def _apply_sync_export_to_user(user_id: int, export: dict, *, fetch_origin: str 
         "stories_total": n_stories,
         "history_messages_applied": history_messages_applied,
         "dm_history_messages_applied": dm_history_messages_applied,
+        "dm_history_notices": dm_history_notices,
         "members_snapshots_applied": members_snapshots_applied,
         "peer_profiles_cached": peer_profiles_cached,
     }

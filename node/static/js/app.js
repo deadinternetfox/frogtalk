@@ -114,7 +114,9 @@ const FtSync = {
     const s = st || {};
     const joined = Number(s.rooms_joined || 0);
     const dms = Number(s.dm_linked || 0);
-    return joined > 0 || dms > 0;
+    const dmMsgs = Number(s.dm_history_messages_applied || 0);
+    const posts = Number(s.social_posts_imported || 0);
+    return joined > 0 || dms > 0 || dmMsgs > 0 || posts > 0;
   },
 
   /** Align client UI with server-normalized sync flags (avoids stuck % overlay). */
@@ -579,8 +581,11 @@ const App = {
           error: data.error,
           hint: `Sync failed: ${String(data.error).slice(0, 120)}`,
         });
-        if (typeof UI !== 'undefined' && UI.showToast) {
-          UI.showToast(`Account sync failed: ${String(data.error).slice(0, 100)}`, 'error', 8000);
+        const soft = window.FtSync && FtSync.federationSyncCoreComplete
+          ? FtSync.federationSyncCoreComplete(data)
+          : false;
+        if (!soft && typeof UI !== 'undefined' && UI.showToast) {
+          UI.showToast(`Account sync issue: ${String(data.error).slice(0, 100)}`, 'warn', 7000);
         }
       } else {
         await this._reconcileFederationSyncAfterDismiss();
@@ -865,7 +870,12 @@ const App = {
         return true;
       }
       if (data?.error && typeof UI !== 'undefined' && UI.showToast) {
-        UI.showToast(`Could not start sync: ${String(data.error).slice(0, 100)}`, 'error', 5000);
+        const soft = window.FtSync && FtSync.federationSyncCoreComplete
+          ? FtSync.federationSyncCoreComplete(data)
+          : false;
+        if (!soft) {
+          UI.showToast(`Could not start sync: ${String(data.error).slice(0, 100)}`, 'warn', 6000);
+        }
       }
     } catch {}
     return false;
@@ -2098,7 +2108,21 @@ const App = {
       const hint = (window.FtSync && FtSync.syncErrorPublicHint)
         ? FtSync.syncErrorPublicHint(errAfter)
         : errAfter.slice(0, 120);
-      UI.showToast(`Sync issue: ${hint}`, 'error', 6000);
+      UI.showToast(`Sync issue: ${hint}`, 'warn', 6000);
+    }
+    try {
+      if (typeof loadDMChannels === 'function') await loadDMChannels();
+    } catch {}
+    try {
+      if (window.DMs && typeof DMs.afterFederationSyncHistoryNotices === 'function') {
+        await DMs.afterFederationSyncHistoryNotices({
+          syncError: String(payload?.error || '').trim(),
+          dmHistoryApplied: Number(payload?.dm_history_messages_applied || 0),
+          dmLinked: Number(payload?.dm_linked || 0),
+        });
+      }
+    } catch (e) {
+      console.warn('[App] DM history sync notices failed', e);
     }
   },
 

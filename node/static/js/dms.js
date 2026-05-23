@@ -159,11 +159,16 @@ function _parseDMCallLog(content) {
   try { return JSON.parse(content.slice('[[CALLLOG]]'.length)); } catch { return null; }
 }
 
+function _parseDMSysLog(content) {
+  if (typeof content !== 'string' || !content.startsWith('[[DMSYS]]')) return null;
+  try { return JSON.parse(content.slice('[[DMSYS]]'.length)); } catch { return null; }
+}
+
 function _looksEncryptedBlob(content) {
   if (typeof content !== 'string') return false;
   const s = content.trim();
   if (!s || s.length < 40) return false;
-  if (s.startsWith('[[CALLLOG]]')) return false;
+  if (s.startsWith('[[CALLLOG]]') || s.startsWith('[[DMSYS]]')) return false;
   if (s.startsWith('{') || s.startsWith('[')) {
     try {
       const obj = JSON.parse(s);
@@ -204,6 +209,8 @@ function _looksEncryptedBlob(content) {
 }
 
 function _dmPreviewText(content, hasMedia, mediaType) {
+  const sys = _parseDMSysLog(content);
+  if (sys) return sys.title || 'Encryption synced';
   const c = _parseDMCallLog(content);
   if (c) {
     if (c.kind === 'missed') return c.subtitle || c.title || 'Missed call';
@@ -715,16 +722,98 @@ function _dmLockedBubbleText(live) {
     return _DM_DECRYPT_LOCKED_HOME + ' — send a new message to start a fresh thread here.';
   }
   if (live) {
-    return '🔒 Could not unlock — encryption is re-syncing; send a new message in a moment.';
+    return '🔒 Unlocking…';
   }
-  return '🔒 Encrypted — keys out of sync across nodes. Send a new message or open Settings → Reset encryption keys.';
+  return '🔒 Encrypted — waiting for encryption sync in this chat.';
 }
+
+const _dmCryptoSyncNoticeAt = new Map();
 
 function _resetDmDecryptWarnings() {
   _dmDecryptWarned.clear();
   _dmDecryptPermafail.clear();
   _dmPeerRecoveryAttempted.clear();
 }
+
+/** Polished in-chat system line when keys were auto-synced (both users via federation). */
+async function _dmPostCryptoSyncNotice(peerUserId) {
+  const chId = Number(_activeDM?.id) || 0;
+  const pid = Number(peerUserId) || 0;
+  if (!chId || !pid) return;
+  const dedupeKey = `${chId}:crypto_sync`;
+  if ((_dmCryptoSyncNoticeAt.get(dedupeKey) || 0) > Date.now() - 120000) return;
+  try {
+    const res = await apiFetch(`/api/dms/${chId}/crypto-sync-notice`, 'POST', {
+      peer_user_id: pid,
+      reason: 'auto',
+    });
+    if (!res.ok) return;
+    _dmCryptoSyncNoticeAt.set(dedupeKey, Date.now());
+    const data = await res.json().catch(() => ({}));
+    if (data?.message && typeof handleWSDMMessage === 'function') {
+      handleWSDMMessage(data.message);
+    }
+  } catch (e) {
+    if (window.__ftDctDebug) console.info('[dms] crypto-sync notice failed', e);
+  }
+}
+try { window._dmPostCryptoSyncNotice = _dmPostCryptoSyncNotice; } catch {}
+
+const _dmHistorySyncNoticeAt = new Map();
+
+async function _dmPostHistoryKeysNotice(peerUserId, channelId) {
+  const chId = Number(channelId) || 0;
+  const pid = Number(peerUserId) || 0;
+  if (!chId || !pid) return;
+  const dedupeKey = `${chId}:history_keys`;
+  if ((_dmHistorySyncNoticeAt.get(dedupeKey) || 0) > Date.now() - 600000) return;
+  try {
+    const res = await apiFetch(`/api/dms/${chId}/history-sync-notice`, 'POST', {
+      peer_user_id: pid,
+      reason: 'keys',
+    });
+    if (!res.ok) return;
+    _dmHistorySyncNoticeAt.set(dedupeKey, Date.now());
+    const data = await res.json().catch(() => ({}));
+    if (data?.message && Number(_activeDM?.id) === chId && typeof handleWSDMMessage === 'function') {
+      handleWSDMMessage(data.message);
+    }
+  } catch (e) {
+    if (window.__ftDctDebug) console.info('[dms] history keys notice failed', e);
+  }
+}
+
+/** After federation sync on a travel node: in-chat note when keys were not restored. */
+async function afterFederationSyncHistoryNotices(opts = {}) {
+  try {
+    if (window.App && typeof App.isAtHomeNode === 'function' && App.isAtHomeNode()) return;
+    if (window.__ftDctImported) return;
+    const dmApplied = Number(opts.dmHistoryApplied || 0);
+    const dmLinked = Number(opts.dmLinked || 0);
+    const syncErr = String(opts.syncError || '').trim();
+    const freshKeys = !!(window.DeviceCrypto && DeviceCrypto.usesFreshKeysOnTravel
+      && DeviceCrypto.usesFreshKeysOnTravel());
+    if (dmApplied > 0 && freshKeys) return;
+    if (!freshKeys && dmApplied <= 0 && !syncErr) return;
+    if (dmApplied <= 0 && dmLinked <= 0 && !syncErr) return;
+    if (typeof loadDMChannels === 'function' && !_dmChannels.length) {
+      await loadDMChannels();
+    }
+    const max = 8;
+    for (const ch of _dmChannels.slice(0, max)) {
+      const peerId = Number(ch.other_id || ch.with_user_id || 0);
+      const chId = Number(ch.id || 0);
+      if (!peerId || !chId) continue;
+      await _dmPostHistoryKeysNotice(peerId, chId);
+    }
+  } catch (e) {
+    if (window.__ftDctDebug) console.info('[dms] afterFederationSyncHistoryNotices', e);
+  }
+}
+try {
+  window.DMs = window.DMs || {};
+  window.DMs.afterFederationSyncHistoryNotices = afterFederationSyncHistoryNotices;
+} catch {}
 
 /** Ask both sides to refresh Signal sessions + prekeys after a live decrypt failure. */
 async function _dmTryCoordinatedResync(peerUserId) {
@@ -740,14 +829,10 @@ async function _dmTryCoordinatedResync(peerUserId) {
   _dmCryptoResyncAt.set(pid, now);
   try {
     if (window.Signal && typeof window.Signal.requestDmCryptoResync === 'function') {
-      await window.Signal.requestDmCryptoResync(pid);
-      try {
-        window.UI?.showToast?.(
-          'Encryption reset with this contact — send a new message to continue.',
-          'info',
-          6000,
-        );
-      } catch {}
+      const out = await window.Signal.requestDmCryptoResync(pid);
+      if (out?.ok) {
+        void _dmPostCryptoSyncNotice(pid);
+      }
     }
   } catch (e) {
     if (window.__ftDctDebug) console.info('[dms] coordinated resync failed', e);
@@ -1927,6 +2012,29 @@ function renderDMMessage (m) {
   const senderNick = m.sender_nick || '';
   const editedTag = (m.edited_at || m.edited) ? '<span class="msg-edited">(edited)</span>' : '';
 
+  // In-chat system lines: [[DMSYS]]{"kind":"crypto_sync"|"history_locked"|...}
+  if (typeof m.content === 'string' && m.content.startsWith('[[DMSYS]]')) {
+    let meta = null;
+    try { meta = JSON.parse(m.content.slice('[[DMSYS]]'.length)); } catch {}
+    const kind = String(meta?.kind || 'info');
+    const cardClass = kind === 'history_locked' ? 'dm-sys-log-locked'
+      : (kind === 'history_import_ok' ? 'dm-sys-log-ok'
+        : (kind === 'history_import_failed' ? 'dm-sys-log-warn' : 'dm-sys-log-crypto'));
+    const title = esc(meta?.title || 'Notice');
+    const subtitle = esc(meta?.subtitle || '');
+    const icon = esc(meta?.icon || 'ℹ️');
+    return `<div class="dm-sys-log-wrap" id="msg-${m.id}" data-dmid="${m.id}">
+      <div class="dm-sys-log-card ${cardClass}">
+        <div class="dm-sys-log-icon">${icon}</div>
+        <div class="dm-sys-log-text">
+          <div class="dm-sys-log-title">${title}</div>
+          ${subtitle ? `<div class="dm-sys-log-sub">${subtitle}</div>` : ''}
+          <div class="dm-sys-log-time">${time}</div>
+        </div>
+      </div>
+    </div>`;
+  }
+
   // Special persisted call-log entries: [[CALLLOG]]{"title":"...","subtitle":"...","icon":"..."}
   if (typeof m.content === 'string' && m.content.startsWith('[[CALLLOG]]')) {
     let meta = null;
@@ -2954,6 +3062,7 @@ async function sendDMMessage () {
       }
     }
     const _peerHomeForEnc = _activeDM?.peer_home_server_id || _dmChanEntry?.peer_home_server_id || '';
+    let _encryptHadKeyRetry = false;
     const _runEncrypt = async () => {
       let encTimeoutMs = 22000;
       try {
@@ -2981,6 +3090,7 @@ async function sendDMMessage () {
         const missingKeys = em1.includes('404') || em1.includes('no_bundle')
           || em1.includes('peer bundle fetch failed');
         if (missingKeys) {
+          _encryptHadKeyRetry = true;
           await new Promise((r) => setTimeout(r, 3000));
           env = await _runEncrypt();
         } else {
@@ -2988,6 +3098,9 @@ async function sendDMMessage () {
         }
       }
       encryptedContent = JSON.stringify(env);
+      if (_encryptHadKeyRetry) {
+        void _dmPostCryptoSyncNotice(_peerUidForEnc);
+      }
       // Seed plaintext cache: we can NEVER decrypt our own outgoing
       // ciphertext (libsignal has a sending chain only). When the server
       // echoes this message back on history reload, _decryptDMPreviewContent
@@ -3165,7 +3278,8 @@ function handleWSDMMessage (data) {
       _activeDM.peer_home_server_id = _senderHome;
     }
   }
-  const _plainPromise = _isMine
+  const _isDMSys = typeof data.content === 'string' && data.content.startsWith('[[DMSYS]]');
+  const _plainPromise = (_isMine || _isDMSys)
     ? Promise.resolve(String(data.content || ''))
     : _decryptDMPreviewContent(data.content || '', _peerForDecrypt, _peerNick0, {
       retry: true,

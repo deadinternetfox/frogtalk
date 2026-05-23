@@ -1,5 +1,6 @@
 """Direct message routes."""
 from datetime import datetime
+import json
 import logging
 import time
 import uuid
@@ -12,6 +13,11 @@ from typing import Optional
 
 import database as db
 from deps import get_current_user, client_ip
+from dm_system_messages import (
+    channel_has_recent_dmsys,
+    crypto_sync_content,
+    insert_history_keys_notice,
+)
 from ws_manager import manager
 
 _log = logging.getLogger(__name__)
@@ -63,6 +69,16 @@ class EditDMBody(BaseModel):
 
 class DMSpoilerRequest(BaseModel):
     blur: int = 1
+
+
+class CryptoSyncNoticeBody(BaseModel):
+    peer_user_id: int = Field(..., ge=1)
+    reason: str = Field(default="auto", max_length=32)
+
+
+class HistorySyncNoticeBody(BaseModel):
+    peer_user_id: int = Field(..., ge=1)
+    reason: str = Field(default="keys", max_length=32)
 
 
 @router.post("/open/{nickname}")
@@ -632,6 +648,164 @@ async def set_dm_forwarding(channel_id: int, body: ForwardingBody,
     except Exception:
         pass
     return {"ok": True, "disabled": int(body.disabled)}
+
+
+# ─── Encryption sync system message ─────────────────────────────────────────
+
+@router.post("/{channel_id}/crypto-sync-notice")
+@limiter.limit("12/minute")
+async def post_crypto_sync_notice(
+    request: Request,
+    channel_id: int,
+    body: CryptoSyncNoticeBody,
+    current_user: dict = Depends(get_current_user),
+):
+    """Insert a polished in-chat line when Signal keys were auto-synced for this thread."""
+    del request
+    if not db.is_dm_member(channel_id, current_user["id"]):
+        return JSONResponse(status_code=403, content={"error": "Not a member of this channel"})
+    peer_id = int(body.peer_user_id)
+    try:
+        with db._conn() as con:
+            ch = con.execute(
+                "SELECT user_a, user_b FROM dm_channels WHERE id=?",
+                (int(channel_id),),
+            ).fetchone()
+    except Exception:
+        ch = None
+    if not ch:
+        return JSONResponse(status_code=404, content={"error": "Channel not found"})
+    other_id = int(ch["user_b"]) if int(ch["user_a"]) == int(current_user["id"]) else int(ch["user_a"])
+    if peer_id != other_id:
+        return JSONResponse(status_code=400, content={"error": "bad_peer"})
+    if await run_in_threadpool(channel_has_recent_dmsys, int(channel_id), "crypto_sync", 120.0):
+        return {"ok": True, "skipped": "recent_notice"}
+
+    content = crypto_sync_content(current_user.get("nickname") or "")
+    msg_id = await run_in_threadpool(
+        db.send_dm_message,
+        int(channel_id),
+        int(current_user["id"]),
+        content,
+    )
+    created_at = datetime.utcnow().isoformat() + "Z"
+    payload = {
+        "type": "dm_message",
+        "id": msg_id,
+        "channel_id": int(channel_id),
+        "sender_id": current_user["id"],
+        "sender_nick": current_user.get("nickname") or "",
+        "sender_display_name": current_user.get("display_name"),
+        "sender_is_admin": bool(current_user.get("is_admin")),
+        "sender_avatar": current_user.get("avatar") or "",
+        "content": content,
+        "media_type": None,
+        "media_name": None,
+        "has_media": False,
+        "media_blur": 0,
+        "view_once": 0,
+        "reply_to": None,
+        "edited": False,
+        "deleted": False,
+        "reactions": {},
+        "created_at": created_at,
+    }
+    for uid in (int(current_user["id"]), other_id):
+        await manager.send_to_user(uid, payload)
+    try:
+        from routers import federation as federation_mod
+
+        peer = db.get_user_by_id(other_id) or {}
+        await run_in_threadpool(
+            lambda: federation_mod.enqueue_dm_message_created(
+                current_user,
+                peer,
+                channel_id=int(channel_id),
+                content=content,
+                created_at=created_at,
+            ),
+        )
+    except Exception:
+        pass
+    return {
+        "ok": True,
+        "id": msg_id,
+        "message": payload,
+    }
+
+
+@router.post("/{channel_id}/history-sync-notice")
+@limiter.limit("12/minute")
+async def post_history_sync_notice(
+    request: Request,
+    channel_id: int,
+    body: HistorySyncNoticeBody,
+    current_user: dict = Depends(get_current_user),
+):
+    """In-chat notice when DM history import or key restore did not fully apply."""
+    del request
+    if not db.is_dm_member(channel_id, current_user["id"]):
+        return JSONResponse(status_code=403, content={"error": "Not a member of this channel"})
+    peer_id = int(body.peer_user_id)
+    try:
+        with db._conn() as con:
+            ch = con.execute(
+                "SELECT user_a, user_b FROM dm_channels WHERE id=?",
+                (int(channel_id),),
+            ).fetchone()
+    except Exception:
+        ch = None
+    if not ch:
+        return JSONResponse(status_code=404, content={"error": "Channel not found"})
+    other_id = int(ch["user_b"]) if int(ch["user_a"]) == int(current_user["id"]) else int(ch["user_a"])
+    if peer_id != other_id:
+        return JSONResponse(status_code=400, content={"error": "bad_peer"})
+    reason = str(body.reason or "keys").strip().lower()
+    if reason != "keys":
+        return JSONResponse(status_code=400, content={"error": "unsupported_reason"})
+    if await run_in_threadpool(channel_has_recent_dmsys, int(channel_id), "history_import_failed", 600.0):
+        return {"ok": True, "skipped": "recent_notice"}
+    msg_id = await run_in_threadpool(
+        insert_history_keys_notice,
+        int(channel_id),
+        int(current_user["id"]),
+    )
+    if not msg_id:
+        return {"ok": True, "skipped": "deduped"}
+    created_at = datetime.utcnow().isoformat() + "Z"
+    try:
+        with db._conn() as con:
+            row = con.execute(
+                "SELECT content FROM dm_messages WHERE id=?",
+                (int(msg_id),),
+            ).fetchone()
+        content = str((row or {}).get("content") or "")
+    except Exception:
+        content = ""
+    payload = {
+        "type": "dm_message",
+        "id": msg_id,
+        "channel_id": int(channel_id),
+        "sender_id": current_user["id"],
+        "sender_nick": current_user.get("nickname") or "",
+        "sender_display_name": current_user.get("display_name"),
+        "sender_is_admin": bool(current_user.get("is_admin")),
+        "sender_avatar": current_user.get("avatar") or "",
+        "content": content,
+        "media_type": None,
+        "media_name": None,
+        "has_media": False,
+        "media_blur": 0,
+        "view_once": 0,
+        "reply_to": None,
+        "edited": False,
+        "deleted": False,
+        "reactions": {},
+        "created_at": created_at,
+    }
+    for uid in (int(current_user["id"]), other_id):
+        await manager.send_to_user(uid, payload)
+    return {"ok": True, "id": msg_id, "message": payload}
 
 
 # ─── Hide DM channel ───────────────────────────────────────────────────────────

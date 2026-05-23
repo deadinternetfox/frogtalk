@@ -635,13 +635,6 @@ const WS = (() => {
             if (typeof window.Signal.applyDmCryptoResync === 'function') {
               await window.Signal.applyDmCryptoResync(fromId);
             }
-            const nick = String(data.from_nickname || '').trim();
-            const who = nick ? `@${nick}` : 'Your contact';
-            window.UI?.showToast?.(
-              `${who} refreshed encryption — send a new message to continue.`,
-              'info',
-              6000,
-            );
           } catch (e) {
             console.warn('[ws] dm_crypto_resync failed', e);
           }
