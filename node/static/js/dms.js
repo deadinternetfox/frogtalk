@@ -2413,7 +2413,7 @@ function _dmSysLogActionsHtml(kind) {
     ? 'Import keys'
     : 'Manage keys';
   return `<div class="dm-sys-log-actions" role="group" aria-label="Encryption keys">
-    <button type="button" class="dm-sys-log-btn dm-sys-log-btn-primary" data-ft-key-action="import"${_dmKeyTriggerAttrs()}>${btnLabel}</button>
+    <button type="button" class="dm-sys-log-btn dm-sys-log-btn-primary" data-ft-key-action="import"${_dmKeyTriggerAttrs()}>${btnLabel === 'Import keys' ? 'Key manager' : btnLabel}</button>
   </div>`;
 }
 
@@ -2441,7 +2441,7 @@ function _dmLockPlainLine(meta) {
     peer_unreachable: 'Cannot reach peer node for encryption keys — try again later.',
     unlocking: 'Unlocking…',
     signal_boot: 'Starting encryption…',
-    keys_needed: 'Import a .frog backup to read older messages from home.',
+    keys_needed: 'Import a .FrogTalk backup to read older messages from home.',
     sync_attempted: 'Encryption sync did not complete — send a new message or import keys.',
     own_sent_locked: 'Sent from another device — import a .FrogTalk backup from home to read it here.',
     decrypt_failed: 'Could not unlock this message — send a new message or import keys.',
