@@ -347,6 +347,12 @@ async def websocket_endpoint(
             emit_room_presence(user, room_name, "online", force=True)
         except Exception:
             pass
+        try:
+            cur = str(user.get("presence") or "online").strip().lower()
+            if cur not in ("invisible", "away", "dnd"):
+                db.update_presence(int(user["id"]), "online")
+        except Exception:
+            pass
     db.update_last_seen(user["id"])
 
     # Drain any ICE candidates that the other side trickled while this user

@@ -18,10 +18,25 @@ const Users = (() => {
     return !!(aNick && bNick && aNick === bNick);
   }
 
+  function _selfMemberPresence(user) {
+    const fromState = String(State.user?.presence || '').toLowerCase();
+    const fromRow = String(user?.presence || '').toLowerCase();
+    if (fromState === 'invisible') return 'invisible';
+    if (fromState === 'away' || fromState === 'dnd') return fromState;
+    if (user?.live_online === true) {
+      if (fromRow === 'away' || fromRow === 'dnd') return fromRow;
+      return 'online';
+    }
+    if (fromState === 'online' || fromState === 'away' || fromState === 'dnd') return fromState;
+    if (fromRow === 'online' || fromRow === 'away' || fromRow === 'dnd') return fromRow;
+    return 'online';
+  }
+
   function _mergeLocalSelf(user) {
     if (!user || !State.user) return user;
     const sameUser = _sameUser(user.user_id, user.nickname, State.user.id, State.user.nickname);
     if (!sameUser) return user;
+    const presence = _selfMemberPresence(user);
     return {
       ...user,
       user_id: user.user_id || State.user.id,
@@ -29,7 +44,9 @@ const Users = (() => {
       display_name: State.user.display_name || user.display_name,
       avatar: State.user.avatar || user.avatar,
       is_admin: State.user.is_admin || user.is_admin,
-      presence: (State.user.presence || user.presence || 'online'),
+      live_online: presence !== 'invisible' && presence !== 'offline'
+        && (user.live_online === true || presence === 'online' || presence === 'away' || presence === 'dnd'),
+      presence,
       status_msg: (State.user.status_msg ?? user.status_msg ?? ''),
     };
   }
@@ -140,8 +157,11 @@ const Users = (() => {
       onlineSource = [];
       offlineSource = [];
       for (const member of _channelMembers) {
+        const isSelfRow = !!(State.user && _sameUser(
+          member.user_id, member.nickname, State.user.id, State.user.nickname,
+        ));
         // Federated members: use server-provided live_online / presence.
-        if (member.remote === true) {
+        if (member.remote === true && !isSelfRow) {
           const p = String((member.presence || '')).toLowerCase();
           const forceOffline = p === 'invisible' || p === 'offline';
           const liveOnline = member.live_online === true
@@ -154,8 +174,15 @@ const Users = (() => {
         const key = String((member.nickname || '')).toLowerCase();
         const online = onlineMap.get(key);
         const merged = online ? { ...member, ...online, display_name: member.display_name || online.display_name } : { ...member };
-        const liveOnline = (member.live_online === true) || !!online;
-        merged.live_online = liveOnline;
+        let liveOnline = (member.live_online === true) || !!online;
+        if (isSelfRow) {
+          const sp = _selfMemberPresence(merged);
+          merged.presence = sp;
+          liveOnline = sp !== 'invisible' && sp !== 'offline';
+          merged.live_online = liveOnline;
+        } else {
+          merged.live_online = liveOnline;
+        }
         const p = String((merged.presence || member.presence || '')).toLowerCase();
         const forceOffline = p === 'invisible' || p === 'offline';
         if (liveOnline && !forceOffline) onlineSource.push(merged);
@@ -318,7 +345,7 @@ const Users = (() => {
     // For self, always trust State.user.presence so the row matches the
     // status pill in the self-panel (the WS-cached u.presence may be stale).
     const effectivePresence = isSelf
-      ? _effectivePresence({ presence: (State.user && State.user.presence) || 'online' }, true)
+      ? _effectivePresence({ presence: _selfMemberPresence(u) }, true)
       : _effectivePresence(u, isOnline);
     const presenceMeta = {
       online: { color: '#4caf50', label: 'Online' },
@@ -533,6 +560,19 @@ const Users = (() => {
     } catch {}
 
     const onRoom = _channelRoom && State.currentRoom === _channelRoom;
+    if (onRoom && _channelMembers.length && State.user
+        && nick === String(State.user.nickname || '').toLowerCase()) {
+      const selfMember = _channelMembers.find(m => _sameUser(
+        m.user_id, m.nickname, State.user.id, State.user.nickname,
+      ));
+      if (selfMember) {
+        const sp = _selfMemberPresence(selfMember);
+        if (sp === 'invisible' || sp === 'offline') return 'offline';
+        if (sp === 'away' || sp === 'dnd' || sp === 'online') return sp;
+        return 'online';
+      }
+    }
+
     if (onRoom && _channelMembers.length) {
       const member = _channelMembers.find(m => String((m?.nickname || '')).toLowerCase() === nick);
       if (member) {

@@ -1779,6 +1779,7 @@ def _apply_channel_member_presence(
         member["live_online"] = True
         if p == "invisible":
             member["presence"] = "offline"
+            member["live_online"] = False
         elif p in _FEDERATED_LIVE_PRESENCE:
             member["presence"] = p
         else:
