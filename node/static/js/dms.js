@@ -899,16 +899,164 @@ function _dmLockedBubbleText(live, peerId) {
   return DMLOCK_PREFIX + JSON.stringify(meta);
 }
 
-function _dmSysLogCardClass(kind) {
+function _dmSysLogCardClass(kind, meta) {
   const k = String(kind || '');
-  if (k === 'history_locked' || k === 'home_locked' || k === 'keys_needed' || k === 'own_sent_locked') {
+  if (k === 'history_locked' || k === 'history_import_ok') {
+    const chId = _activeDM?.id;
+    const stats = (window.__ftDmUnlockStats && chId) ? window.__ftDmUnlockStats[chId] : null;
+    if (stats?.attempted && stats.stillLocked === 0 && stats.unlocked > 0) {
+      return 'dm-sys-log-history dm-sys-log-unlock-ok';
+    }
+    if (stats?.attempted && stats.unlocked > 0 && stats.stillLocked > 0) {
+      return 'dm-sys-log-history dm-sys-log-unlock-partial';
+    }
+    return 'dm-sys-log-history';
+  }
+  if (k === 'home_locked' || k === 'keys_needed' || k === 'own_sent_locked') {
     return 'dm-sys-log-locked';
   }
-  if (k === 'history_import_ok') return 'dm-sys-log-ok';
   if (k === 'history_import_failed' || k === 'sync_failed' || k === 'sync_attempted'
       || k === 'peer_unreachable' || k === 'decrypt_failed') return 'dm-sys-log-warn';
   return 'dm-sys-log-crypto';
 }
+
+function _dmParseImportedCount(meta) {
+  const n = Number(meta?.imported_count);
+  if (n > 0) return n;
+  const m = String(meta?.subtitle || '').match(/Imported\s+(\d+)/i);
+  return m ? Number(m[1]) : 0;
+}
+
+function _dmCountHistoryCryptoState() {
+  let lockable = 0;
+  for (const m of _dmMessages) {
+    if (!m || m.deleted) continue;
+    const c = typeof m.content === 'string' ? m.content : '';
+    if (c.startsWith('[[DMSYS]]') || c.startsWith('[[CALLLOG]]')) continue;
+    if (_isDmLockPlaceholder(c) || _looksEncryptedBlob(c)) lockable++;
+  }
+  return { lockable };
+}
+
+function _dmLatestHistoryImportCount() {
+  for (let i = _dmMessages.length - 1; i >= 0; i--) {
+    const meta = _parseDMSysLog(_dmMessages[i]?.content);
+    if (!meta) continue;
+    const k = String(meta.kind || '');
+    if (k === 'history_locked' || k === 'history_import_ok') {
+      const n = _dmParseImportedCount(meta);
+      if (n > 0) return n;
+    }
+  }
+  return 0;
+}
+
+function _dmSysLogEffectiveSubtitle(meta) {
+  const k = String(meta?.kind || '');
+  if (k !== 'history_locked' && k !== 'history_import_ok') {
+    return String(meta?.subtitle || '');
+  }
+  const imported = _dmParseImportedCount(meta);
+  const chId = _activeDM?.id;
+  const stats = (window.__ftDmUnlockStats && chId) ? window.__ftDmUnlockStats[chId] : null;
+  if (!stats) return String(meta?.subtitle || '');
+
+  if (!stats.attempted) {
+    if (!stats.hasKeys && imported > 0) {
+      return `Imported ${imported} older message${imported !== 1 ? 's' : ''} — import encryption keys below to read them. New messages work normally.`;
+    }
+    return String(meta?.subtitle || '');
+  }
+
+  const total = imported || (stats.unlocked + stats.stillLocked) || 0;
+  if (stats.stillLocked === 0 && stats.unlocked > 0) {
+    return `Imported ${total || stats.unlocked} message${(total || stats.unlocked) !== 1 ? 's' : ''} — all unlocked with your encryption keys.`;
+  }
+  if (stats.unlocked > 0) {
+    return `Imported ${total} message${total !== 1 ? 's' : ''} — unlocked ${stats.unlocked}, ${stats.stillLocked} could not be decrypted. Import keys from your home node below.`;
+  }
+  if (stats.stillLocked > 0) {
+    return `Imported ${total || stats.stillLocked} message${(total || stats.stillLocked) !== 1 ? 's' : ''} — could not decrypt with keys in this browser. Import keys below.`;
+  }
+  return String(meta?.subtitle || '');
+}
+
+const _dmAutoUnlockAt = new Map();
+
+async function _tryAutoUnlockImportedHistory() {
+  if (!_activeDM?.id) return null;
+  const chId = Number(_activeDM.id);
+  const dedupeKey = `${chId}:auto_unlock`;
+  const now = Date.now();
+  if ((_dmAutoUnlockAt.get(dedupeKey) || 0) > now - 4000) {
+    return (window.__ftDmUnlockStats && window.__ftDmUnlockStats[chId]) || null;
+  }
+  _dmAutoUnlockAt.set(dedupeKey, now);
+
+  const before = _dmCountHistoryCryptoState();
+  const imported = _dmLatestHistoryImportCount();
+  let hasKeys = false;
+  try {
+    if (window.DeviceCrypto?.hasExportableCrypto) {
+      hasKeys = await DeviceCrypto.hasExportableCrypto();
+    }
+  } catch {}
+  const canDecrypt = hasKeys || !!window.__ftDctImported;
+
+  if (!canDecrypt || before.lockable === 0) {
+    const stats = {
+      imported: imported || before.lockable,
+      unlocked: 0,
+      stillLocked: before.lockable,
+      hasKeys: canDecrypt,
+      attempted: before.lockable > 0,
+    };
+    try {
+      window.__ftDmUnlockStats = window.__ftDmUnlockStats || {};
+      window.__ftDmUnlockStats[chId] = stats;
+    } catch {}
+    return stats;
+  }
+
+  if (!_dmSkipHistoricalDecrypt()) {
+    await _redecryptStaleDMMessages();
+    await _refreshDmLockPlaceholders();
+  }
+  const after = _dmCountHistoryCryptoState();
+  const unlocked = Math.max(0, before.lockable - after.lockable);
+  const stats = {
+    imported: imported || before.lockable,
+    unlocked,
+    stillLocked: after.lockable,
+    hasKeys: true,
+    attempted: true,
+  };
+  try {
+    window.__ftDmUnlockStats = window.__ftDmUnlockStats || {};
+    window.__ftDmUnlockStats[chId] = stats;
+  } catch {}
+
+  if (unlocked > 0 && stats.stillLocked === 0) {
+    const msg = `Unlocked ${unlocked} imported message${unlocked !== 1 ? 's' : ''} with your keys.`;
+    if (typeof toast === 'function') toast(msg, 'success', 6500);
+    else if (typeof UI !== 'undefined' && UI.showToast) UI.showToast(msg, 'success', 6500);
+  } else if (unlocked > 0) {
+    const msg = `Unlocked ${unlocked} of ${stats.imported || unlocked + stats.stillLocked} — ${stats.stillLocked} still need keys.`;
+    if (typeof toast === 'function') toast(msg, 'info', 8000);
+    else if (typeof UI !== 'undefined' && UI.showToast) UI.showToast(msg, 'info', 8000);
+  } else if (stats.stillLocked > 0 && (imported > 0 || before.lockable > 0)) {
+    const n = stats.imported || stats.stillLocked;
+    const msg = `Imported ${n} message${n !== 1 ? 's' : ''} — could not decrypt. Import keys from your home node.`;
+    if (typeof toast === 'function') toast(msg, 'warning', 9000);
+    else if (typeof UI !== 'undefined' && UI.showToast) UI.showToast(msg, 'warning', 9000);
+  }
+
+  if (unlocked > 0 && State.currentRoomType === 'dm' && _activeDM?.id === chId && typeof renderDMChat === 'function') {
+    renderDMChat();
+  }
+  return stats;
+}
+try { window._tryAutoUnlockImportedHistory = _tryAutoUnlockImportedHistory; } catch {}
 
 function _isDmLockPlaceholder(text) {
   return !!_parseDMLock(text);
@@ -1061,8 +1209,11 @@ try {
     _resetDmDecryptWarnings();
     if (_activeDM?.id && _dmMessages.length && !_dmSkipHistoricalDecrypt()) {
       void _redecryptStaleDMMessages().then(() => {
+        void _tryAutoUnlockImportedHistory();
         if (typeof renderDMChannels === 'function') renderDMChannels();
       });
+    } else if (_activeDM?.id && _dmMessages.length) {
+      void _tryAutoUnlockImportedHistory();
     } else if (typeof loadDMChannels === 'function') {
       void loadDMChannels();
     } else {
@@ -2090,7 +2241,11 @@ async function loadDMMessages (pageOffset = 0, options = {}) {
     if (!isDelta || msgs.length) {
       renderDMChat();
       scrollChatBottom();
-      if (!_dmSkipHistoricalDecrypt()) void _redecryptStaleDMMessages();
+      if (!_dmSkipHistoricalDecrypt()) {
+        void _redecryptStaleDMMessages().then(() => _tryAutoUnlockImportedHistory());
+      } else {
+        void _tryAutoUnlockImportedHistory();
+      }
     }
   } else {
     _dmMessages = [...msgs, ..._dmMessages];
@@ -2236,12 +2391,18 @@ function _scrollDMToBottomStable() {
 function _dmSysLogActionsHtml(kind) {
   const k = String(kind || '');
   const withImport = new Set([
-    'history_locked', 'history_import_failed',
+    'history_locked', 'history_import_failed', 'history_import_ok',
     'home_locked', 'keys_needed', 'sync_failed',
   ]);
   if (!withImport.has(k)) return '';
+  const chId = _activeDM?.id;
+  const stats = (window.__ftDmUnlockStats && chId) ? window.__ftDmUnlockStats[chId] : null;
+  if (k === 'history_import_ok' && stats?.attempted && stats.stillLocked === 0) return '';
+  const btnLabel = (stats?.stillLocked > 0 || k === 'history_locked' || k === 'history_import_failed')
+    ? 'Import keys'
+    : 'Manage keys';
   return `<div class="dm-sys-log-actions" role="group" aria-label="Encryption keys">
-    <button type="button" class="dm-sys-log-btn dm-sys-log-btn-primary" data-ft-key-action="import">Import keys</button>
+    <button type="button" class="dm-sys-log-btn dm-sys-log-btn-primary" data-ft-key-action="import">${btnLabel}</button>
   </div>`;
 }
 
@@ -2291,9 +2452,9 @@ function _renderDmLockInBubble(meta, opts = {}) {
 
 function _renderDmSysLogCard(meta, msgId, time) {
   const kind = String(meta?.kind || 'info');
-  const cardClass = _dmSysLogCardClass(kind);
+  const cardClass = _dmSysLogCardClass(kind, meta);
   const title = esc(meta?.title || 'Notice');
-  const subtitle = esc(meta?.subtitle || '');
+  const subtitle = esc(_dmSysLogEffectiveSubtitle(meta));
   const icon = esc(meta?.icon || 'ℹ️');
   const actions = _dmSysLogActionsHtml(kind);
   const idAttr = msgId ? `msg-${msgId}` : `dm-lock-${Date.now()}`;

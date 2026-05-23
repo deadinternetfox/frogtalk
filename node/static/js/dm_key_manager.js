@@ -219,8 +219,25 @@
       await _ensureCryptoReady();
       const text = await file.text();
       await DeviceCrypto.importKeyFileFromText(text, pass);
-      _toast('Keys restored — unlocking messages…', 'success');
       await _afterImport();
+      let toastMsg = 'Keys restored — unlocking messages…';
+      let importStats = null;
+      try {
+        if (typeof window._tryAutoUnlockImportedHistory === 'function') {
+          importStats = await window._tryAutoUnlockImportedHistory();
+          if (importStats?.unlocked > 0 && importStats.stillLocked === 0) {
+            toastMsg = `Keys restored — unlocked ${importStats.unlocked} message${importStats.unlocked !== 1 ? 's' : ''}.`;
+          } else if (importStats?.unlocked > 0) {
+            toastMsg = `Keys restored — unlocked ${importStats.unlocked}, ${importStats.stillLocked} still locked. Import from home if needed.`;
+          } else if (importStats?.stillLocked > 0) {
+            toastMsg = `Keys imported but ${importStats.stillLocked} message${importStats.stillLocked !== 1 ? 's' : ''} could not be decrypted — check you used the right .key file.`;
+          } else {
+            toastMsg = 'Keys restored successfully.';
+          }
+        }
+      } catch {}
+      const toastKind = (importStats?.stillLocked > 0 && !importStats?.unlocked) ? 'warning' : 'success';
+      _toast(toastMsg, toastKind);
       close();
     } catch (e) {
       const code = String((e && e.message) || e || '');

@@ -45,13 +45,23 @@ _HISTORY_FAILED_COPY = {
 }
 
 
-def dm_sys_content(kind: str, *, title: str = "", subtitle: str = "", icon: str = "") -> str:
+def dm_sys_content(
+    kind: str,
+    *,
+    title: str = "",
+    subtitle: str = "",
+    icon: str = "",
+    imported_count: int = 0,
+) -> str:
     payload = {
         "kind": str(kind or "info").strip() or "info",
         "title": str(title or "").strip() or "Notice",
         "subtitle": str(subtitle or "").strip(),
         "icon": str(icon or "ℹ️").strip() or "ℹ️",
     }
+    ic = int(imported_count or 0)
+    if ic > 0:
+        payload["imported_count"] = ic
     return DMSYS_PREFIX + json.dumps(payload, separators=(",", ":"))
 
 
@@ -99,6 +109,7 @@ def insert_dm_system_notice(
     title: str = "",
     subtitle: str = "",
     icon: str = "",
+    imported_count: int = 0,
     dedupe_sec: float = 300.0,
 ) -> int | None:
     """Insert a [[DMSYS]] row; return message id or None if deduped / failed."""
@@ -109,7 +120,13 @@ def insert_dm_system_notice(
     k = str(kind or "").strip()
     if k and channel_has_recent_dmsys(cid, k, within_sec=dedupe_sec):
         return None
-    content = dm_sys_content(kind=k, title=title, subtitle=subtitle, icon=icon)
+    content = dm_sys_content(
+        kind=k,
+        title=title,
+        subtitle=subtitle,
+        icon=icon,
+        imported_count=imported_count,
+    )
     try:
         return int(db.send_dm_message(cid, uid, content) or 0) or None
     except Exception:
@@ -186,10 +203,10 @@ def maybe_history_sync_notice(
             title="Chat history imported",
             subtitle=(
                 f"Imported {applied} older message{'s' if applied != 1 else ''} from {label}. "
-                "They stay locked on this node unless you restore encryption keys — "
-                "new messages work normally."
+                "Checking encryption keys in this browser…"
             ),
             icon="📥",
+            imported_count=applied,
         )
         return out
 
@@ -202,6 +219,7 @@ def maybe_history_sync_notice(
             title="Chat history restored",
             subtitle=f"Imported {applied} messages from {label}.",
             icon="✓",
+            imported_count=applied,
         )
     return out
 
