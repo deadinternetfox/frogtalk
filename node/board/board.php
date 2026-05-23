@@ -3154,7 +3154,7 @@ if ($singleThread) {
                     <span class="stat-sep">·</span>
                     <span class="stat-item">💬 Posts: <span class="stat-val"><?= $totalPosts ?></span></span>
                     <span class="stat-sep">·</span>
-                    <span class="stat-item">👁 Total Views: <span class="stat-val"><?= number_format($totalViews) ?></span></span>
+                    <span class="stat-item">👁️ Total Views: <span class="stat-val"><?= number_format($totalViews) ?></span></span>
                     <span class="stat-sep">·</span>
                     <span class="stat-item"><span class="online-dot"></span> <span class="stat-val"><?= $onlineCount ?></span> browsing now</span>
                     <span class="stat-sep">·</span>
@@ -3339,7 +3339,7 @@ if ($singleThread) {
                             </button>
                             <button class="tip-btn" onclick="tipPost('<?= $singleThread['id'] ?>')" data-post="<?= $singleThread['id'] ?>">&#x1F4B0; Tip OP</button>
                             <button class="goyim-bump-btn" onclick="openGoyimBump('<?= $singleThread['id'] ?>')" title="Tip $GOYIM to boost this thread's visibility">&#x1F525; Boost $GOYIM<span class="gbump-count" id="gbump-count-<?= $singleThread['id'] ?>"><?php $gt = round($singleThread['goyim_tips'] ?? 0); if ($gt > 0) echo ' ' . number_format($gt) . 'G'; ?></span></button>
-                            <span class="view-count">👁 <?= $threadViewCount ?> views</span>
+                            <span class="view-count">👁️ <?= $threadViewCount ?> views</span>
                             <div class="share-wrap">
                                 <button class="share-btn" onclick="toggleShare(this)">📤 Share</button>
                                 <div class="share-dropdown">
@@ -3478,7 +3478,7 @@ if ($singleThread) {
                                         <div class="wmp-row" id="replyChainPicker" style="display:none; width:100%;">
                                             <div class="tip-chain-selector" id="replyChainSelector" style="width:100%;"></div>
                                         </div>
-                                        <div class="wallet-reveal-row"><button type="button" class="wallet-reveal-btn" onclick="toggleWalletReveal(this,'reply')">&#x1F441; Reveal</button></div>
+                                        <div class="wallet-reveal-row"><button type="button" class="wallet-reveal-btn" onclick="toggleWalletReveal(this,'reply')">&#x1F441;&#xFE0F; Reveal</button></div>
                                         <div class="wallet-chain-inputs" style="display:none">
                                             <div class="wci-row"><span class="wci-label">🦊 ETH</span><input type="text" name="wallet_eth" id="replyWalletEth" placeholder="Auto-filled from MetaMask" maxlength="128" class="wci-input" readonly></div>
                                             <div class="wci-row"><span class="wci-label">₿ BTC</span><input type="text" name="wallet_btc" id="replyWalletBtc" placeholder="Paste BTC address (optional)" maxlength="128" class="wci-input"></div>
@@ -3489,7 +3489,7 @@ if ($singleThread) {
                                     <!-- Manual paste (mobile / no MetaMask) -->
                                     <div class="wallet-mm-manual" id="replyManualPanel">
                                         <p style="color:#4a8f4a;font-size:11px;margin:0 0 6px;">💱 Enter addresses for each chain you want tips on:</p>
-                                        <div class="wallet-reveal-row"><button type="button" class="wallet-reveal-btn" onclick="toggleWalletReveal(this,'reply')">&#x1F441; Reveal</button></div>
+                                        <div class="wallet-reveal-row"><button type="button" class="wallet-reveal-btn" onclick="toggleWalletReveal(this,'reply')">&#x1F441;&#xFE0F; Reveal</button></div>
                                         <div class="wallet-chain-inputs" style="display:none">
                                             <div class="wci-row"><span class="wci-label">🦊 ETH</span><input type="text" name="wallet_eth" placeholder="0x... (ETH/BSC/Polygon)" maxlength="128" class="wci-input"></div>
                                             <div class="wci-row"><span class="wci-label">₿ BTC</span><input type="text" name="wallet_btc" placeholder="1.../3.../bc1... Bitcoin" maxlength="128" class="wci-input"></div>
@@ -3578,7 +3578,7 @@ if ($singleThread) {
                                     <div class="wmp-row" id="threadChainPicker" style="display:none; width:100%;">
                                         <div class="tip-chain-selector" id="threadChainSelector" style="width:100%;"></div>
                                     </div>
-                                    <div class="wallet-reveal-row"><button type="button" class="wallet-reveal-btn" onclick="toggleWalletReveal(this,'thread')">&#x1F441; Reveal</button></div>
+                                    <div class="wallet-reveal-row"><button type="button" class="wallet-reveal-btn" onclick="toggleWalletReveal(this,'thread')">&#x1F441;&#xFE0F; Reveal</button></div>
                                     <div class="wallet-chain-inputs" style="display:none">
                                         <div class="wci-row"><span class="wci-label">🦊 ETH</span><input type="text" name="wallet_eth" id="threadWalletEth" placeholder="Auto-filled from MetaMask" maxlength="128" class="wci-input" readonly></div>
                                         <div class="wci-row"><span class="wci-label">₿ BTC</span><input type="text" name="wallet_btc" id="threadWalletBtc" placeholder="Paste BTC address (optional)" maxlength="128" class="wci-input"></div>
@@ -3589,7 +3589,7 @@ if ($singleThread) {
                                 <!-- Manual paste (mobile / no MetaMask) -->
                                 <div class="wallet-mm-manual" id="threadManualPanel">
                                     <p style="color:#4a8f4a;font-size:11px;margin:0 0 6px;">💱 Enter addresses for each chain you want tips on:</p>
-                                    <div class="wallet-reveal-row"><button type="button" class="wallet-reveal-btn" onclick="toggleWalletReveal(this,'thread')">&#x1F441; Reveal</button></div>
+                                    <div class="wallet-reveal-row"><button type="button" class="wallet-reveal-btn" onclick="toggleWalletReveal(this,'thread')">&#x1F441;&#xFE0F; Reveal</button></div>
                                     <div class="wallet-chain-inputs" style="display:none">
                                         <div class="wci-row"><span class="wci-label">🦊 ETH</span><input type="text" name="wallet_eth" placeholder="0x... (ETH/BSC/Polygon)" maxlength="128" class="wci-input"></div>
                                         <div class="wci-row"><span class="wci-label">₿ BTC</span><input type="text" name="wallet_btc" placeholder="1.../3.../bc1... Bitcoin" maxlength="128" class="wci-input"></div>
@@ -3679,7 +3679,7 @@ if ($singleThread) {
                                 <div class="catalog-stats">
                                     <span>💬 <span class="cs-val"><?= $catReplyCount ?></span></span>
                                     <span>🐸 <span class="cs-val"><?= $catLikeCount ?></span></span>
-                                    <span>👁 <span class="cs-val"><?= $catViewCount ?></span></span>
+                                    <span>👁️ <span class="cs-val"><?= $catViewCount ?></span></span>
                                 </div>
                             </a>
                             <?php if (!empty($thread['media']) && !isMediaVisible($thread['media']) && $isAdmin): $catMpa = $thread['media']; ?>
@@ -3833,7 +3833,7 @@ if ($singleThread) {
                                 <span class="tf-stats">
                                     <span class="ts-num"><?= $replyCount ?></span> repl<?= $replyCount === 1 ? 'y' : 'ies' ?>
                                     <span class="tf-sep">&middot;</span>
-                                    <span class="view-count">&#x1F441; <?= getViewCount($thread['id']) ?></span>
+                                    <span class="view-count">&#x1F441;&#xFE0F; <?= getViewCount($thread['id']) ?></span>
                                     <span class="tf-sep">&middot;</span>
                                     <button class="like-btn <?= hasLiked($thread['id']) ? 'liked' : '' ?>" onclick="toggleLike('<?= $thread['id'] ?>', this)" data-post="<?= $thread['id'] ?>">&#x1F438; <span class="like-count"><?= getLikeCount($thread['id']) ?></span></button>
                                 </span>
@@ -3945,7 +3945,7 @@ if ($singleThread) {
                 <br>
                 <span style="font-size:11px;color:#6baf6b;letter-spacing:.2px;">powered by <a href="https://frogtalk.xyz">FrogTalk</a></span>
                 <br>
-                <span class="footer-online"><?php if ($singleThread): ?><span class="footer-views">👁 <?= number_format($viewC) ?> thread views</span><?php else: ?><span class="footer-views">👁 <?= number_format($totalViews) ?> views</span><?php endif; ?> · <span class="online-dot footer-dot"></span> <span class="footer-online-count"><?= $onlineCount ?> online</span></span>
+                <span class="footer-online"><?php if ($singleThread): ?><span class="footer-views">👁️ <?= number_format($viewC) ?> thread views</span><?php else: ?><span class="footer-views">👁️ <?= number_format($totalViews) ?> views</span><?php endif; ?> · <span class="online-dot footer-dot"></span> <span class="footer-online-count"><?= $onlineCount ?> online</span></span>
             </div>
         </div>
     </main>
@@ -4404,7 +4404,7 @@ if ($singleThread) {
         if (!chain || !chain.classList.contains('wallet-chain-inputs')) return;
         var hidden = chain.style.display === 'none';
         chain.style.display = hidden ? '' : 'none';
-        btn.innerHTML = hidden ? '&#x1F648; Hide' : '&#x1F441; Reveal';
+        btn.innerHTML = hidden ? '&#x1F648; Hide' : '&#x1F441;&#xFE0F; Reveal';
     }
 
     // Restore post form open/closed state from sessionStorage (per-thread for reply form)
@@ -6576,7 +6576,7 @@ if ($singleThread) {
                     const replySpan = footer.querySelector('.reply-count span');
                     if (replySpan) replySpan.textContent = t.replyCount;
                     const viewEl = footer.querySelector('.view-count');
-                    if (viewEl) viewEl.textContent = '👁 ' + t.views;
+                    if (viewEl) viewEl.textContent = '👁️ ' + t.views;
                     const likeEl = footer.querySelector('.like-count');
                     if (likeEl) likeEl.textContent = t.likes;
                     // Update hot glow
@@ -6619,7 +6619,7 @@ if ($singleThread) {
                     + '<div class="post-comment">' + escapeHtml(t.comment) + (t.comment.length >= 300 ? '...' : '') + '</div></div>'
                     + '<div class="thread-footer">'
                     + '<span class="reply-count"><span>' + t.replyCount + '</span> repl' + (t.replyCount === 1 ? 'y' : 'ies') + '</span>'
-                    + '<span class="view-count">👁 ' + t.views + '</span>'
+                    + '<span class="view-count">👁️ ' + t.views + '</span>'
                     + '<button class="like-btn" onclick="toggleLike(\'' + t.id + '\', this)" data-post="' + t.id + '">&#x1F438; <span class="like-count">' + t.likes + '</span></button>'
                     + '<button class="goyim-bump-btn" onclick="openGoyimBump(\'' + t.id + '\')" class="ft-tip-btn-sm">&#x1F525; Boost' + (t.goyimTips > 0 ? ' <span class="gbump-count">' + Math.round(t.goyimTips) + 'G</span>' : '') + '</button>'
                     + '<a href="/board?thread=' + t.id + '" class="thread-link">View Thread →</a>'
@@ -6671,7 +6671,7 @@ if ($singleThread) {
             
             // Update OP stats
             const viewEl = document.querySelector('.post-actions .view-count');
-            if (viewEl) viewEl.textContent = '👁 ' + data.views + ' views';
+            if (viewEl) viewEl.textContent = '👁️ ' + data.views + ' views';
             const likeEl = document.querySelector('.post-actions .like-count');
             if (likeEl) likeEl.textContent = data.likes;
             

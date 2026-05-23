@@ -2207,6 +2207,8 @@ def _export_travel_push_room_payload(room: dict, source_server_id: str) -> dict 
             room_payload["room_key_hint"] = hint
     else:
         room_payload["description"] = str(detail.get("description") or "")[:200]
+    if ctype in ("music", "voice"):
+        room_payload["dj_only_queue"] = 1 if int(detail.get("dj_only_queue") or 0) else 0
     return room_payload
 
 
@@ -2528,6 +2530,11 @@ async def _push_travel_room_shell_to_home(user_id: int, room_name: str) -> dict:
             result.get("bytes"),
             (result.get("applied") or {}).get("rooms_joined"),
         )
+        try:
+            from routers.federation import emit_music_queue_snapshot
+            emit_music_queue_snapshot(str(room_name or "").lower())
+        except Exception:
+            pass
     return result
 
 
@@ -5543,6 +5550,11 @@ def _materialize_federated_channel(raw, *, owner_user_id: int | None = None) -> 
             patch["who_can_invite"] = parsed["who_can_invite"]
         if "forwarding_disabled" in parsed:
             patch["forwarding_disabled"] = parsed["forwarding_disabled"]
+        ctype = str(parsed.get("channel_type") or "").strip().lower()
+        if ctype in ("text", "music", "voice"):
+            cur_ct = str((room or {}).get("channel_type") or "text").strip().lower()
+            if cur_ct != ctype:
+                patch["channel_type"] = ctype
         if patch:
             try:
                 db.update_room_settings(name, **patch)
@@ -5674,6 +5686,7 @@ def _build_sync_memberships_for_user(user_id: int) -> dict:
             "channel_type": ctype,
             "description": str(room.get("description") or "")[:200],
             "icon": _sanitize_sync_room_icon(room.get("icon")),
+            "dj_only_queue": 1 if int(room.get("dj_only_queue") or 0) else 0,
         })
     try:
         ident = db.get_or_create_local_server_identity() or {}

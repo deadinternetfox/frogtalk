@@ -796,6 +796,7 @@ const WS = (() => {
       case 'music_track_removed':
       case 'music_track_skipped':
       case 'music_queue_cleared':
+      case 'music_queue_snapshot':
       case 'music_dj_only_changed':
       case 'music_djs_changed': {
         try { window.Music?.handleWsEvent?.(data); } catch {}

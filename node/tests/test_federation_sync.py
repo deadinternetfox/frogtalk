@@ -2043,6 +2043,79 @@ class FederationDirectoryJoinApiTests(unittest.TestCase):
         self.assertEqual(int(loaded.get("dj_only_queue") or 0), 1)
         self.assertEqual(int(loaded.get("slowmode") or 0), 30)
 
+    def test_materialize_patches_channel_type_on_existing_room(self):
+        import routers.auth as auth_mod
+
+        db = self.db
+        auth_mod._materialize_federated_channel({
+            "name": "vibes-mirror",
+            "type": "public",
+            "channel_type": "text",
+            "description": "land",
+        })
+        room = auth_mod._materialize_federated_channel({
+            "name": "vibes-mirror",
+            "type": "public",
+            "channel_type": "music",
+            "dj_only_queue": 1,
+            "description": "party",
+        })
+        self.assertIsNotNone(room)
+        loaded = db.get_room_by_name("vibes-mirror") or {}
+        self.assertEqual(str(loaded.get("channel_type") or ""), "music")
+        self.assertEqual(int(loaded.get("dj_only_queue") or 0), 1)
+
+    def test_travel_shell_export_includes_music_dj_only(self):
+        import routers.auth as auth_mod
+
+        db = self.db
+        uid = int(db.create_user("travel_music_owner", "secret12"))
+        rid = db.create_room("travel-vibes", "party", "public", uid, None, channel_type="music")
+        self.assertIsNotNone(rid)
+        db.join_room(uid, int(rid))
+        with db._conn() as con:
+            con.execute("UPDATE rooms SET dj_only_queue=1 WHERE id=?", (int(rid),))
+            con.commit()
+        room = db.get_room_by_name("travel-vibes") or {}
+        payload = auth_mod._export_travel_push_room_payload(room, "srv_visit")
+        self.assertEqual(payload.get("channel_type"), "music")
+        self.assertEqual(payload.get("dj_only_queue"), 1)
+
+    def test_music_queue_snapshot_skips_when_local_queue_nonempty(self):
+        import asyncio
+        import routers.federation as fed_mod
+
+        db = self.db
+        uid = int(db.create_user("snap_owner", "secret12"))
+        rid = int(db.create_room("snap-room", "m", "public", uid, None, channel_type="music"))
+        db.join_room(uid, rid)
+        db.music_add_track(
+            room_name="snap-room",
+            submitter_id=uid,
+            submitter_nick="snap_owner",
+            provider="youtube",
+            video_id="dQw4w9WgXcQ",
+            url="https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            title="local",
+            thumbnail="",
+        )
+        asyncio.get_event_loop().run_until_complete(
+            fed_mod._handle_room_music_event("snap-room", "room.music.queue.snapshot", {
+                "tracks": [{
+                    "submitter_nick": "remote",
+                    "provider": "youtube",
+                    "video_id": "abc12345678",
+                    "url": "https://www.youtube.com/watch?v=abc12345678",
+                    "title": "remote",
+                    "thumbnail": "",
+                    "duration": 0,
+                }],
+            })
+        )
+        queue = db.music_get_queue("snap-room")
+        self.assertEqual(len(queue), 1)
+        self.assertEqual(str(queue[0].get("video_id") or ""), "dQw4w9WgXcQ")
+
     def test_sync_export_includes_room_key_hint(self):
         import routers.auth as auth_mod
 

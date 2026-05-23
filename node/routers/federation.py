@@ -351,6 +351,56 @@ def touch_room_presence(user: dict, room_name: str) -> None:
     emit_room_presence(user, room_name, p, force=False)
 
 
+_MUSIC_QUEUE_SNAPSHOT_MAX = 15
+
+
+def emit_music_queue_snapshot(room_name: str) -> dict:
+    """Federate the current unplayed music queue (visit→home / cross-node catch-up)."""
+    name = str(room_name or "").strip().lower()
+    if not name:
+        return {"ok": False, "error": "no_room"}
+    room = db.get_room_by_name(name)
+    if not room:
+        return {"ok": False, "error": "no_room"}
+    ctype = str(room.get("channel_type") or "text").strip().lower()
+    if ctype not in ("music", "voice"):
+        return {"ok": False, "skipped": True}
+    tracks = db.music_get_queue(name, limit=_MUSIC_QUEUE_SNAPSHOT_MAX)
+    if not tracks:
+        return {"ok": False, "skipped": True}
+    anchor = db.get_music_room_anchor(name) or {}
+    safe: list[dict] = []
+    for t in tracks:
+        if not isinstance(t, dict):
+            continue
+        provider = str(t.get("provider") or "").strip()
+        video_id = str(t.get("video_id") or "").strip()
+        url = str(t.get("url") or "").strip()
+        if not provider or not video_id or not url:
+            continue
+        safe.append({
+            "submitter_nick": str(t.get("submitter_nick") or "")[:64],
+            "provider": provider[:32],
+            "video_id": video_id[:256],
+            "url": url[:2048],
+            "title": str(t.get("title") or "")[:200],
+            "thumbnail": str(t.get("thumbnail") or "")[:2048],
+            "duration": int(t.get("duration") or 0),
+        })
+    if not safe:
+        return {"ok": False, "skipped": True}
+    return enqueue_server_event(
+        "room.music.queue.snapshot",
+        {
+            "room_name": name,
+            "tracks": safe,
+            "head_track_id": int(anchor.get("track_id") or 0) or None,
+            "start_unix": int(float(anchor.get("started_unix") or 0)) or None,
+            "snapshot_at": int(time.time()),
+        },
+    )
+
+
 def enqueue_room_message_created(
     sender: dict,
     *,
@@ -4847,12 +4897,63 @@ async def _broadcast_music_ws(room_name: str, message: dict) -> None:
 
 
 async def _handle_room_music_event(room_name: str, event_type: str, payload: dict) -> None:
+    from routers import rooms as rooms_router
+
+    if event_type == "room.music.queue.snapshot":
+        if not db.get_room_by_name(room_name):
+            return
+        if db.music_get_queue(room_name, limit=1):
+            return
+        tracks_in = payload.get("tracks") or []
+        if not isinstance(tracks_in, list):
+            return
+        had_current = db.music_get_current(room_name)
+        first_id = None
+        for raw in tracks_in[:_MUSIC_QUEUE_SNAPSHOT_MAX]:
+            if not isinstance(raw, dict):
+                continue
+            url = str(raw.get("url") or "").strip()
+            provider, video_id, _embed = rooms_router._parse_track_url(url)
+            if not provider:
+                continue
+            submitter_nick = _fed_nickname(raw.get("submitter_nick")) or "federation_sync"
+            submitter = _ensure_local_user_by_nickname(submitter_nick)
+            submitter_id = int(submitter["id"]) if submitter else int(db.get_or_create_federation_system_user())
+            thumb = rooms_router._sanitize_artwork_url(str(raw.get("thumbnail") or ""))
+            tid = db.music_add_track(
+                room_name=room_name,
+                submitter_id=submitter_id,
+                submitter_nick=submitter_nick,
+                provider=provider,
+                video_id=video_id,
+                url=url[:2048],
+                title=str(raw.get("title") or "")[:200],
+                thumbnail=thumb or "",
+                duration=int(raw.get("duration") or 0),
+            )
+            if first_id is None:
+                first_id = int(tid)
+        if first_id and not had_current:
+            start_unix = payload.get("start_unix")
+            try:
+                su = int(float(start_unix)) if start_unix is not None else int(time.time())
+            except Exception:
+                su = int(time.time())
+            _set_music_anchor(room_name, first_id, su)
+        await _broadcast_music_ws(room_name, {"type": "music_queue_snapshot", "room": room_name})
+        return
+
     if event_type == "room.music.track.added":
         provider = str(payload.get("provider") or "").strip()
         video_id = str(payload.get("video_id") or "").strip()
         url = str(payload.get("url") or "").strip()
-        if not provider or not video_id or not url:
+        if not url:
             return
+        parsed_provider, parsed_vid, _embed = rooms_router._parse_track_url(url)
+        if not parsed_provider:
+            return
+        provider = parsed_provider
+        video_id = parsed_vid
         submitter_nick = str(payload.get("submitter_nick") or "federation_sync").strip() or "federation_sync"
         submitter = _ensure_local_user_by_nickname(submitter_nick)
         submitter_id = int(submitter["id"]) if submitter else int(db.get_or_create_federation_system_user())
@@ -4862,9 +4963,9 @@ async def _handle_room_music_event(room_name: str, event_type: str, payload: dic
             submitter_nick=submitter_nick,
             provider=provider,
             video_id=video_id,
-            url=url,
-            title=str(payload.get("title") or ""),
-            thumbnail=str(payload.get("thumbnail") or ""),
+            url=url[:2048],
+            title=str(payload.get("title") or "")[:200],
+            thumbnail=rooms_router._sanitize_artwork_url(str(payload.get("thumbnail") or "")) or "",
             duration=int(payload.get("duration") or 0),
         )
         if bool(payload.get("make_current")):
@@ -4889,22 +4990,41 @@ async def _handle_room_music_event(room_name: str, event_type: str, payload: dic
         return
 
     if event_type == "room.music.track.removed":
+        actor = _fed_nickname(payload.get("updated_by_nickname"))
         provider = str(payload.get("provider") or "").strip()
         video_id = str(payload.get("video_id") or "").strip()
         url = str(payload.get("url") or "").strip()
+        if not url:
+            return
+        parsed_provider, parsed_vid, _embed = rooms_router._parse_track_url(url)
+        if parsed_provider:
+            provider = parsed_provider
+            video_id = parsed_vid
         removed_id = None
         with db._conn() as con:
             row = con.execute(
                 """
-                SELECT id FROM music_queue
+                SELECT id, submitter_id FROM music_queue
                 WHERE room_name=? AND played=0 AND provider=? AND video_id=? AND url=?
                 ORDER BY id ASC
                 LIMIT 1
                 """,
-                (room_name, provider, video_id, url),
+                (room_name, provider, video_id, url[:2048]),
             ).fetchone()
             if row:
                 removed_id = int(row["id"])
+                submitter_id = int(row["submitter_id"] or 0)
+                if actor:
+                    actor_row = _ensure_local_user_by_nickname(actor)
+                    actor_id = int(actor_row["id"]) if actor_row else 0
+                    is_submitter = actor_id > 0 and actor_id == submitter_id
+                    is_mod = bool(_fed_room_moderator(room_name, actor))
+                    if not is_submitter and not is_mod:
+                        _log.warning(
+                            "federation: dropping room.music.track.removed (unauthorised) room=%s",
+                            room_name,
+                        )
+                        return
                 con.execute("DELETE FROM music_queue WHERE id=?", (removed_id,))
                 con.commit()
         if removed_id is not None:
@@ -4922,6 +5042,12 @@ async def _handle_room_music_event(room_name: str, event_type: str, payload: dic
         return
 
     if event_type == "room.music.track.skipped":
+        if not payload.get("auto") and not _fed_room_moderator(room_name, payload.get("updated_by_nickname")):
+            _log.warning(
+                "federation: dropping room.music.track.skipped (unauthorised) room=%s",
+                room_name,
+            )
+            return
         current = db.music_get_current(room_name)
         skipped_id = None
         if current:
@@ -4940,6 +5066,12 @@ async def _handle_room_music_event(room_name: str, event_type: str, payload: dic
         return
 
     if event_type == "room.music.queue.cleared":
+        if not _fed_room_moderator(room_name, payload.get("updated_by_nickname")):
+            _log.warning(
+                "federation: dropping room.music.queue.cleared (unauthorised) room=%s",
+                room_name,
+            )
+            return
         db.music_clear_queue(room_name)
         _clear_music_anchor(room_name)
         await _broadcast_music_ws(room_name, {"type": "music_queue_cleared", "room": room_name})

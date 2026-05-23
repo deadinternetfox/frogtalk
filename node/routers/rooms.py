@@ -844,6 +844,7 @@ async def update_room(room_name: str, body: UpdateRoomRequest,
                 "type": "room_settings_updated",
                 "room": effective_name,
                 "channel_type": room_row.get("channel_type") or "text",
+                "dj_only": bool(room_row.get("dj_only_queue")),
             }
             if renamed_to:
                 ws_evt["renamed_from"] = room_name
@@ -2148,6 +2149,18 @@ def _can_control(room_name: str, user_id: int, is_admin: bool) -> bool:
     return db.dj_is(room_name, user_id)
 
 
+def _music_require_room_access(current_user: dict, room_name: str):
+    """Return (room, error_response) — error_response is a JSONResponse when denied."""
+    room = db.get_room_by_name(room_name)
+    if not room:
+        return None, JSONResponse(status_code=404, content={"error": "Room not found"})
+    if not db.user_can_access_room(
+        current_user["id"], room_name, is_admin=bool(current_user.get("is_admin"))
+    ):
+        return None, JSONResponse(status_code=403, content={"error": "Not a member of this room"})
+    return room, None
+
+
 def _parse_track_url(url: str):
     """Return (provider, video_id, embed_url) or (None, None, None)."""
     url = _normalize_music_url(url or "")
@@ -2398,9 +2411,9 @@ async def music_track_art(
 
 @router.get("/{room_name}/queue")
 async def music_get_queue(room_name: str, current_user: dict = Depends(get_current_user)):
-    room = db.get_room_by_name(room_name)
-    if not room:
-        return JSONResponse(status_code=404, content={"error": "Room not found"})
+    room, err = _music_require_room_access(current_user, room_name)
+    if err:
+        return err
     queue = db.music_get_queue(room_name)
     djs = db.dj_list(room_name)
     is_admin = bool(current_user.get("is_admin"))
@@ -2426,9 +2439,9 @@ async def music_get_queue(room_name: str, current_user: dict = Depends(get_curre
 @router.post("/{room_name}/queue")
 async def music_add_to_queue(room_name: str, body: AddTrackRequest,
                              current_user: dict = Depends(get_current_user)):
-    room = db.get_room_by_name(room_name)
-    if not room:
-        return JSONResponse(status_code=404, content={"error": "Room not found"})
+    room, err = _music_require_room_access(current_user, room_name)
+    if err:
+        return err
     is_admin = bool(current_user.get("is_admin"))
     if not _can_queue(room, current_user["id"], is_admin):
         return JSONResponse(status_code=403, content={"error": "Only DJs can add tracks in this channel"})
@@ -2507,9 +2520,9 @@ async def music_add_to_queue(room_name: str, body: AddTrackRequest,
 @router.delete("/{room_name}/queue/{track_id}")
 async def music_delete_track(room_name: str, track_id: int,
                              current_user: dict = Depends(get_current_user)):
-    room = db.get_room_by_name(room_name)
-    if not room:
-        return JSONResponse(status_code=404, content={"error": "Room not found"})
+    room, err = _music_require_room_access(current_user, room_name)
+    if err:
+        return err
     is_admin = bool(current_user.get("is_admin"))
     # Submitter can delete their own track; controllers can delete anything
     current = db.music_get_current(room_name)
@@ -2542,6 +2555,7 @@ async def music_delete_track(room_name: str, track_id: int,
         "url": str(row["url"] or ""),
         "removed_was_head": removed_was_head,
         "next_start_unix": next_start_unix,
+        "updated_by_nickname": str(current_user.get("nickname") or "")[:64],
     })
 
     try:
@@ -2559,6 +2573,9 @@ async def music_skip(room_name: str,
                      body: Optional[MusicSkipRequest] = None,
                      current_user: dict = Depends(get_current_user)):
     """Mark the current head track as played, advancing the queue."""
+    _, err = _music_require_room_access(current_user, room_name)
+    if err:
+        return err
     is_admin = bool(current_user.get("is_admin"))
     is_auto = bool(body and body.auto)
     if not is_auto and not _can_control(room_name, current_user["id"], is_admin):
@@ -2596,10 +2613,15 @@ async def music_skip(room_name: str,
     else:
         clear_music_head_anchor(room_name)
 
-    _emit_federation_room_event("room.music.track.skipped", {
+    fed_skip = {
         "room_name": room_name,
         "next_start_unix": next_start_unix,
-    })
+    }
+    if is_auto:
+        fed_skip["auto"] = True
+    else:
+        fed_skip["updated_by_nickname"] = str(current_user.get("nickname") or "")[:64]
+    _emit_federation_room_event("room.music.track.skipped", fed_skip)
 
     try:
         from ws_manager import manager
@@ -2614,6 +2636,9 @@ async def music_skip(room_name: str,
 
 @router.post("/{room_name}/queue/clear")
 async def music_clear(room_name: str, current_user: dict = Depends(get_current_user)):
+    _, err = _music_require_room_access(current_user, room_name)
+    if err:
+        return err
     is_admin = bool(current_user.get("is_admin"))
     if not _can_control(room_name, current_user["id"], is_admin):
         return JSONResponse(status_code=403, content={"error": "Only DJs or mods can clear queue"})
@@ -2622,6 +2647,7 @@ async def music_clear(room_name: str, current_user: dict = Depends(get_current_u
 
     _emit_federation_room_event("room.music.queue.cleared", {
         "room_name": room_name,
+        "updated_by_nickname": str(current_user.get("nickname") or "")[:64],
     })
 
     try:
@@ -2635,6 +2661,9 @@ async def music_clear(room_name: str, current_user: dict = Depends(get_current_u
 @router.post("/{room_name}/dj-only")
 async def music_toggle_dj_only(room_name: str, body: ToggleDJOnlyRequest,
                                current_user: dict = Depends(get_current_user)):
+    _, err = _music_require_room_access(current_user, room_name)
+    if err:
+        return err
     if not db.can_moderate_room(room_name, current_user["id"], bool(current_user.get("is_admin"))):
         return JSONResponse(status_code=403, content={"error": "Not authorised"})
     db.room_set_dj_only(room_name, 1 if body.dj_only else 0)
@@ -2660,6 +2689,9 @@ class DJRequest(BaseModel):
 @router.post("/{room_name}/djs")
 async def grant_dj(room_name: str, body: DJRequest,
                    current_user: dict = Depends(get_current_user)):
+    _, err = _music_require_room_access(current_user, room_name)
+    if err:
+        return err
     if not db.can_moderate_room(room_name, current_user["id"], bool(current_user.get("is_admin"))):
         return JSONResponse(status_code=403, content={"error": "Not authorised"})
     db.dj_add(room_name, body.user_id, current_user["id"])
@@ -2676,6 +2708,9 @@ async def grant_dj(room_name: str, body: DJRequest,
 @router.delete("/{room_name}/djs/{user_id}")
 async def revoke_dj(room_name: str, user_id: int,
                     current_user: dict = Depends(get_current_user)):
+    _, err = _music_require_room_access(current_user, room_name)
+    if err:
+        return err
     if not db.can_moderate_room(room_name, current_user["id"], bool(current_user.get("is_admin"))):
         return JSONResponse(status_code=403, content={"error": "Not authorised"})
     db.dj_remove(room_name, user_id)
