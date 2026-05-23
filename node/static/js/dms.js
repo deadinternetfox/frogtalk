@@ -714,17 +714,129 @@ function _dmIsLockPlaceholder(text) {
     || s.includes('Encrypted on your home node')
     || s.includes('keys out of sync')
     || s.includes('Could not unlock')
+    || s.includes('waiting for encryption sync')
+    || s.includes('Syncing from your home')
+    || s.includes('Sync failed')
+    || s.includes('Encryption sync incomplete')
+    || s.includes('Import a .key')
+    || s.includes('import keys')
+    || s.includes('Starting encryption')
+    || s.includes('Cannot fetch encryption')
   );
 }
 
-function _dmLockedBubbleText(live) {
+function _federationSyncSnapshot() {
+  try {
+    const raw = (window.FtSync && typeof FtSync.state === 'function')
+      ? FtSync.state()
+      : ((window.App && App.federationSyncState) || window.__ftFederationSync || {});
+    return (window.FtSync && typeof FtSync.normalizeState === 'function')
+      ? FtSync.normalizeState(raw)
+      : (raw && typeof raw === 'object' ? raw : {});
+  } catch {
+    return {};
+  }
+}
+
+/** Why a bubble is still locked — drives user-visible placeholder text. */
+function _dmDecryptLockContext(peerId, live) {
+  const pid = Number(peerId) || 0;
+  const sync = _federationSyncSnapshot();
+
+  if (sync.in_progress || _federationSyncInProgress()) {
+    return { reason: 'sync_in_progress', hint: String(sync.hint || '').trim() };
+  }
+
+  const err = String(sync.error || '').trim();
+  const syncDone = !!sync.done && !sync.in_progress;
+  if (syncDone && err) {
+    const coreOk = window.FtSync && FtSync.federationSyncCoreComplete
+      ? FtSync.federationSyncCoreComplete(sync)
+      : false;
+    if (!coreOk) {
+      const hint = (window.FtSync && FtSync.syncErrorPublicHint)
+        ? FtSync.syncErrorPublicHint(err)
+        : err.slice(0, 120);
+      return { reason: 'sync_failed', hint };
+    }
+  }
+
   if (_dmSkipHistoricalDecrypt()) {
-    return _DM_DECRYPT_LOCKED_HOME + ' — send a new message to start a fresh thread here.';
+    return { reason: 'home_locked' };
   }
+
+  if (pid && window.Signal && typeof window.Signal.isPeerBundleBackedOff === 'function'
+      && window.Signal.isPeerBundleBackedOff(pid)) {
+    return { reason: 'peer_unreachable' };
+  }
+
   if (live) {
-    return '🔒 Unlocking…';
+    return { reason: 'unlocking' };
   }
-  return '🔒 Encrypted — waiting for encryption sync in this chat.';
+
+  if (!window.Signal?.isReady?.()) {
+    return { reason: 'signal_boot' };
+  }
+
+  if (pid) {
+    const last = _dmCryptoResyncAt.get(pid) || 0;
+    if (last > 0 && (Date.now() - last) < 120000) {
+      return { reason: 'sync_attempted' };
+    }
+  }
+
+  if (_isTravelNode() && !window.__ftDctImported && syncDone) {
+    return { reason: 'keys_needed' };
+  }
+
+  return { reason: 'decrypt_failed' };
+}
+
+function _dmLockedBubbleText(live, peerId) {
+  const ctx = _dmDecryptLockContext(peerId, live);
+  switch (ctx.reason) {
+    case 'sync_in_progress':
+      return '🔒 Syncing from your home node…';
+    case 'sync_failed':
+      return `🔒 Sync failed — ${ctx.hint || 'home node unreachable'}. Re-sync in Settings → Network or import keys (🗝️).`;
+    case 'home_locked':
+      return `${_DM_DECRYPT_LOCKED_HOME} — send a new message or import keys (🗝️).`;
+    case 'peer_unreachable':
+      return '🔒 Cannot reach peer node for encryption keys — try again later.';
+    case 'unlocking':
+      return '🔒 Unlocking…';
+    case 'signal_boot':
+      return '🔒 Starting encryption…';
+    case 'keys_needed':
+      return '🔒 Import a .key file (🗝️) to unlock older messages from home.';
+    case 'sync_attempted':
+      return '🔒 Encryption sync did not complete — send a new message or import keys (🗝️).';
+    default:
+      return '🔒 Could not unlock — send a new message or use 🗝️ Import keys.';
+  }
+}
+
+async function _refreshDmLockPlaceholders() {
+  if (!_activeDM?.id || !_dmMessages.length) return;
+  const peerId = Number(_activeDM.user_id) || 0;
+  let changed = false;
+  for (const m of _dmMessages) {
+    if (!m || m.deleted) continue;
+    if (!_isDmLockPlaceholder(m.content) && !_dmIsLockPlaceholder(m.content)) continue;
+    const next = _dmLockedBubbleText(false, peerId);
+    if (next && next !== m.content) {
+      m.content = next;
+      changed = true;
+    }
+  }
+  if (!changed) return;
+  _dmHistoryCache.set(_activeDM.id, _dmMessages.map((x) => ({ ...x })));
+  if (State.currentRoomType === 'dm' && typeof renderDMChat === 'function') {
+    renderDMChat();
+  }
+  if (typeof renderDMChannels === 'function') {
+    void renderDMChannels();
+  }
 }
 
 const _dmCryptoSyncNoticeAt = new Map();
@@ -854,23 +966,42 @@ try {
       });
     } else if (typeof loadDMChannels === 'function') {
       void loadDMChannels();
+    } else {
+      void _refreshDmLockPlaceholders();
     }
+  });
+  window.addEventListener('ft:federation-sync', () => {
+    void _refreshDmLockPlaceholders();
   });
 } catch {}
 
 function _federationSyncInProgress() {
   try {
-    const st = (window.FtSync && FtSync.state) ? FtSync.state()
-      : ((window.App && App.federationSyncState) || {});
+    const st = _federationSyncSnapshot();
     return !!(st && st.in_progress);
   } catch {
     return false;
   }
 }
 
-function _dmEncryptedPreviewLabel() {
-  if (_federationSyncInProgress()) return '🔒 Syncing encryption…';
-  if (_dmSkipHistoricalDecrypt()) return '🔒 From home node';
+function _dmEncryptedPreviewLabel(peerId) {
+  const ctx = _dmDecryptLockContext(peerId, false);
+  switch (ctx.reason) {
+    case 'sync_in_progress':
+      return '🔒 Syncing…';
+    case 'sync_failed':
+      return '🔒 Sync failed';
+    case 'home_locked':
+      return '🔒 From home node';
+    case 'peer_unreachable':
+      return '🔒 Peer unreachable';
+    case 'keys_needed':
+      return '🔒 Needs .key import';
+    case 'sync_attempted':
+      return '🔒 Sync incomplete';
+    default:
+      break;
+  }
   if (!window.Signal || !Signal.isReady()) return '🔒 Encrypted';
   return '🔒 Encrypted message';
 }
@@ -912,6 +1043,7 @@ async function _decryptDMPreviewContent(cipher, peerId, _peerNick, opts = {}) {
   if (!raw) return '';
   if (_parseDMCallLog(raw)) return raw;
 
+  const peerNum = Number(peerId) || 0;
   const _cacheKey = _dmPtCacheKey(raw);
 
   // Plaintext cache: if we've previously decrypted this exact envelope,
@@ -921,14 +1053,14 @@ async function _decryptDMPreviewContent(cipher, peerId, _peerNick, opts = {}) {
   const _cached = _dmPtCacheGet(raw);
   if (_cached !== undefined) return _cached;
   if (_dmDecryptPermafail.has(_cacheKey)) {
-    if (opts.sidebar) return _dmEncryptedPreviewLabel();
-    return _dmLockedBubbleText(!!opts.live);
+    if (opts.sidebar) return _dmEncryptedPreviewLabel(peerNum);
+    return _dmLockedBubbleText(!!opts.live, peerNum);
   }
 
   if (_dmSkipHistoricalDecrypt() && !opts.live && _looksEncryptedBlob(raw)) {
     _dmMarkDecryptPermafail(raw);
-    if (opts.sidebar) return _dmEncryptedPreviewLabel();
-    return _dmLockedBubbleText(false);
+    if (opts.sidebar) return _dmEncryptedPreviewLabel(peerNum);
+    return _dmLockedBubbleText(false, peerNum);
   }
 
   const inflight = _dmDecryptInflight.get(_cacheKey);
@@ -937,7 +1069,6 @@ async function _decryptDMPreviewContent(cipher, peerId, _peerNick, opts = {}) {
   }
 
   const myId = STATE?.user?.id;
-  const peerNum = Number(peerId) || 0;
   // Outgoing ciphertext cannot be decrypted via a session keyed to self.
   if (myId && peerNum && (+peerNum === +myId) && _looksEncryptedBlob(raw)) {
     return raw;
@@ -955,7 +1086,7 @@ async function _decryptDMPreviewContent(cipher, peerId, _peerNick, opts = {}) {
 
   if (opts.sidebar && !window.Signal?.isReady?.()) {
     if (_federationSyncInProgress() || opts.waitForSignal) {
-      return _dmEncryptedPreviewLabel();
+      return _dmEncryptedPreviewLabel(peerNum);
     }
   }
 
@@ -1051,14 +1182,14 @@ async function _decryptDMPreviewContent(cipher, peerId, _peerNick, opts = {}) {
       void _dmTryCoordinatedResync(peerNum);
     }
     if (_dmDecryptPermafail.has(_cacheKey)) {
-      if (opts.sidebar) return _dmEncryptedPreviewLabel();
-      return _dmLockedBubbleText(!!opts.live);
+      if (opts.sidebar) return _dmEncryptedPreviewLabel(peerNum);
+      return _dmLockedBubbleText(!!opts.live, peerNum);
     }
     if (_looksEncryptedBlob(raw) && !opts.sidebar) {
-      return _dmLockedBubbleText(!!opts.live);
+      return _dmLockedBubbleText(!!opts.live, peerNum);
     }
     if (opts.sidebar && _looksEncryptedBlob(raw)) {
-      return _dmEncryptedPreviewLabel();
+      return _dmEncryptedPreviewLabel(peerNum);
     }
     if (_looksEncryptedBlob(raw) && !opts.silent) {
       const warnKey = `toast:${peerNum}`;
@@ -1477,6 +1608,7 @@ async function openDMChannel (id, nickname, avatar) {
   // spinner hung on "Opening conversation with…").
   _show('call-voice-btn');
   _show('dm-timer-btn');
+  _show('dm-keys-btn');
   _show('encrypt-btn');
   // Encode DM peer info for calls
   STATE.dmPeerNick = nickname;
@@ -1807,7 +1939,7 @@ async function loadDMMessages (pageOffset = 0, options = {}) {
         const own = _resolveOwnDMPlaintext(next.content, next.id, _reqRoomId);
         if (own && !_looksEncryptedBlob(own)) next.content = own;
       } else if (_dmSkipHistoricalDecrypt()) {
-        next.content = _dmLockedBubbleText();
+        next.content = _dmLockedBubbleText(false, _peerUserId);
         _dmMarkDecryptPermafail(String(msg.content || ''));
       } else {
         try {
@@ -2002,6 +2134,17 @@ function _scrollDMToBottomStable() {
   [80, 220, 500].forEach(ms => setTimeout(go, ms));
 }
 
+function _dmSysLogActionsHtml(kind) {
+  const k = String(kind || '');
+  if (k !== 'history_locked' && k !== 'history_import_failed') return '';
+  const impPrimary = k === 'history_locked' ? ' dm-sys-log-btn-primary' : '';
+  return `<div class="dm-sys-log-actions" role="group" aria-label="Encryption keys">
+    <button type="button" class="dm-sys-log-btn${impPrimary}" onclick="showDmCryptoKeysModal('import')">Import keys</button>
+    <button type="button" class="dm-sys-log-btn" onclick="showDmCryptoKeysModal('export')">Export keys</button>
+    <button type="button" class="dm-sys-log-btn" onclick="openChatMoreMenu()">More…</button>
+  </div>`;
+}
+
 function renderDMMessage (m) {
   // Loose numeric compare — server may send sender_id as string in some paths.
   const _uid = STATE.user?.id;
@@ -2023,12 +2166,14 @@ function renderDMMessage (m) {
     const title = esc(meta?.title || 'Notice');
     const subtitle = esc(meta?.subtitle || '');
     const icon = esc(meta?.icon || 'ℹ️');
+    const actions = _dmSysLogActionsHtml(kind);
     return `<div class="dm-sys-log-wrap" id="msg-${m.id}" data-dmid="${m.id}">
       <div class="dm-sys-log-card ${cardClass}">
         <div class="dm-sys-log-icon">${icon}</div>
-        <div class="dm-sys-log-text">
+        <div class="dm-sys-log-text" style="flex:1;min-width:0">
           <div class="dm-sys-log-title">${title}</div>
           ${subtitle ? `<div class="dm-sys-log-sub">${subtitle}</div>` : ''}
+          ${actions}
           <div class="dm-sys-log-time">${time}</div>
         </div>
       </div>

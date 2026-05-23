@@ -1354,6 +1354,8 @@ const Rooms = (() => {
     // Hide DM-specific buttons when switching to regular channels
     const timerBtn = document.getElementById('dm-timer-btn');
     if (timerBtn && type !== 'dm') timerBtn.style.display = 'none';
+    const dmKeysBtn = document.getElementById('dm-keys-btn');
+    if (dmKeysBtn) dmKeysBtn.style.display = type === 'dm' ? '' : 'none';
 
     // Show/hide unified call button: voice/video-capable call only in DMs.
     // (There is no separate 📹 button — the user turns on camera mid-call.)

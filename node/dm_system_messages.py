@@ -9,6 +9,22 @@ import database as db
 
 DMSYS_PREFIX = "[[DMSYS]]"
 
+
+def _friendly_source_label(label: str) -> str:
+    s = str(label or "").strip()
+    if not s:
+        return "your home node"
+    if s.startswith("http://") or s.startswith("https://"):
+        try:
+            from urllib.parse import urlparse
+
+            host = urlparse(s).hostname or ""
+            if host:
+                return host
+        except Exception:
+            pass
+    return s[:80]
+
 _HISTORY_FAILED_COPY = {
     "connection": (
         "Could not reach your home node to import DM history. "
@@ -129,7 +145,7 @@ def maybe_history_sync_notice(
     uid = int(actor_user_id or 0)
     applied = int(messages_applied or 0)
     offered = int(messages_offered or 0)
-    label = str(source_label or "your home node").strip() or "your home node"
+    label = _friendly_source_label(source_label)
     out: dict[str, Any] = {"channel_id": cid, "inserted": None, "kind": None}
     if cid <= 0 or uid <= 0:
         return out

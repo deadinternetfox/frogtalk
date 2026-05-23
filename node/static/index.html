@@ -2293,6 +2293,7 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
 #chat-header.is-dm #search-btn,
 #chat-header.is-dm #pins-btn,
 #chat-header.is-dm #dm-timer-btn,
+#chat-header.is-dm #dm-keys-btn,
 #chat-header.is-dm #encrypt-btn,
 #chat-header.is-dm #members-btn{display:none !important}
 @media (max-width:600px){
@@ -3254,27 +3255,55 @@ body.ft-incoming-call-active #incoming-call{z-index:20000}
   display:flex;align-items:flex-start;gap:12px;
   padding:12px 14px;
   border-radius:12px;
-  border:1px solid #2d4a32;
-  background:linear-gradient(180deg,#152218 0%,#101612 100%);
-  box-shadow:0 4px 14px rgba(0,0,0,.28),0 0 0 1px rgba(120,200,130,.06) inset;
+  border:1px solid var(--border-color);
+  background:color-mix(in srgb, var(--surface-color) 88%, var(--accent-color));
+  box-shadow:0 4px 14px color-mix(in srgb, var(--bg-color) 55%, transparent);
 }
 .dm-sys-log-icon{
   width:36px;height:36px;border-radius:50%;
   display:flex;align-items:center;justify-content:center;
-  background:rgba(76,175,80,.14);
-  border:1px solid rgba(120,200,130,.35);
+  background:var(--accent-dim);
+  border:1px solid color-mix(in srgb, var(--accent-color) 45%, var(--border-color));
   font-size:17px;flex:0 0 auto;
 }
-.dm-sys-log-title{font-size:13px;font-weight:700;color:#d8f0da;line-height:1.2}
-.dm-sys-log-sub{font-size:12px;color:#a8c4ad;margin-top:5px;line-height:1.45}
-.dm-sys-log-time{font-size:11px;color:#6f8a74;margin-top:6px}
-.dm-sys-log-card.dm-sys-log-warn{border-color:rgba(201,176,122,.35);background:rgba(48,40,24,.55)}
-.dm-sys-log-card.dm-sys-log-warn .dm-sys-log-title{color:#e8d4a8}
-.dm-sys-log-card.dm-sys-log-warn .dm-sys-log-sub{color:#b8a078}
-.dm-sys-log-card.dm-sys-log-locked{border-color:rgba(120,160,200,.28);background:rgba(24,36,48,.5)}
-.dm-sys-log-card.dm-sys-log-locked .dm-sys-log-title{color:#b8d4e8}
-.dm-sys-log-card.dm-sys-log-ok{border-color:rgba(100,180,120,.3);background:rgba(20,40,28,.45)}
-.dm-sys-log-card.dm-sys-log-ok .dm-sys-log-title{color:#b8e8c4}
+.dm-sys-log-title{font-size:13px;font-weight:700;color:var(--text-color);line-height:1.2}
+.dm-sys-log-sub{font-size:12px;color:var(--text-muted);margin-top:5px;line-height:1.45}
+.dm-sys-log-time{font-size:11px;color:var(--text-muted);margin-top:6px;opacity:.85}
+.dm-sys-log-actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.dm-sys-log-btn{
+  font-size:11px;font-weight:600;padding:6px 10px;border-radius:8px;cursor:pointer;
+  border:1px solid color-mix(in srgb, var(--accent-color) 50%, var(--border-color));
+  background:color-mix(in srgb, var(--accent-color) 18%, var(--surface-color));
+  color:var(--text-color);
+}
+.dm-sys-log-btn:hover{background:color-mix(in srgb, var(--accent-color) 28%, var(--surface-color))}
+.dm-sys-log-btn-primary{
+  background:var(--accent-color);
+  color:color-mix(in srgb, var(--accent-color) 12%, #000);
+  border-color:color-mix(in srgb, var(--accent-color) 70%, #fff);
+}
+.dm-sys-log-card.dm-sys-log-warn{
+  border-color:color-mix(in srgb, #c9b07a 45%, var(--border-color));
+  background:color-mix(in srgb, var(--surface-color) 82%, #c9b07a);
+}
+.dm-sys-log-card.dm-sys-log-locked{
+  border-color:color-mix(in srgb, var(--accent-color) 35%, #6a9ec8);
+  background:color-mix(in srgb, var(--surface-color) 86%, #4a6a8a);
+}
+.dm-sys-log-card.dm-sys-log-ok{
+  border-color:color-mix(in srgb, var(--accent-color) 55%, var(--border-color));
+  background:color-mix(in srgb, var(--surface-color) 80%, var(--accent-color));
+}
+.dm-sys-log-card.dm-sys-log-crypto{border-color:color-mix(in srgb, var(--accent-color) 40%, var(--border-color))}
+.dm-keys-tabs{display:flex;gap:6px;margin-bottom:12px}
+.dm-keys-tab{
+  flex:1;padding:8px 10px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;
+  border:1px solid var(--border-color);background:var(--surface-color);color:var(--text-muted);
+}
+.dm-keys-tab.active{
+  border-color:color-mix(in srgb, var(--accent-color) 55%, var(--border-color));
+  background:var(--accent-dim);color:var(--accent-color);
+}
 .dm-call-log-wrap{display:flex;justify-content:flex-start;padding:8px 0}
 .dm-call-log-card{
   width:min(96%,520px);
@@ -8963,6 +8992,7 @@ window.ConnErr = (function(){
         <button class="icon-btn" id="voice-join-btn" data-tip="Join Voice Channel" onclick="joinVoiceChannel()">📞</button>
         <button class="icon-btn" id="call-voice-btn" data-tip="Call" onclick="startCall('voice')" style="display:none">📞</button>
         <button class="icon-btn" id="dm-timer-btn" data-tip="Disappearing Messages" onclick="showDisappearSettings()" style="display:none">⏱️</button>
+        <button class="icon-btn" id="dm-keys-btn" data-tip="Export / import encryption keys" onclick="showDmCryptoKeysModal('export')" style="display:none">🗝️</button>
         <button class="icon-btn" id="encrypt-btn" data-tip="E2E Encryption" onclick="toggleEncryptionInfo()" style="display:none">🔒</button>
         <button class="icon-btn" id="members-btn" data-tip="Members" onclick="toggleUsersPanel()">👥</button>
         <button class="icon-btn" id="chat-more-btn" data-tip="More" onclick="openChatMoreMenu()">⋯</button>
@@ -10526,6 +10556,20 @@ window.ConnErr = (function(){
         <div id="recovery-key-status" style="font-size:11px;color:#7a8a82;margin-top:8px;min-height:14px"></div>
       </div>
 
+      <div style="margin:24px 0 8px;padding-top:16px;border-top:1px solid var(--border-color)">
+        <div style="font-size:13px;color:var(--accent-color);font-weight:600;margin-bottom:8px">🗝️ DM encryption backup</div>
+        <div style="font-size:12px;color:var(--text-muted);line-height:1.55;margin-bottom:12px">
+          Export or import a <b>.key</b> file to unlock older direct messages after a node switch or travel login.
+          The file is encrypted with a passphrase you choose — we never see it.
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="modal-btn primary" type="button" style="flex:1;min-width:140px"
+                  onclick="showDmCryptoKeysModal('export')">Export keys</button>
+          <button class="modal-btn secondary" type="button" style="flex:1;min-width:140px"
+                  onclick="showDmCryptoKeysModal('import')">Import keys</button>
+        </div>
+      </div>
+
       <!-- Linked Devices (Track F) -->
       <div style="margin:24px 0 8px;padding-top:16px;border-top:1px solid #2a2a2a">
         <div style="font-size:13px;color:#4caf50;font-weight:600;margin-bottom:8px">📱 Linked devices</div>
@@ -10654,6 +10698,51 @@ window.ConnErr = (function(){
               onclick="cancelFederationResyncConfirm()">Cancel</button>
       <button class="modal-btn primary" type="button" id="fed-resync-confirm-go"
               onclick="confirmFederationResyncConfirm()">Re-sync now</button>
+    </div>
+  </div>
+</div>
+
+<!-- DM encryption key backup (.key file) — export / import in this browser -->
+<div class="modal-overlay hidden" id="modal-dm-crypto-keys"
+     onclick="if(event.target===this)closeModal('modal-dm-crypto-keys')">
+  <div class="modal" role="dialog" aria-modal="true" style="max-width:440px;width:min(440px,94vw)">
+    <div style="text-align:center;margin-bottom:12px">
+      <div style="font-size:36px;line-height:1;margin-bottom:4px" aria-hidden="true">🗝️</div>
+      <div class="modal-title" style="margin:0">Encryption keys</div>
+      <div id="dm-keys-subtitle" class="modal-label" style="margin-top:8px;line-height:1.5;font-weight:400"></div>
+    </div>
+    <div class="dm-keys-tabs">
+      <button type="button" class="dm-keys-tab active" id="dm-keys-tab-export"
+              onclick="switchDmKeysModalTab('export')">Export</button>
+      <button type="button" class="dm-keys-tab" id="dm-keys-tab-import"
+              onclick="switchDmKeysModalTab('import')">Import</button>
+    </div>
+    <div id="dm-keys-pane-export">
+      <p class="modal-label" style="line-height:1.5;margin-bottom:10px">
+        Download a password-protected <b>.key</b> file. Use it on this or another FrogTalk node
+        in the <b>same browser profile</b> to unlock older imported DM history.
+      </p>
+      <input type="password" id="dm-keys-export-pass" class="modal-input" autocomplete="new-password"
+             placeholder="Passphrase (min 8 characters)">
+      <input type="password" id="dm-keys-export-pass2" class="modal-input" autocomplete="new-password"
+             placeholder="Confirm passphrase">
+      <button type="button" class="modal-btn primary" id="dm-keys-export-btn" style="width:100%;margin-top:8px"
+              onclick="submitDmKeysExport()">Download .key file</button>
+    </div>
+    <div id="dm-keys-pane-import" style="display:none">
+      <p class="modal-label" style="line-height:1.5;margin-bottom:10px">
+        Choose a <b>.key</b> file you exported earlier and enter its passphrase.
+      </p>
+      <input type="file" id="dm-keys-file-input" class="modal-input" accept=".key,.json,application/json"
+             style="padding:8px">
+      <input type="password" id="dm-keys-import-pass" class="modal-input" autocomplete="current-password"
+             placeholder="Passphrase">
+      <button type="button" class="modal-btn primary" id="dm-keys-import-btn" style="width:100%;margin-top:8px"
+              onclick="submitDmKeysImport()">Import keys</button>
+    </div>
+    <div id="dm-keys-error" class="auth-error" style="display:none;margin-top:12px"></div>
+    <div class="modal-actions" style="margin-top:14px">
+      <button type="button" class="modal-btn secondary" onclick="closeModal('modal-dm-crypto-keys')">Close</button>
     </div>
   </div>
 </div>
@@ -11632,7 +11721,8 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoa
 </script>
 <script src="/static/js/crypto.js?v=192"></script>
 <script src="/static/js/signal_store.js?v=3"></script>
-<script src="/static/js/device_crypto.js?v=7"></script>
+<script src="/static/js/device_crypto.js?v=8"></script>
+<script src="/static/js/dm_crypto_keys.js?v=1"></script>
 <script src="/static/js/signal.js?v=28"></script>
 <script src="/static/js/wall_crypto.js?v=2"></script>
 <script src="/static/js/state.js?v=203"></script>
@@ -11649,7 +11739,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoa
 <script src="/static/js/users.js?v=202"></script>
 <script src="/static/js/emoji.js?v=193"></script>
 <script src="/static/js/friends.js?v=422"></script>
-<script src="/static/js/dms.js?v=491"></script>
+<script src="/static/js/dms.js?v=493"></script>
 <script src="/static/js/calls.js?v=246"></script>
 <script src="/static/js/media.js?v=423"></script>
 <script src="/static/js/gifs.js?v=205"></script>

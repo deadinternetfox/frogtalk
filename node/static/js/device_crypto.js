@@ -12,6 +12,8 @@
 
   const DCT_VERSION = 2;
   const DEFAULT_POLICY = 'fresh_keys';
+  const KEYFILE_MAGIC = 'FROGTALK-KEY-v1';
+  const KEYFILE_KDF_ITERS = 210000;
 
   function dctPolicy() {
     try {
@@ -564,6 +566,125 @@
     return importFromSwitch(ticket);
   }
 
+  async function _deriveKeyFromPassphrase(passphrase, saltU8) {
+    const enc = new TextEncoder();
+    const baseKey = await crypto.subtle.importKey(
+      'raw',
+      enc.encode(String(passphrase || '')),
+      'PBKDF2',
+      false,
+      ['deriveKey'],
+    );
+    return crypto.subtle.deriveKey(
+      {
+        name: 'PBKDF2',
+        salt: saltU8,
+        iterations: KEYFILE_KDF_ITERS,
+        hash: 'SHA-256',
+      },
+      baseKey,
+      { name: 'AES-GCM', length: 256 },
+      false,
+      ['encrypt', 'decrypt'],
+    );
+  }
+
+  async function _sealPackedForPassphrase(packed, passphrase) {
+    const salt = crypto.getRandomValues(new Uint8Array(16));
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const key = await _deriveKeyFromPassphrase(passphrase, salt);
+    const plain = new TextEncoder().encode(JSON.stringify(packed));
+    const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, plain);
+    return { salt, iv, ct };
+  }
+
+  async function _openPackedFromPassphrase(wrap, passphrase) {
+    const salt = _bytesFromB64(wrap.salt_b64);
+    const iv = _bytesFromB64(wrap.iv_b64);
+    const ct = _bytesFromB64(wrap.ciphertext_b64);
+    const key = await _deriveKeyFromPassphrase(passphrase, salt);
+    const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, ct);
+    return JSON.parse(new TextDecoder().decode(plain));
+  }
+
+  function _keyfileNickname() {
+    try {
+      const n = String((window.State && State.user && State.user.nickname) || 'user').trim();
+      return n.replace(/[^a-zA-Z0-9_-]+/g, '_').slice(0, 32) || 'user';
+    } catch {
+      return 'user';
+    }
+  }
+
+  async function exportKeyFilePayload(passphrase) {
+    const pass = String(passphrase || '');
+    if (pass.length < 8) throw new Error('passphrase_too_short');
+    await _ensureSignalReadyForExport();
+    if (!(await _hasExportableCrypto())) throw new Error('no_signal_identity');
+    const plain = await _buildPlainExport();
+    const packed = await _packPlainExport(plain);
+    const sealed = await _sealPackedForPassphrase(packed, pass);
+    return {
+      magic: KEYFILE_MAGIC,
+      exported_at: Date.now(),
+      node_origin: String(window.location.origin || ''),
+      account_nickname: _keyfileNickname(),
+      kdf: 'pbkdf2-sha256',
+      kdf_iters: KEYFILE_KDF_ITERS,
+      salt_b64: _b64FromBytes(sealed.salt),
+      iv_b64: _b64FromBytes(sealed.iv),
+      ciphertext_b64: _b64FromBytes(new Uint8Array(sealed.ct)),
+    };
+  }
+
+  async function downloadKeyFile(passphrase) {
+    const payload = await exportKeyFilePayload(passphrase);
+    const body = JSON.stringify(payload, null, 2);
+    const blob = new Blob([body], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const stamp = new Date().toISOString().slice(0, 10);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `frogtalk-${_keyfileNickname()}-${stamp}.key`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+    return true;
+  }
+
+  async function importKeyFilePayload(payload, passphrase) {
+    const obj = (payload && typeof payload === 'object') ? payload : null;
+    if (!obj || String(obj.magic || '') !== KEYFILE_MAGIC) throw new Error('bad_key_file');
+    const pass = String(passphrase || '');
+    if (pass.length < 8) throw new Error('passphrase_too_short');
+    let packed;
+    try {
+      packed = await _openPackedFromPassphrase(obj, pass);
+    } catch {
+      throw new Error('wrong_passphrase');
+    }
+    const plain = await _unpackPlainExport(packed);
+    const ok = await _importPlainPayload(plain, '');
+    if (!ok) throw new Error('import_failed');
+    try {
+      if (window.Signal && typeof Signal.init === 'function' && State?.user?.id) {
+        await Signal.init(State.user.id);
+      }
+    } catch {}
+    return true;
+  }
+
+  async function importKeyFileFromText(text, passphrase) {
+    let parsed;
+    try {
+      parsed = JSON.parse(String(text || '').trim());
+    } catch {
+      throw new Error('bad_key_file');
+    }
+    return importKeyFilePayload(parsed, passphrase);
+  }
+
   const DeviceCrypto = {
     exportAndUploadForSwitch,
     importFromSwitch,
@@ -575,6 +696,12 @@
     publicExportErrorMessage: _dctPublicMessage,
     policy: dctPolicy,
     usesFreshKeysOnTravel,
+    exportKeyFilePayload,
+    downloadKeyFile,
+    importKeyFilePayload,
+    importKeyFileFromText,
+    buildPlainExport: _buildPlainExport,
+    ensureReadyForExport: _ensureSignalReadyForExport,
   };
 
   try {
