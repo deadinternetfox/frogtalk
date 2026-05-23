@@ -3297,38 +3297,21 @@ body.ft-incoming-call-active #incoming-call{z-index:20000}
   background:color-mix(in srgb, var(--surface-color) 80%, var(--accent-color));
 }
 .dm-sys-log-card.dm-sys-log-crypto{border-color:color-mix(in srgb, var(--accent-color) 40%, var(--border-color))}
-.dm-lock-in-bubble{
-  display:flex;align-items:flex-start;gap:10px;
-  padding:10px 12px;border-radius:10px;
-  border:1px solid var(--border-color);
-  background:color-mix(in srgb, var(--surface-color) 92%, var(--bg-color));
-  max-width:min(100%,420px);
+.msg-content.dm-lock-msg{
+  color:var(--text-muted);
+  font-style:italic;
+  font-size:13px;
+  line-height:1.5;
+  opacity:.92;
 }
-.dm-lock-in-bubble--locked{
-  border-color:color-mix(in srgb, var(--accent-color) 30%, #6a9ec8);
-  background:color-mix(in srgb, var(--surface-color) 88%, #4a6a8a);
+.dm-lock-import-link{
+  display:inline;margin:0 0 0 5px;padding:0;border:0;background:transparent;
+  color:var(--accent-color);font:inherit;font-size:13px;font-weight:600;
+  font-style:normal;cursor:pointer;text-decoration:underline;text-underline-offset:2px;
+  vertical-align:baseline;
 }
-.dm-lock-in-bubble--warn{
-  border-color:color-mix(in srgb, #c9b07a 40%, var(--border-color));
-  background:color-mix(in srgb, var(--surface-color) 88%, #c9b07a);
-}
-.dm-lock-in-bubble--pending{
-  border-color:color-mix(in srgb, var(--accent-color) 35%, var(--border-color));
-  background:color-mix(in srgb, var(--surface-color) 90%, var(--accent-color));
-}
-.dm-lock-in-bubble-icon{font-size:1.2rem;line-height:1.2;flex:0 0 auto;margin-top:1px}
-.dm-lock-in-bubble-title{font-size:13px;font-weight:700;color:var(--text-color);line-height:1.25}
-.dm-lock-in-bubble-sub{font-size:12px;color:var(--text-muted);margin-top:4px;line-height:1.45}
-.dm-lock-in-bubble-btn{
-  display:inline-block;margin-top:10px;padding:7px 14px;border-radius:8px;
-  font-size:12px;font-weight:600;cursor:pointer;border:none;
-  background:var(--accent-color);
-  color:color-mix(in srgb, var(--accent-color) 12%, #000);
-  transition:filter .15s ease,transform .1s ease;
-}
-.dm-lock-in-bubble-btn:hover{filter:brightness(1.08)}
-.dm-lock-in-bubble-btn:active{transform:scale(.98)}
-.dm-lock-in-bubble-btn:focus-visible{outline:2px solid color-mix(in srgb, var(--accent-color) 60%, #fff);outline-offset:2px}
+.dm-lock-import-link:hover{color:color-mix(in srgb, var(--accent-color) 75%, #fff)}
+.dm-lock-import-link:focus-visible{outline:2px solid color-mix(in srgb, var(--accent-color) 55%, #fff);outline-offset:2px;border-radius:2px}
 .dm-keys-tabs{display:flex;gap:6px;margin-bottom:12px}
 .dm-keys-tab{
   flex:1;padding:8px 10px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;

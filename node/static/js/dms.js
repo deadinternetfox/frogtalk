@@ -2245,15 +2245,6 @@ function _dmSysLogActionsHtml(kind) {
   </div>`;
 }
 
-function _dmLockBubbleTone(kind) {
-  const k = String(kind || '');
-  if (k === 'own_sent_locked' || k === 'home_locked' || k === 'keys_needed') return 'locked';
-  if (k === 'sync_failed' || k === 'sync_attempted' || k === 'decrypt_failed' || k === 'peer_unreachable') {
-    return 'warn';
-  }
-  return 'pending';
-}
-
 function _dmLockShowImportBtn(meta, mine) {
   if (mine) return false;
   const k = String(meta?.kind || '');
@@ -2263,25 +2254,39 @@ function _dmLockShowImportBtn(meta, mine) {
   return true;
 }
 
-/** Compact lock notice inside a normal DM bubble (keeps sender avatar + name). */
+/** One grey italic line for locked ciphertext (classic DM bubble look). */
+function _dmLockPlainLine(meta) {
+  const k = String(meta?.kind || '');
+  const hint = String(meta?.hint || '').trim();
+  const lines = {
+    sync_in_progress: 'Syncing encryption from your home node…',
+    sync_failed: hint
+      ? `Sync failed — ${hint}`
+      : 'Sync failed — check Settings → Network or import keys.',
+    home_locked: 'Encrypted on your home node — send a new message here or import keys.',
+    peer_unreachable: 'Cannot reach peer node for encryption keys — try again later.',
+    unlocking: 'Unlocking…',
+    signal_boot: 'Starting encryption…',
+    keys_needed: 'Import a .key file to read older messages from home.',
+    sync_attempted: 'Encryption sync did not complete — send a new message or import keys.',
+    own_sent_locked: 'Sent from another device — cannot be shown on this browser.',
+    decrypt_failed: 'Could not unlock this message — send a new message or import keys.',
+  };
+  if (lines[k]) return lines[k];
+  const title = String(meta?.title || '').trim();
+  const sub = String(meta?.subtitle || '').trim();
+  if (title && sub) return `${title} — ${sub}`;
+  return title || sub || 'Encrypted message';
+}
+
+/** Inner HTML only — wrapped in `.msg-content.encrypted` by renderDMMessage. */
 function _renderDmLockInBubble(meta, opts = {}) {
   const mine = !!opts.mine;
-  const kind = String(meta?.kind || 'decrypt_failed');
-  const tone = _dmLockBubbleTone(kind);
-  const title = esc(meta?.title || 'Encrypted message');
-  const subtitle = esc(meta?.subtitle || '');
-  const icon = esc(meta?.icon || '🔒');
+  const line = esc(_dmLockPlainLine(meta));
   const importBtn = _dmLockShowImportBtn(meta, mine)
-    ? '<button type="button" class="dm-lock-in-bubble-btn" onclick="event.stopPropagation();showDmCryptoKeysModal(\'import\')">Import keys</button>'
+    ? ' <button type="button" class="dm-lock-import-link" onclick="event.stopPropagation();showDmCryptoKeysModal(\'import\')">Import keys</button>'
     : '';
-  return `<div class="dm-lock-in-bubble dm-lock-in-bubble--${tone}" role="note">
-    <span class="dm-lock-in-bubble-icon" aria-hidden="true">${icon}</span>
-    <div class="dm-lock-in-bubble-body">
-      <div class="dm-lock-in-bubble-title">${title}</div>
-      ${subtitle ? `<div class="dm-lock-in-bubble-sub">${subtitle}</div>` : ''}
-      ${importBtn}
-    </div>
-  </div>`;
+  return `\u{1F512} ${line}${importBtn}`;
 }
 
 function _renderDmSysLogCard(meta, msgId, time) {
@@ -2514,11 +2519,13 @@ function renderDMMessage (m) {
     if (ownPlain) _rawContent = ownPlain;
   }
   const _isCipherBlob = _looksEncryptedBlob(_rawContent);
+  let _contentIsLockLine = false;
   const safeContent = (m.view_once || isViewOnceConsumed || embeddedLock)
     ? ''
     : (_isCipherBlob ? '' : _rawContent);
   if (embeddedLock) {
     contentHtml = _renderDmLockInBubble(embeddedLock, { mine });
+    _contentIsLockLine = true;
   } else if (safeContent) {
     contentHtml = esc(safeContent);
     const urlRe = /https?:\/\/[^\s<>"]+/g;
@@ -2572,15 +2579,13 @@ function renderDMMessage (m) {
       const peerForLock = Number(_activeDM?.user_id) || Number(m.sender_id) || 0;
       const lockCtx = _dmDecryptLockContext(peerForLock, false);
       if (mine) {
-        contentHtml = _renderDmLockInBubble({
-          kind: 'own_sent_locked',
-          title: 'Sent from another device',
-          subtitle: 'This encrypted message was sent from another browser or node and cannot be shown here.',
-          icon: '🔒',
-        }, { mine: true });
+        contentHtml = _renderDmLockInBubble({ kind: 'own_sent_locked' }, { mine: true });
       } else {
-        contentHtml = _renderDmLockInBubble(_dmLockMetaFromContext(lockCtx), { mine: false });
+        const lockMeta = _dmLockMetaFromContext(lockCtx);
+        if (lockCtx.hint) lockMeta.hint = lockCtx.hint;
+        contentHtml = _renderDmLockInBubble(lockMeta, { mine: false });
       }
+      _contentIsLockLine = true;
     } else if (m.has_media) {
       contentHtml = '<em style="color:#444">Media</em>';
     }
@@ -2609,7 +2614,11 @@ function renderDMMessage (m) {
   const fwdDisabled = !!(_activeDM && _activeDM.forwarding_disabled);
   const fwdBadge = (typeof Messages !== 'undefined' && Messages.forwardedBadgeHtml) ? Messages.forwardedBadgeHtml(m) : '';
   const isForwarded = !!(m && m.forwarded_from);
-  const messageTextHtml = (!isForwarded && contentHtml) ? `<div class="msg-content">${contentHtml}</div>` : '';
+  const messageTextHtml = (!isForwarded && contentHtml)
+    ? (_contentIsLockLine
+      ? `<div class="msg-content encrypted dm-lock-msg">${contentHtml}</div>`
+      : `<div class="msg-content">${contentHtml}</div>`)
+    : '';
   const _hasVisualDmMedia = !!(mediaUrl || m.has_media || m.media_blur)
     && !mimeType.startsWith('audio/')
     && !m.view_once
