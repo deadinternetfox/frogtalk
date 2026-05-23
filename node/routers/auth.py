@@ -7205,7 +7205,11 @@ class VerifyPasswordRequest(BaseModel):
 
 @router.post("/verify-password")
 @limiter.limit("20/minute")
-async def verify_password(body: VerifyPasswordRequest, current_user: dict = Depends(get_current_user)):
+async def verify_password(
+    request: Request,
+    body: VerifyPasswordRequest,
+    current_user: dict = Depends(get_current_user),
+):
     """Confirm account password for sensitive client-only flows (e.g. key manager)."""
     if not db.verify_user(current_user["nickname"], body.password):
         return JSONResponse(status_code=401, content={"error": "Incorrect password"})
