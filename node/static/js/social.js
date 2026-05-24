@@ -3911,7 +3911,7 @@ const Social = (() => {
                 ${canRequest
                   ? `<button class="sp-action-btn primary" onclick="Social.addFriendFromProfile('${esc(u.nickname)}',this)">+ Add Friend</button>`
                   : u.friend_status === 'sent'
-                    ? `<button class="sp-action-btn secondary" disabled>Friend Request Sent</button>`
+                    ? `<button class="sp-action-btn secondary" onclick="Social.cancelFriendFromProfile('${esc(u.nickname)}',this)">Cancel Request</button>`
                     : u.friend_status === 'received'
                       ? `<button class="sp-action-btn primary" onclick="Social.acceptFriendFromProfile('${esc(u.nickname)}',this)">Accept Friend</button>`
                       : ''}
@@ -3983,7 +3983,7 @@ const Social = (() => {
                    ${u.friend_status === 'friends'
                      ? `<button class="sp-action-btn secondary" disabled>Friends ✓</button>`
                      : u.friend_status === 'sent'
-                     ? `<button class="sp-action-btn secondary" disabled>Requested</button>`
+                     ? `<button class="sp-action-btn secondary" onclick="Social.cancelFriendFromProfile('${esc(u.nickname)}',this)">Cancel Request</button>`
                      : u.friend_status === 'received'
                      ? `<button class="sp-action-btn primary" onclick="Social.acceptFriendFromProfile('${esc(u.nickname)}',this)">Accept Friend</button>`
                      : `<button class="sp-action-btn secondary" onclick="Social.addFriendFromProfile('${esc(u.nickname)}',this)">+ Add Friend</button>`
@@ -8901,6 +8901,26 @@ const Social = (() => {
     }
   }
 
+  async function cancelFriendFromProfile(nickname, btn) {
+    if (btn) { btn.disabled = true; btn.textContent = '…'; }
+    const r = await apiFetch('/api/friends/cancel/' + encodeURIComponent(nickname), 'POST');
+    if (r.ok) {
+      _invalidateProfileCache(nickname);
+      UI.showToast('Friend request cancelled', 'info');
+      try {
+        if (typeof loadFriends === 'function') loadFriends();
+      } catch {}
+      try {
+        if (_currentTab === 'profile' && _profileUser === nickname) {
+          await loadProfile(nickname);
+        }
+      } catch {}
+    } else {
+      if (btn) { btn.disabled = false; btn.textContent = 'Cancel Request'; }
+      UI.showToast('Could not cancel request', 'error');
+    }
+  }
+
   async function acceptFriendFromProfile(nickname, btn) {
     if (btn) { btn.disabled = true; btn.textContent = '…'; }
     const r = await apiFetch('/api/friends/accept/' + encodeURIComponent(nickname), 'POST');
@@ -10229,7 +10249,7 @@ const Social = (() => {
     shareReelUrl, reelShareUrl,
     openPostMenu, blockUserFromSocial,
     promptDeletePrivateMedia, promptDeletePostMedia,
-    addFriendFromProfile, acceptFriendFromProfile,
+    addFriendFromProfile, acceptFriendFromProfile, cancelFriendFromProfile,
     refreshProfileRelationship,
     openNewPost, closeNewPost, handleNewPostMedia, openNewPostCamera, clearNewPostMedia, submitNewPost,    applyFilter, updateFilter,
     setPostPrivacy, cyclePostPrivacy, toggleAllowComments, toggleShareLink,

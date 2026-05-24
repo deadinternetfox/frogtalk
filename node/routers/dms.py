@@ -144,7 +144,12 @@ async def list_dms(current_user: dict = Depends(get_current_user)):
         for ch in channels:
             if not ch.get("other_show_read_receipts", 1):
                 ch["peer_last_read"] = 0
-            ch["other_last_seen"] = db.get_privacy_last_seen(int(ch.get("other_id") or 0), viewer_id)
+            other_id = int(ch.get("other_id") or 0)
+            ch["other_last_seen"] = db.get_privacy_last_seen(other_id, viewer_id)
+            ch["other_presence"] = db.effective_presence_for_user(
+                other_id,
+                str(ch.get("other_global_user_id") or "").strip(),
+            )
             ch.pop("other_show_read_receipts", None)
             try:
                 from routers.signal import _peer_home_and_gid

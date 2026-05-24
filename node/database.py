@@ -6061,6 +6061,71 @@ def get_federation_user_activity_last_seen(global_user_id: str) -> str:
         return ""
 
 
+def user_has_live_session(user_id: int, global_user_id: str = "") -> bool:
+    """True when user has an active WS on this node or a fresh federated connection."""
+    uid = int(user_id or 0)
+    gid = str(global_user_id or "").strip()
+    if uid > 0:
+        try:
+            from ws_manager import manager
+
+            if manager.is_user_online(uid):
+                return True
+        except Exception:
+            pass
+        if not gid:
+            try:
+                with _conn() as con:
+                    row = con.execute(
+                        "SELECT global_user_id FROM users WHERE id=?",
+                        (uid,),
+                    ).fetchone()
+                if row:
+                    gid = str(row["global_user_id"] or "").strip()
+            except Exception:
+                pass
+    if gid:
+        return bool(get_federation_user_connection_servers(gid))
+    return False
+
+
+def effective_presence_for_user(user_id: int, global_user_id: str = "") -> str:
+    """UI presence: online/away/dnd/invisible/offline from live sessions + saved status."""
+    uid = int(user_id or 0)
+    gid = str(global_user_id or "").strip()
+    if uid <= 0 and not gid:
+        return "offline"
+    db_presence = ""
+    if uid > 0:
+        try:
+            with _conn() as con:
+                row = con.execute(
+                    "SELECT presence, global_user_id FROM users WHERE id=?",
+                    (uid,),
+                ).fetchone()
+            if row:
+                db_presence = str(row["presence"] or "").strip().lower()
+                if not gid:
+                    gid = str(row["global_user_id"] or "").strip()
+        except Exception:
+            pass
+    if not user_has_live_session(uid, gid):
+        return "offline"
+    p = db_presence
+    if not p and gid:
+        fed = get_federation_user_profile_row(gid) or {}
+        p = str(fed.get("presence") or "").strip().lower()
+    p = p or "online"
+    if p in ("away", "dnd", "invisible"):
+        return p
+    if p == "offline" and gid:
+        fed = get_federation_user_profile_row(gid) or {}
+        fp = str(fed.get("presence") or "").strip().lower()
+        if fp in ("away", "dnd", "invisible"):
+            return fp
+    return "online"
+
+
 def get_effective_last_seen(user_id: int, global_user_id: str = "") -> str:
     """Newest last_seen across local row, federated profile, and live connections."""
     uid = int(user_id or 0)

@@ -934,19 +934,26 @@ def enqueue_friend_graph_event(
     event_type: str,
     from_user: dict,
     to_user: dict,
+    *,
+    extra: dict | None = None,
 ) -> dict:
-    """Replicate friend.requested / friend.accepted to each party's home node."""
+    """Replicate friend.requested / friend.accepted / friend.request.removed to homed nodes."""
     from_gid = str(from_user.get("global_user_id") or "").strip()
     to_gid = str(to_user.get("global_user_id") or "").strip()
     targets = db.resolve_federation_push_targets_for_recipient_gids([from_gid, to_gid])
+    payload = {
+        "from_nickname": str(from_user.get("nickname") or "").strip(),
+        "from_global_user_id": from_gid,
+        "to_nickname": str(to_user.get("nickname") or "").strip(),
+        "to_global_user_id": to_gid,
+    }
+    if isinstance(extra, dict):
+        for key, val in extra.items():
+            if val is not None:
+                payload[key] = val
     return enqueue_server_event(
         event_type,
-        {
-            "from_nickname": str(from_user.get("nickname") or "").strip(),
-            "from_global_user_id": from_gid,
-            "to_nickname": str(to_user.get("nickname") or "").strip(),
-            "to_global_user_id": to_gid,
-        },
+        payload,
         target_server_ids=targets if targets else None,
     )
 
@@ -5431,6 +5438,38 @@ async def _handle_user_event(event: dict) -> None:
             seen = str(payload.get("last_seen") or "").strip()
             if seen:
                 db.apply_last_seen_if_newer(global_user_id=gid, last_seen=seen)
+        try:
+            from ws_manager import manager
+
+            local_uid = 0
+            try:
+                with db._conn() as con:
+                    row = con.execute(
+                        "SELECT id FROM users WHERE global_user_id=? LIMIT 1",
+                        (gid,),
+                    ).fetchone()
+                if row:
+                    local_uid = int(row["id"] if hasattr(row, "keys") else row[0])
+            except Exception:
+                local_uid = 0
+            pres = db.effective_presence_for_user(local_uid, gid)
+            broadcast = {
+                "type": "profile_update",
+                "global_user_id": gid,
+                "presence": pres,
+            }
+            if local_uid > 0:
+                broadcast["user_id"] = local_uid
+            prof = db.get_federation_user_profile_row(gid) or {}
+            nick = str(prof.get("nickname") or "").strip()
+            if nick:
+                broadcast["nickname"] = nick
+            seen = str(payload.get("last_seen") or "").strip()
+            if seen:
+                broadcast["last_seen"] = seen
+            await manager.broadcast_all(broadcast)
+        except Exception:
+            pass
         return
 
     if event_type not in ("user.profile.updated", "user.created", "user.deleted"):
@@ -5517,10 +5556,7 @@ async def _handle_user_event(event: dict) -> None:
     if not local_user:
         try:
             from ws_manager import manager
-            allowed_presence = {"online", "away", "dnd", "invisible", "offline"}
-            fp = str(payload.get("presence") or "offline").strip().lower()
-            if fp not in allowed_presence:
-                fp = "offline"
+            fp = db.effective_presence_for_user(0, gid)
             broadcast = {
                 "type": "profile_update",
                 "nickname": nick_in,
@@ -5617,7 +5653,7 @@ async def _handle_user_event(event: dict) -> None:
             "nickname": str(payload.get("nickname") or "").strip(),
             "display_name": display_name_raw or None,
             "avatar": avatar_in or None,
-            "presence": (presence or str(payload.get("presence") or "").strip().lower() or "online"),
+            "presence": db.effective_presence_for_user(local_user["id"], gid),
         }
         # Never fan-out an empty status — peers use COALESCE on ingest, but
         # the live WS patch used to wipe UI state on other devices.
@@ -5977,6 +6013,37 @@ async def _handle_friend_event(event: dict) -> None:
             )
         except Exception:
             pass
+        return
+
+    if event_type == "friend.request.removed":
+        db.decline_friend_request(from_user["id"], to_user["id"])
+        actor = str(payload.get("actor") or "").strip().lower()
+        notify_user = None
+        notify_from = ""
+        notify_avatar = None
+        notify_action = ""
+        if actor == "to":
+            notify_user = from_user
+            notify_from = to_nick
+            notify_avatar = to_user.get("avatar")
+            notify_action = "declined"
+        elif actor == "from":
+            notify_user = to_user
+            notify_from = from_nick
+            notify_avatar = from_user.get("avatar")
+            notify_action = "cancelled"
+        if notify_user and notify_action:
+            try:
+                from ws_manager import manager
+                await manager.send_to_user(int(notify_user["id"]), {
+                    "type": "friend_notify",
+                    "action": notify_action,
+                    "from": notify_from,
+                    "from_avatar": notify_avatar,
+                })
+            except Exception:
+                pass
+        return
 
     if event_type == "friend.sound.created":
         owner_nick = str(payload.get("owner_nick") or "").strip()

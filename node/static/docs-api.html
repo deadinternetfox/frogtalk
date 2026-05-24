@@ -149,6 +149,7 @@ POST   /api/users/me/presence
 POST   /api/friends/request/{nickname}
 POST   /api/friends/accept/{nickname}
 POST   /api/friends/decline/{nickname}
+POST   /api/friends/cancel/{nickname}
 DELETE /api/friends/{nickname}
 POST   /api/friends/block/{nickname}
 GET    /api/friends</code></pre>
@@ -693,7 +694,7 @@ social.story.created / social.story.deleted</code></pre>
           gid is homed on a different server than <code>origin_server_id</code> are rejected (prevents
           cross-peer impersonation). Post update/delete require author ownership on the mapped local row.</p>
           <p class="muted">Also signed under sensitive prefixes: <code>user.*</code>, <code>dm.*</code>,
-          <code>friend.*</code> (e.g. <code>friend.requested</code>, <code>friend.accepted</code>).
+          <code>friend.*</code> (e.g. <code>friend.requested</code>, <code>friend.accepted</code>, <code>friend.request.removed</code>).
           <code>user.profile.updated</code> mirrors avatar, status, mood, and sanitized
           <code>custom_style</code> to peers that host a local row for the gid.</p>
 

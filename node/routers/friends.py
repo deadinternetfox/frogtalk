@@ -13,7 +13,6 @@ from typing import Optional
 
 import database as db
 from deps import get_current_user, client_ip
-from ws_manager import manager
 
 _log = logging.getLogger(__name__)
 limiter = Limiter(key_func=client_ip)
@@ -71,10 +70,18 @@ def _friend_push(user_id: int, title: str, body: str,
         pass
 
 
-def _emit_friend_graph_event(event_type: str, from_user: dict, to_user: dict) -> None:
+def _emit_friend_graph_event(
+    event_type: str,
+    from_user: dict,
+    to_user: dict,
+    *,
+    extra: dict | None = None,
+) -> None:
     try:
         from routers import federation as federation_mod
-        federation_mod.enqueue_friend_graph_event(event_type, from_user, to_user)
+        federation_mod.enqueue_friend_graph_event(
+            event_type, from_user, to_user, extra=extra,
+        )
     except Exception:
         pass
 
@@ -263,7 +270,63 @@ async def decline_request(request: Request, nickname: str, current_user: dict = 
     profile = db.get_user_profile(nickname)
     if not profile:
         return JSONResponse(status_code=404, content={"error": "User not found"})
+    if db.friend_request_status(profile["id"], current_user["id"]) != "received":
+        return JSONResponse(status_code=404, content={"error": "No pending request from that user"})
     db.decline_friend_request(profile["id"], current_user["id"])
+    _emit_friend_graph_event(
+        "friend.request.removed",
+        profile,
+        current_user,
+        extra={"actor": "to"},
+    )
+    try:
+        from ws_manager import manager
+        await manager.send_to_user(int(profile["id"]), {
+            "type": "friend_notify",
+            "action": "declined",
+            "from": current_user.get("nickname") or "",
+            "from_avatar": current_user.get("avatar"),
+        })
+    except Exception:
+        pass
+    try:
+        from routers.auth import schedule_travel_push_to_home
+        schedule_travel_push_to_home(int(current_user["id"]), force=True)
+    except Exception:
+        pass
+    return {"ok": True}
+
+
+@router.post("/cancel/{nickname}")
+@limiter.limit("120/hour")
+async def cancel_request(request: Request, nickname: str, current_user: dict = Depends(get_current_user)):
+    profile = db.get_user_profile(nickname)
+    if not profile:
+        return JSONResponse(status_code=404, content={"error": "User not found"})
+    if db.friend_request_status(current_user["id"], profile["id"]) != "sent":
+        return JSONResponse(status_code=404, content={"error": "No outgoing request to that user"})
+    db.decline_friend_request(current_user["id"], profile["id"])
+    _emit_friend_graph_event(
+        "friend.request.removed",
+        current_user,
+        profile,
+        extra={"actor": "from"},
+    )
+    try:
+        from ws_manager import manager
+        await manager.send_to_user(int(profile["id"]), {
+            "type": "friend_notify",
+            "action": "cancelled",
+            "from": current_user.get("nickname") or "",
+            "from_avatar": current_user.get("avatar"),
+        })
+    except Exception:
+        pass
+    try:
+        from routers.auth import schedule_travel_push_to_home
+        schedule_travel_push_to_home(int(current_user["id"]), force=True)
+    except Exception:
+        pass
     return {"ok": True}
 
 
@@ -312,25 +375,12 @@ async def block_user(nickname: str, current_user: dict = Depends(get_current_use
 @router.get("")
 async def list_friends(current_user: dict = Depends(get_current_user)):
     friends = db.get_friends(current_user["id"])
-    try:
-        online_ids = {int(u.get("user_id")) for u in manager.online_users_snapshot() if u.get("user_id") is not None}
-    except Exception:
-        online_ids = set()
-
-    # Presence in DB can remain stale after disconnects. Match channel member
-    # list behavior: any user not currently connected is rendered offline,
-    # regardless of their last saved presence (away/dnd/etc.).
     for f in friends:
         try:
             fid = int(f.get("id"))
         except Exception:
             continue
-        p = str(f.get("presence") or "").strip().lower()
-        if fid not in online_ids:
-            f["presence"] = "offline"
-            continue
-        if p not in {"away", "dnd", "invisible"}:
-            f["presence"] = "online"
+        f["presence"] = db.effective_presence_for_user(fid)
 
     return {
         "friends": friends,

@@ -1205,6 +1205,38 @@ class FederationSyncTests(unittest.TestCase):
         }))
         self.assertEqual(db.friend_request_status(alice_id, bob_id), "sent")
 
+    def test_friend_request_removed_federation_event(self):
+        import asyncio
+        from routers import federation as fed_mod
+
+        db = self.db
+        alice_id = int(db.create_user("alice_fed_rm", "secret12"))
+        alice = db.get_user_by_id(alice_id) or {}
+        alice_gid = str(alice.get("global_user_id") or "").strip()
+
+        bob_gid = "00000000-0000-4000-8000-000000000093"
+        bob = db.ensure_federated_dm_local_user(
+            bob_gid,
+            "bob_fed_rm",
+            origin_server_id="srv_bob_home_rm",
+        )
+        bob_id = int(bob.get("id") or 0)
+        db.send_friend_request(alice_id, bob_id)
+        self.assertEqual(db.friend_request_status(alice_id, bob_id), "sent")
+
+        asyncio.run(fed_mod._handle_friend_event({
+            "event_type": "friend.request.removed",
+            "origin_server_id": "srv_travel_node",
+            "payload": {
+                "from_global_user_id": alice_gid,
+                "from_nickname": "alice_fed_rm",
+                "to_global_user_id": bob_gid,
+                "to_nickname": "bob_fed_rm",
+                "actor": "from",
+            },
+        }))
+        self.assertEqual(db.friend_request_status(alice_id, bob_id), "none")
+
     def test_social_follow_changed_from_travel_node(self):
         import asyncio
         from routers import federation as fed_mod

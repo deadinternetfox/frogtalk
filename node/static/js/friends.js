@@ -187,7 +187,8 @@ function renderPending (el) {
           <div style="font-weight:600;font-size:14px;color:#e3f6ec;cursor:pointer" onclick="closeFriends();showUserInfo('${esc(f.nickname)}',${Number(f.id)||0})" title="View profile">${_friendNameHtml(f)}</div>
           <div style="font-size:12px;color:#9dc4b2">Waiting for response</div>
         </div>
-        <span style="font-size:12px;color:#7fd2a7">Requested</span>
+        <span style="font-size:12px;color:#7fd2a7;margin-right:4px">Requested</span>
+        <button class="modal-btn secondary" style="padding:4px 10px;font-size:12px" onclick="cancelFriendRequest('${esc(f.nickname)}', this)" title="Cancel request">✕</button>
       </div>`).join('')
     : '';
 
@@ -233,7 +234,8 @@ async function searchFriends () {
         ${(friendStatus === 'friends' || isFriend)
           ? `<span style="font-size:12px;color:#7fd2a7">Friends</span>`
           : (friendStatus === 'sent' || isRequested)
-          ? `<button class="modal-btn secondary" style="padding:4px 12px;font-size:12px" disabled>Requested</button>`
+          ? `<button class="modal-btn secondary" style="padding:4px 12px;font-size:12px"
+               onclick="cancelFriendRequest('${esc(u.nickname)}',this)">✕ Cancel</button>`
           : (friendStatus === 'received' || isReceived)
           ? `<button class="modal-btn primary" style="padding:4px 12px;font-size:12px"
                onclick="acceptFriend('${esc(u.nickname)}',this)">✓ Accept</button>`
@@ -304,6 +306,17 @@ async function declineFriend (nick, btn) {
   if (r.ok) {
     if (btn) await _animateRemoveRow(btn);
     loadFriends();
+    try { if (typeof Social !== 'undefined' && Social.refreshProfileRelationship) Social.refreshProfileRelationship(nick); } catch {}
+  } else if (btn) { btn.disabled = false; }
+}
+
+async function cancelFriendRequest (nick, btn) {
+  if (btn) btn.disabled = true;
+  const r = await apiFetch('/api/friends/cancel/' + encodeURIComponent(nick), 'POST');
+  if (r.ok) {
+    if (btn) await _animateRemoveRow(btn);
+    loadFriends();
+    try { if (typeof Social !== 'undefined' && Social.refreshProfileRelationship) Social.refreshProfileRelationship(nick); } catch {}
   } else if (btn) { btn.disabled = false; }
 }
 
@@ -405,6 +418,19 @@ try { window.rerenderFriendsPanels = rerenderFriendsPanels; } catch {}
 function handleFriendNotify (data) {
   if (data.type === 'friend_notify') {
     const isDnd = String((State?.user?.presence || '')).toLowerCase() === 'dnd';
+    const action = String(data.action || '').toLowerCase();
+    if (action === 'declined' || action === 'cancelled') {
+      loadFriends();
+      updateFrogBadge();
+      if (!isDnd) {
+        const from = String(data.from || 'Someone');
+        const msg = action === 'declined'
+          ? `${from} declined your friend request`
+          : `${from} cancelled their friend request`;
+        toast('👥 ' + msg, 'info', 5000);
+      }
+      return;
+    }
     const msg = data.action === 'request'
       ? `${data.from} sent you a friend request`
       : `${data.from} accepted your friend request`;
@@ -606,11 +632,14 @@ function renderFfpContent(tab) {
   if (countEl) countEl.textContent = _pendingFriends.length ? `(${_pendingFriends.length})` : '';
   
   if (tab === 'pending') {
-    if (!_pendingFriends.length) {
+    if (!_pendingFriends.length && !_pendingOutgoing.length) {
       el.innerHTML = '<div class="ffp-empty">No pending friend requests</div>';
       return;
     }
-    el.innerHTML = _pendingFriends.map(f => `
+    let html = '';
+    if (_pendingFriends.length) {
+      html += '<div style="font-size:11px;color:#8aa498;font-weight:700;margin-bottom:8px;letter-spacing:.4px">INCOMING</div>';
+      html += _pendingFriends.map(f => `
       <div class="ffp-friend">
         <div class="ffp-avatar">${fmtAv(f.avatar, f.nickname, 40)}</div>
         <div class="ffp-info">
@@ -623,6 +652,23 @@ function renderFfpContent(tab) {
         </div>
       </div>
     `).join('');
+    }
+    if (_pendingOutgoing.length) {
+      html += '<div style="font-size:11px;color:#8aa498;font-weight:700;margin:14px 0 8px;letter-spacing:.4px">OUTGOING</div>';
+      html += _pendingOutgoing.map(f => `
+      <div class="ffp-friend">
+        <div class="ffp-avatar">${fmtAv(f.avatar, f.nickname, 40)}</div>
+        <div class="ffp-info">
+          <div class="ffp-name">${esc(f.nickname)}</div>
+          <div class="ffp-status">Waiting for response</div>
+        </div>
+        <div class="ffp-actions">
+          <button class="icon-btn" onclick="cancelFriendRequest('${esc(f.nickname)}', this).then(()=>{renderFfpContent('pending')})" title="Cancel request" style="color:#f44336">✕</button>
+        </div>
+      </div>
+    `).join('');
+    }
+    el.innerHTML = html;
     return;
   }
   
