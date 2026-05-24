@@ -2204,6 +2204,9 @@ async function openDMChannel (id, nickname, avatar) {
   if (typeof closeMobileSidebar === 'function') closeMobileSidebar();
 
   const existing = _dmChannels.find(c => c.id === id) || {};
+  _dmMessagesLoading = true;
+  _dmMessagesReady = false;
+  _updateDmComposeState();
   _activeDM    = {
     id, nickname, avatar,
     user_id: existing.with_user_id || existing.other_id || null,
@@ -2364,6 +2367,11 @@ async function openDMChannel (id, nickname, avatar) {
 
   await msgsP;
   await timerP;
+  if (_canSkipInitialFetch && _activeDM && _activeDM.id === id) {
+    _dmMessagesLoading = false;
+    _dmMessagesReady = true;
+    _updateDmComposeState();
+  }
   if (_activeDM?.user_id) {
     if (!_dmSkipHistoricalDecrypt()) void _redecryptStaleDMMessages();
     else void _redecryptTravelDMMessages();
@@ -2513,6 +2521,20 @@ async function loadDMMessages (pageOffset = 0, options = {}) {
   const _reqRoomId = _activeDM.id;
   const _reqSeq = ++_dmLoadReqSeq;
   const _isReqCurrent = () => !!(_activeDM && _activeDM.id === _reqRoomId && _reqSeq === _dmLoadReqSeq);
+  let loadSuccess = false;
+  const _finishLoad = () => {
+    if (pageOffset === 0 && _isReqCurrent()) {
+      _dmMessagesLoading = false;
+      if (loadSuccess) _dmMessagesReady = true;
+      _updateDmComposeState();
+    }
+  };
+  if (pageOffset === 0) {
+    _dmMessagesLoading = true;
+    if (!isDelta) _dmMessagesReady = false;
+    _updateDmComposeState();
+  }
+  try {
   if (pageOffset === 0 && !isDelta) {
     const area = document.getElementById('messages-area');
     // Preserve already-rendered content (cache or prior load) and only show a
@@ -2709,6 +2731,10 @@ async function loadDMMessages (pageOffset = 0, options = {}) {
   // Clear unread badge
   const ch = _dmChannels.find(c => c.id === _reqRoomId);
   if (ch) { ch.unread = 0; renderDMChannels(); }
+  loadSuccess = true;
+  } finally {
+    _finishLoad();
+  }
 }
 
 /* ── Render DM chat ──────────────────────────────────────────────────────────── */
@@ -3936,8 +3962,32 @@ async function _sendDMTextHttp(channelId, encryptedContent, replyToId) {
 
 /* ── Send DM ─────────────────────────────────────────────────────────────────── */
 let _dmSending = false;
+let _dmMessagesLoading = false;
+let _dmMessagesReady = false;
+
+function _updateDmComposeState() {
+  const input = document.getElementById('msg-input');
+  const sendBtn = document.getElementById('send-btn');
+  const blocked = !!(_activeDM && (_dmMessagesLoading || !_dmMessagesReady));
+  if (input) {
+    input.disabled = blocked;
+    if (blocked) {
+      input.dataset.ftDmBlocked = '1';
+    } else {
+      delete input.dataset.ftDmBlocked;
+    }
+  }
+  if (sendBtn) {
+    sendBtn.disabled = blocked || _dmSending;
+  }
+}
+
 async function sendDMMessage () {
   if (!_activeDM) return;
+  if (_dmMessagesLoading || !_dmMessagesReady) {
+    try { UI.showToast('Still loading this conversation…', 'info'); } catch {}
+    return;
+  }
   if (_dmSending) return;  // guard against double-tap / rapid re-sends
 
   // Auto-stop recording if in progress and wait for finalization
@@ -3962,6 +4012,7 @@ async function sendDMMessage () {
   const prevBtnText = sendBtn ? sendBtn.textContent : '';
   _dmSending = true;
   if (sendBtn) { sendBtn.disabled = true; sendBtn.textContent = '⏳'; }
+  _updateDmComposeState();
 
   // Resolve peer for v2 (Signal/libsignal) encryption preference.
   const _dmChanEntry = _dmChannels.find(c => c.id === _activeDM?.id);
@@ -4087,7 +4138,8 @@ async function sendDMMessage () {
       toast('Failed to send file', 'error');
     } finally {
       _dmSending = false;
-      if (sendBtn) { sendBtn.disabled = false; sendBtn.textContent = prevBtnText || '➤'; }
+      if (sendBtn) sendBtn.textContent = prevBtnText || '➤';
+      _updateDmComposeState();
     }
     return;
   }
@@ -4180,15 +4232,21 @@ async function sendDMMessage () {
   _scrollDMToBottomStable();
   } finally {
     _dmSending = false;
-    if (sendBtn) {
-      sendBtn.disabled = false;
-      sendBtn.textContent = prevBtnText || '➤';
-    }
+    if (sendBtn) sendBtn.textContent = prevBtnText || '➤';
+    _updateDmComposeState();
   }
 }
 
 /* ── Incoming WS DM message ─────────────────────────────────────────────────── */
 function handleWSDMMessage (data) {
+  if (window.__ftDmCryptoDebug || window.__ftDctDebug) {
+    console.info('[DM] inbound message', {
+      id: data.id,
+      channel_id: data.channel_id,
+      federated: !!(data.federated || data.origin_server_id),
+      origin: data.origin_server_id || null,
+    });
+  }
   // Flag whether this DM is for the currently-open conversation (used by
   // notifications.js to suppress desktop/sound alerts when already reading).
   data._isActive = !!(_activeDM && data.channel_id === _activeDM.id);
@@ -4897,6 +4955,40 @@ function isDMView () {
 /* ── Disappearing Messages ────────────────────────────────────────────────── */
 let _dmDisappearTimer = 0;
 
+function _purgeExpiredDMMessages() {
+  if (!_activeDM?.id || !_dmDisappearTimer) return;
+  const cutoff = Date.now() - (_dmDisappearTimer * 1000);
+  const before = _dmMessages.length;
+  _dmMessages = _dmMessages.filter((m) => {
+    const raw = String(m?.created_at || '').trim();
+    if (!raw) return true;
+    try {
+      const ts = Date.parse(raw.endsWith('Z') || raw.includes('+') ? raw : raw + 'Z');
+      if (!Number.isFinite(ts)) return true;
+      return ts >= cutoff;
+    } catch {
+      return true;
+    }
+  });
+  if (_dmMessages.length !== before) {
+    _dmHistoryCache.set(_activeDM.id, _dmMessages.map(m => ({ ...m })));
+    renderDMChat();
+  }
+}
+
+function handleWSDMDisappearUpdated(data) {
+  const chId = Number(data?.channel_id) || 0;
+  const seconds = Number(data?.seconds) || 0;
+  const ch = _dmChannels.find(c => c.id === chId);
+  if (ch) ch.disappear_after = seconds;
+  if (_activeDM && _activeDM.id === chId) {
+    _dmDisappearTimer = seconds;
+    _purgeExpiredDMMessages();
+    updateDisappearIndicator();
+  }
+}
+window.handleWSDMDisappearUpdated = handleWSDMDisappearUpdated;
+
 async function loadDisappearTimer() {
   if (!_activeDM) return;
   try {
@@ -4904,6 +4996,7 @@ async function loadDisappearTimer() {
     if (r.ok) {
       const data = await r.json();
       _dmDisappearTimer = data.seconds || 0;
+      _purgeExpiredDMMessages();
       updateDisappearIndicator();
     }
   } catch (e) {
@@ -5019,6 +5112,7 @@ async function saveDisappearTimer() {
     }
     
     _dmDisappearTimer = seconds;
+    _purgeExpiredDMMessages();
     updateDisappearIndicator();
     closeModal('modal-disappear');
     

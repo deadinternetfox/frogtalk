@@ -203,6 +203,33 @@ def enqueue_dm_message_created(
     )
 
 
+def enqueue_dm_disappear_updated(
+    actor: dict,
+    peer: dict,
+    *,
+    channel_id: int = 0,
+    seconds: int = 0,
+) -> dict:
+    """Enqueue a signed ``dm.disappear.updated`` for peer nodes."""
+    import federation_dms as fed_dm
+
+    targets = fed_dm.federation_mirror_targets(actor, peer)
+    if not targets:
+        return {"ok": False, "error": "no_dm_route"}
+    return enqueue_server_event(
+        "dm.disappear.updated",
+        {
+            "channel_id": int(channel_id or 0),
+            "sender_global_user_id": str(actor.get("global_user_id") or "").strip(),
+            "peer_global_user_id": str(peer.get("global_user_id") or "").strip(),
+            "sender_nickname": str(actor.get("nickname") or "").strip(),
+            "peer_nickname": str(peer.get("nickname") or "").strip(),
+            "seconds": int(seconds or 0),
+        },
+        target_server_ids=targets,
+    )
+
+
 # Keep profile events under the 256 KiB outbox cap (avatar data URLs can be MBs).
 _PROFILE_FED_FIELD_MAX_CHARS = 200_000
 # Member snapshot cap: 500 members is enough for almost every channel
@@ -5500,9 +5527,66 @@ async def _handle_user_block_event(event_type: str, payload: dict) -> None:
                        event_type, blocker_nick, blocked_nick)
 
 
+async def _handle_dm_disappear_updated(event: dict) -> None:
+    """Apply a federated disappearing-message timer change."""
+    payload = event.get("payload") or {}
+    sender_nick = _fed_nickname(payload.get("sender_nickname"))
+    peer_nick = _fed_nickname(payload.get("peer_nickname"))
+    if not sender_nick or not peer_nick:
+        return
+    try:
+        seconds = int(payload.get("seconds") or 0)
+    except Exception:
+        seconds = 0
+    allowed = {0, 3600, 86400, 604800, 2592000}
+    if seconds not in allowed:
+        return
+    origin = str(event.get("origin_server_id") or "").strip()
+    sender_gid = str(payload.get("sender_global_user_id") or "").strip()
+    peer_gid = str(payload.get("peer_global_user_id") or "").strip()
+    if sender_gid and sender_nick:
+        db.upsert_federation_user_profile(sender_gid, sender_nick, origin_server_id=origin)
+    if peer_gid and peer_nick:
+        db.upsert_federation_user_profile(peer_gid, peer_nick, origin_server_id=origin)
+    sender = _fed_resolve_user_for_dm(sender_nick, sender_gid or None, origin_server_id=origin)
+    peer = _fed_resolve_user_for_dm(peer_nick, peer_gid or None, origin_server_id=origin)
+    if not sender or not peer:
+        _log.info(
+            "federation: drop dm.disappear.updated — local user missing "
+            "(sender=%s peer=%s origin=%s)",
+            sender_nick,
+            peer_nick,
+            origin,
+        )
+        return
+    channel_id = db.get_or_create_dm(sender["id"], peer["id"])
+    if not db.set_dm_disappear_timer(channel_id, sender["id"], seconds):
+        return
+    try:
+        db.cleanup_expired_dm_messages()
+    except Exception:
+        _log.debug("federation: disappear cleanup failed", exc_info=True)
+    ws_payload = {
+        "type": "dm_disappear_updated",
+        "channel_id": channel_id,
+        "seconds": seconds,
+    }
+    try:
+        from ws_manager import manager
+        await manager.send_to_user(sender["id"], ws_payload)
+        if int(sender["id"]) != int(peer["id"]):
+            await manager.send_to_user(peer["id"], ws_payload)
+    except Exception:
+        pass
+
+
 async def _handle_dm_event(event: dict) -> None:
     """Handle incoming federated DM events."""
-    if event.get("event_type") != "dm.message.created":
+    event_type = str(event.get("event_type") or "")
+    if event_type == "dm.disappear.updated":
+        await _handle_dm_disappear_updated(event)
+        return
+    if event_type != "dm.message.created":
         return
     payload = event.get("payload") or {}
     # Validate handles + sizes before we touch the local DB. A peer that

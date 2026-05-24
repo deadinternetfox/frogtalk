@@ -268,7 +268,7 @@
     if (_bundlePromise) return _bundlePromise;
     _bundlePromise = (async () => {
       if (!(await _ensurePinUnlockedForSignal())) {
-        _signalDebug('bundle upload skipped — PIN required');
+        _signalWarn('bundle upload skipped — unlock App PIN first');
         return;
       }
       const libsignal = _libsignal;
@@ -302,7 +302,7 @@
         // 503 → server still has flag off. Not an error from our side.
         if (res.status === 503) { _bundleHealthy = false; return; }
         if (res.status === 423) {
-          _signalDebug('bundle upload pin-gated');
+          _signalWarn('bundle upload pin-gated (HTTP 423)');
           return;
         }
         throw new Error('bundle upload failed: ' + res.status);
@@ -318,10 +318,14 @@
 
   function _signalDebug(...args) {
     try {
-      if (window.__ftSignalDebug || window.__ftDctDebug) {
+      if (window.__ftSignalDebug || window.__ftDctDebug || window.__ftDmCryptoDebug) {
         console.info('[Signal]', ...args);
       }
     } catch {}
+  }
+
+  function _signalWarn(...args) {
+    try { console.warn('[Signal]', ...args); } catch {}
   }
 
   const _bundleInflight = new Map();
@@ -764,6 +768,7 @@
     const pid = Number(peerUserId) || 0;
     if (!pid || !_store) return { ok: false };
     if (!(await _ensurePinUnlockedForSignal())) {
+      _signalWarn('dm-resync skipped — unlock App PIN first');
       return { ok: false, skipped: 'pin_required' };
     }
     await invalidatePeerCrypto(pid);
@@ -841,6 +846,7 @@
     const pid = Number(peerUserId) || 0;
     if (!pid || !_store) return { ok: false };
     if (!(await _ensurePinUnlockedForSignal())) {
+      _signalWarn('dm-crypto-heal skipped — unlock App PIN first');
       return { ok: false, skipped: 'pin_required' };
     }
     await invalidatePeerCrypto(pid);

@@ -615,6 +615,47 @@ async def set_disappear_timer(channel_id: int, body: DisappearTimerBody,
     ok = db.set_dm_disappear_timer(channel_id, current_user["id"], body.seconds)
     if not ok:
         return JSONResponse(status_code=403, content={"error": "Cannot set timer for this channel"})
+
+    try:
+        await run_in_threadpool(db.cleanup_expired_dm_messages)
+    except Exception:
+        _log.debug("disappear cleanup failed", exc_info=True)
+
+    try:
+        with db._conn() as con:
+            ch = con.execute(
+                "SELECT user_a, user_b FROM dm_channels WHERE id=?", (channel_id,)
+            ).fetchone()
+        if ch:
+            ws_payload = {
+                "type": "dm_disappear_updated",
+                "channel_id": channel_id,
+                "seconds": body.seconds,
+            }
+            for uid in (ch["user_a"], ch["user_b"]):
+                if uid:
+                    await manager.send_to_user(uid, ws_payload)
+    except Exception:
+        pass
+
+    try:
+        from routers import federation as federation_mod
+        with db._conn() as con:
+            ch = con.execute(
+                "SELECT user_a, user_b FROM dm_channels WHERE id=?", (channel_id,)
+            ).fetchone()
+        if ch:
+            peer_id = ch["user_b"] if ch["user_a"] == current_user["id"] else ch["user_a"]
+            peer = db.get_user_by_id(peer_id) or {}
+            federation_mod.enqueue_dm_disappear_updated(
+                current_user,
+                peer,
+                channel_id=channel_id,
+                seconds=body.seconds,
+            )
+    except Exception:
+        _log.exception("federation: failed to enqueue DM disappear timer")
+
     return {"ok": True, "seconds": body.seconds}
 
 
