@@ -1115,6 +1115,23 @@ async def ack_content_warning(
     return {"ok": True, "required": False, "content_warning": db.content_warning_to_dict(True, flags)}
 
 
+@router.post("/{room_name}/content-warning/forget")
+@limiter.limit("60/minute")
+async def forget_content_warning_ack(
+    request: Request,
+    room_name: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """Clear session ack when the user leaves a CW channel view (switch away)."""
+    name = (room_name or "").strip().lower()
+    if not name:
+        return JSONResponse(status_code=400, content={"error": "Invalid room name"})
+    token = session_token_from_request(request) or ""
+    if token:
+        cw_ack_clear_room(token, name)
+    return {"ok": True}
+
+
 # ─── Channel theme background image upload ───────────────────────────────────
 # Stored on disk and served via a dedicated endpoint instead of being
 # inlined into the channel_theme JSON (which is capped at 4KB and would

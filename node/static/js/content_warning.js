@@ -26,9 +26,26 @@
     });
   }
 
+  function _roomMeta(roomName) {
+    const name = String(roomName || '').trim().toLowerCase();
+    if (!name || !window.State || !Array.isArray(State.rooms)) return null;
+    return State.rooms.find((r) => String(r.name || '').toLowerCase() === name) || null;
+  }
+
+  function isCwRoom(roomName) {
+    const cw = _roomMeta(roomName)?.content_warning;
+    return !!(cw && cw.enabled && Array.isArray(cw.flags) && cw.flags.length);
+  }
+
   function _removeOverlay() {
     const el = _el(OVERLAY_ID);
     if (el) el.remove();
+  }
+
+  function _clearRoomCache(roomName) {
+    try {
+      if (window.State && State.messages) State.messages[roomName] = [];
+    } catch {}
   }
 
   function showDeclinedScreen(roomName) {
@@ -47,6 +64,7 @@
 
   function _showGate(roomName, meta, resolve, showDeclinedOnBack) {
     _removeOverlay();
+    _clearRoomCache(roomName);
     const flags = (meta && meta.flags) || [];
     const items = formatFlags(flags);
     const listHtml = items.length
@@ -124,31 +142,80 @@
     _el('cw-gate-enter').onclick = () => { void onEnter(); };
   }
 
-  function gate(roomName) {
-    const name = String(roomName || '').trim().toLowerCase();
-    if (!name || name.startsWith('dm:')) return Promise.resolve(true);
-    if (!window.State || !State.token) return Promise.resolve(true);
+  async function _waitForToken(maxMs) {
+    const limit = maxMs || 5000;
+    const start = Date.now();
+    while (Date.now() - start < limit) {
+      if (window.State && State.token) return true;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    return !!(window.State && State.token);
+  }
 
-    return new Promise((resolve) => {
-      fetch('/api/rooms/' + encodeURIComponent(name) + '/content-warning/status', {
-        headers: { 'X-Session-Token': State.token },
-      })
-        .then((r) => (r.ok ? r.json() : null))
-        .then((data) => {
-          if (!data || !data.required) {
-            resolve(true);
-            return;
-          }
-          const alreadyInRoom = !!(window.State && State.currentRoom === name);
-          _showGate(name, data.content_warning || {}, resolve, alreadyInRoom);
-        })
-        .catch(() => resolve(true));
+  async function _fetchStatus(roomName) {
+    const r = await fetch('/api/rooms/' + encodeURIComponent(roomName) + '/content-warning/status', {
+      headers: { 'X-Session-Token': State.token },
     });
+    if (r.ok) return r.json();
+    try {
+      const body = await r.json();
+      if (body && typeof body === 'object') return { _httpStatus: r.status, ...body };
+    } catch {}
+    return { _httpStatus: r.status, required: false };
+  }
+
+  async function forgetAck(roomName) {
+    const name = String(roomName || '').trim().toLowerCase();
+    if (!name || name.startsWith('dm:') || !window.State || !State.token) return;
+    if (!isCwRoom(name)) return;
+    try {
+      await fetch('/api/rooms/' + encodeURIComponent(name) + '/content-warning/forget', {
+        method: 'POST',
+        headers: { 'X-Session-Token': State.token },
+      });
+    } catch {}
+    _clearRoomCache(name);
+  }
+
+  function gate(roomName, opts) {
+    const name = String(roomName || '').trim().toLowerCase();
+    const options = opts || {};
+    if (!name || name.startsWith('dm:')) return Promise.resolve(true);
+
+    return (async () => {
+      const hasToken = await _waitForToken(options.tokenWaitMs || 5000);
+      if (!hasToken) {
+        return !isCwRoom(name);
+      }
+
+      let data = null;
+      try {
+        data = await _fetchStatus(name);
+      } catch {
+        data = null;
+      }
+
+      const localCw = _roomMeta(name)?.content_warning;
+      const cwMeta = (data && data.content_warning) || localCw || {};
+      let required = !!(data && data.required);
+
+      // Fail-closed when status is unavailable but sidebar metadata marks 18+.
+      if (!required && isCwRoom(name) && (!data || data._httpStatus >= 400)) {
+        required = true;
+      }
+
+      if (!required) return true;
+
+      const alreadyInRoom = !!(window.State && State.currentRoom === name);
+      return await new Promise((resolve) => {
+        _showGate(name, cwMeta, resolve, alreadyInRoom);
+      });
+    })();
   }
 
   function _lockRoomUntilAck(room) {
     try {
-      if (window.State && State.messages) State.messages[room] = [];
+      _clearRoomCache(room);
       const area = _el('messages-area');
       if (area) {
         area.innerHTML =
@@ -183,7 +250,14 @@
   function handleWsRequired(data) {
     const room = String((data && data.room) || '').trim().toLowerCase();
     if (!room || !window.State || State.currentRoom !== room) return;
-    void gate(room);
+    _lockRoomUntilAck(room);
+    void gate(room).then((ok) => {
+      if (ok && typeof WS !== 'undefined' && WS.connect) {
+        try { WS.connect(room); } catch {}
+      } else if (!ok) {
+        try { showDeclinedScreen(room); } catch {}
+      }
+    });
   }
 
   function badgeHtml(cw) {
@@ -195,6 +269,8 @@
 
   window.ContentWarning = {
     gate,
+    forgetAck,
+    isCwRoom,
     formatFlags,
     handleWsUpdate,
     handleWsRequired,

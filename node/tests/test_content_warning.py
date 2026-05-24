@@ -194,6 +194,37 @@ class ContentWarningTests(unittest.TestCase):
         )
         self.assertEqual(blocked.status_code, 451, blocked.text)
 
+    def test_forget_clears_content_warning_ack(self):
+        owner = self._session("cw_owner_h")
+        member = self._session("cw_member_h")
+        self._create_public_room(
+            owner,
+            "cw-pub-h",
+            cw={"enabled": True, "flags": ["nudity"]},
+        )
+        self.client.post("/api/rooms/cw-pub-h/join", headers=self._hdr(member))
+        self.client.post(
+            "/api/rooms/cw-pub-h/content-warning/ack",
+            json={"confirm": True},
+            headers=self._hdr(member),
+        )
+        ok = self.client.get("/api/messages/cw-pub-h?limit=20", headers=self._hdr(member))
+        self.assertEqual(ok.status_code, 200, ok.text)
+
+        forget = self.client.post(
+            "/api/rooms/cw-pub-h/content-warning/forget",
+            headers=self._hdr(member),
+        )
+        self.assertEqual(forget.status_code, 200, forget.text)
+
+        blocked = self.client.get("/api/messages/cw-pub-h?limit=20", headers=self._hdr(member))
+        self.assertEqual(blocked.status_code, 451, blocked.text)
+        st = self.client.get(
+            "/api/rooms/cw-pub-h/content-warning/status",
+            headers=self._hdr(member),
+        )
+        self.assertTrue(st.json().get("required"))
+
     def test_database_helpers_round_trip(self):
         db = self.db
         uid = db.create_user("cw_db_user", "secret12")

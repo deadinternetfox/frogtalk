@@ -1220,6 +1220,8 @@ const Rooms = (() => {
   }
 
   async function switchToRoom(name, type = 'public', dmPeer = null, channelType = 'text') {    closeMobileSidebar();
+    const prevRoom = State.currentRoom;
+    const prevType = State.currentRoomType;
     const _roomDataEarly = State.rooms.find(r => r.name === name);
     const _chTypeEarly = (_roomDataEarly?.channel_type === 'voice') ? 'music' : (_roomDataEarly?.channel_type || channelType || 'text');
     if (State.currentRoom === name && State.currentRoomType === type) {
@@ -1230,9 +1232,24 @@ const Rooms = (() => {
         // Re-clicking the current channel must still refresh the music panel
         // (e.g. user played a FrogSocial track while staying on this channel).
         try { Music?.mount?.(name, chNow); } catch {}
+        // Re-check CW gate (e.g. settings changed, ack expired, or federation sync reload).
+        if (type !== 'dm' && type !== 'private' && window.ContentWarning?.gate) {
+          const cwOk = await ContentWarning.gate(name);
+          if (!cwOk) {
+            try { ContentWarning.showDeclinedScreen?.(name); } catch {}
+          }
+        }
       }
       return;
     }
+
+    // Leaving a CW channel view clears session ack so returning always re-prompts.
+    if (prevRoom && prevRoom !== name && prevType !== 'dm' && prevType !== 'private') {
+      if (window.ContentWarning?.forgetAck) {
+        try { await ContentWarning.forgetAck(prevRoom); } catch {}
+      }
+    }
+
     try {
       const typingBar = document.getElementById('typing-bar');
       if (typingBar) typingBar.textContent = '';
@@ -1248,7 +1265,7 @@ const Rooms = (() => {
 
     if (type !== 'dm' && type !== 'private') {
       if (window.ContentWarning && typeof ContentWarning.gate === 'function') {
-        const cwOk = await ContentWarning.gate(name);
+        const cwOk = await ContentWarning.gate(name, { tokenWaitMs: 8000 });
         if (!cwOk) {
           try { UI.showToast(`You must confirm you are 18+ to enter #${name}`, 'info'); } catch {}
           return;
