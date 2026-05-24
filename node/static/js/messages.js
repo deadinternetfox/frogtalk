@@ -122,6 +122,7 @@ const Messages = (() => {
   }
 
   function _ftAppOrigin() {
+    if (typeof ftPublicOrigin === 'function') return ftPublicOrigin();
     try {
       const o = String(location.origin || '').trim();
       if (o.startsWith('http://') || o.startsWith('https://')) return o;
@@ -242,7 +243,8 @@ const Messages = (() => {
   function _parseFrogSocialUrl(url) {
     try {
       const parsed = new URL(_normalizeUrl(url));
-      const hostOk = (parsed.hostname === 'frogtalk.xyz' || parsed.hostname === 'frogtalk.app' || parsed.hostname === 'localhost');
+      const hostOk = (typeof ftIsFrogHost === 'function' ? ftIsFrogHost(parsed.hostname) : false)
+        || parsed.hostname === 'localhost';
       if (!hostOk) return null;
       const path = parsed.pathname || '/';
       const profilePath = path.match(/^\/u\/([A-Za-z0-9_]{1,32})\/?$/i);
@@ -353,11 +355,17 @@ const Messages = (() => {
     escaped = escaped.replace(/\x00URL(\d+)\x00/g, (_m, i) => {
       const url = urlSlots[+i];
       // FrogTalk invite URLs → render a card placeholder instead of a
-      // plain link. Accepts both the legacy /invite/<8-16 chars> form and
-      // the new short /i/<code-or-vanity> form (2–32 [A-Za-z0-9_-]).
-      const inviteMatch = url.match(/^https?:\/\/(?:www\.)?(?:frogtalk\.(?:xyz|app)|localhost(?::\d+)?)\/(?:invite|i)\/([A-Za-z0-9_-]{2,32})/);
-      if (inviteMatch) {
-        const code = _safeEmbedInviteCode(inviteMatch[1]);
+      // plain link. Accepts legacy /invite/ and short /i/ on this node or known Frog hosts.
+      let inviteCode = '';
+      try {
+        if (typeof ftIsInviteUrl === 'function' && ftIsInviteUrl(url)) {
+          const parsed = new URL(url);
+          const m = (parsed.pathname || '').match(/^\/(?:invite|i)\/([A-Za-z0-9_-]{2,32})/i);
+          if (m) inviteCode = _safeEmbedInviteCode(m[1]);
+        }
+      } catch {}
+      if (inviteCode) {
+        const code = inviteCode;
         if (!code) return `<a href="${url}" target="_blank" rel="noopener noreferrer" class="msg-link">${url}</a>`;
         return `<span class="invite-card-placeholder" data-invite-code="${UI.escHtml(code)}"${_embedUrlAttr(_canonicalEmbedUrl('invite', code, url))}>` +
           `<span class="invite-card-loading">🐸 Loading invite…</span></span>`;

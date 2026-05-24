@@ -39,6 +39,20 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
 from database import init_db
+from public_url_policy import (
+    OFFICIAL_HUB_URL_DEFAULT,
+    official_hub_url,
+    public_channel_url,
+    public_og_image_url,
+    public_post_url,
+    public_profile_url,
+    public_reel_url,
+    public_static_url,
+    resolve_public_site_url,
+    resolve_public_site_host,
+    substitute_site_url_in_text,
+)
+from site_contacts import resolve_contact_email, resolve_site_contacts, substitute_operator_content
 from routers import auth, rooms, messages, users, ws, media as media_mod
 from routers import friends as friends_mod
 from routers import dms
@@ -462,6 +476,7 @@ def _render_error_page(status_code: int, title: str, message: str, request: Requ
     cta_href   = "/app?login=1" if is_auth else "/app"
     cta_text   = "Sign in" if is_auth else "Open FrogTalk"
     emoji, accent, glow = _ERROR_THEME.get(status_code, ("\u26a0\ufe0f", "#4caf50", "76,175,80"))
+    site_home = _he(_site_url(request))
     return f"""<!DOCTYPE html>
 <html lang="en"><head>
 <meta charset="utf-8">
@@ -688,10 +703,38 @@ def _render_error_page(status_code: int, title: str, message: str, request: Requ
     </div>
   </main>
   <footer class="foot">
-    <a href="https://frogtalk.xyz">frogtalk.xyz</a> &nbsp;\u00b7&nbsp; <a href="/static/privacy.html">Privacy</a>
+    <a href="/">{site_home}</a> &nbsp;\u00b7&nbsp; <a href="/static/privacy.html">Privacy</a>
   </footer>
 </div>
 </body></html>"""
+
+
+def _site_url(request: Request | None = None) -> str:
+    return resolve_public_site_url(request=request)
+
+
+def _serve_static_html_page(path: str, request: Request | None = None) -> HTMLResponse:
+    """Serve a static HTML file with official-hub URLs replaced by this node's public URL."""
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            body = f.read()
+    except OSError:
+        return HTMLResponse("<!DOCTYPE html><html><body><h1>Not found</h1></body></html>", status_code=404)
+    body = substitute_operator_content(body, request=request)
+    return HTMLResponse(
+        body,
+        headers={"Cache-Control": "public, max-age=300"},
+    )
+
+
+def _serve_substituted_text(path: str, media_type: str, request: Request | None = None) -> Response:
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            body = f.read()
+    except OSError:
+        return Response(status_code=404)
+    body = substitute_operator_content(body, request=request)
+    return Response(content=body, media_type=media_type, headers={"Cache-Control": "public, max-age=3600"})
 
 
 def _json_http_error(status_code: int, detail=None) -> _JSONResponse:
@@ -1201,21 +1244,21 @@ def _serve_app_shell_response() -> HTMLResponse:
 
 
 @app.get("/invite/{code}")
-async def serve_invite_landing(code: str):
+async def serve_invite_landing(request: Request, code: str):
     """Serve invite landing page."""
     from routers.invites import invite_landing_page
-    return await invite_landing_page(code)
+    return await invite_landing_page(request, code)
 
 
 @app.get("/i/{ident}")
-async def serve_short_invite_landing(ident: str):
+async def serve_short_invite_landing(request: Request, ident: str):
     """Short-link form: /i/<code-or-vanity>.
 
     Resolves either a real invite code OR a channel vanity slug. The
     landing-page builder transparently handles both shapes.
     """
     from routers.invites import invite_landing_page
-    return await invite_landing_page(ident)
+    return await invite_landing_page(request, ident)
 
 
 def _og_escape(s: str) -> str:
@@ -1236,7 +1279,7 @@ def _og_is_public_avatar(avatar: str | None) -> bool:
 
 
 @app.get("/u/{nickname}", response_class=HTMLResponse)
-async def serve_profile_landing(nickname: str):
+async def serve_profile_landing(request: Request, nickname: str):
     """Public profile share page with Open Graph / Twitter card metadata.
 
     Logged-in clients are redirected into the app; scrapers (Telegram,
@@ -1273,19 +1316,19 @@ async def serve_profile_landing(nickname: str):
 <meta property=\"og:title\" content=\"FrogTalk — Private profile\">
 <meta property=\"og:site_name\" content=\"FrogTalk\">
 <meta property=\"og:description\" content=\"This FrogTalk profile is private. Sign in to view it.\">
-<meta property=\"og:image\" content=\"https://frogtalk.xyz/static/icons/og-image.png\">
-<meta property=\"og:image:secure_url\" content=\"https://frogtalk.xyz/static/icons/og-image.png\">
+<meta property=\"og:image\" content=\"{public_static_url('/static/icons/og-image.png', request=request)}\">
+<meta property=\"og:image:secure_url\" content=\"{public_static_url('/static/icons/og-image.png', request=request)}\">
 <meta property=\"og:image:type\" content=\"image/png\">
 <meta property=\"og:image:width\" content=\"1200\">
 <meta property=\"og:image:height\" content=\"630\">
 <meta property=\"og:image:alt\" content=\"FrogTalk private profile\">
 <meta property=\"og:locale\" content=\"en_US\">
-<meta property=\"og:url\" content=\"https://frogtalk.xyz/u/{nick}\">
+<meta property=\"og:url\" content=\"{public_profile_url(nick, request=request)}\">
 <meta name=\"twitter:card\" content=\"summary_large_image\">
 <meta name=\"twitter:site\" content=\"@frogtalk\">
 <meta name=\"twitter:title\" content=\"FrogTalk — Private profile\">
 <meta name=\"twitter:description\" content=\"This FrogTalk profile is private. Sign in to view it.\">
-<meta name=\"twitter:image\" content=\"https://frogtalk.xyz/static/icons/og-image.png\">
+<meta name=\"twitter:image\" content=\"{public_static_url('/static/icons/og-image.png', request=request)}\">
 <meta name=\"twitter:image:alt\" content=\"FrogTalk private profile\">
 <meta name=\"theme-color\" content=\"#4caf50\">
 <style>
@@ -1323,10 +1366,10 @@ p{{color:#aaa;font-size:14px;line-height:1.5;margin:6px 0 22px}}
     if _og_is_public_avatar(avatar):
         og_image = avatar
     elif avatar.startswith("data:image/"):
-        og_image = f"https://frogtalk.xyz/og/user/{nick}.img"
+        og_image = public_og_image_url("user", nick, request=request)
     else:
-        og_image = "https://frogtalk.xyz/static/icons/icon-512.png"
-    canonical = f"https://frogtalk.xyz/u/{nick}"
+        og_image = public_static_url("/static/icons/icon-512.png", request=request)
+    canonical = public_profile_url(nick, request=request)
 
     # For the visible card, prefer the raw avatar (browsers support data: URLs
     # natively — avoids an extra proxy hop). og_image is used for scrapers.
@@ -1398,7 +1441,7 @@ try {{
 
 
 @app.get("/c/{room_name}", response_class=HTMLResponse)
-async def serve_channel_landing(room_name: str):
+async def serve_channel_landing(request: Request, room_name: str):
     """Public channel share page with Open Graph card.
 
     Only reveals info for public rooms; private rooms show a generic join
@@ -1426,16 +1469,16 @@ async def serve_channel_landing(room_name: str):
     desc_raw = (room.get("description") or "").strip() if is_public else "This is a private FrogTalk channel."
     desc = desc_raw.replace("\n", " ")[:180] or "A FrogTalk channel."
     title = f"#{room_name} on FrogTalk" if is_public else "Private channel on FrogTalk"
-    canonical = f"https://frogtalk.xyz/c/{room_name}"
+    canonical = public_channel_url(room_name, request=request)
     # OG image: proxy the room icon if it's a data: URL so Discord/Telegram
     # can render it; otherwise use http(s) directly, or branded fallback.
     raw_icon = (room.get("icon") or "") if is_public else ""
     if raw_icon.startswith(("http://", "https://")):
         og_image = raw_icon
     elif raw_icon.startswith("data:image/"):
-        og_image = f"https://frogtalk.xyz/og/room/{room_name}.img"
+        og_image = public_og_image_url("room", room_name, request=request)
     else:
-        og_image = "https://frogtalk.xyz/static/icons/icon-512.png"
+        og_image = public_static_url("/static/icons/icon-512.png", request=request)
     # Render emoji icons in the card, or <img> for uploaded icons.
     is_img_icon = raw_icon.startswith(("http://", "https://", "data:image/", "/"))
     icon_block = (
@@ -1515,7 +1558,7 @@ try {{
 
 
 @app.get("/p/{post_id}", response_class=HTMLResponse)
-async def serve_post_landing(post_id: int):
+async def serve_post_landing(request: Request, post_id: int):
     """Public post share page with OG card metadata.
 
     Public posts are visible to logged-out users; non-public posts return a
@@ -1564,16 +1607,16 @@ async def serve_post_landing(post_id: int):
     title = f"{title_snippet} - @{nick} on FrogTalk" if title_snippet else f"Post by @{nick} on FrogTalk"
     media_data = post.get("media_data") or ""
     media_type = (post.get("media_type") or "").lower()
-    og_image = "https://frogtalk.xyz/static/icons/og-image.png"
+    og_image = public_static_url("/static/icons/og-image.png", request=request)
     og_image_type = "image/png"
     if media_type.startswith("image/") and media_data.startswith(("http://", "https://")):
         og_image = media_data
         og_image_type = media_type
     elif media_type.startswith("image/") and media_data.startswith("data:image/"):
-        og_image = f"https://frogtalk.xyz/og/post/{post_id}.img"
+        og_image = public_og_image_url("post", str(post_id), request=request)
         og_image_type = media_type
 
-    canonical = f"https://frogtalk.xyz/p/{post_id}"
+    canonical = public_post_url(post_id, request=request)
     avatar = post.get("avatar") or ""
     avatar_html = (
         f"<img class=\"author-avatar\" src=\"{_og_escape(avatar)}\" alt=\"\">"
@@ -1832,7 +1875,7 @@ async def serve_public_reel_media(post_id: int):
 
 
 @app.get("/r/{post_id}", response_class=HTMLResponse)
-async def serve_reel_landing(post_id: int):
+async def serve_reel_landing(request: Request, post_id: int):
     """Public reel share page. Guests can watch; logged-in users open in-app."""
     import database as db
 
@@ -1877,8 +1920,8 @@ async def serve_reel_landing(post_id: int):
     desc = content.replace("\n", " ").strip()[:180] or f"A public reel by @{nick} on FrogTalk."
     title_snippet = content.replace("\n", " ").strip()[:72]
     title = f"{title_snippet} - @{nick} on FrogTalk" if title_snippet else f"Reel by @{nick} on FrogTalk"
-    canonical = f"https://frogtalk.xyz/r/{post_id}"
-    media_url = f"https://frogtalk.xyz/r/{post_id}/media"
+    canonical = public_reel_url(post_id, request=request)
+    media_url = f"{canonical}/media"
     avatar = post.get("avatar") or ""
     avatar_html = (
         f"<img class=\"author-avatar\" src=\"{_og_escape(avatar)}\" alt=\"\">"
@@ -1907,8 +1950,8 @@ async def serve_reel_landing(post_id: int):
 <meta property=\"og:site_name\" content=\"FrogTalk\">
 <meta property=\"og:title\" content=\"{_og_escape(title)}\">
 <meta property=\"og:description\" content=\"{_og_escape(desc)}\">
-<meta property=\"og:image\" content=\"https://frogtalk.xyz/static/icons/og-image.png\">
-<meta property=\"og:image:secure_url\" content=\"https://frogtalk.xyz/static/icons/og-image.png\">
+<meta property=\"og:image\" content=\"{public_static_url('/static/icons/og-image.png', request=request)}\">
+<meta property=\"og:image:secure_url\" content=\"{public_static_url('/static/icons/og-image.png', request=request)}\">
 <meta property=\"og:image:type\" content=\"image/png\">
 <meta property=\"og:image:width\" content=\"1200\">
 <meta property=\"og:image:height\" content=\"630\">
@@ -1922,7 +1965,7 @@ async def serve_reel_landing(post_id: int):
 <meta name=\"twitter:site\" content=\"@frogtalk\">
 <meta name=\"twitter:title\" content=\"{_og_escape(title)}\">
 <meta name=\"twitter:description\" content=\"{_og_escape(desc)}\">
-<meta name=\"twitter:image\" content=\"https://frogtalk.xyz/static/icons/og-image.png\">
+<meta name=\"twitter:image\" content=\"{public_static_url('/static/icons/og-image.png', request=request)}\">
 <meta name=\"twitter:image:alt\" content=\"Reel by @{_og_escape(nick)} on FrogTalk\">
 <meta name=\"theme-color\" content=\"#4caf50\">
 <style>
@@ -2001,10 +2044,19 @@ try {{
 
 
 @app.get("/api/ping")
-async def api_ping():
+async def api_ping(request: Request):
     """Lightweight health probe used by the client connection-lost overlay."""
     from fastapi.responses import JSONResponse
-    return JSONResponse({"ok": True}, headers={"Cache-Control": "no-store"})
+    base = _site_url(request)
+    return JSONResponse(
+        {
+            "ok": True,
+            "public_url": base,
+            "public_host": resolve_public_site_host(request=request),
+            "official_hub_url": official_hub_url(),
+        },
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 # ── Public share-info JSON endpoints ─────────────────────────────────────
@@ -2244,7 +2296,7 @@ async def serve_sw():
 from datetime import datetime as _sitemap_dt
 from xml.sax.saxutils import escape as _xml_escape
 
-SITE_URL = os.getenv("FROGTALK_SITE_URL", "https://frogtalk.xyz").rstrip("/")
+SITE_URL = OFFICIAL_HUB_URL_DEFAULT.rstrip("/")  # legacy import alias; prefer _site_url(request)
 
 
 @app.get("/robots.txt", include_in_schema=False)
@@ -2314,15 +2366,16 @@ async def serve_robots(request: Request):
     ai_block = ""
     for bot in ai_bots:
         ai_block += f"\nUser-agent: {bot}\nAllow: /\nDisallow: /api/\nDisallow: /og/\n"
+    site = _site_url(request)
     body = (
         default_block
         + ai_block
-        + f"\nHost: {SITE_URL.replace('https://', '').replace('http://', '')}\n"
-        + f"Sitemap: {SITE_URL}/sitemap.xml\n"
-        + f"Sitemap: {SITE_URL}/sitemap-static.xml\n"
-        + f"Sitemap: {SITE_URL}/sitemap-users.xml\n"
-        + f"Sitemap: {SITE_URL}/sitemap-rooms.xml\n"
-        + f"Sitemap: {SITE_URL}/sitemap-board.xml\n"
+        + f"\nHost: {site.replace('https://', '').replace('http://', '')}\n"
+        + f"Sitemap: {site}/sitemap.xml\n"
+        + f"Sitemap: {site}/sitemap-static.xml\n"
+        + f"Sitemap: {site}/sitemap-users.xml\n"
+        + f"Sitemap: {site}/sitemap-rooms.xml\n"
+        + f"Sitemap: {site}/sitemap-board.xml\n"
     )
     from fastapi.responses import Response
     return Response(content=body, media_type="text/plain; charset=utf-8")
@@ -2351,30 +2404,41 @@ async def serve_llms_txt(request: Request):
             media_type="text/plain; charset=utf-8",
             headers={"X-Robots-Tag": "noindex, nofollow, noarchive"},
         )
-    return FileResponse(
+    return _serve_substituted_text(
         "static/llms.txt",
-        media_type="text/plain; charset=utf-8",
-        headers={"Cache-Control": "public, max-age=3600"},
+        "text/plain; charset=utf-8",
+        request=request,
     )
 
 
 # ── OpenSearch description (browser address-bar search providers) ────────────
 @app.get("/opensearch.xml", include_in_schema=False)
-async def serve_opensearch():
-    return FileResponse(
+async def serve_opensearch(request: Request):
+    return _serve_substituted_text(
         "static/opensearch.xml",
-        media_type="application/opensearchdescription+xml",
-        headers={"Cache-Control": "public, max-age=86400"},
+        "application/opensearchdescription+xml",
+        request=request,
     )
 
 
 # ── security.txt (RFC 9116) ──────────────────────────────────────────────────
 @app.get("/.well-known/security.txt", include_in_schema=False)
-async def serve_security_txt():
-    return FileResponse(
-        "static/.well-known/security.txt",
+async def serve_security_txt(request: Request):
+    from datetime import datetime, timezone
+
+    site = _site_url(request)
+    security_email = resolve_contact_email("security")
+    expires = datetime.now(timezone.utc).replace(year=datetime.now(timezone.utc).year + 2)
+    body = (
+        f"Contact: mailto:{security_email}\n"
+        f"Expires: {expires.strftime('%Y-%m-%dT23:59:59.000Z')}\n"
+        "Preferred-Languages: en\n"
+        f"Canonical: {site.rstrip('/')}/.well-known/security.txt\n"
+    )
+    return Response(
+        content=body,
         media_type="text/plain; charset=utf-8",
-        headers={"Cache-Control": "public, max-age=86400"},
+        headers={"Cache-Control": "public, max-age=3600"},
     )
 
 
@@ -2422,7 +2486,7 @@ BOARD_DATA_PATH = os.getenv(
 )
 
 
-def _board_thread_urls(today: str) -> str:
+def _board_thread_urls(today: str, site: str) -> str:
     """Return sitemap <url> blocks for all non-hidden board threads."""
     import json as _json
     try:
@@ -2436,16 +2500,17 @@ def _board_thread_urls(today: str) -> str:
         tid = t.get("id")
         if not tid or t.get("hidden"):
             continue
-        out.append(_sitemap_url(f"{SITE_URL}/board?thread={_xml_escape(str(tid))}", today, "daily", "0.7"))
+        out.append(_sitemap_url(f"{site}/board?thread={_xml_escape(str(tid))}", today, "daily", "0.7"))
     return "".join(out)
 
 
 @app.get("/sitemap.xml", include_in_schema=False)
-async def serve_sitemap_index():
+async def serve_sitemap_index(request: Request):
     """Combined flat sitemap (static pages + user profiles + rooms)."""
     from fastapi.responses import Response
     import database as db
     today = _sitemap_dt.utcnow().strftime("%Y-%m-%d")
+    site = _site_url(request)
 
     # Static pages
     pages = [
@@ -2461,10 +2526,10 @@ async def serve_sitemap_index():
         ("/download/windows-zip", "weekly", "0.7"),
         ("/board", "hourly", "0.8"),
     ]
-    urls = "".join(_sitemap_url(SITE_URL + p, today, cf, pr) for p, cf, pr in pages)
+    urls = "".join(_sitemap_url(site + p, today, cf, pr) for p, cf, pr in pages)
 
     # Board threads
-    urls += _board_thread_urls(today)
+    urls += _board_thread_urls(today, site)
 
     # User profiles
     try:
@@ -2478,7 +2543,7 @@ async def serve_sitemap_index():
                 "ORDER BY id DESC LIMIT 5000"
             ).fetchall()
         urls += "".join(
-            _sitemap_url(f"{SITE_URL}/u/{_xml_escape(r['nickname'])}", today, "weekly", "0.6")
+            _sitemap_url(f"{site}/u/{_xml_escape(r['nickname'])}", today, "weekly", "0.6")
             for r in user_rows if r["nickname"]
         )
     except Exception as e:
@@ -2497,7 +2562,7 @@ async def serve_sitemap_index():
                 "ORDER BY id DESC LIMIT 5000"
             ).fetchall()
         urls += "".join(
-            _sitemap_url(f"{SITE_URL}/c/{_xml_escape(r['name'])}", today, "weekly", "0.6")
+            _sitemap_url(f"{site}/c/{_xml_escape(r['name'])}", today, "weekly", "0.6")
             for r in room_rows if r["name"]
         )
     except Exception as e:
@@ -2512,9 +2577,10 @@ async def serve_sitemap_index():
 
 
 @app.get("/sitemap-static.xml", include_in_schema=False)
-async def serve_sitemap_static():
+async def serve_sitemap_static(request: Request):
     from fastapi.responses import Response
     today = _sitemap_dt.utcnow().strftime("%Y-%m-%d")
+    site = _site_url(request)
     pages = [
         ("/",             "daily",   "1.0"),
         ("/docs/api",     "monthly", "0.6"),
@@ -2528,7 +2594,7 @@ async def serve_sitemap_static():
         ("/download/windows-zip", "weekly", "0.7"),
         ("/board", "hourly", "0.8"),
     ]
-    urls = "".join(_sitemap_url(SITE_URL + p, today, cf, pr) for p, cf, pr in pages)
+    urls = "".join(_sitemap_url(site + p, today, cf, pr) for p, cf, pr in pages)
     body = (
         '<?xml version="1.0" encoding="UTF-8"?>'
         '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
@@ -2538,10 +2604,11 @@ async def serve_sitemap_static():
 
 
 @app.get("/sitemap-users.xml", include_in_schema=False)
-async def serve_sitemap_users():
+async def serve_sitemap_users(request: Request):
     """Public user profiles."""
     from fastapi.responses import Response
     import database as db
+    site = _site_url(request)
     rows = []
     # Exclude internal system/bridge accounts. All auto-generated accounts embed
     # the Unix-ms timestamp (starting with 1777...) in their username, so a single
@@ -2561,7 +2628,7 @@ async def serve_sitemap_users():
         _log.warning("sitemap-users error: %s", e)
     today = _sitemap_dt.utcnow().strftime("%Y-%m-%d")
     urls = "".join(
-        _sitemap_url(f"{SITE_URL}/u/{_xml_escape(r['nickname'])}", today, "weekly", "0.6")
+        _sitemap_url(f"{site}/u/{_xml_escape(r['nickname'])}", today, "weekly", "0.6")
         for r in rows if r["nickname"]
     )
     body = (
@@ -2573,10 +2640,11 @@ async def serve_sitemap_users():
 
 
 @app.get("/sitemap-rooms.xml", include_in_schema=False)
-async def serve_sitemap_rooms():
+async def serve_sitemap_rooms(request: Request):
     """Public chat rooms / channels."""
     from fastapi.responses import Response
     import database as db
+    site = _site_url(request)
     rows = []
     try:
         with db._conn() as con:
@@ -2593,7 +2661,7 @@ async def serve_sitemap_rooms():
         _log.warning("sitemap-rooms error: %s", e)
     today = _sitemap_dt.utcnow().strftime("%Y-%m-%d")
     urls = "".join(
-        _sitemap_url(f"{SITE_URL}/c/{_xml_escape(r['name'])}", today, "weekly", "0.6")
+        _sitemap_url(f"{site}/c/{_xml_escape(r['name'])}", today, "weekly", "0.6")
         for r in rows if r["name"]
     )
     body = (
@@ -2605,12 +2673,13 @@ async def serve_sitemap_rooms():
 
 
 @app.get("/sitemap-board.xml", include_in_schema=False)
-async def serve_sitemap_board():
+async def serve_sitemap_board(request: Request):
     """Frog Channel imageboard: index page + individual thread URLs."""
     from fastapi.responses import Response
     today = _sitemap_dt.utcnow().strftime("%Y-%m-%d")
-    urls = _sitemap_url(f"{SITE_URL}/board", today, "hourly", "0.8")
-    urls += _board_thread_urls(today)
+    site = _site_url(request)
+    urls = _sitemap_url(f"{site}/board", today, "hourly", "0.8")
+    urls += _board_thread_urls(today, site)
     body = (
         '<?xml version="1.0" encoding="UTF-8"?>'
         '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
@@ -2983,7 +3052,7 @@ async def download_android():
 
 
 @app.get("/download/ios")
-async def download_ios():
+async def download_ios(request: Request):
     """Redirect to TestFlight/App Store, or serve local iOS landing page.
 
     iOS has no APK-style sideload for unmodified phones. The closest analogue
@@ -2993,38 +3062,30 @@ async def download_ios():
     URL instead.
     """
     target = os.getenv("IOS_DOWNLOAD_URL", "").strip()
-    if target and target not in {"/ios", "https://frogtalk.xyz/ios"}:
+    if target and target not in {"/ios", official_hub_url() + "/ios"}:
         from fastapi.responses import RedirectResponse
         return RedirectResponse(url=target, status_code=302)
-    return FileResponse(
-        "static/ios.html",
-        media_type="text/html; charset=utf-8",
-        headers={"Cache-Control": "public, max-age=300"},
-    )
+    return _serve_static_html_page("static/ios.html", request=request)
 
 
 @app.get("/ios", include_in_schema=False)
-async def ios_landing_page():
+async def ios_landing_page(request: Request):
     """Public iOS coming-soon page with SEO/social metadata."""
     target = os.getenv("IOS_DOWNLOAD_URL", "").strip()
-    if target and target not in {"/ios", "https://frogtalk.xyz/ios"}:
+    if target and target not in {"/ios", official_hub_url() + "/ios"}:
         from fastapi.responses import RedirectResponse
         return RedirectResponse(url=target, status_code=302)
-    return FileResponse(
-        "static/ios.html",
-        media_type="text/html; charset=utf-8",
-        headers={"Cache-Control": "public, max-age=300"},
-    )
+    return _serve_static_html_page("static/ios.html", request=request)
 
 
 @app.get("/download/ios/", include_in_schema=False)
-async def download_ios_trailing_slash():
-    return await download_ios()
+async def download_ios_trailing_slash(request: Request):
+    return await download_ios(request)
 
 
 @app.get("/ios/", include_in_schema=False)
-async def ios_landing_page_trailing_slash():
-    return await ios_landing_page()
+async def ios_landing_page_trailing_slash(request: Request):
+    return await ios_landing_page(request)
 
 
 @app.get("/.well-known/apple-app-site-association", include_in_schema=False)
@@ -3202,31 +3263,31 @@ async def download_windows_zip():
 
 
 @app.get("/docs/api")
-async def docs_api_page():
+async def docs_api_page(request: Request):
     page = "static/docs-api.html"
     if os.path.exists(page):
-        return FileResponse(page)
-    return FileResponse("static/home.html")
+        return _serve_static_html_page(page, request=request)
+    return _serve_static_html_page("static/home.html", request=request)
 
 
 @app.get("/docs/node")
-async def docs_node_page():
+async def docs_node_page(request: Request):
     page = "static/docs-node.html"
     if os.path.exists(page):
-        return FileResponse(page)
-    return FileResponse("static/home.html")
+        return _serve_static_html_page(page, request=request)
+    return _serve_static_html_page("static/home.html", request=request)
 
 
 @app.get("/privacy")
-async def privacy_page():
+async def privacy_page(request: Request):
     page = "static/privacy.html"
     if os.path.exists(page):
-        return FileResponse(page)
-    return FileResponse("static/home.html")
+        return _serve_static_html_page(page, request=request)
+    return _serve_static_html_page("static/home.html", request=request)
 
 
 @app.get("/security")
-async def security_page():
+async def security_page(request: Request):
     """Vulnerability disclosure + community-contribution page.
 
     FrogTalk is "vibe-coded but open source" — this page invites the
@@ -3234,8 +3295,8 @@ async def security_page():
     """
     page = "static/security.html"
     if os.path.exists(page):
-        return FileResponse(page)
-    return FileResponse("static/home.html")
+        return _serve_static_html_page(page, request=request)
+    return _serve_static_html_page("static/home.html", request=request)
 
 
 @app.get("/")
@@ -3248,23 +3309,23 @@ async def serve_home(request: Request):
     qp = request.query_params
     nick = (qp.get("profile") or qp.get("u") or "").strip()
     if nick:
-        return await serve_profile_landing(nick)
+        return await serve_profile_landing(request, nick)
     room = (qp.get("room") or qp.get("channel") or qp.get("c") or "").strip()
     if room:
-        return await serve_channel_landing(room)
+        return await serve_channel_landing(request, room)
     post = (qp.get("post") or qp.get("p") or "").strip()
     if post.isdigit() and int(post) > 0:
-        return await serve_post_landing(int(post))
+        return await serve_post_landing(request, int(post))
     reel = (qp.get("reel") or qp.get("r") or "").strip()
     if reel.isdigit() and int(reel) > 0:
-        return await serve_reel_landing(int(reel))
+        return await serve_reel_landing(request, int(reel))
     code = (qp.get("invite") or qp.get("i") or "").strip()
     if code:
-        return await serve_invite_landing(code)
+        return await serve_invite_landing(request, code)
     home = "static/home.html"
     if os.path.exists(home):
-        return FileResponse(home)
-    return FileResponse("static/index.html")
+        return _serve_static_html_page(home, request=request)
+    return _serve_static_html_page("static/index.html", request=request)
 
 
 if __name__ == "__main__":

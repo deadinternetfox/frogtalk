@@ -2650,7 +2650,8 @@ const Rooms = (() => {
       const copyBtn = e.target.closest('[data-invite-copy]');
       if (copyBtn) {
         const url = copyBtn.getAttribute('data-invite-url') || '';
-        if (!url.startsWith('https://frogtalk.xyz/i/')) return;
+        const origin = (typeof ftPublicOrigin === 'function' ? ftPublicOrigin() : location.origin).replace(/\/$/, '');
+        if (!url.startsWith(origin + '/i/') && !url.startsWith(origin + '/invite/')) return;
         UI.copy(url).then(ok => UI.showToast(ok ? 'Copied!' : 'Could not copy', ok ? 'success' : 'error'));
         return;
       }
@@ -2681,7 +2682,7 @@ const Rooms = (() => {
     const meta = document.createElement('div');
     meta.className = 'ch-invite-item__meta';
 
-    const url = `https://frogtalk.xyz/i/${code}`;
+    const url = inv.url || (typeof ftInviteUrl === 'function' ? ftInviteUrl(code) : `${location.origin}/i/${code}`);
     const urlEl = document.createElement('div');
     urlEl.className = 'ch-invite-item__url';
     urlEl.textContent = url;
@@ -3478,7 +3479,7 @@ const Rooms = (() => {
     _applyInviteTabPermissions(data);
     _applyPrivateInvitePolicies(isPrivate);
 
-    _renderVanityCard(!!data.is_owner && !isPrivate, isPrivate ? null : (data.vanity || null));
+    _renderVanityCard(!!data.is_owner && !isPrivate, isPrivate ? null : (data.vanity || null), data.vanity_url || null);
 
     if (!invites.length) {
       container.replaceChildren();
@@ -3508,7 +3509,7 @@ const Rooms = (() => {
   let _vanityWired = false;
   let _vanityLastStatus = 'idle';  // 'idle' | 'checking' | 'available' | 'taken' | 'invalid' | 'unchanged'
 
-  function _renderVanityCard(isOwner, currentVanity) {
+  function _renderVanityCard(isOwner, currentVanity, vanityUrlFromApi) {
     const card = document.getElementById('ch-vanity-card');
     if (!card) return;
     const isPrivate = (_currentRoomData?.room?.type || 'public') === 'private';
@@ -3532,9 +3533,10 @@ const Rooms = (() => {
     if (clearBtn) clearBtn.classList.toggle('ch-is-hidden', !_vanityCurrent);
     if (currentRow && currentLink) {
       if (_vanityCurrent) {
-        const url = `https://frogtalk.xyz/i/${_vanityCurrent}`;
+        const url = vanityUrlFromApi || (typeof ftInviteUrl === 'function' ? ftInviteUrl(_vanityCurrent) : `${location.origin}/i/${_vanityCurrent}`);
+        const host = (typeof ftPublicHost === 'function' ? ftPublicHost() : location.host);
         currentRow.classList.add('is-visible');
-        currentLink.textContent = `frogtalk.xyz/i/${_vanityCurrent}`;
+        currentLink.textContent = `${host}/i/${_vanityCurrent}`;
         currentLink.href = url;
       } else {
         currentRow.classList.remove('is-visible');
@@ -3674,7 +3676,8 @@ const Rooms = (() => {
 
   async function clearVanity() {
     if (!_currentSettingsRoom || !_vanityCurrent) return;
-    if (!confirm(`Remove the vanity URL frogtalk.xyz/i/${_vanityCurrent}? Existing /invite/ links will continue to work.`)) return;
+    const host = (typeof ftPublicHost === 'function' ? ftPublicHost() : 'this site');
+    if (!confirm(`Remove the vanity URL ${host}/i/${_vanityCurrent}? Existing /invite/ links will continue to work.`)) return;
     const clearBtn = document.getElementById('ch-vanity-clear-btn');
     if (clearBtn) clearBtn.disabled = true;
     try {
@@ -3700,7 +3703,7 @@ const Rooms = (() => {
 
   async function copyVanityLink() {
     if (!_vanityCurrent) return;
-    const url = `https://frogtalk.xyz/i/${_vanityCurrent}`;
+    const url = (typeof ftInviteUrl === 'function' ? ftInviteUrl(_vanityCurrent) : `${location.origin}/i/${_vanityCurrent}`);
     if (await UI.copy(url)) UI.showToast('Link copied!');
     else UI.showToast('Could not copy — long-press the link to copy manually', 'error');
   }

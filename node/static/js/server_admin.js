@@ -36,6 +36,19 @@
   const saveChannelRetentionBtn = document.getElementById('save-channel-retention-btn');
   const channelRetentionStatus = document.getElementById('channel-retention-status');
   const channelRetentionLastSaved = document.getElementById('channel-retention-last-saved');
+  const sitePublicUrlInput = document.getElementById('site-public-url');
+  const sitePublicUrlPreview = document.getElementById('site-public-url-preview');
+  const savePublicUrlBtn = document.getElementById('save-public-url-btn');
+  const publicUrlStatus = document.getElementById('public-url-status');
+  const nodeDisplayNameInput = document.getElementById('node-display-name');
+  const contactSecurityEmail = document.getElementById('contact-security-email');
+  const contactPrivacyEmail = document.getElementById('contact-privacy-email');
+  const contactSupportEmail = document.getElementById('contact-support-email');
+  const contactVapidEmail = document.getElementById('contact-vapid-email');
+  const siteSettingsMeta = document.getElementById('site-settings-meta');
+  const siteSettingsPreview = document.getElementById('site-settings-preview');
+  const saveSiteSettingsBtn = document.getElementById('save-site-settings-btn');
+  const siteSettingsStatus = document.getElementById('site-settings-status');
   const blockTorPeersWrap = document.getElementById('block-tor-peers-wrap');
   const blockTorPeers = document.getElementById('block-tor-peers');
   const clearnetFedPolicyNote = document.getElementById('clearnet-federation-policy-note');
@@ -53,6 +66,8 @@
   let frogTapCount = 0;
   let frogTapTimer = null;
   let retentionBaseline = '';
+  let publicUrlBaseline = '';
+  let siteSettingsBaseline = '';
   let federationPolicyBaseline = '';
   let lastPublicUrlMeta = null;
   let lastFederationPolicy = {};
@@ -64,6 +79,239 @@
   const operatorUrlBannerSteps = document.getElementById('operator-url-banner-steps');
   const operatorUrlBannerActions = document.getElementById('operator-url-banner-actions');
   const operatorUrlBannerDismiss = document.getElementById('operator-url-banner-dismiss');
+
+  function exampleEmailDomain(host) {
+    const h = String(host || '').trim().toLowerCase().replace(/^www\./, '');
+    if (!h || h === 'localhost' || /^\d+\.\d+\.\d+\.\d+$/.test(h)) return 'domain.com';
+    if (h.endsWith('.onion')) return h;
+    const parts = h.split('.').filter(Boolean);
+    if (parts.length >= 3) return parts.slice(-2).join('.');
+    return h;
+  }
+
+  function operatorExampleHost(meta) {
+    const fromMeta = String(meta?.host || meta?.public_url || '').trim();
+    if (fromMeta.startsWith('http')) {
+      try { return new URL(fromMeta).host; } catch { /* fall through */ }
+    }
+    if (fromMeta) return fromMeta.replace(/^www\./, '');
+    try {
+      return String(window.location.hostname || '').trim().toLowerCase() || 'domain.com';
+    } catch {
+      return 'domain.com';
+    }
+  }
+
+  function applyOperatorPlaceholders(meta) {
+    const host = operatorExampleHost(meta || lastPublicUrlMeta || {});
+    const mailDomain = exampleEmailDomain(host);
+    const publicUrlPh = host.includes('.') && !host.startsWith('domain.')
+      ? `https://${host}`
+      : 'https://chat.domain.com';
+    if (sitePublicUrlInput) sitePublicUrlInput.placeholder = publicUrlPh;
+    const emailPlaceholders = {
+      [contactSecurityEmail?.id || '']: `security@${mailDomain}`,
+      [contactPrivacyEmail?.id || '']: `privacy@${mailDomain}`,
+      [contactSupportEmail?.id || '']: `hello@${mailDomain}`,
+      [contactVapidEmail?.id || '']: `admin@${mailDomain}`,
+    };
+    [contactSecurityEmail, contactPrivacyEmail, contactSupportEmail, contactVapidEmail].forEach((el) => {
+      if (!el) return;
+      el.placeholder = emailPlaceholders[el.id] || el.placeholder;
+    });
+    if (nodeDisplayNameInput) {
+      nodeDisplayNameInput.placeholder = mailDomain === 'domain.com'
+        ? 'FrogTalk on domain.com'
+        : `FrogTalk (${mailDomain})`;
+    }
+    const hintHost = mailDomain;
+    const urlHint = document.querySelector('#site-public-url + .field-hint');
+    if (urlHint) {
+      urlHint.innerHTML =
+        `Use <code>https://chat.${escHtml(hintHost)}</code> (or apex) — no path. ` +
+        `Share links: <code>${escHtml(hintHost)}/i/…</code>, <code>/u/…</code>, <code>/p/…</code>.`;
+    }
+  }
+
+  function siteSettingsSig() {
+    return JSON.stringify({
+      display_name: String(nodeDisplayNameInput?.value || '').trim(),
+      security_email: String(contactSecurityEmail?.value || '').trim().toLowerCase(),
+      privacy_email: String(contactPrivacyEmail?.value || '').trim().toLowerCase(),
+      support_email: String(contactSupportEmail?.value || '').trim().toLowerCase(),
+      vapid_email: String(contactVapidEmail?.value || '').trim().toLowerCase(),
+    });
+  }
+
+  function setSiteSettingsStatus(state, text) {
+    if (!siteSettingsStatus) return;
+    siteSettingsStatus.className = 'status-pill';
+    if (state === 'saved') siteSettingsStatus.classList.add('state-saved');
+    if (state === 'dirty') siteSettingsStatus.classList.add('state-dirty');
+    if (state === 'error') siteSettingsStatus.classList.add('state-error');
+    siteSettingsStatus.textContent = text || state;
+  }
+
+  function renderSiteSettingsMeta(settings) {
+    if (!siteSettingsMeta) return;
+    const sid = escHtml(String(settings?.server_id || '—'));
+    const base = escHtml(String(settings?.base_url || '—'));
+    const onion = escHtml(String(settings?.onion_url || ''));
+    siteSettingsMeta.innerHTML =
+      `<strong>Federation ID:</strong> <code>${sid}</code> · ` +
+      `<strong>Listed as:</strong> <code>${base || '—'}</code>` +
+      (onion ? ` · <strong>Onion:</strong> <code>${onion}</code>` : '');
+  }
+
+  function renderSiteSettingsPreview(settings) {
+    if (!siteSettingsPreview) return;
+    const c = settings?.contacts || {};
+    siteSettingsPreview.innerHTML =
+      `Live: security → <code>${escHtml(c.security || '—')}</code> · ` +
+      `privacy → <code>${escHtml(c.privacy || '—')}</code> · ` +
+      `support → <code>${escHtml(c.support || '—')}</code> · ` +
+      `VAPID → <code>${escHtml(c.vapid || '—')}</code>`;
+  }
+
+  function syncSiteSettings(config) {
+    const settings = config?.site_settings || {};
+    const contacts = settings.contacts || {};
+    if (nodeDisplayNameInput) nodeDisplayNameInput.value = String(settings.display_name || '');
+    if (contactSecurityEmail) contactSecurityEmail.value = String(contacts.security || '');
+    if (contactPrivacyEmail) contactPrivacyEmail.value = String(contacts.privacy || '');
+    if (contactSupportEmail) contactSupportEmail.value = String(contacts.support || '');
+    if (contactVapidEmail) contactVapidEmail.value = String(contacts.vapid || '');
+    siteSettingsBaseline = siteSettingsSig();
+    renderSiteSettingsMeta(settings);
+    renderSiteSettingsPreview(settings);
+    setSiteSettingsStatus('saved', 'Loaded from this node');
+  }
+
+  async function saveSiteSettings() {
+    if (saveSiteSettingsBtn) {
+      saveSiteSettingsBtn.disabled = true;
+      saveSiteSettingsBtn.textContent = 'Saving…';
+    }
+    setSiteSettingsStatus('saving', 'Saving…');
+    try {
+      const payload = await api('/api/server-admin/site-settings', {
+        method: 'PUT',
+        body: JSON.stringify({
+          display_name: String(nodeDisplayNameInput?.value || '').trim(),
+          security_email: String(contactSecurityEmail?.value || '').trim(),
+          privacy_email: String(contactPrivacyEmail?.value || '').trim(),
+          support_email: String(contactSupportEmail?.value || '').trim(),
+          vapid_email: String(contactVapidEmail?.value || '').trim(),
+        }),
+      });
+      syncSiteSettings(payload);
+      siteSettingsBaseline = siteSettingsSig();
+      setSiteSettingsStatus('saved', 'Saved on this node');
+      setActionMessage('Node identity and contact emails updated. Public pages and push use the new values immediately.');
+    } catch (e) {
+      setSiteSettingsStatus('error', 'Save failed');
+      setActionMessage(e.message, true);
+      throw e;
+    } finally {
+      if (saveSiteSettingsBtn) {
+        saveSiteSettingsBtn.disabled = false;
+        saveSiteSettingsBtn.textContent = 'Save Identity & Contacts';
+      }
+    }
+  }
+
+  function refreshSiteSettingsDirtyUi() {
+    const dirty = siteSettingsSig() !== siteSettingsBaseline;
+    setSiteSettingsStatus(dirty ? 'dirty' : 'saved', dirty ? 'Unsaved changes' : 'Loaded from this node');
+    const preview = {
+      contacts: {
+        security: String(contactSecurityEmail?.value || '').trim().toLowerCase(),
+        privacy: String(contactPrivacyEmail?.value || '').trim().toLowerCase(),
+        support: String(contactSupportEmail?.value || '').trim().toLowerCase(),
+        vapid: String(contactVapidEmail?.value || '').trim().toLowerCase(),
+      },
+    };
+    renderSiteSettingsPreview(preview);
+  }
+
+  function publicUrlSig() {
+    return String(sitePublicUrlInput?.value || '').trim();
+  }
+
+  function setPublicUrlStatus(state, text) {
+    if (!publicUrlStatus) return;
+    publicUrlStatus.className = 'status-pill';
+    if (state === 'saved') publicUrlStatus.classList.add('state-saved');
+    if (state === 'dirty') publicUrlStatus.classList.add('state-dirty');
+    if (state === 'error') publicUrlStatus.classList.add('state-error');
+    publicUrlStatus.textContent = text || state;
+  }
+
+  function renderPublicUrlPreview(url, meta) {
+    if (!sitePublicUrlPreview) return;
+    const raw = String(url || '').trim().replace(/\/$/, '');
+    if (!raw) {
+      sitePublicUrlPreview.textContent = 'No public URL configured — share links fall back to env PUBLIC_URL or request host.';
+      return;
+    }
+    let host = '';
+    try { host = new URL(raw).host; } catch { host = raw; }
+    const badges = [];
+    if (meta?.is_https) badges.push('HTTPS');
+    else if (meta?.is_http_only_clearnet) badges.push('HTTP only');
+    if (meta?.has_domain) badges.push('Domain');
+    if (meta?.is_ip_host) badges.push('Raw IP');
+    sitePublicUrlPreview.innerHTML =
+      `Preview: <code>${escHtml(host)}/i/example</code> · ` +
+      `<code>${escHtml(host)}/u/you</code> · ` +
+      `<code>${escHtml(host)}/p/123</code>` +
+      (badges.length ? ` <span style="opacity:.75">(${badges.join(' · ')})</span>` : '');
+  }
+
+  function syncPublicSiteUrl(config) {
+    const url = String(config?.site_public_url || config?.public_url_meta?.public_url || '').trim();
+    if (sitePublicUrlInput) sitePublicUrlInput.value = url;
+    publicUrlBaseline = publicUrlSig();
+    renderPublicUrlPreview(url, config?.public_url_meta || lastPublicUrlMeta);
+    applyOperatorPlaceholders(config?.public_url_meta || lastPublicUrlMeta);
+    setPublicUrlStatus('saved', url ? 'Loaded from this node' : 'Using env fallback');
+  }
+
+  async function savePublicSiteUrl() {
+    const publicUrl = publicUrlSig();
+    if (savePublicUrlBtn) {
+      savePublicUrlBtn.disabled = true;
+      savePublicUrlBtn.textContent = 'Saving Public URL…';
+    }
+    setPublicUrlStatus('saving', 'Saving…');
+    try {
+      const payload = await api('/api/server-admin/public-url', {
+        method: 'PUT',
+        body: JSON.stringify({ public_url: publicUrl }),
+      });
+      syncPublicSiteUrl(payload);
+      if (payload.public_url_meta) applyPublicUrlMeta(payload.public_url_meta);
+      publicUrlBaseline = publicUrlSig();
+      setPublicUrlStatus('saved', 'Saved on this node');
+      const notes = Array.isArray(payload.policy_notes) ? payload.policy_notes.join(' ') : '';
+      setActionMessage(notes || 'Public site URL saved. Invite and share links now use this domain.');
+    } catch (e) {
+      setPublicUrlStatus('error', 'Save failed');
+      setActionMessage(e.message, true);
+      throw e;
+    } finally {
+      if (savePublicUrlBtn) {
+        savePublicUrlBtn.disabled = false;
+        savePublicUrlBtn.textContent = 'Save Public URL';
+      }
+    }
+  }
+
+  function refreshPublicUrlDirtyUi() {
+    const dirty = publicUrlSig() !== publicUrlBaseline;
+    setPublicUrlStatus(dirty ? 'dirty' : 'saved', dirty ? 'Unsaved changes' : 'Loaded from this node');
+    renderPublicUrlPreview(publicUrlSig(), lastPublicUrlMeta);
+  }
 
   function retentionSig() {
     const d = Math.max(1, Number(channelActiveDays?.value || 30) || 30);
@@ -814,7 +1062,7 @@
     if (issues.includes('ip') && issues.includes('no-tls')) {
       title = 'Public URL is a bare IP and this node is not using HTTPS';
       body = `This node is advertised as <code>${pub}</code>.${boardSuffix} Other nodes may auto-block HTTP-only peers.`;
-      steps.push('Point DNS at this VPS and set <code>PUBLIC_URL=https://your.domain</code> in <code>/opt/frogtalk/.env</code>.');
+      steps.push('Point DNS at this VPS and set <code>PUBLIC_URL=https://chat.domain.com</code> in <code>/opt/frogtalk/.env</code>.');
       steps.push('Run <code>sudo bash /opt/frogtalk/node/scripts/install.sh ssl</code> (Let’s Encrypt) or terminate TLS at Cloudflare (orange cloud).');
       steps.push('Restart: <code>sudo systemctl restart frogtalk-node</code> and re-sync the federation directory from this panel.');
       actions.push({ label: 'Open install docs', href: '/docs/node#ssl', external: false });
@@ -834,11 +1082,11 @@
       severity = 'warn';
       title = 'Public URL is a bare IP';
       body = `The browser address bar uses <code>${host}</code>. Raw-IP PUBLIC_URL still exposes this address to users and federation peers until you switch to a domain + HTTPS.`;
-      steps.push('Add a DNS name, set <code>PUBLIC_URL=https://your.domain</code>, and run the SSL installer.');
+      steps.push('Add a DNS name, set <code>PUBLIC_URL=https://chat.domain.com</code>, and run the SSL installer.');
       steps.push('Re-announce to the hub after <code>PUBLIC_URL</code> changes.');
     }
 
-    actions.push({ label: 'Copy PUBLIC_URL fix', action: 'copy-env', value: meta.is_https && meta.host ? `PUBLIC_URL=https://${meta.host}` : `PUBLIC_URL=https://your.domain` });
+    actions.push({ label: 'Copy PUBLIC_URL fix', action: 'copy-env', value: meta.is_https && meta.host ? `PUBLIC_URL=https://${meta.host}` : 'PUBLIC_URL=https://chat.domain.com' });
 
     return { severity, title, body, steps, actions, fingerprint: operatorUrlBannerFingerprint(meta) };
   }
@@ -940,7 +1188,7 @@
       }
     } catch (_) { /* ignore */ }
     operatorDomainBanner.classList.remove('hidden');
-    if (operatorDomainBannerTitle) operatorDomainBannerTitle.textContent = 'Set PUBLIC_URL to https://your.domain';
+    if (operatorDomainBannerTitle) operatorDomainBannerTitle.textContent = 'Set PUBLIC_URL to https://chat.domain.com';
     if (operatorDomainBannerBody) {
       operatorDomainBannerBody.textContent = 'Imageboard is not enabled on this node right now. Before onboarding users or federation peers, configure a real domain and trusted HTTPS so your raw server IP is not the public identity.';
     }
@@ -961,7 +1209,7 @@
         bits.push('<span class="mini-badge danger">HTTP only</span> Enable HTTPS (banner above).');
       }
       if (lastImageboardAvailable === false && (meta.is_ip_host || meta.is_http_only_clearnet || !meta.is_https)) {
-        bits.push('<span class="mini-badge">Info</span> Imageboard is not enabled. Set <code>PUBLIC_URL=https://your.domain</code> before onboarding federation peers.');
+        bits.push('<span class="mini-badge">Info</span> Imageboard is not enabled. Set <code>PUBLIC_URL=https://chat.domain.com</code> before onboarding federation peers.');
       }
       if (bits.length) {
         warnEl.style.display = 'block';
@@ -972,6 +1220,7 @@
         warnEl.innerHTML = '';
       }
     }
+    applyOperatorPlaceholders(meta);
     renderOnboardingAlerts();
   }
 
@@ -1834,6 +2083,8 @@
     const pingMs = Math.max(1, Math.round(performance.now() - t0));
     latencyBadge.textContent = `Latency: ${pingMs} ms`;
     syncChannelRetention(config.channel_retention || {});
+    syncPublicSiteUrl(config);
+    syncSiteSettings(config);
     applyFederationPolicyControls(config.federation_policy_ui || {});
     syncFederationPolicy(config.federation_policy || {});
     if (config.public_url_meta) applyPublicUrlMeta(config.public_url_meta);
@@ -2019,6 +2270,15 @@
   saveChannelRetentionBtn?.addEventListener('click', () => {
     saveChannelRetention().catch(() => {});
   });
+  savePublicUrlBtn?.addEventListener('click', () => {
+    savePublicSiteUrl().catch(() => {});
+  });
+  sitePublicUrlInput?.addEventListener('input', refreshPublicUrlDirtyUi);
+  saveSiteSettingsBtn?.addEventListener('click', () => {
+    saveSiteSettings().catch(() => {});
+  });
+  [nodeDisplayNameInput, contactSecurityEmail, contactPrivacyEmail, contactSupportEmail, contactVapidEmail]
+    .forEach(el => el?.addEventListener('input', refreshSiteSettingsDirtyUi));
   saveFederationPolicyBtn?.addEventListener('click', () => {
     saveFederationPolicy().catch(() => {});
   });

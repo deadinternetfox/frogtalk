@@ -7,11 +7,10 @@ from pydantic import BaseModel
 
 import database as db
 from deps import get_current_user
+from site_contacts import vapid_claims
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/push", tags=["push"])
-
-VAPID_CLAIMS = {"sub": "mailto:admin@frogtalk.xyz"}
 
 # Tracks whether we've already logged the "Firebase not configured" warning
 # so we don't spam the journal on every push attempt.
@@ -399,7 +398,7 @@ def send_push(user_id: int, title: str, body: str, url: str = "/app",
                     },
                     data=payload,
                     vapid_private_key=priv,
-                    vapid_claims=VAPID_CLAIMS,
+                    vapid_claims=vapid_claims(),
                 )
             except Exception as e:
                 resp = getattr(e, "response", None)

@@ -4097,6 +4097,28 @@ FEDERATION_BLOCK_TOR_PEERS_KEY = "federation.block_tor_peers"
 FEDERATION_BLOCK_HTTP_ONLY_PEERS_KEY = "federation.block_http_only_peers"
 FEDERATION_REDACT_CLEARNET_IPS_KEY = "federation.redact_clearnet_ips"
 
+SITE_PUBLIC_URL_CONFIG_KEY = "site.public_url"
+
+
+def get_site_public_url() -> str:
+    from public_url_policy import SITE_PUBLIC_URL_CONFIG_KEY, normalize_public_url
+
+    raw = get_config(SITE_PUBLIC_URL_CONFIG_KEY) or ""
+    return normalize_public_url(raw)
+
+
+def set_site_public_url(url: str) -> str:
+    """Persist operator-configured public URL; sync federation.base_url."""
+    from public_url_policy import SITE_PUBLIC_URL_CONFIG_KEY, normalize_public_url
+
+    norm = normalize_public_url(url)
+    if not norm:
+        set_config(SITE_PUBLIC_URL_CONFIG_KEY, "")
+    else:
+        set_config(SITE_PUBLIC_URL_CONFIG_KEY, norm)
+        set_config("federation.base_url", norm)
+    return norm
+
 
 def get_federation_policy_settings() -> Dict[str, object]:
     """Operator federation policy stored in node_config."""
@@ -12571,8 +12593,13 @@ def get_or_create_local_server_identity() -> Dict:
 
     base_url = get_config("federation.base_url")
     if not base_url:
-        base_url = os.getenv("FROGTALK_BASE_URL", "")
-        set_config("federation.base_url", base_url)
+        try:
+            from public_url_policy import local_public_url
+
+            base_url = local_public_url()
+        except Exception:
+            base_url = os.getenv("FROGTALK_BASE_URL", "")
+        set_config("federation.base_url", base_url or "")
 
     onion_url = get_config("federation.onion_url")
     if onion_url is None:

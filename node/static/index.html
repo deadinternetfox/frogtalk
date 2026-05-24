@@ -9607,12 +9607,12 @@ window.ConnErr = (function(){
           </div>
           <p class="ch-vanity-card__desc">
             Claim a memorable short link for your channel. Anyone visiting
-            <code class="ch-vanity-card__code">frogtalk.xyz/i/&lt;name&gt;</code>
+            <code class="ch-vanity-card__code" data-ft-vanity-prefix>frogtalk.xyz/i/&lt;name&gt;</code>
             will land on a join page.
           </p>
           <div id="ch-vanity-row" class="ch-vanity-row">
             <div class="ch-vanity-input-wrap">
-              <span class="ch-vanity-input-prefix">frogtalk.xyz/i/</span>
+              <span class="ch-vanity-input-prefix" data-ft-vanity-prefix>frogtalk.xyz/i/</span>
               <input id="ch-vanity-input" class="ch-vanity-input" type="text" maxlength="32" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="frogs">
             </div>
             <button id="ch-vanity-save-btn" type="button" class="ch-vanity-save-btn" onclick="Rooms.saveVanity()" disabled>Save</button>
@@ -10431,7 +10431,7 @@ window.ConnErr = (function(){
       <label style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid #1e1e1e;cursor:pointer">
         <div>
           <div style="font-size:14px;color:#e0e0e0">Public Profile</div>
-          <div style="font-size:12px;color:#666;margin-top:2px">Let anyone — even without a FrogTalk account — view your basic profile at <span style="color:#4caf50">frogtalk.xyz/u/you</span>. Turn off to keep it hidden from search &amp; anonymous visitors.</div>
+          <div style="font-size:12px;color:#666;margin-top:2px">Let anyone — even without a FrogTalk account — view your basic profile at <span style="color:#4caf50" data-ft-profile-url-hint>frogtalk.xyz/u/you</span>. Turn off to keep it hidden from search &amp; anonymous visitors.</div>
         </div>
         <input type="checkbox" id="profile-public" style="width:18px;height:18px;cursor:pointer;accent-color:#4caf50">
       </label>
@@ -12001,6 +12001,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoa
 <script src="/static/js/notifications.js?v=435"></script>
 <script src="/static/js/ws.js?v=264"></script>
 <script src="/static/js/cropper.js?v=191"></script>
+<script src="/static/js/ft_site.js?v=__APP_ASSET_VERSION__"></script>
 <script src="/static/js/ui.js?v=__APP_ASSET_VERSION__"></script>
 <script src="/static/js/dm_lock.js?v=2"></script>
 <script src="/static/js/content_warning.js?v=22"></script>

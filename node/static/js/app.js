@@ -1111,6 +1111,10 @@ const App = {
   async init() {
     if (await this.ensureFreshAssets()) return;
 
+    if (typeof ftSiteBootstrap === 'function') {
+      try { await ftSiteBootstrap(); } catch {}
+    }
+
     State.load();
 
     const hideSplash = () => {

@@ -19,6 +19,8 @@ import re
 from typing import Optional, Dict
 import httpx
 
+from public_url_policy import resolve_public_site_url
+
 log = logging.getLogger("bridge.discord")
 
 DISCORD_TOKEN: Optional[str] = None
@@ -972,12 +974,7 @@ async def forward_to_discord(room: str, nickname: str, content: str,
     # work — they need to live behind the site's public origin so the
     # Discord CDN can reach them.
     resolved_avatar = (sender_avatar or "").strip() or None
-    public_base = (
-        os.getenv("FROGTALK_PUBLIC_URL")
-        or os.getenv("PUBLIC_URL")
-        or os.getenv("FROGTALK_BASE_URL")
-        or "https://frogtalk.xyz"
-    ).rstrip("/")
+    public_base = resolve_public_site_url().rstrip("/")
 
     # If we know the FrogTalk user id, always prefer the public avatar
     # endpoint — it serves whatever bytes are in the user row, which

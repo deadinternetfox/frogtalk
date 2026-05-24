@@ -12,10 +12,17 @@ from typing import Optional
 import bleach
 from fastapi import APIRouter, Request, Response, UploadFile, File
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 import database as db
-from public_url_policy import analyze_public_url, url_is_http_only_clearnet, url_is_https
+from public_url_policy import (
+    analyze_public_url,
+    normalize_public_url,
+    resolve_public_site_url,
+    url_is_http_only_clearnet,
+    url_is_https,
+)
+from site_contacts import get_operator_site_settings, set_operator_site_settings
 from ws_manager import manager
 from routers import federation as federation_router
 from deps import (
@@ -554,6 +561,18 @@ class FederationPolicyBody(BaseModel):
     redact_clearnet_ips: bool = False
 
 
+class PublicSiteUrlBody(BaseModel):
+    public_url: str = Field(default="", max_length=512)
+
+
+class OperatorSiteSettingsBody(BaseModel):
+    display_name: str = Field(default="", max_length=120)
+    security_email: str = Field(default="", max_length=254)
+    privacy_email: str = Field(default="", max_length=254)
+    support_email: str = Field(default="", max_length=254)
+    vapid_email: str = Field(default="", max_length=254)
+
+
 class PurgeStaleNodesBody(BaseModel):
     dry_run: bool = False
 
@@ -660,6 +679,8 @@ async def server_webui_config(request: Request):
         "federation_policy": db.get_federation_policy_settings(),
         "federation_policy_ui": federation_router.federation_policy_admin_ui(),
         "public_url_meta": analyze_public_url(),
+        "site_public_url": db.get_site_public_url() or resolve_public_site_url(),
+        "site_settings": get_operator_site_settings(),
         "easter_egg": _current_easter_egg_payload(),
     }
 
@@ -741,6 +762,78 @@ async def server_admin_put_channel_retention(body: ChannelRetentionBody, request
         "ok": True,
         "channel_retention": settings,
         "local_policy": True,
+    }
+
+
+@router.put("/api/server-admin/public-url")
+async def server_admin_put_public_url(body: PublicSiteUrlBody, request: Request):
+    disabled = _require_enabled()
+    if disabled:
+        return disabled
+
+    _user, auth = await _require_frogtalk_admin(request)
+    if auth:
+        return auth
+
+    raw = (body.public_url or "").strip()
+    if not raw:
+        db.set_site_public_url("")
+        url_meta = analyze_public_url()
+        return {
+            "ok": True,
+            "site_public_url": resolve_public_site_url(request=request),
+            "public_url_meta": url_meta,
+            "cleared": True,
+        }
+
+    norm = normalize_public_url(raw)
+    if not norm:
+        return JSONResponse(
+            status_code=400,
+            content={"error": "Invalid URL — use https://chat.domain.com (no path)"},
+        )
+
+    saved = db.set_site_public_url(norm)
+    url_meta = analyze_public_url(saved)
+    notes: list[str] = []
+    if url_meta.get("is_http_only_clearnet"):
+        notes.append("HTTP clearnet URLs work for share links but federation peers may prefer HTTPS.")
+    if url_meta.get("is_ip_host"):
+        notes.append(
+            "Raw-IP URLs expose your server address. Use a domain with HTTPS for production."
+        )
+
+    return {
+        "ok": True,
+        "site_public_url": saved,
+        "public_url_meta": url_meta,
+        "policy_notes": notes,
+    }
+
+
+@router.put("/api/server-admin/site-settings")
+async def server_admin_put_site_settings(body: OperatorSiteSettingsBody, request: Request):
+    disabled = _require_enabled()
+    if disabled:
+        return disabled
+
+    _user, auth = await _require_frogtalk_admin(request)
+    if auth:
+        return auth
+
+    result = set_operator_site_settings(
+        display_name=body.display_name,
+        security_email=body.security_email,
+        privacy_email=body.privacy_email,
+        support_email=body.support_email,
+        vapid_email=body.vapid_email,
+    )
+    if not result.get("ok"):
+        return JSONResponse(status_code=400, content=result)
+
+    return {
+        "ok": True,
+        "site_settings": result.get("site_settings") or get_operator_site_settings(),
     }
 
 

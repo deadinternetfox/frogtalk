@@ -381,7 +381,8 @@ function _dmScrollIfNearBottom() {
 function _parseDMFrogSocialUrl(url) {
   try {
     const parsed = new URL(_normalizeUrl(url));
-    const hostOk = (parsed.hostname === 'frogtalk.xyz' || parsed.hostname === 'frogtalk.app' || parsed.hostname === 'localhost');
+    const hostOk = (typeof ftIsFrogHost === 'function' ? ftIsFrogHost(parsed.hostname) : false)
+      || parsed.hostname === 'localhost';
     if (!hostOk) return null;
     const path = parsed.pathname || '/';
     const profilePath = path.match(/^\/u\/([A-Za-z0-9_]{1,32})\/?$/i);
@@ -3663,11 +3664,16 @@ function renderDMMessage (m) {
     contentHtml = contentHtml.replace(/\x00URL(\d+)\x00/g, (_m, i) => {
       const url = _urlSlots[+i];
       // FrogTalk channel-invite URLs → reuse the same loader as channels.
-      // Match host: frogtalk.xyz, frogtalk.app, or localhost; accept both
-      // legacy /invite/<code> and the short /i/<code-or-vanity> form.
-      const inviteMatch = url.match(/^https?:\/\/(?:frogtalk\.(?:xyz|app)|localhost(?::\d+)?)\/(?:invite|i)\/([A-Za-z0-9_-]{2,32})\b/i);
-      if (inviteMatch) {
-        const code = inviteMatch[1];
+      let inviteCode = '';
+      try {
+        if (typeof ftIsInviteUrl === 'function' && ftIsInviteUrl(url)) {
+          const parsed = new URL(url);
+          const m = (parsed.pathname || '').match(/^\/(?:invite|i)\/([A-Za-z0-9_-]{2,32})\b/i);
+          if (m) inviteCode = m[1];
+        }
+      } catch {}
+      if (inviteCode) {
+        const code = inviteCode;
         return `<span class="invite-card-placeholder" data-invite-code="${esc(code)}">` +
           `<span class="invite-card-loading">🐸 Loading invite…</span></span>`;
       }

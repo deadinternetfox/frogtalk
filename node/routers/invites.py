@@ -12,6 +12,12 @@ from slowapi import Limiter
 
 import database as db
 from deps import get_current_user, client_ip
+from public_url_policy import (
+    public_invite_url,
+    public_og_image_url,
+    public_static_url,
+    resolve_public_site_url,
+)
 from routers.rooms import (
     request_private_room_rekey,
     _broadcast_room_member_joined,
@@ -197,7 +203,7 @@ async def create_invite(
     if db.create_invite(room["id"], current_user["id"], code, body.max_uses, body.expires_hours):
         return {
             "code": code,
-            "url": f"https://frogtalk.xyz/i/{code}",
+            "url": public_invite_url(code, request=request),
             "max_uses": body.max_uses,
             "expires_hours": body.expires_hours
         }
@@ -249,6 +255,7 @@ async def vanity_check(slug: str = "", room: str = "", current_user: dict = Depe
 
 @router.put("/channels/{room_name}/vanity")
 async def set_channel_vanity(
+    request: Request,
     room_name: str,
     body: SetVanityRequest,
     current_user: dict = Depends(get_current_user),
@@ -293,12 +300,12 @@ async def set_channel_vanity(
     return {
         "ok": True,
         "vanity": normalized,
-        "url": f"https://frogtalk.xyz/i/{normalized}",
+        "url": public_invite_url(normalized, request=request),
     }
 
 
 @router.get("/channels/{room_name}")
-async def list_channel_invites(room_name: str, current_user: dict = Depends(get_current_user)):
+async def list_channel_invites(request: Request, room_name: str, current_user: dict = Depends(get_current_user)):
     """List all invites for a channel (owner/mods only)."""
     room = db.get_room_by_name(room_name)
     if not room:
@@ -310,10 +317,17 @@ async def list_channel_invites(room_name: str, current_user: dict = Depends(get_
         return JSONResponse(status_code=403, content={"error": "Not authorized"})
     
     invites = db.get_channel_invites(room["id"], include_redemptions=True)
+    for inv in invites:
+        code = str(inv.get("code") or "").strip()
+        if code:
+            inv["url"] = public_invite_url(code, request=request)
     room_type = (room.get("type") or "public").lower()
+    vanity = room.get("vanity") if room_type != "private" else None
+    vanity_url = public_invite_url(vanity, request=request) if vanity else None
     return {
         "invites": invites,
-        "vanity": room.get("vanity") if room_type != "private" else None,
+        "vanity": vanity,
+        "vanity_url": vanity_url,
         "room_type": room_type,
         "who_can_invite": room.get("who_can_invite", "everyone"),
         "can_create_invite": _user_can_create_invite(room, current_user),
@@ -496,7 +510,7 @@ async def join_via_invite(code: str, current_user: dict = Depends(get_current_us
 
 # Landing page for invite links (served as HTML for unauthenticated users)
 @router.get("/{code}/landing", response_class=HTMLResponse)
-async def invite_landing_page(code: str):
+async def invite_landing_page(request: Request, code: str):
     """Show invite landing page with login/join options.
 
     Accepts either a real invite code (looked up in channel_invites) or a
@@ -579,18 +593,18 @@ a:hover{background:linear-gradient(180deg,#6cd870 0%,#56bd5a 55%,#479e4d 100%)}
         # short-links the og endpoint won't find a matching code, so fall back
         # to the branded image.
         if raw_icon.startswith('/'):
-            og_image = f'https://frogtalk.xyz{raw_icon}'
+            og_image = public_static_url(raw_icon, request=request)
         elif raw_icon.startswith(('http://', 'https://')):
             og_image = raw_icon
         elif invite.get('_is_vanity'):
-            og_image = 'https://frogtalk.xyz/static/icons/og-image.png'
+            og_image = public_static_url('/static/icons/og-image.png', request=request)
         else:
-            og_image = f'https://frogtalk.xyz/og/invite/{code}.img'
+            og_image = public_og_image_url('invite', code, request=request)
     else:
         icon_html = f'<div class="icon">{_html_mod.escape(raw_icon)}</div>'
         # For emoji icons, fall back to the app's branded OG image so the
         # Telegram/Discord preview still shows the FrogTalk logo + name.
-        og_image = 'https://frogtalk.xyz/static/icons/og-image.png'
+        og_image = public_static_url('/static/icons/og-image.png', request=request)
 
     room_name_safe = _html_mod.escape(invite['room_name'])
     room_desc_safe = _html_mod.escape(invite.get('room_desc') or 'A FrogTalk channel')
@@ -609,7 +623,7 @@ a:hover{background:linear-gradient(180deg,#6cd870 0%,#56bd5a 55%,#479e4d 100%)}
         f"{raw_bio}"
     )
     og_desc_safe = _html_mod.escape(og_desc_full[:200])
-    canonical = f"https://frogtalk.xyz/i/{code}"
+    canonical = public_invite_url(code, request=request)
 
     html = f"""<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8">
