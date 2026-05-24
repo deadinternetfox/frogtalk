@@ -2475,11 +2475,13 @@ function renderDMChannels () {
     const isMissedCall = ch.last_msg_meta?.kind === 'missed';
     const isCallLog = ch.last_msg_meta != null;
     const previewIcon = isMissedCall ? '<span class="dm-row-preview-icon" title="Missed call">📵</span>' : '';
-    const preview = ch.last_msg
-      ? (isMine && !isCallLog ? 'You: ' : '') + String(ch.last_msg).replace(/\s+/g, ' ').slice(0, 60)
-      : (typeof _formatDmPeerPresence === 'function'
-        ? _formatDmPeerPresence(ch.other_last_seen, ch.other_presence)
-        : (typeof _formatLastSeen === 'function' ? _formatLastSeen(ch.other_last_seen) : ''));
+    const preview = ch.dm_locked
+      ? '🔒 Locked'
+      : (ch.last_msg
+        ? (isMine && !isCallLog ? 'You: ' : '') + String(ch.last_msg).replace(/\s+/g, ' ').slice(0, 60)
+        : (typeof _formatDmPeerPresence === 'function'
+          ? _formatDmPeerPresence(ch.other_last_seen, ch.other_presence)
+          : (typeof _formatLastSeen === 'function' ? _formatLastSeen(ch.other_last_seen) : '')));
     const previewHtml = preview
       ? `<div class="dm-row-preview ${isMissedCall ? 'missed' : ''}">${previewIcon}<span>${esc(preview)}</span></div>`
       : '';
@@ -2587,6 +2589,10 @@ async function openDMChannel (id, nickname, avatar) {
   if (typeof closeMobileSidebar === 'function') closeMobileSidebar();
 
   const existing = _dmChannels.find(c => c.id === id) || {};
+  const _prevActiveId = _activeDM?.id;
+  if (_prevActiveId && _prevActiveId !== id && window.DmLock) {
+    void DmLock.lockChannelView(_prevActiveId);
+  }
   _activeDM    = {
     id, nickname, avatar,
     user_id: existing.with_user_id || existing.other_id || null,
@@ -2597,6 +2603,9 @@ async function openDMChannel (id, nickname, avatar) {
     other_presence: existing.other_presence || '',
     other_show_read_receipts: existing.other_show_read_receipts !== false,
     forwarding_disabled: !!existing.forwarding_disabled,
+    my_pin_lock: !!existing.my_pin_lock,
+    my_pin_lock_timeout: Number(existing.my_pin_lock_timeout) || 0,
+    dm_locked: !!existing.dm_locked,
     peer_home_server_id: existing.peer_home_server_id || '',
     global_user_id: existing.global_user_id || '',
   };
@@ -2662,6 +2671,17 @@ async function openDMChannel (id, nickname, avatar) {
   // opens immediately.
   const _openId = id;
   await _ensureActiveDMPeerUserId();
+
+  if (window.DmLock && (existing.my_pin_lock || existing.dm_locked)) {
+    const unlocked = await DmLock.gate(id, nickname);
+    if (!unlocked) {
+      DmLock.renderLockOverlay(nickname);
+      _dmMessagesLoading = false;
+      _updateDmComposeState();
+      return;
+    }
+  }
+
   const _meta = _dmHistoryMeta.get(id);
   const _cacheFreshMs = 15000;
   const _cacheIsFresh = !!(_meta && (Date.now() - _meta.fetchedAt) < _cacheFreshMs);
@@ -2979,6 +2999,17 @@ async function loadDMMessages (pageOffset = 0, options = {}) {
   }
   if (!r || !r.ok) {
     if (!_isReqCurrent()) return;
+    if (r && r.status === 423) {
+      const j = await r.json().catch(() => ({}));
+      if (j.dm_lock_required && window.DmLock) {
+        const ch = _dmChannels.find(c => c.id === _reqRoomId);
+        if (ch) ch.dm_locked = true;
+        const ok = await DmLock.gate(_reqRoomId, _activeDM?.nickname);
+        if (ok) return loadDMMessages(pageOffset, options);
+        DmLock.renderLockOverlay(_activeDM?.nickname);
+        return;
+      }
+    }
     // Delta fetch got a bad response — retry once as a full load.
     if (isDelta && uiRetry < 1) {
       return loadDMMessages(0, { ...options, afterId: 0, uiRetry: uiRetry + 1 });
@@ -5489,6 +5520,29 @@ function showDisappearSettings() {
           </label>
         </div>
         <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border-color,#2a2a2a)">
+          <div style="font-size:12px;color:var(--text-muted,#888);margin:-4px 0 8px;text-transform:uppercase;letter-spacing:.5px;font-weight:600">🔒 Lock this chat</div>
+          <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;margin-bottom:10px">
+            <input type="checkbox" id="dm-pin-lock-enabled" style="width:18px;height:18px;margin-top:2px;accent-color:var(--accent-color,#4caf50);cursor:pointer">
+            <div>
+              <div style="font-weight:600;font-size:14px;color:var(--text-color,#e0e0e0)">Require PIN or password to open</div>
+              <div style="font-size:12px;color:var(--text-muted,#888)">Only you — locks this thread on your devices</div>
+            </div>
+          </label>
+          <label style="display:block;font-size:12px;color:var(--text-muted,#888);margin-bottom:6px">Re-lock after</label>
+          <select class="modal-input" id="dm-pin-lock-timeout" style="color:#e0e0e0;background:#0d0d0d">
+            <option value="0">Every time I open it</option>
+            <option value="60">1 minute</option>
+            <option value="300">5 minutes</option>
+            <option value="900">15 minutes</option>
+            <option value="3600">1 hour</option>
+            <option value="-1">Until I leave the app</option>
+          </select>
+          <p id="dm-pin-lock-hint" style="font-size:12px;color:var(--text-muted,#888);margin:10px 0 0;line-height:1.45;display:none">
+            <button type="button" id="dm-pin-lock-set-pin" style="background:none;border:none;color:var(--accent-color,#4caf50);cursor:pointer;padding:0;font-size:12px">Set an App PIN</button>
+            in Privacy settings for faster unlock.
+          </p>
+        </div>
+        <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border-color,#2a2a2a)">
           <div style="font-size:12px;color:var(--text-muted,#888);margin:-4px 0 8px;text-transform:uppercase;letter-spacing:.5px;font-weight:600">🗝️ Encryption</div>
           <p style="font-size:12px;color:var(--text-muted,#888);line-height:1.45;margin-bottom:10px">
             View, export, and import keys for this chat and all DMs. Protected by your App PIN (if set), otherwise your account password.
@@ -5510,6 +5564,23 @@ function showDisappearSettings() {
   document.getElementById('disappear-select').value = _dmDisappearTimer.toString();
   const fwdCb = document.getElementById('dm-forwarding-disabled');
   if (fwdCb) fwdCb.checked = !!(_activeDM && _activeDM.forwarding_disabled);
+  void (async () => {
+    if (!window.DmLock || !_activeDM?.id) return;
+    try {
+      const prefs = await DmLock.loadPrefs(_activeDM.id);
+      const lockCb = document.getElementById('dm-pin-lock-enabled');
+      const lockSel = document.getElementById('dm-pin-lock-timeout');
+      const hint = document.getElementById('dm-pin-lock-hint');
+      if (lockCb) lockCb.checked = !!prefs.enabled;
+      if (lockSel) lockSel.value = String(prefs.timeout_sec ?? 0);
+      if (hint) hint.style.display = prefs.has_pin ? 'none' : '';
+      const setPin = document.getElementById('dm-pin-lock-set-pin');
+      if (setPin && !setPin._wired) {
+        setPin._wired = true;
+        setPin.onclick = () => { try { Pin.openSettings(); } catch {} };
+      }
+    } catch {}
+  })();
   const attrs = _dmKeyTriggerAttrs();
   ['dm-privacy-open-keymgr'].forEach((id) => {
     const btn = document.getElementById(id);
@@ -5530,6 +5601,8 @@ async function saveDisappearTimer() {
   if (!_activeDM) return;
   
   const seconds = parseInt(document.getElementById('disappear-select').value) || 0;
+  const lockEnabled = !!document.getElementById('dm-pin-lock-enabled')?.checked;
+  const lockTimeout = parseInt(document.getElementById('dm-pin-lock-timeout')?.value, 10) || 0;
   
   try {
     const r = await apiFetch(`/api/dms/${_activeDM.id}/disappear`, 'POST', { seconds });
@@ -5538,10 +5611,22 @@ async function saveDisappearTimer() {
       toast(data.error || 'Failed to set timer', 'error');
       return;
     }
+    if (window.DmLock) {
+      try {
+        await DmLock.savePrefs(_activeDM.id, lockEnabled, lockTimeout);
+      } catch (e) {
+        toast(e.message || 'Failed to save lock settings', 'error');
+        return;
+      }
+    }
     
     _dmDisappearTimer = seconds;
+    _activeDM.my_pin_lock = lockEnabled;
+    _activeDM.my_pin_lock_timeout = lockTimeout;
+    _activeDM.dm_locked = lockEnabled;
     _purgeExpiredDMMessages();
     updateDisappearIndicator();
+    if (typeof renderDMChannels === 'function') renderDMChannels();
     closeModal('modal-disappear');
     
     if (seconds > 0) {

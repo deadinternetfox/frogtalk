@@ -33,6 +33,7 @@ from deps import (
     invalidate_request_session_cache,
     pin_mark_unlocked,
     pin_clear_for_token,
+    dm_lock_clear_for_token,
     admin_pin_mark_unlocked,
     admin_pin_clear_for_token,
     admin_area_access_status,
@@ -398,6 +399,14 @@ def _sanitize_sync_dm_channel_settings(raw: dict) -> dict:
         "wiped_at": str(raw.get("wiped_at") or "").strip()[:64],
         "last_wipe_id": str(raw.get("last_wipe_id") or "").strip()[:64],
     }
+    if "pin_lock_enabled" in raw or "my_pin_lock" in raw:
+        out["pin_lock_enabled"] = 1 if raw.get("pin_lock_enabled") in (True, 1, "1") or raw.get("my_pin_lock") in (True, 1, "1") else 0
+    if "pin_lock_timeout_sec" in raw or "my_pin_lock_timeout" in raw:
+        tout = int(raw.get("pin_lock_timeout_sec") if raw.get("pin_lock_timeout_sec") is not None else raw.get("my_pin_lock_timeout") or 0)
+        if tout in (0, 60, 300, 900, 3600, -1):
+            out["pin_lock_timeout_sec"] = tout
+        else:
+            out["pin_lock_timeout_sec"] = 0
     return out
 
 
@@ -2284,6 +2293,8 @@ def _export_travel_push_dm_peers(uid: int, source_server_id: str) -> list[dict]:
             "hidden": ch.get("hidden"),
             "wiped_at": ch.get("wiped_at"),
             "last_wipe_id": ch.get("last_wipe_id"),
+            "my_pin_lock": ch.get("my_pin_lock"),
+            "my_pin_lock_timeout": ch.get("my_pin_lock_timeout"),
         })
         dm_peers.append({**stub, **dm_settings})
         if len(dm_peers) >= _SYNC_TRAVEL_PUSH_DM_LIMIT:
@@ -3409,6 +3420,8 @@ def _build_sync_export_for_user(
             "hidden": ch.get("hidden"),
             "wiped_at": ch.get("wiped_at"),
             "last_wipe_id": ch.get("last_wipe_id"),
+            "my_pin_lock": ch.get("my_pin_lock"),
+            "my_pin_lock_timeout": ch.get("my_pin_lock_timeout"),
         })
         dm_peers.append({
             "nickname": nick,
@@ -4239,7 +4252,8 @@ def _apply_sync_export_to_user(
                 k in item
                 for k in (
                     "disappear_after", "forwarding_disabled", "my_last_read", "hidden",
-                    "wiped_at", "last_wipe_id",
+                    "wiped_at", "last_wipe_id", "pin_lock_enabled", "my_pin_lock",
+                    "pin_lock_timeout_sec", "my_pin_lock_timeout",
                 )
             ):
                 dm_prefs = _sanitize_sync_dm_channel_settings(item)
@@ -4253,6 +4267,8 @@ def _apply_sync_export_to_user(
                         hidden=bool(dm_prefs.get("hidden")) if "hidden" in item else None,
                         wiped_at=dm_prefs.get("wiped_at") or None,
                         last_wipe_id=dm_prefs.get("last_wipe_id") or None,
+                        pin_lock_enabled=dm_prefs.get("pin_lock_enabled") if "pin_lock_enabled" in dm_prefs else None,
+                        pin_lock_timeout_sec=dm_prefs.get("pin_lock_timeout_sec") if "pin_lock_timeout_sec" in dm_prefs else None,
                     )
                 except Exception:
                     pass
@@ -7866,6 +7882,7 @@ async def logout(
         try:
             pin_clear_for_token(token)
             admin_pin_clear_for_token(token)
+            dm_lock_clear_for_token(token)
         except Exception:
             pass
     try:
@@ -8354,6 +8371,7 @@ async def pin_disable(request: Request, body: PinDisableRequest,
     try:
         pin_clear_for_token(token)
         admin_pin_clear_for_token(token)
+        dm_lock_clear_for_token(token)
     except Exception:
         pass
     return res
@@ -8606,6 +8624,7 @@ async def delete_account(body: DeleteAccountRequest, current_user: dict = Depend
         invalidate_request_session_cache(request)
         pin_clear_for_token(session_token_from_request(request))
         admin_pin_clear_for_token(session_token_from_request(request))
+        dm_lock_clear_for_token(session_token_from_request(request))
     except Exception:
         pass
 

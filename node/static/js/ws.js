@@ -649,6 +649,10 @@ const WS = (() => {
         if (typeof handleWSDMDisappearUpdated === 'function') handleWSDMDisappearUpdated(data);
         break;
       }
+      case 'dm_lock_prefs_updated': {
+        if (window.DmLock && typeof DmLock.handleWsLockPrefs === 'function') DmLock.handleWsLockPrefs(data);
+        break;
+      }
       case 'dm_messages_wiped': {
         if (typeof handleWSDMMessagesWiped === 'function') handleWSDMMessagesWiped(data);
         break;

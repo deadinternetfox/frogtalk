@@ -251,6 +251,41 @@ def enqueue_dm_message_created(
     )
 
 
+def enqueue_dm_lock_prefs_updated(
+    actor: dict,
+    peer: dict,
+    *,
+    channel_id: int = 0,
+    enabled: bool = False,
+    timeout_sec: int = 0,
+) -> dict:
+    """Enqueue a signed ``dm.lock_prefs.updated`` for peer nodes."""
+    import federation_dms as fed_dm
+
+    targets = fed_dm.federation_mirror_targets(actor, peer)
+    if not targets:
+        return {"ok": False, "error": "no_dm_route"}
+    actor_gid = str(actor.get("global_user_id") or "").strip()
+    peer_gid = str(peer.get("global_user_id") or "").strip()
+    if not actor_gid or not peer_gid:
+        return {"ok": False, "error": "no_global_user_id"}
+    return enqueue_server_event(
+        "dm.lock_prefs.updated",
+        {
+            "channel_id": int(channel_id or 0),
+            "actor_global_user_id": actor_gid,
+            "peer_global_user_id": peer_gid,
+            "sender_global_user_id": actor_gid,
+            "actor_nickname": str(actor.get("nickname") or "").strip(),
+            "peer_nickname": str(peer.get("nickname") or "").strip(),
+            "sender_nickname": str(actor.get("nickname") or "").strip(),
+            "pin_lock_enabled": 1 if enabled else 0,
+            "pin_lock_timeout_sec": int(timeout_sec or 0),
+        },
+        target_server_ids=targets,
+    )
+
+
 def enqueue_dm_disappear_updated(
     actor: dict,
     peer: dict,
@@ -5925,6 +5960,58 @@ async def _handle_dm_disappear_updated(event: dict) -> None:
         _log.debug("federation: disappear notice/ws failed", exc_info=True)
 
 
+async def _handle_dm_lock_prefs_updated(event: dict) -> None:
+    payload = event.get("payload") or {}
+    actor_nick = _fed_nickname(payload.get("actor_nickname"))
+    peer_nick = _fed_nickname(payload.get("peer_nickname"))
+    enabled = bool(int(payload.get("pin_lock_enabled") or 0))
+    timeout = int(payload.get("pin_lock_timeout_sec") or 0)
+    if timeout not in (0, 60, 300, 900, 3600, -1):
+        timeout = 0
+    origin = str(event.get("origin_server_id") or "").strip()
+    actor_gid = str(payload.get("actor_global_user_id") or "").strip()
+    peer_gid = str(payload.get("peer_global_user_id") or "").strip()
+    if not actor_gid or not peer_gid or actor_gid == peer_gid:
+        return
+    if actor_gid and actor_nick:
+        db.upsert_federation_user_profile(actor_gid, actor_nick, origin_server_id=origin)
+    if peer_gid and peer_nick:
+        db.upsert_federation_user_profile(peer_gid, peer_nick, origin_server_id=origin)
+    actor = _fed_resolve_user_for_dm(actor_nick, actor_gid or None, origin_server_id=origin)
+    peer = _fed_resolve_user_for_dm(peer_nick, peer_gid or None, origin_server_id=origin)
+    if not actor or not peer:
+        _log.info(
+            "federation: drop dm.lock_prefs.updated — local user missing "
+            "(actor=%s peer=%s origin=%s)",
+            actor_nick,
+            peer_nick,
+            origin,
+        )
+        return
+    actor_ids = {str(actor.get("global_user_id") or "").strip(), str(peer.get("global_user_id") or "").strip()}
+    if actor_gid not in actor_ids:
+        _log.info("federation: drop dm.lock_prefs.updated — actor not in pair")
+        return
+    channel_id = db.get_or_create_dm(actor["id"], peer["id"])
+    if not db.set_my_dm_pin_lock(
+        channel_id,
+        actor["id"],
+        enabled=enabled,
+        timeout_sec=timeout,
+    ):
+        return
+    try:
+        from routers import dms as dms_mod
+        await dms_mod._notify_dm_lock_prefs_updated(
+            channel_id,
+            actor=actor,
+            enabled=enabled,
+            timeout_sec=timeout,
+        )
+    except Exception:
+        _log.debug("federation: dm lock prefs ws failed", exc_info=True)
+
+
 async def _handle_dm_wipe_all(event: dict) -> None:
     """Apply a federated bilateral DM wipe."""
     payload = event.get("payload") or {}
@@ -5983,6 +6070,9 @@ async def _handle_dm_event(event: dict) -> None:
     event_type = str(event.get("event_type") or "")
     if event_type == "dm.disappear.updated":
         await _handle_dm_disappear_updated(event)
+        return
+    if event_type == "dm.lock_prefs.updated":
+        await _handle_dm_lock_prefs_updated(event)
         return
     if event_type == "dm.wipe.all":
         await _handle_dm_wipe_all(event)

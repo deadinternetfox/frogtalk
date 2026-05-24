@@ -12,7 +12,16 @@ from slowapi import Limiter
 from typing import Optional
 
 import database as db
-from deps import get_current_user, client_ip
+from deps import (
+    client_ip,
+    dm_lock_clear_channel,
+    dm_lock_http_detail,
+    dm_lock_mark_unlocked,
+    dm_lock_session_is_locked,
+    dm_lock_set_active_view,
+    get_current_user,
+    session_token_from_request,
+)
 from dm_system_messages import (
     channel_has_recent_dmsys,
     chat_wiped_content,
@@ -43,6 +52,7 @@ ALLOWED_MEDIA = (
 )
 ENCRYPTED_MEDIA_PREFIX = 'ftenc:'
 _DM_DISAPPEAR_ALLOWED = frozenset({0, 3600, 86400, 604800, 2592000})
+_DM_PIN_LOCK_TIMEOUT_ALLOWED = frozenset({0, 60, 300, 900, 3600, -1})
 
 
 async def _dm_channel_members(channel_id: int) -> tuple[int, int] | None:
@@ -205,6 +215,44 @@ async def _notify_dm_disappear_updated(
             await manager.send_to_user(uid, ws_payload)
 
 
+def _dm_lock_block_response(current_user: dict, channel_id: int, token: str):
+    if dm_lock_session_is_locked(int(channel_id), int(current_user["id"]), token):
+        return JSONResponse(status_code=423, content=dm_lock_http_detail(current_user))
+    return None
+
+
+async def _notify_dm_lock_prefs_updated(
+    channel_id: int,
+    *,
+    actor: dict,
+    enabled: bool,
+    timeout_sec: int,
+) -> None:
+    members = await _dm_channel_members(channel_id)
+    if not members:
+        return
+    ws_payload = {
+        "type": "dm_lock_prefs_updated",
+        "channel_id": int(channel_id),
+        "actor_id": int(actor.get("id") or 0),
+        "pin_lock_enabled": 1 if enabled else 0,
+        "pin_lock_timeout_sec": int(timeout_sec or 0),
+    }
+    for uid in members:
+        if uid:
+            await manager.send_to_user(uid, ws_payload)
+
+
+class DMLockPrefsBody(BaseModel):
+    enabled: bool = False
+    timeout_sec: int = 0
+
+
+class DMLockUnlockBody(BaseModel):
+    pin: Optional[str] = Field(default=None, max_length=16)
+    password: Optional[str] = Field(default=None, max_length=128)
+
+
 async def _notify_dm_messages_wiped(
     channel_id: int,
     *,
@@ -330,8 +378,9 @@ async def open_dm(request: Request, nickname: str, current_user: dict = Depends(
 
 
 @router.get("")
-async def list_dms(current_user: dict = Depends(get_current_user)):
+async def list_dms(request: Request, current_user: dict = Depends(get_current_user)):
     viewer_id = current_user["id"]
+    token = session_token_from_request(request)
 
     def _build():
         channels = db.get_dm_channels(viewer_id)
@@ -355,6 +404,17 @@ async def list_dms(current_user: dict = Depends(get_current_user)):
                     ch["peer_home_server_id"] = home_sid
             except Exception:
                 pass
+            if ch.get("my_pin_lock"):
+                ch["dm_locked"] = dm_lock_session_is_locked(
+                    int(ch["id"]), viewer_id, token,
+                )
+            else:
+                ch["dm_locked"] = False
+            if ch.get("dm_locked"):
+                ch["last_msg"] = None
+                ch["last_msg_at"] = None
+                ch["last_msg_id"] = 0
+                ch["unread"] = 0
         return channels
 
     return {"channels": await run_in_threadpool(_build)}
@@ -399,9 +459,13 @@ async def mark_read(channel_id: int, body: dict = None,
 
 
 @router.get("/{channel_id}/messages")
-async def get_messages(channel_id: int, before: Optional[int] = None,
+async def get_messages(request: Request, channel_id: int, before: Optional[int] = None,
                        after: Optional[int] = None, limit: int = 50,
                        current_user: dict = Depends(get_current_user)):
+    token = session_token_from_request(request)
+    blocked = _dm_lock_block_response(current_user, channel_id, token)
+    if blocked:
+        return blocked
     limit = min(limit, 100)
     viewer_id = current_user["id"]
 
@@ -433,9 +497,13 @@ async def get_messages(channel_id: int, before: Optional[int] = None,
 
 
 @router.get("/{channel_id}/messages/{msg_id}/media")
-async def get_dm_media(channel_id: int, msg_id: int,
+async def get_dm_media(request: Request, channel_id: int, msg_id: int,
                        current_user: dict = Depends(get_current_user)):
     """Fetch media_data for a single DM message (lazy load)."""
+    token = session_token_from_request(request)
+    blocked = _dm_lock_block_response(current_user, channel_id, token)
+    if blocked:
+        return blocked
     # Verify membership (cheap PK lookup)
     if not db.is_dm_member(channel_id, current_user["id"]):
         return JSONResponse(status_code=403, content={"error": "Not a member of this channel"})
@@ -466,6 +534,10 @@ async def get_dm_media(channel_id: int, msg_id: int,
 @limiter.limit("120/minute")
 async def send_message(request: Request, channel_id: int, body: DMMessageBody,
                        current_user: dict = Depends(get_current_user)):
+    token = session_token_from_request(request)
+    blocked = _dm_lock_block_response(current_user, channel_id, token)
+    if blocked:
+        return blocked
     if not body.content and not body.media_data:
         return JSONResponse(status_code=400, content={"error": "Empty message"})
     if body.media_data:
@@ -1047,6 +1119,125 @@ async def post_history_sync_notice(
 
 
 # ─── Hide DM channel ───────────────────────────────────────────────────────────
+
+# ─── DM PIN lock (per-user, per-thread) ───────────────────────────────────────
+
+@router.get("/{channel_id}/lock-prefs")
+async def get_dm_lock_prefs(channel_id: int, current_user: dict = Depends(get_current_user)):
+    if not db.is_dm_member(channel_id, current_user["id"]):
+        return JSONResponse(status_code=403, content={"error": "Not a member of this channel"})
+    enabled, timeout = db.get_my_dm_pin_lock(channel_id, current_user["id"])
+    return {
+        "enabled": enabled,
+        "timeout_sec": timeout,
+        "has_pin": bool(int(current_user.get("has_pin") or 0)),
+    }
+
+
+@router.post("/{channel_id}/lock-prefs")
+@limiter.limit("30/minute")
+async def set_dm_lock_prefs(
+    request: Request,
+    channel_id: int,
+    body: DMLockPrefsBody,
+    current_user: dict = Depends(get_current_user),
+):
+    if not db.is_dm_member(channel_id, current_user["id"]):
+        return JSONResponse(status_code=403, content={"error": "Not a member of this channel"})
+    tout = int(body.timeout_sec or 0)
+    if tout not in _DM_PIN_LOCK_TIMEOUT_ALLOWED:
+        return JSONResponse(status_code=400, content={"error": "Invalid lock timeout"})
+    ok = db.set_my_dm_pin_lock(
+        channel_id,
+        current_user["id"],
+        enabled=bool(body.enabled),
+        timeout_sec=tout,
+    )
+    if not ok:
+        return JSONResponse(status_code=403, content={"error": "Cannot update lock settings"})
+    token = session_token_from_request(request)
+    if not body.enabled:
+        dm_lock_clear_channel(token, channel_id)
+    peer_id = _dm_peer_id(channel_id, current_user["id"])
+    peer = db.get_user_by_id(peer_id) or {} if peer_id else {}
+    await _notify_dm_lock_prefs_updated(
+        channel_id,
+        actor=current_user,
+        enabled=bool(body.enabled),
+        timeout_sec=tout,
+    )
+    try:
+        from routers import federation as federation_mod
+        if peer_id:
+            federation_mod.enqueue_dm_lock_prefs_updated(
+                current_user,
+                peer,
+                channel_id=channel_id,
+                enabled=bool(body.enabled),
+                timeout_sec=tout,
+            )
+    except Exception:
+        _log.exception("federation: failed to enqueue DM lock prefs")
+    try:
+        from routers.auth import schedule_travel_push_to_home
+        schedule_travel_push_to_home(int(current_user["id"]), force=True)
+    except Exception:
+        pass
+    return {"ok": True, "enabled": bool(body.enabled), "timeout_sec": tout}
+
+
+@router.post("/{channel_id}/unlock")
+@limiter.limit("30/minute")
+async def unlock_dm_channel(
+    request: Request,
+    channel_id: int,
+    body: DMLockUnlockBody,
+    current_user: dict = Depends(get_current_user),
+):
+    if not db.is_dm_member(channel_id, current_user["id"]):
+        return JSONResponse(status_code=403, content={"error": "Not a member of this channel"})
+    enabled, timeout = db.get_my_dm_pin_lock(channel_id, current_user["id"])
+    if not enabled:
+        return {"ok": True, "unlocked": True}
+    has_pin = bool(int(current_user.get("has_pin") or 0))
+    if has_pin:
+        pin = str(body.pin or "").strip()
+        if not pin:
+            return JSONResponse(status_code=400, content={"error": "PIN required"})
+        ok, reason, remaining = await run_in_threadpool(
+            db.verify_user_pin, current_user["id"], pin,
+        )
+        if not ok:
+            code = 423 if remaining else 401
+            return JSONResponse(
+                status_code=code,
+                content={"error": reason or "Incorrect PIN", "pin_lock_remaining_sec": remaining},
+            )
+    else:
+        pw = str(body.password or "")
+        if not pw or not await run_in_threadpool(
+            db.verify_user, current_user["nickname"], pw,
+        ):
+            return JSONResponse(status_code=401, content={"error": "Incorrect password"})
+    token = session_token_from_request(request)
+    dm_lock_mark_unlocked(token, channel_id, timeout_sec=timeout)
+    dm_lock_set_active_view(token, channel_id, True)
+    return {"ok": True, "unlocked": True}
+
+
+@router.post("/{channel_id}/lock")
+async def lock_dm_channel_view(
+    request: Request,
+    channel_id: int,
+    current_user: dict = Depends(get_current_user),
+):
+    """Clear unlock grace for this DM (e.g. user switched away)."""
+    if not db.is_dm_member(channel_id, current_user["id"]):
+        return JSONResponse(status_code=403, content={"error": "Not a member of this channel"})
+    token = session_token_from_request(request)
+    dm_lock_clear_channel(token, channel_id)
+    return {"ok": True}
+
 
 @router.post("/{channel_id}/hide")
 async def hide_dm_channel(channel_id: int, current_user: dict = Depends(get_current_user)):

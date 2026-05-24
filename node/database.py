@@ -1901,6 +1901,14 @@ def _migrate():
             con.execute("ALTER TABLE dm_channels ADD COLUMN wiped_at TEXT DEFAULT ''")
         if "last_wipe_id" not in dm_cols:
             con.execute("ALTER TABLE dm_channels ADD COLUMN last_wipe_id TEXT DEFAULT ''")
+        if "pin_lock_a" not in dm_cols:
+            con.execute("ALTER TABLE dm_channels ADD COLUMN pin_lock_a INTEGER DEFAULT 0")
+        if "pin_lock_b" not in dm_cols:
+            con.execute("ALTER TABLE dm_channels ADD COLUMN pin_lock_b INTEGER DEFAULT 0")
+        if "pin_lock_timeout_a" not in dm_cols:
+            con.execute("ALTER TABLE dm_channels ADD COLUMN pin_lock_timeout_a INTEGER DEFAULT 0")
+        if "pin_lock_timeout_b" not in dm_cols:
+            con.execute("ALTER TABLE dm_channels ADD COLUMN pin_lock_timeout_b INTEGER DEFAULT 0")
         dm_msg_cols = {r["name"] for r in con.execute("PRAGMA table_info(dm_messages)").fetchall()}
         if "media_blur" not in dm_msg_cols:
             con.execute("ALTER TABLE dm_messages ADD COLUMN media_blur INTEGER DEFAULT 0")
@@ -6070,6 +6078,10 @@ def get_dm_channels_for_sync(user_id: int) -> List[Dict]:
                    COALESCE(dc.last_read_b, 0) AS last_read_b,
                    COALESCE(dc.wiped_at, '') AS wiped_at,
                    COALESCE(dc.last_wipe_id, '') AS last_wipe_id,
+                   COALESCE(dc.pin_lock_a, 0) AS pin_lock_a,
+                   COALESCE(dc.pin_lock_b, 0) AS pin_lock_b,
+                   COALESCE(dc.pin_lock_timeout_a, 0) AS pin_lock_timeout_a,
+                   COALESCE(dc.pin_lock_timeout_b, 0) AS pin_lock_timeout_b,
                    CASE WHEN dc.user_a=? THEN dc.user_b ELSE dc.user_a END AS other_id
             FROM dm_channels dc
             WHERE dc.user_a=? OR dc.user_b=?
@@ -6085,6 +6097,14 @@ def get_dm_channels_for_sync(user_id: int) -> List[Dict]:
             (is_a and int(d.get("hidden_by_a") or 0))
             or ((not is_a) and int(d.get("hidden_by_b") or 0))
         )
+        if is_a:
+            d["my_pin_lock"] = bool(int(d.get("pin_lock_a") or 0))
+            d["my_pin_lock_timeout"] = int(d.get("pin_lock_timeout_a") or 0)
+        else:
+            d["my_pin_lock"] = bool(int(d.get("pin_lock_b") or 0))
+            d["my_pin_lock_timeout"] = int(d.get("pin_lock_timeout_b") or 0)
+        for k in ("pin_lock_a", "pin_lock_b", "pin_lock_timeout_a", "pin_lock_timeout_b"):
+            d.pop(k, None)
         out.append(d)
     return out
 
@@ -6107,6 +6127,10 @@ def get_dm_channels(user_id: int) -> List[Dict]:
                    COALESCE(dc.last_read_a, 0) AS last_read_a,
                    COALESCE(dc.last_read_b, 0) AS last_read_b,
                    COALESCE(dc.forwarding_disabled, 0) AS forwarding_disabled,
+                   COALESCE(dc.pin_lock_a, 0) AS pin_lock_a,
+                   COALESCE(dc.pin_lock_b, 0) AS pin_lock_b,
+                   COALESCE(dc.pin_lock_timeout_a, 0) AS pin_lock_timeout_a,
+                   COALESCE(dc.pin_lock_timeout_b, 0) AS pin_lock_timeout_b,
                    u.id AS other_id, u.nickname AS other_nick,
                    u.global_user_id AS other_global_user_id,
                    u.avatar AS other_avatar, u.presence AS other_presence,
@@ -6142,9 +6166,13 @@ def get_dm_channels(user_id: int) -> List[Dict]:
         peer_read = d["last_read_b"] if is_a else d["last_read_a"]
         d["my_last_read"] = my_read
         d["peer_last_read"] = peer_read
+        d["my_pin_lock"] = bool(int(d["pin_lock_a"] if is_a else d["pin_lock_b"]) or 0)
+        d["my_pin_lock_timeout"] = int((d["pin_lock_timeout_a"] if is_a else d["pin_lock_timeout_b"]) or 0)
         # Hide internal fields
         d.pop("user_a", None); d.pop("user_b", None)
         d.pop("last_read_a", None); d.pop("last_read_b", None)
+        d.pop("pin_lock_a", None); d.pop("pin_lock_b", None)
+        d.pop("pin_lock_timeout_a", None); d.pop("pin_lock_timeout_b", None)
         result.append(d)
     return result
 
@@ -6841,6 +6869,7 @@ def get_dm_channel_wiped_at(channel_id: int) -> str:
 # ---------------------------------------------------------------------------
 
 _SYNC_DM_DISAPPEAR_ALLOWED = frozenset({0, 3600, 86400, 604800, 2592000})
+_DM_PIN_LOCK_TIMEOUT_ALLOWED = frozenset({0, 60, 300, 900, 3600, -1})
 
 
 def apply_sync_dm_channel_settings(
@@ -6853,6 +6882,8 @@ def apply_sync_dm_channel_settings(
     hidden: bool | None = None,
     wiped_at: str | None = None,
     last_wipe_id: str | None = None,
+    pin_lock_enabled: int | None = None,
+    pin_lock_timeout_sec: int | None = None,
 ) -> bool:
     """Apply per-channel DM prefs from account sync (member-gated)."""
     cid = int(channel_id or 0)
@@ -6879,6 +6910,21 @@ def apply_sync_dm_channel_settings(
                 "UPDATE dm_channels SET forwarding_disabled=? WHERE id=?",
                 (1 if int(forwarding_disabled) else 0, cid),
             )
+        if pin_lock_enabled is not None or pin_lock_timeout_sec is not None:
+            enabled = 1 if int(pin_lock_enabled or 0) else 0 if pin_lock_enabled is not None else None
+            tout = int(pin_lock_timeout_sec or 0) if pin_lock_timeout_sec is not None else None
+            if tout is not None and tout not in _DM_PIN_LOCK_TIMEOUT_ALLOWED:
+                tout = 0
+            if is_a:
+                if enabled is not None:
+                    con.execute("UPDATE dm_channels SET pin_lock_a=? WHERE id=?", (enabled, cid))
+                if tout is not None:
+                    con.execute("UPDATE dm_channels SET pin_lock_timeout_a=? WHERE id=?", (tout, cid))
+            else:
+                if enabled is not None:
+                    con.execute("UPDATE dm_channels SET pin_lock_b=? WHERE id=?", (enabled, cid))
+                if tout is not None:
+                    con.execute("UPDATE dm_channels SET pin_lock_timeout_b=? WHERE id=?", (tout, cid))
         if my_last_read is not None:
             up_to = max(0, int(my_last_read or 0))
             col = "last_read_a" if is_a else "last_read_b"
@@ -6937,6 +6983,72 @@ def get_dm_disappear_timer(channel_id: int) -> int:
             (channel_id,)
         ).fetchone()
     return row["disappear_after"] if row and row["disappear_after"] else 0
+
+
+def _dm_member_side_row(con, channel_id: int, user_id: int):
+    return con.execute(
+        """
+        SELECT user_a, user_b,
+               COALESCE(pin_lock_a, 0) AS pin_lock_a,
+               COALESCE(pin_lock_b, 0) AS pin_lock_b,
+               COALESCE(pin_lock_timeout_a, 0) AS pin_lock_timeout_a,
+               COALESCE(pin_lock_timeout_b, 0) AS pin_lock_timeout_b
+        FROM dm_channels WHERE id=? AND (user_a=? OR user_b=?)
+        """,
+        (int(channel_id), int(user_id), int(user_id)),
+    ).fetchone()
+
+
+def get_my_dm_pin_lock(channel_id: int, user_id: int) -> tuple[bool, int]:
+    """Return (enabled, timeout_sec) for this user's side of the DM."""
+    cid = int(channel_id or 0)
+    uid = int(user_id or 0)
+    if cid <= 0 or uid <= 0:
+        return False, 0
+    with _conn() as con:
+        row = _dm_member_side_row(con, cid, uid)
+    if not row:
+        return False, 0
+    is_a = int(row["user_a"]) == uid
+    enabled = bool(int(row["pin_lock_a"] if is_a else row["pin_lock_b"]) or 0)
+    timeout = int((row["pin_lock_timeout_a"] if is_a else row["pin_lock_timeout_b"]) or 0)
+    if timeout not in _DM_PIN_LOCK_TIMEOUT_ALLOWED:
+        timeout = 0
+    return enabled, timeout
+
+
+def set_my_dm_pin_lock(
+    channel_id: int,
+    user_id: int,
+    *,
+    enabled: bool,
+    timeout_sec: int,
+) -> bool:
+    """Set PIN lock prefs for this user's side of the DM."""
+    cid = int(channel_id or 0)
+    uid = int(user_id or 0)
+    if cid <= 0 or uid <= 0:
+        return False
+    tout = int(timeout_sec or 0)
+    if tout not in _DM_PIN_LOCK_TIMEOUT_ALLOWED:
+        tout = 0
+    with _conn() as con:
+        row = _dm_member_side_row(con, cid, uid)
+        if not row:
+            return False
+        is_a = int(row["user_a"]) == uid
+        if is_a:
+            con.execute(
+                "UPDATE dm_channels SET pin_lock_a=?, pin_lock_timeout_a=? WHERE id=?",
+                (1 if enabled else 0, tout, cid),
+            )
+        else:
+            con.execute(
+                "UPDATE dm_channels SET pin_lock_b=?, pin_lock_timeout_b=? WHERE id=?",
+                (1 if enabled else 0, tout, cid),
+            )
+        con.commit()
+    return True
 
 
 def cleanup_expired_dm_messages():

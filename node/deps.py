@@ -464,3 +464,112 @@ async def admin_pin_gate(
             },
         )
     return user
+
+
+# ── Per-DM PIN lock session (server-side unlock grace) ───────────────────
+_dm_lock_lock = threading.Lock()
+# token_key -> { channel_id: {unlocked_at, last_active, active_view} }
+_dm_lock_state: dict[str, dict[int, dict]] = {}
+_DM_LOCK_STATE_MAX = 4096
+
+
+def dm_lock_mark_unlocked(token: str, channel_id: int, *, timeout_sec: int = 0) -> None:
+    """Record a successful unlock for ``channel_id`` on this session."""
+    k = _pin_key(token)
+    cid = int(channel_id or 0)
+    if not k or cid <= 0:
+        return
+    now = time.time()
+    with _dm_lock_lock:
+        per = _dm_lock_state.setdefault(k, {})
+        per[cid] = {
+            "unlocked_at": now,
+            "last_active": now,
+            "active_view": int(timeout_sec) == 0,
+            "timeout_sec": int(timeout_sec or 0),
+        }
+        if len(_dm_lock_state) > _DM_LOCK_STATE_MAX:
+            stale = sorted(
+                _dm_lock_state.items(),
+                key=lambda kv: max((v.get("last_active") or 0) for v in kv[1].values()) if kv[1] else 0,
+            )
+            for ks, _ in stale[: _DM_LOCK_STATE_MAX // 2]:
+                _dm_lock_state.pop(ks, None)
+
+
+def dm_lock_clear_channel(token: str, channel_id: int) -> None:
+    k = _pin_key(token)
+    cid = int(channel_id or 0)
+    if not k or cid <= 0:
+        return
+    with _dm_lock_lock:
+        per = _dm_lock_state.get(k)
+        if per:
+            per.pop(cid, None)
+
+
+def dm_lock_clear_for_token(token: str) -> None:
+    k = _pin_key(token)
+    if not k:
+        return
+    with _dm_lock_lock:
+        _dm_lock_state.pop(k, None)
+
+
+def dm_lock_set_active_view(token: str, channel_id: int, active: bool) -> None:
+    """Track whether the user is currently viewing a timeout=0 locked DM."""
+    k = _pin_key(token)
+    cid = int(channel_id or 0)
+    if not k or cid <= 0:
+        return
+    with _dm_lock_lock:
+        st = (_dm_lock_state.get(k) or {}).get(cid)
+        if st is not None:
+            st["active_view"] = bool(active)
+            if active:
+                st["last_active"] = time.time()
+
+
+def dm_lock_session_is_locked(
+    channel_id: int,
+    user_id: int,
+    token: str,
+) -> bool:
+    """True when this user must unlock before reading ``channel_id``."""
+    import database as db
+
+    cid = int(channel_id or 0)
+    uid = int(user_id or 0)
+    if cid <= 0 or uid <= 0:
+        return False
+    enabled, timeout = db.get_my_dm_pin_lock(cid, uid)
+    if not enabled:
+        return False
+    k = _pin_key(token)
+    if not k:
+        return True
+    now = time.time()
+    with _dm_lock_lock:
+        st = (_dm_lock_state.get(k) or {}).get(cid)
+        if not st:
+            return True
+        tout = int(st.get("timeout_sec") if st.get("timeout_sec") is not None else timeout)
+        if tout == 0:
+            return not bool(st.get("active_view"))
+        if tout < 0:
+            st["last_active"] = now
+            return False
+        idle = tout if tout > 0 else 300
+        if (now - float(st.get("last_active") or 0)) > idle:
+            (_dm_lock_state.get(k) or {}).pop(cid, None)
+            return True
+        st["last_active"] = now
+        return False
+
+
+def dm_lock_http_detail(user: dict) -> dict:
+    return {
+        "dm_lock_required": True,
+        "has_pin": bool(int((user or {}).get("has_pin") or 0)),
+        "error": "DM lock required",
+    }
