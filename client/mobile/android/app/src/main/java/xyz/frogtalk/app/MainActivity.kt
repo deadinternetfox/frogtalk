@@ -38,10 +38,7 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val TAG = "FrogTalk"
-        private const val APP_URL = "https://frogtalk.app/app"
         private const val SETUP_ASSET_URL = "file:///android_asset/mobile_node_setup.html"
-        /** Pre-filled in the first-run setup wizard. */
-        private const val OFFICIAL_SERVER_INPUT = "frogtalk.app"
         private const val WEB_CACHE_REV = "20260522-fed-sync-v241"
         private const val PREFS = "frogtalk_prefs"
         private const val PREF_SERVER_BASE_URL = "server_base_url"
@@ -90,8 +87,30 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun officialNodeJson(): JSONObject {
+        return try {
+            assets.open("official-node.json").use { stream ->
+                JSONObject(stream.bufferedReader().readText())
+            }
+        } catch (_: Exception) {
+            JSONObject()
+                .put("host", "frogtalk.app")
+                .put("origin", "https://frogtalk.app")
+                .put("appPath", "/app")
+        }
+    }
+
+    private fun defaultAppUrl(): String {
+        val cfg = officialNodeJson()
+        val origin = cfg.optString("origin", "").trim().trimEnd('/')
+        val path = cfg.optString("appPath", "/app").ifBlank { "/app" }
+        if (origin.isNotEmpty()) return "$origin$path"
+        val host = cfg.optString("host", "frogtalk.app").trim()
+        return "https://$host$path"
+    }
+
     private fun buildAppUrl(baseUrl: String? = null, intentOverride: Intent? = null): String {
-        val rawUrl = baseUrl ?: APP_URL
+        val rawUrl = baseUrl ?: defaultAppUrl()
         val parsed = Uri.parse(rawUrl)
         if ((parsed.scheme ?: "").equals("file", ignoreCase = true)) {
             return rawUrl
@@ -1046,7 +1065,7 @@ class MainActivity : AppCompatActivity() {
                     val openUrl = try {
                         getConfiguredAppEntryUrl()
                     } catch (_: Throwable) {
-                        APP_URL
+                        defaultAppUrl()
                     }
                     startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(openUrl)))
                 } catch (_: Throwable) {

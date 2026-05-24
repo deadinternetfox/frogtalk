@@ -2,6 +2,19 @@ const { app, BrowserWindow, Menu, Tray, Notification, shell, ipcMain, dialog } =
 const fs = require('fs');
 const path = require('path');
 
+const _officialNode = (() => {
+  try {
+    return require(path.join(__dirname, '..', 'official-node.json'));
+  } catch {
+    return { host: 'frogtalk.app', origin: 'https://frogtalk.app', appPath: '/app' };
+  }
+})();
+const OFFICIAL_SERVER_INPUT = String(_officialNode.host || 'frogtalk.app').trim();
+const APP_URL_FALLBACK = String(
+  _officialNode.origin || `https://${OFFICIAL_SERVER_INPUT}`,
+).replace(/\/$/, '') + String(_officialNode.appPath || '/app');
+const WEB_PARTITION = 'persist:frogtalk-web';
+
 /** Optional Fallow runtime beacon (Node 20+). Set BEACON_API_KEY in the environment. */
 function startFallowBeacon() {
   const apiKey = process.env.BEACON_API_KEY;
@@ -20,10 +33,6 @@ function startFallowBeacon() {
     return null;
   }
 }
-
-const APP_URL_FALLBACK = 'https://frogtalk.app/app';
-const OFFICIAL_SERVER_INPUT = 'frogtalk.app';
-const WEB_PARTITION = 'persist:frogtalk-web';
 const AUTH_SNAPSHOT_PATH = path.join(app.getPath('userData'), 'auth-snapshot.json');
 const DESKTOP_SETTINGS_PATH = path.join(app.getPath('userData'), 'desktop-settings.json');
 

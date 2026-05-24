@@ -1,6 +1,6 @@
 {
   "name": "FrogTalk",
-  "version": "1.5.3",
+  "version": "1.6.37-alpha",
   "description": "FrogTalk - End-to-end encrypted chat with voice & video calls",
   "main": "main.js",
   "homepage": "https://frogtalk.app",
@@ -35,6 +35,7 @@
         "AppImage",
         "deb"
       ],
+      "artifactName": "FrogTalk-${version}.${ext}",
       "icon": "icon.png",
       "category": "Network;InstantMessaging;Chat",
       "synopsis": "End-to-end encrypted chat with voice and video calls",
@@ -75,7 +76,8 @@
       "main.js",
       "preload.js",
       "icon.png",
-      "../static"
+      "../static",
+      "../official-node.json"
     ]
   },
   "dependencies": {

@@ -42,8 +42,8 @@ android {
         applicationId = "xyz.frogtalk.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 241
-        versionName = "1.6.36"
+        versionCode = 242
+        versionName = "1.6.37-alpha"
     }
 
     buildTypes {
@@ -86,6 +86,18 @@ android {
     dependencyLocking {
         lockAllConfigurations()
     }
+}
+
+val officialNodeDefaults = rootProject.file("../../official-node.json")
+
+tasks.register<Copy>("copyOfficialNodeDefaults") {
+    from(officialNodeDefaults)
+    into(layout.projectDirectory.dir("src/main/assets"))
+    onlyIf { officialNodeDefaults.isFile }
+}
+
+tasks.named("preBuild") {
+    dependsOn("copyOfficialNodeDefaults")
 }
 
 dependencies {

@@ -152,9 +152,9 @@
         <h2>Your home node</h2>
         <p class="hint">Most people use the official node. Self-hosters can enter their own server address.</p>
         <label for="server-url">Server address</label>
-        <input type="text" id="server-url" value="frogtalk.app" autocomplete="off" spellcheck="false" inputmode="url">
+        <input type="text" id="server-url" value="" autocomplete="off" spellcheck="false" inputmode="url" placeholder="frogtalk.app">
         <div class="chip-row">
-          <button type="button" class="chip" data-url="frogtalk.app">Official</button>
+          <button type="button" class="chip" data-url="">Official</button>
         </div>
         <p class="err" id="url-err">Enter a valid hostname (e.g. frogtalk.app).</p>
         <div class="actions">
@@ -219,6 +219,31 @@
       var openBtn = document.getElementById('btn-open');
       var isSubmitting = false;
       var nativeWait = null;
+
+      function applyOfficialDefaults(host) {
+        host = String(host || 'frogtalk.app').trim();
+        if (input) input.value = host;
+        if (preview) preview.textContent = host;
+        document.querySelectorAll('[data-url]').forEach(function (el) {
+          el.setAttribute('data-url', host);
+        });
+        if (input) input.placeholder = host;
+        if (err) err.textContent = 'Enter a valid hostname (e.g. ' + host + ').';
+      }
+
+      function loadOfficialDefaults() {
+        var xhr = new XMLHttpRequest();
+        xhr.open('GET', 'official-node.json', true);
+        xhr.onload = function () {
+          try {
+            var data = JSON.parse(xhr.responseText || '{}');
+            applyOfficialDefaults(data.host || 'frogtalk.app');
+          } catch (e) { applyOfficialDefaults('frogtalk.app'); }
+        };
+        xhr.onerror = function () { applyOfficialDefaults('frogtalk.app'); };
+        try { xhr.send(); } catch (e) { applyOfficialDefaults('frogtalk.app'); }
+      }
+      loadOfficialDefaults();
 
       function android() {
         try { return window.Android || null; } catch (e) { return null; }

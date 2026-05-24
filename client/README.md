@@ -3,6 +3,8 @@
 Everything end-users install lives in this folder. The node server (FastAPI +
 web client + ops scripts) lives in `../node/`.
 
+**Default home node:** `client/official-node.json` — `master` uses `frogtalk.app`; `dev` uses `frogtalk.xyz`. Electron and the Android first-run wizard read this file at build/runtime.
+
 ## Linux quick start (desktop)
 
 | Method | Command |
