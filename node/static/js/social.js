@@ -390,10 +390,16 @@ const Social = (() => {
   // against an unreliable byte-range stream.
   function _authMediaThumb(raw) {
     const src = String(raw || '');
+    const token = String(State?.token || '');
+    const _rewriteThumb = (u) => {
+      u.pathname = u.pathname.replace(/\/media$/, '/thumb');
+      if (token && !u.searchParams.get('token')) u.searchParams.set('token', token);
+      return u;
+    };
     if (/^https?:\/\//i.test(src)) {
       try {
-        const u = new URL(src);
-        u.pathname = u.pathname.replace(/\/media$/, '/thumb');
+        const u = _rewriteThumb(new URL(src));
+        if (!/\/api\/social\/(posts|federation\/posts)\//.test(u.pathname)) return '';
         return `${u.origin}${u.pathname}${u.search}${u.hash}`;
       } catch {
         return '';
@@ -402,12 +408,8 @@ const Social = (() => {
     const isSocialPost = src.startsWith('/api/social/posts/')
       || src.startsWith('/api/social/federation/posts/');
     if (!isSocialPost) return '';
-    const token = String(State?.token || '');
     try {
-      const u = new URL(src, window.location.origin);
-      // .../media → .../thumb (local and federation proxy paths)
-      u.pathname = u.pathname.replace(/\/media$/, '/thumb');
-      if (token && !u.searchParams.get('token')) u.searchParams.set('token', token);
+      const u = _rewriteThumb(new URL(src, window.location.origin));
       return `${u.pathname}${u.search}${u.hash}`;
     } catch {
       return '';

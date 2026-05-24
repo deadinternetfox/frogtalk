@@ -920,6 +920,78 @@ def _thumb_path(post_id: int) -> Path:
     return _THUMB_DIR / f"{int(post_id)}.jpg"
 
 
+def _lookup_federation_post_map(local_id: int) -> tuple[str, str]:
+    """Return (origin_server_id, global_post_id) for a federated wall mirror."""
+    pid = int(local_id or 0)
+    if pid <= 0:
+        return "", ""
+    try:
+        with db._conn() as con:
+            row = con.execute(
+                """
+                SELECT origin_server_id, global_id FROM federation_wall_map
+                WHERE object_kind='post' AND local_id=?
+                LIMIT 1
+                """,
+                (pid,),
+            ).fetchone()
+        if row:
+            origin = str(row["origin_server_id"] or "").strip()
+            gid = str(row["global_id"] or "").strip()
+            return origin, gid
+    except Exception:
+        pass
+    return "", ""
+
+
+def _cache_thumb_bytes(local_id: int, raw: bytes) -> None:
+    if int(local_id or 0) <= 0 or not raw:
+        return
+    try:
+        out = _thumb_path(int(local_id))
+        if out.exists() and out.stat().st_size > 200:
+            return
+        out.write_bytes(raw)
+    except Exception:
+        pass
+
+
+def _resolve_federated_post_media(
+    origin: str,
+    post_gid: str,
+    local_id: int | None,
+    viewer_id: int,
+    viewer_gid: str,
+    media_kind: str,
+) -> tuple[str, bytes | None, str]:
+    """Serve from local mirror when bytes exist; otherwise pull from home node."""
+    kind = str(media_kind or "media").strip().lower()
+    lid = int(local_id or 0)
+
+    if lid > 0 and kind == "thumb":
+        cached = _thumb_path(lid)
+        if cached.exists() and cached.stat().st_size > 200:
+            return ("ok", cached.read_bytes(), "image/jpeg")
+        st, raw, _ct = _wall_post_media_bytes_for_viewer(lid, viewer_id)
+        if st == "forbidden":
+            return (st, None, "")
+        if st == "ok" and raw and _generate_thumb_sync(lid, raw) and cached.exists():
+            return ("ok", cached.read_bytes(), "image/jpeg")
+    elif lid > 0:
+        st, raw, ct = _wall_post_media_bytes_for_viewer(lid, viewer_id)
+        if st == "forbidden":
+            return (st, None, "")
+        if st == "ok" and raw:
+            return (st, raw, ct)
+
+    home_st, home_raw, home_ct = _fetch_home_federated_post_media(
+        origin, post_gid, viewer_gid, kind=kind,
+    )
+    if home_st == "ok" and home_raw and kind == "thumb" and lid > 0:
+        _cache_thumb_bytes(lid, home_raw)
+    return home_st, home_raw, home_ct
+
+
 def _generate_thumb_sync(post_id: int, raw_bytes: bytes) -> bool:
     """Extract a JPG poster from raw video bytes. Returns True on success.
     Tries seek positions 1.5s → 4.0s → 0.5s so a fade-in intro doesn't
@@ -1010,13 +1082,14 @@ async def get_post_thumb(
         if not current_user:
             return ("unauth", None)
         row = db.get_wall_post_media(post_id)
-        if not row or not row.get("media_data"):
+        if not row:
             return ("notfound", None)
         media_type = (row.get("media_type") or "").lower()
         if not media_type.startswith("video/"):
             return ("notfound", None)
         owner_id = int(row["user_id"])
         viewer_id = int(current_user["id"])
+        viewer_gid = str(current_user.get("global_user_id") or "").strip()
         privacy = (row.get("privacy") or "public").lower()
         if owner_id != viewer_id:
             if db.is_blocked_either_way(viewer_id, owner_id):
@@ -1032,7 +1105,7 @@ async def get_post_thumb(
         # Cache hit — no need to decode.
         if cached.exists() and cached.stat().st_size > 200:
             return ("cached", None)
-        media_data = row["media_data"]
+        media_data = row.get("media_data")
         if isinstance(media_data, str) and media_data.startswith("data:"):
             try:
                 _, _, b64 = media_data.partition(",")
@@ -1040,6 +1113,15 @@ async def get_post_thumb(
             except Exception:
                 return ("decode_error", None)
             return ("generate", raw)
+        origin, post_gid = _lookup_federation_post_map(post_id)
+        if origin and post_gid:
+            st, raw, _ct = _resolve_federated_post_media(
+                origin, post_gid, post_id, viewer_id, viewer_gid, "thumb",
+            )
+            if st == "ok" and raw:
+                return ("home_bytes", raw)
+            if st == "forbidden":
+                return ("forbidden", None)
         return ("notfound", None)
 
     kind, payload = await run_in_threadpool(_resolve_owner_and_payload)
@@ -1051,6 +1133,11 @@ async def get_post_thumb(
         return JSONResponse(status_code=403, content={"error": "Forbidden"})
     if kind == "decode_error":
         return JSONResponse(status_code=500, content={"error": "Decode failed"})
+    if kind == "home_bytes" and payload:
+        return Response(
+            content=payload,
+            headers={**headers, "Content-Length": str(len(payload))},
+        )
     if kind == "cached":
         resp = _serve_cached()
         if resp is not None:
@@ -1605,21 +1692,13 @@ async def federation_post_media_proxy(
         viewer_id = int(current_user["id"])
         viewer_gid = str(current_user.get("global_user_id") or "").strip()
         local_id = db.resolve_federation_wall_local_id(origin, "post", post_gid)
-        if local_id:
-            if media_kind == "thumb":
-                cached = _thumb_path(int(local_id))
-                if cached.exists() and cached.stat().st_size > 200:
-                    return ("ok", cached.read_bytes(), "image/jpeg")
-                st, raw, _ct = _wall_post_media_bytes_for_viewer(int(local_id), viewer_id)
-                if st != "ok" or not raw:
-                    return (st, None, "")
-                if _generate_thumb_sync(int(local_id), raw) and cached.exists():
-                    return ("ok", cached.read_bytes(), "image/jpeg")
-                return ("notfound", None, "")
-            st, raw, ct = _wall_post_media_bytes_for_viewer(int(local_id), viewer_id)
-            return (st, raw, ct)
-        return _fetch_home_federated_post_media(
-            origin, post_gid, viewer_gid, kind=media_kind,
+        return _resolve_federated_post_media(
+            origin,
+            post_gid,
+            local_id,
+            viewer_id,
+            viewer_gid,
+            media_kind,
         )
 
     st, raw, ct = await run_in_threadpool(_resolve)
