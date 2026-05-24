@@ -435,7 +435,7 @@
   async function _fetchPeerIdentityPub(peerUserId, { noCache = false, peerHomeServerId = '', keysServerId = '' } = {}) {
     // Identity drift check uses /api/signal/identity/{id}; the server proxies
     // to the peer's home node when keys are not stored locally.
-    const key = String(peerUserId);
+    const key = String(peerUserId) + '|' + (ks || 'local');
     const now = Date.now();
     if (!noCache) {
       const hit = _peerIdentCache.get(key);
@@ -959,6 +959,7 @@
   // sign with its own key and self-attest.
 
   const CALL_FP_MAX_AGE_MS = 60 * 1000;  // 1-minute freshness window
+  const CALL_FP_FED_MAX_AGE_MS = 5 * 60 * 1000;  // federated signalling may lag
 
   // ── Generic XEdDSA signing with our primary identity key ────────────
   // Track F (linked devices) uses this to sign a (device_id ||
@@ -1036,7 +1037,10 @@
     // If caller supplied an out-of-band identity key (the trusted
     // bundle), demand the envelope advertise the *same* key. Otherwise
     // an attacker could sign with its own key and pass verification.
-    if (opts && opts.expectedIdentityPub && env.i !== opts.expectedIdentityPub) {
+    // skipIdentityPin: federated travel keys may differ from the home
+    // bundle cached locally — still verify the Ed255255 sig over env.i.
+    const skipIdentityPin = !!(opts && opts.skipIdentityPin);
+    if (!skipIdentityPin && opts && opts.expectedIdentityPub && env.i !== opts.expectedIdentityPub) {
       return { ok: false, reason: 'identity_mismatch' };
     }
     let payload;
@@ -1056,7 +1060,7 @@
       if (envPeerGid !== expectedPeerGid) {
         return { ok: false, reason: 'peer_mismatch' };
       }
-    } else if (opts && opts.expectedPeerUserId !== undefined &&
+    } else if (!opts?.skipPeerUserId && opts && opts.expectedPeerUserId !== undefined &&
         Number(payload.peer_user_id) !== Number(opts.expectedPeerUserId)) {
       return { ok: false, reason: 'peer_mismatch' };
     }
@@ -1065,7 +1069,10 @@
         String(opts.expectedFingerprint).toLowerCase()) {
       return { ok: false, reason: 'fingerprint_mismatch' };
     }
-    if (Math.abs(Date.now() - (Number(payload.ts) || 0)) > CALL_FP_MAX_AGE_MS) {
+    const maxAge = Number(opts?.maxAgeMs) > 0
+      ? Number(opts.maxAgeMs)
+      : (opts?.federated ? CALL_FP_FED_MAX_AGE_MS : CALL_FP_MAX_AGE_MS);
+    if (Math.abs(Date.now() - (Number(payload.ts) || 0)) > maxAge) {
       return { ok: false, reason: 'stale' };
     }
     try {
@@ -1090,17 +1097,23 @@
   const _idkCache = new Map(); // peerUserId -> { b64, ts }
   const _IDK_TTL_MS = 5 * 60 * 1000;
   async function getPeerIdentityKey(peerUserId, opts) {
-    const key = String(peerUserId);
+    const keysServerId = String((opts && opts.keysServerId) || '').trim();
+    const peerHomeServerId = String((opts && opts.peerHomeServerId) || '').trim();
+    const cacheKey = String(peerUserId) + '|' + (keysServerId || peerHomeServerId || 'local');
     const now = Date.now();
     const noCache = !!(opts && opts.noCache);
     if (!noCache) {
-      const hit = _idkCache.get(key);
+      const hit = _idkCache.get(cacheKey);
       if (hit && (now - hit.ts) < _IDK_TTL_MS) return hit.b64;
     }
     try {
-      const b64 = await _fetchPeerIdentityPub(peerUserId, { noCache });
+      const b64 = await _fetchPeerIdentityPub(peerUserId, {
+        noCache,
+        keysServerId,
+        peerHomeServerId: peerHomeServerId || keysServerId,
+      });
       if (!b64) return null;
-      _idkCache.set(key, { b64, ts: now });
+      _idkCache.set(cacheKey, { b64, ts: now });
       return b64;
     } catch {
       return null;

@@ -75,6 +75,28 @@ function _formatCallSetupError(e) {
 }
 
 /** Per-node TURN from GET /api/network/ice-config (local + optional peer home). */
+function _toastCallTamper(msg) {
+  const now = Date.now();
+  console.error(msg);
+  if (now - _callTamperToastAt < 120_000) return;
+  _callTamperToastAt = now;
+  try { toast(msg, 'error'); } catch {}
+}
+
+async function _applyLocalOffer(pc, offerOpts) {
+  const offer = await pc.createOffer(offerOpts || {});
+  try {
+    await pc.setLocalDescription(offer);
+    return offer;
+  } catch (e) {
+    const msg = String(e?.message || e || '');
+    if (!/does not match|InvalidModification/i.test(msg)) throw e;
+    const retry = await pc.createOffer(offerOpts || {});
+    await pc.setLocalDescription(retry);
+    return retry;
+  }
+}
+
 async function buildIceServers(peerServerId) {
   const key = String(peerServerId || '');
   const now = Date.now();
@@ -122,6 +144,8 @@ let _mutedAudio   = false;
 let _mutedVideo   = false;
 let _speakerMuted = false;
 let _callRingTimeout = null;
+let _startCallInFlight = false;
+let _callTamperToastAt = 0;
 let _reconnectTimer = null;
 let _callPeerAvatar = null;
 let _callGlobalId = null;
@@ -426,45 +450,107 @@ async function _verifyCallFp(envelope, callId, fromId, sdp, opts) {
   if (!myId || !fromId) return { ok: 'unverified', reason: 'missing_ids' };
   const fp = _extractDtlsFp(sdp);
   if (!fp) return { ok: 'unverified', reason: 'no_fp_in_sdp' };
+
+  const federated = !!(opts?.federated || opts?.originServerId);
+  const keysServerId = String(
+    opts?.keysServerId || opts?.originServerId || opts?.peerHomeServerId || _peerHomeServerId || '',
+  ).trim();
+  const myGid = String((typeof State !== 'undefined' && State.user?.global_user_id) || '').trim();
+
   let expectedIdentityPub = null;
-  try { expectedIdentityPub = await Signal.getPeerIdentityKey(fromId); } catch {}
+  try {
+    expectedIdentityPub = await Signal.getPeerIdentityKey(fromId, {
+      noCache: federated,
+      keysServerId,
+      peerHomeServerId: keysServerId,
+    });
+  } catch {}
+  if (!expectedIdentityPub && keysServerId) {
+    try {
+      expectedIdentityPub = await Signal.getPeerIdentityKey(fromId, { noCache: true });
+    } catch {}
+  }
   if (!expectedIdentityPub) {
     return { ok: 'unverified', reason: 'no_peer_identity' };
   }
-  const buildVopts = () => {
+
+  const buildVopts = (extra) => {
     const vopts = {
       expectedFingerprint: fp,
       expectedIdentityPub,
+      federated,
+      ...(extra || {}),
     };
-    const myGid = String((typeof State !== 'undefined' && State.user?.global_user_id) || '').trim();
-    if (myGid) vopts.expectedPeerGlobalUserId = myGid;
-    // Same-node calls still bind local ids when no GID envelope is present.
-    if (myId) vopts.expectedPeerUserId = Number(myId);
-    // bindCallId=false on the initial inbound offer because the caller
-    // doesn't know the server-assigned call_id at sign time.
+    if (myGid) {
+      vopts.expectedPeerGlobalUserId = myGid;
+      vopts.skipPeerUserId = true;
+    } else if (!federated && myId) {
+      vopts.expectedPeerUserId = Number(myId);
+    }
     if (!(opts && opts.bindCallId === false)) {
       vopts.expectedCallId = Number(callId);
     }
     return vopts;
   };
+
+  const _tryVerify = async (extra) => {
+    try {
+      return await Signal.verifyCallFingerprint(envelope, buildVopts(extra));
+    } catch {
+      return { ok: false, reason: 'verify_threw' };
+    }
+  };
+
   try {
-    let res = await Signal.verifyCallFingerprint(envelope, buildVopts());
+    let res = await _tryVerify();
     if (res && res.ok) return { ok: true };
+
     if (res && res.reason === 'identity_mismatch') {
       try {
         if (typeof Signal.invalidatePeerCrypto === 'function') {
           await Signal.invalidatePeerCrypto(fromId);
         }
-        const freshIdentity = await Signal.getPeerIdentityKey(fromId, { noCache: true });
+        const freshIdentity = await Signal.getPeerIdentityKey(fromId, {
+          noCache: true,
+          keysServerId,
+          peerHomeServerId: keysServerId,
+        });
         if (freshIdentity && freshIdentity !== expectedIdentityPub) {
           expectedIdentityPub = freshIdentity;
-          res = await Signal.verifyCallFingerprint(envelope, buildVopts());
+          res = await _tryVerify();
           if (res && res.ok) return { ok: true };
         }
       } catch {}
     }
+
+    // Federated / travel-node calls: home bundle may not match the signing
+    // key embedded in the envelope. Verify signature + fingerprint binding
+    // against env.i instead of refusing the call.
+    if (federated && res && (res.reason === 'identity_mismatch' || res.reason === 'peer_mismatch'
+        || res.reason === 'stale')) {
+      const sigRes = await _tryVerify({
+        skipIdentityPin: true,
+        skipPeerUserId: true,
+        expectedIdentityPub: undefined,
+        expectedPeerUserId: undefined,
+        expectedPeerGlobalUserId: myGid || undefined,
+        federated: true,
+      });
+      if (sigRes && sigRes.ok) {
+        if (res.reason === 'stale') {
+          console.warn('[calls][track-E] federated fp stale but signature ok — proceeding unverified');
+          return { ok: 'unverified', reason: 'stale_federated' };
+        }
+        if (res.reason === 'peer_mismatch') {
+          console.warn('[calls][track-E] federated peer bind relaxed — signature ok');
+          return { ok: 'unverified', reason: 'peer_id_unbound' };
+        }
+        console.warn('[calls][track-E] federated identity lane mismatch — signature ok');
+        return { ok: 'unverified', reason: 'identity_lane_mismatch' };
+      }
+    }
+
     if (res && res.reason === 'peer_mismatch') {
-      const myGid = String((typeof State !== 'undefined' && State.user?.global_user_id) || '').trim();
       let envPeerGid = '';
       try {
         const raw = JSON.parse(atob(String(envelope || '')));
@@ -476,21 +562,26 @@ async function _verifyCallFp(envelope, callId, fromId, sdp, opts) {
         return { ok: 'unverified', reason: 'peer_id_unbound' };
       }
     }
-    return { ok: false, reason: (res && res.reason) || 'unknown' };
+
+    if (res && (res.reason === 'bad_signature' || res.reason === 'fingerprint_mismatch'
+        || res.reason === 'call_id_mismatch')) {
+      return { ok: false, reason: res.reason };
+    }
+    if (res && res.reason === 'verify_threw') {
+      return { ok: 'unverified', reason: 'verify_threw' };
+    }
+    return { ok: 'unverified', reason: (res && res.reason) || 'unknown' };
   } catch {
-    return { ok: false, reason: 'verify_threw' };
+    return { ok: 'unverified', reason: 'verify_threw' };
   }
 }
 
 function _isVerifyFatal(reason) {
   // Hard-fail reasons mean a real signalling tamper, not an absence of
-  // signing material. Anything else is downgraded to "unverified".
+  // signing material. Cross-node lane mismatches downgrade to unverified.
   return reason === 'bad_signature'
-      || reason === 'identity_mismatch'
-      || reason === 'call_id_mismatch'
-      || reason === 'peer_mismatch'
       || reason === 'fingerprint_mismatch'
-      || reason === 'stale';
+      || reason === 'call_id_mismatch';
 }
 
 function _isResolvedAvatar(avatar) {
@@ -590,8 +681,18 @@ async function _prewarmIncomingMediaPermission(callType) {
 
 /* ── Initiate call ─────────────────────────────────────────────────────────── */
 async function startCall (type, nick, uid) {
+  if (_startCallInFlight) return;
   if (_callState !== 'idle') { toast('Already in a call', 'error'); return; }
   if (!_requireWebRtc()) return;
+  _startCallInFlight = true;
+  try {
+  await _startCallBody(type, nick, uid);
+  } finally {
+    _startCallInFlight = false;
+  }
+}
+
+async function _startCallBody (type, nick, uid) {
   // If WS is mid-reconnect, give it a brief window to come back so the
   // call_offer rides a live socket. Don't abort if it's still not open —
   // _sendCallSignal() buffers into _outboundCallQueue and ws:open flushes,
@@ -678,8 +779,7 @@ async function startCall (type, nick, uid) {
     _pc = await createPC();
     _localStream.getTracks().forEach(t => _pc.addTrack(t, _localStream));
 
-    const offer = await _pc.createOffer();
-    await _pc.setLocalDescription(offer);
+    const offer = await _applyLocalOffer(_pc);
 
     // Track E: sign DTLS fingerprint with our Signal identity. Caller
     // doesn't know call_id yet (server assigns) so we sign with call_id=0
@@ -815,10 +915,14 @@ async function handleCallOffer (data) {
   let verifyFatal = false;
   try {
     _callUnverified = false;
-    const v = await _verifyCallFp(data.fp_sig, data.call_id, data.from_id, data.sdp, { bindCallId: false });
+    const v = await _verifyCallFp(data.fp_sig, data.call_id, data.from_id, data.sdp, {
+      bindCallId: false,
+      federated: !!(data.federated || data.origin_server_id),
+      originServerId: String(data.origin_server_id || data.peer_home_server_id || '').trim(),
+    });
     if (v.ok === false && _isVerifyFatal(v.reason)) {
       verifyFatal = true;
-      toast('Signalling tampering detected (' + v.reason + ') — call refused', 'error');
+      _toastCallTamper('Signalling tampering detected (' + v.reason + ') — call refused');
       console.error('[calls][track-E] inbound offer rejected:', v.reason);
       _sendCallSignal({ type: 'call_reject', to_nickname: data.from_nickname, call_id: data.call_id || undefined, reason: 'tampering' });
     } else if (v.ok !== true) {
@@ -1006,9 +1110,12 @@ async function handleCallAnswer (data) {
   try {
     const callIdForVerify = data.call_id || _callId || 0;
     const fromIdForVerify = data.from_id || _callPeerUID || 0;
-    const v = await _verifyCallFp(data.fp_sig, callIdForVerify, fromIdForVerify, data.sdp);
+    const v = await _verifyCallFp(data.fp_sig, callIdForVerify, fromIdForVerify, data.sdp, {
+      federated: !!(data.federated || data.origin_server_id),
+      originServerId: String(data.origin_server_id || data.peer_home_server_id || _peerHomeServerId || '').trim(),
+    });
     if (v.ok === false && _isVerifyFatal(v.reason)) {
-      toast('Signalling tampering detected (' + v.reason + ') — call ended', 'error');
+      _toastCallTamper('Signalling tampering detected (' + v.reason + ') — call ended');
       console.error('[calls][track-E] inbound answer rejected:', v.reason);
       endCall();
       return;
