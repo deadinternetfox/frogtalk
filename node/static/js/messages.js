@@ -4261,6 +4261,7 @@ function handleInputKey(e) {
 
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault();
+    if (e.target?.disabled) return;
     sendMessage();
   }
   // Up arrow to edit last message when input is empty
