@@ -1311,12 +1311,10 @@ const Rooms = (() => {
   function _chatTransitionLabel(name, type, dmPeer, phase) {
     if (type === 'dm') {
       const who = String(dmPeer || '…').replace(/^@/, '');
-      return phase === 'load'
-        ? `Loading conversation with ${who}…`
-        : `Opening conversation with ${who}…`;
+      return `Loading conversation with ${who}…`;
     }
     const nm = String(name || '…').replace(/^#/, '');
-    return phase === 'load' ? `Loading #${nm}…` : `Opening #${nm}…`;
+    return `Loading #${nm}…`;
   }
 
   function _chatTransitionSwitchKey(name, type, opts) {

@@ -463,6 +463,64 @@ input, select {
   color: #d9f3ff;
   background: rgba(12, 29, 38, 0.88);
 }
+.user-cell {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+.user-cell-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.user-action-btn {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 106, 106, 0.55);
+  padding: 2px 8px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #ffd3d3;
+  background: rgba(40, 14, 14, 0.72);
+  cursor: pointer;
+  line-height: 1.4;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.user-action-btn:hover {
+  background: rgba(72, 22, 22, 0.92);
+  border-color: rgba(255, 130, 130, 0.75);
+}
+.user-action-btn:focus-visible {
+  outline: 2px solid rgba(255, 130, 130, 0.55);
+  outline-offset: 2px;
+}
+.users-table .user-actions-col {
+  width: 1%;
+  white-space: nowrap;
+  text-align: right;
+}
+@media (max-width: 640px) {
+  .user-action-btn {
+    padding: 5px 11px;
+    font-size: 11px;
+  }
+}
+.site-settings-meta {
+  color: #8fb59f;
+  font-size: 11px;
+  line-height: 1.45;
+}
+.site-settings-meta code {
+  font-size: 10px;
+}
 .node-name-row {
   display: flex;
   gap: 6px;
@@ -758,6 +816,44 @@ input, select {
   }
   .users-table {
     min-width: 0;
+  }
+  .users-table,
+  .users-table tbody,
+  .users-table tr,
+  .users-table td {
+    display: block;
+    width: 100%;
+  }
+  .users-table thead {
+    display: none;
+  }
+  .users-table tr {
+    border: 1px solid #203b2c;
+    border-radius: 12px;
+    padding: 10px;
+    margin-bottom: 10px;
+    background: rgba(9, 19, 12, 0.64);
+  }
+  .users-table td {
+    border-bottom: none;
+    padding: 4px 0;
+  }
+  .users-table td[data-label]:not(:first-child)::before {
+    content: attr(data-label);
+    display: block;
+    font-size: 10px;
+    color: #8db39b;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    margin-bottom: 4px;
+  }
+  .users-table .user-cell {
+    padding-bottom: 6px;
+    margin-bottom: 2px;
+    border-bottom: 1px solid rgba(32, 59, 44, 0.65);
+  }
+  .control-group .section-sub--tight {
+    margin-bottom: 8px;
   }
   .nodes-table,
   .nodes-table tbody,
@@ -1314,57 +1410,48 @@ input, select {
 
             <div class="control-group">
               <div class="control-title">Public Site URL</div>
-              <p class="section-sub" style="margin:0 0 10px;font-size:12px;color:var(--muted);">Canonical domain for invite links, share previews, OG tags, and vanity URLs on this node. Overrides <code>PUBLIC_URL</code> in the running app without restart.</p>
               <div class="field">
                 <label for="site-public-url">Public URL</label>
                 <input id="site-public-url" type="url" placeholder="https://chat.domain.com" maxlength="512" autocomplete="off" spellcheck="false">
-                <div class="field-hint">Use <code>https://chat.domain.com</code> (or your apex) — no path. Share links become <code>domain.com/i/…</code>, <code>/u/…</code>, <code>/p/…</code>.</div>
+                <div class="field-hint">HTTPS, no path — used for invites, OG tags, and share links.</div>
               </div>
-              <div id="site-public-url-preview" class="inline-note" style="margin-top:8px;font-size:12px;line-height:1.6;"></div>
-              <div class="retention-actions" style="margin-top:10px;">
+              <div id="site-public-url-preview" class="inline-note" style="margin-top:6px;font-size:12px;line-height:1.5;"></div>
+              <div class="retention-actions" style="margin-top:8px;">
                 <button class="btn primary" id="save-public-url-btn" type="button">Save Public URL</button>
                 <span id="public-url-status" class="status-pill state-saved">Loaded</span>
               </div>
-              <div class="inline-note" style="margin-top:8px;">Also syncs <code>federation.base_url</code>. Set <code>PUBLIC_URL</code> in <code>.env</code> for bootstrap before first admin save.</div>
             </div>
 
             <div class="control-group" id="site-settings-panel">
-              <div class="control-title">Node Identity &amp; Contact Emails</div>
-              <p class="section-sub" style="margin:0 0 12px;font-size:12px;color:var(--muted);">How this node appears in federation and on public pages. Contact addresses feed privacy/security pages, <code>security.txt</code>, and Web Push (VAPID).</p>
+              <div class="control-title">Node Identity &amp; Contacts</div>
 
               <div class="field-grid">
                 <div class="field" style="grid-column:1/-1;">
-                  <label for="node-display-name">Node display name</label>
+                  <label for="node-display-name">Display name</label>
                   <input id="node-display-name" type="text" maxlength="120" placeholder="FrogTalk on domain.com" autocomplete="off">
-                  <div class="field-hint">Shown in federation directory, network picker, and imageboard title.</div>
                 </div>
                 <div class="field">
-                  <label for="contact-security-email">Security reports</label>
+                  <label for="contact-security-email">Security</label>
                   <input id="contact-security-email" type="email" maxlength="254" placeholder="security@domain.com" autocomplete="off">
-                  <div class="field-hint"><code>/security</code> · RFC 9116 <code>security.txt</code></div>
                 </div>
                 <div class="field">
-                  <label for="contact-privacy-email">Privacy contact</label>
+                  <label for="contact-privacy-email">Privacy</label>
                   <input id="contact-privacy-email" type="email" maxlength="254" placeholder="privacy@domain.com" autocomplete="off">
-                  <div class="field-hint"><code>/privacy</code> policy page</div>
                 </div>
                 <div class="field">
-                  <label for="contact-support-email">General support</label>
+                  <label for="contact-support-email">Support</label>
                   <input id="contact-support-email" type="email" maxlength="254" placeholder="hello@domain.com" autocomplete="off">
-                  <div class="field-hint">Support / hello address on public pages</div>
                 </div>
                 <div class="field">
-                  <label for="contact-vapid-email">Web Push (VAPID)</label>
+                  <label for="contact-vapid-email">Web Push</label>
                   <input id="contact-vapid-email" type="email" maxlength="254" placeholder="admin@domain.com" autocomplete="off">
-                  <div class="field-hint">Browser push subscription contact (<code>mailto:</code> claim)</div>
                 </div>
               </div>
 
-              <div id="site-settings-meta" class="inline-note" style="margin-top:8px;font-size:12px;line-height:1.55;"></div>
-              <div id="site-settings-preview" class="inline-note" style="margin-top:8px;font-size:12px;line-height:1.6;"></div>
+              <div id="site-settings-meta" class="site-settings-meta" style="margin-top:8px;"></div>
 
-              <div class="retention-actions" style="margin-top:10px;">
-                <button class="btn primary" id="save-site-settings-btn" type="button">Save Identity &amp; Contacts</button>
+              <div class="retention-actions" style="margin-top:8px;">
+                <button class="btn primary" id="save-site-settings-btn" type="button">Save</button>
                 <span id="site-settings-status" class="status-pill state-saved">Loaded</span>
               </div>
             </div>

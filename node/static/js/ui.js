@@ -9053,7 +9053,7 @@ function _mentionColorWithAlpha(color, alpha, fallback) {
     }
     try {
       if (State._roomSwitchInProgress) {
-        return room ? `Opening #${room}…` : 'Opening channel…';
+        return room ? `Loading #${room}…` : 'Loading channel…';
       }
     } catch {}
     return room ? `Message #${room}` : 'Message channel';

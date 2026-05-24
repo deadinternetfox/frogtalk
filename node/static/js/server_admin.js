@@ -46,7 +46,6 @@
   const contactSupportEmail = document.getElementById('contact-support-email');
   const contactVapidEmail = document.getElementById('contact-vapid-email');
   const siteSettingsMeta = document.getElementById('site-settings-meta');
-  const siteSettingsPreview = document.getElementById('site-settings-preview');
   const saveSiteSettingsBtn = document.getElementById('save-site-settings-btn');
   const siteSettingsStatus = document.getElementById('site-settings-status');
   const blockTorPeersWrap = document.getElementById('block-tor-peers-wrap');
@@ -127,9 +126,7 @@
     const hintHost = mailDomain;
     const urlHint = document.querySelector('#site-public-url + .field-hint');
     if (urlHint) {
-      urlHint.innerHTML =
-        `Use <code>https://chat.${escHtml(hintHost)}</code> (or apex) — no path. ` +
-        `Share links: <code>${escHtml(hintHost)}/i/…</code>, <code>/u/…</code>, <code>/p/…</code>.`;
+      urlHint.textContent = 'HTTPS, no path — used for invites, OG tags, and share links.';
     }
   }
 
@@ -156,21 +153,7 @@
     if (!siteSettingsMeta) return;
     const sid = escHtml(String(settings?.server_id || '—'));
     const base = escHtml(String(settings?.base_url || '—'));
-    const onion = escHtml(String(settings?.onion_url || ''));
-    siteSettingsMeta.innerHTML =
-      `<strong>Federation ID:</strong> <code>${sid}</code> · ` +
-      `<strong>Listed as:</strong> <code>${base || '—'}</code>` +
-      (onion ? ` · <strong>Onion:</strong> <code>${onion}</code>` : '');
-  }
-
-  function renderSiteSettingsPreview(settings) {
-    if (!siteSettingsPreview) return;
-    const c = settings?.contacts || {};
-    siteSettingsPreview.innerHTML =
-      `Live: security → <code>${escHtml(c.security || '—')}</code> · ` +
-      `privacy → <code>${escHtml(c.privacy || '—')}</code> · ` +
-      `support → <code>${escHtml(c.support || '—')}</code> · ` +
-      `VAPID → <code>${escHtml(c.vapid || '—')}</code>`;
+    siteSettingsMeta.innerHTML = `Federation ID <code>${sid}</code> · Listed <code>${base}</code>`;
   }
 
   function syncSiteSettings(config) {
@@ -183,8 +166,7 @@
     if (contactVapidEmail) contactVapidEmail.value = String(contacts.vapid || '');
     siteSettingsBaseline = siteSettingsSig();
     renderSiteSettingsMeta(settings);
-    renderSiteSettingsPreview(settings);
-    setSiteSettingsStatus('saved', 'Loaded from this node');
+    setSiteSettingsStatus('saved', 'Loaded');
   }
 
   async function saveSiteSettings() {
@@ -215,23 +197,14 @@
     } finally {
       if (saveSiteSettingsBtn) {
         saveSiteSettingsBtn.disabled = false;
-        saveSiteSettingsBtn.textContent = 'Save Identity & Contacts';
+        saveSiteSettingsBtn.textContent = 'Save';
       }
     }
   }
 
   function refreshSiteSettingsDirtyUi() {
     const dirty = siteSettingsSig() !== siteSettingsBaseline;
-    setSiteSettingsStatus(dirty ? 'dirty' : 'saved', dirty ? 'Unsaved changes' : 'Loaded from this node');
-    const preview = {
-      contacts: {
-        security: String(contactSecurityEmail?.value || '').trim().toLowerCase(),
-        privacy: String(contactPrivacyEmail?.value || '').trim().toLowerCase(),
-        support: String(contactSupportEmail?.value || '').trim().toLowerCase(),
-        vapid: String(contactVapidEmail?.value || '').trim().toLowerCase(),
-      },
-    };
-    renderSiteSettingsPreview(preview);
+    setSiteSettingsStatus(dirty ? 'dirty' : 'saved', dirty ? 'Unsaved' : 'Loaded');
   }
 
   function publicUrlSig() {
@@ -251,7 +224,7 @@
     if (!sitePublicUrlPreview) return;
     const raw = String(url || '').trim().replace(/\/$/, '');
     if (!raw) {
-      sitePublicUrlPreview.textContent = 'No public URL configured — share links fall back to env PUBLIC_URL or request host.';
+      sitePublicUrlPreview.textContent = 'No public URL set — falls back to PUBLIC_URL env or request host.';
       return;
     }
     let host = '';
@@ -262,9 +235,7 @@
     if (meta?.has_domain) badges.push('Domain');
     if (meta?.is_ip_host) badges.push('Raw IP');
     sitePublicUrlPreview.innerHTML =
-      `Preview: <code>${escHtml(host)}/i/example</code> · ` +
-      `<code>${escHtml(host)}/u/you</code> · ` +
-      `<code>${escHtml(host)}/p/123</code>` +
+      `Links: <code>${escHtml(host)}/i/…</code> · <code>/u/…</code>` +
       (badges.length ? ` <span style="opacity:.75">(${badges.join(' · ')})</span>` : '');
   }
 
@@ -1585,13 +1556,42 @@
       onlineUsersBody.innerHTML = '<tr><td colspan="3" style="color:#93ab9a">No users online</td></tr>';
       return;
     }
-    onlineUsersBody.innerHTML = users.map(u => `
+    onlineUsersBody.innerHTML = users.map((u) => {
+      const nick = String(u.nickname || `#${u.user_id}`);
+      const role = u.is_admin ? 'admin' : 'user';
+      const banBtn = u.is_admin
+        ? ''
+        : `<button type="button" class="user-action-btn" data-user-ban="${escHtml(nick)}" title="Ban ${escHtml(nick)}">Ban</button>`;
+      return `
       <tr>
-        <td>${escHtml(u.nickname || `#${u.user_id}`)}</td>
-        <td>${Number(u.connections) || 0}</td>
-        <td>${u.is_admin ? 'admin' : 'user'}</td>
-      </tr>
-    `).join('');
+        <td class="user-cell" data-label="User">
+          <span class="user-cell-name">${escHtml(nick)}</span>
+          ${banBtn}
+        </td>
+        <td data-label="Connections">${Number(u.connections) || 0}</td>
+        <td data-label="Role">${role}</td>
+      </tr>`;
+    }).join('');
+  }
+
+  async function quickBanUser(nickname) {
+    const nick = String(nickname || '').trim();
+    if (!nick) return;
+    const mins = parseInt(document.getElementById('mod-duration')?.value || '60', 10);
+    if (!window.confirm(`Ban @${nick} for ${mins} minute${mins === 1 ? '' : 's'}?`)) return;
+    const modNick = document.getElementById('mod-nick');
+    if (modNick) modNick.value = nick;
+    setActionMessage('Banning…');
+    try {
+      await api('/api/server-admin/control/ban', {
+        method: 'POST',
+        body: JSON.stringify({ nickname: nick, duration_minutes: mins, reason: '' }),
+      });
+      setActionMessage(`Banned ${nick}.`);
+      await refreshDashboard();
+    } catch (e) {
+      setActionMessage(e.message, true);
+    }
   }
 
   function nodeActionButton(node) {
@@ -2317,6 +2317,13 @@
 
   document.querySelectorAll('[data-action]').forEach(btn => {
     btn.addEventListener('click', () => runAction(btn.getAttribute('data-action')));
+  });
+
+  onlineUsersBody?.addEventListener('click', (ev) => {
+    const btn = ev.target.closest('[data-user-ban]');
+    if (!btn) return;
+    ev.preventDefault();
+    quickBanUser(btn.getAttribute('data-user-ban'));
   });
 
   ensureAuth().catch((e) => {
