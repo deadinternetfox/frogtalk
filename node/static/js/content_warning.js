@@ -43,6 +43,30 @@
     return _cwEnabled(_roomMeta(roomName)?.content_warning);
   }
 
+  function patchRoomCwMeta(roomName, cw) {
+    const name = String(roomName || '').trim().toLowerCase();
+    if (!name || !window.State || !Array.isArray(State.rooms) || !_cwEnabled(cw)) return;
+    const row = State.rooms.find((r) => String(r.name || '').toLowerCase() === name);
+    if (row) row.content_warning = cw;
+  }
+
+  function _mergeCwMeta() {
+    for (let i = 0; i < arguments.length; i++) {
+      const cw = arguments[i];
+      if (_cwEnabled(cw)) return cw;
+    }
+    return { enabled: false, flags: [] };
+  }
+
+  function _isViewingRoom(room) {
+    if (!room || !window.State) return false;
+    if (State.currentRoom === room) return true;
+    try {
+      if (State._roomSwitchInProgress === room) return true;
+    } catch {}
+    return false;
+  }
+
   async function _fetchStatus(roomName) {
     const name = String(roomName || '').trim().toLowerCase();
     if (!name || !window.State || !State.token) return null;
@@ -52,21 +76,20 @@
         { headers: { 'X-Session-Token': State.token }, cache: 'no-store' },
       );
       if (r.ok) return r.json();
-      if (r.status === 403 || r.status === 404) {
-        return { _httpStatus: r.status, required: false, content_warning: { enabled: false, flags: [] } };
-      }
-    } catch {}
-    return null;
+      return { _httpStatus: r.status, _failed: true };
+    } catch {
+      return null;
+    }
   }
 
-  async function resolveCwMeta(roomName) {
+  async function resolveCwMeta(roomName, knownCw) {
     const name = String(roomName || '').trim().toLowerCase();
+    if (_cwEnabled(knownCw)) return knownCw;
     const local = _roomMeta(name)?.content_warning;
     if (_cwEnabled(local)) return local;
     const status = await _fetchStatus(name);
     if (status && _cwEnabled(status.content_warning)) return status.content_warning;
-    if (_cwEnabled(local)) return local;
-    return status?.content_warning || local || { enabled: false, flags: [] };
+    return _mergeCwMeta(knownCw, local, status?.content_warning);
   }
 
   function _removeOverlay() {
@@ -159,7 +182,6 @@
           }
           return;
         }
-        _visitAcked.add(String(roomName || '').trim().toLowerCase());
         _removeOverlay();
         resolve(true);
       } catch {
@@ -205,45 +227,62 @@
     await forgetAck(name);
   }
 
+  /** Call after switchToRoom commits — not when gate overlay resolves. */
+  function markVisitAcked(roomName) {
+    const name = String(roomName || '').trim().toLowerCase();
+    if (name && !name.startsWith('dm:')) _visitAcked.add(name);
+  }
+
   function gate(roomName, opts) {
     const name = String(roomName || '').trim().toLowerCase();
     const options = opts || {};
     if (!name || name.startsWith('dm:')) return Promise.resolve(true);
 
     return (async () => {
-      if (_visitAcked.has(name)) return true;
+      const knownCw = options.knownCw;
+      if (_cwEnabled(knownCw)) patchRoomCwMeta(name, knownCw);
+
+      if (_visitAcked.has(name) && !options.forceRecheck) return true;
 
       const localCw = _roomMeta(name)?.content_warning;
+      const knownMarked = _cwEnabled(knownCw);
       const localMarked = _cwEnabled(localCw);
 
       const hasToken = await _waitForToken(options.tokenWaitMs || 8000);
+      const displayMeta = _mergeCwMeta(knownCw, localCw);
+
       if (!hasToken) {
-        if (localMarked) {
-          const meta = localCw || await resolveCwMeta(name);
+        if (knownMarked || localMarked) {
           return await new Promise((resolve) => {
-            _showGate(name, meta, resolve, !!(window.State && State.currentRoom === name));
+            _showGate(name, displayMeta, resolve, _isViewingRoom(name));
           });
         }
         return true;
       }
 
       const status = await _fetchStatus(name);
-      const cwMeta = await resolveCwMeta(name);
-      const statusMarked = _cwEnabled(status?.content_warning) || _cwEnabled(cwMeta);
-      const statusRequired = !!(status && status.required);
+      const cwMeta = _mergeCwMeta(knownCw, localCw, status?.content_warning);
+      let resolvedMeta = cwMeta;
+      if (!_cwEnabled(resolvedMeta)) {
+        resolvedMeta = await resolveCwMeta(name, knownCw);
+      }
 
-      let shouldGate = statusRequired || statusMarked || localMarked;
-      if (!shouldGate && localMarked) shouldGate = true;
-      if (!shouldGate && statusMarked) shouldGate = true;
-      if (!shouldGate && status === null && (localMarked || isCwRoom(name))) {
+      const statusRequired = !!(status && status.required);
+      const statusMarked = _cwEnabled(status?.content_warning);
+      const metaMarked = _cwEnabled(resolvedMeta);
+
+      let shouldGate = statusRequired || statusMarked || metaMarked || knownMarked || localMarked;
+      if (status && status._failed && (knownMarked || localMarked || metaMarked)) {
+        shouldGate = true;
+      }
+      if (status === null && (knownMarked || localMarked || metaMarked)) {
         shouldGate = true;
       }
 
       if (!shouldGate) return true;
 
-      const alreadyInRoom = !!(window.State && State.currentRoom === name);
       return await new Promise((resolve) => {
-        _showGate(name, cwMeta.enabled ? cwMeta : (localCw || cwMeta), resolve, alreadyInRoom);
+        _showGate(name, resolvedMeta, resolve, _isViewingRoom(name));
       });
     })();
   }
@@ -270,25 +309,28 @@
       _removeOverlay();
       return;
     }
-    if (window.State && State.currentRoom === room) {
-      _visitAcked.delete(room);
-      _lockRoomUntilAck(room);
-      void gate(room).then((ok) => {
-        if (ok && typeof WS !== 'undefined' && WS.connect) {
-          try { WS.connect(room); } catch {}
-        } else if (!ok) {
-          try { showDeclinedScreen(room); } catch {}
-        }
-      });
-    }
+    patchRoomCwMeta(room, cw);
+    if (!_isViewingRoom(room)) return;
+    _visitAcked.delete(room);
+    _lockRoomUntilAck(room);
+    void gate(room, { knownCw: cw, forceRecheck: true }).then((ok) => {
+      if (ok && typeof WS !== 'undefined' && WS.connect) {
+        try { WS.connect(room); } catch {}
+      } else if (!ok) {
+        try { showDeclinedScreen(room); } catch {}
+      }
+    });
   }
 
   function handleWsRequired(data) {
     const room = String((data && data.room) || '').trim().toLowerCase();
-    if (!room || !window.State || State.currentRoom !== room) return;
+    if (!room) return;
+    const cw = (data && data.content_warning) || {};
+    if (_cwEnabled(cw)) patchRoomCwMeta(room, cw);
+    if (!_isViewingRoom(room)) return;
     _visitAcked.delete(room);
     _lockRoomUntilAck(room);
-    void gate(room).then((ok) => {
+    void gate(room, { knownCw: cw, forceRecheck: true }).then((ok) => {
       if (ok && typeof WS !== 'undefined' && WS.connect) {
         try { WS.connect(room); } catch {}
       } else if (!ok) {
@@ -307,14 +349,19 @@
   function patchMeta(roomName, cw) {
     const name = String(roomName || '').trim().toLowerCase();
     if (!name) return;
-    if (cw && cw.enabled) _visitAcked.delete(name);
+    if (cw && cw.enabled) {
+      patchRoomCwMeta(name, cw);
+      _visitAcked.delete(name);
+    }
   }
 
   window.ContentWarning = {
     gate,
     forgetAck,
     prepareRoomEntry,
+    markVisitAcked,
     resolveCwMeta,
+    patchRoomCwMeta,
     isCwRoom,
     patchMeta,
     formatFlags,

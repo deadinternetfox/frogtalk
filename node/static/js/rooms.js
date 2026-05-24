@@ -1241,7 +1241,10 @@ const Rooms = (() => {
         try { Music?.mount?.(name, chNow); } catch {}
         // Re-check CW gate (e.g. settings changed, ack expired, or federation sync reload).
         if (type !== 'dm' && type !== 'private' && window.ContentWarning?.gate) {
-          const cwOk = await ContentWarning.gate(name);
+          const cwOk = await ContentWarning.gate(name, {
+            knownCw: opts.knownCw,
+            forceRecheck: true,
+          });
           if (!cwOk) {
             try { ContentWarning.showDeclinedScreen?.(name); } catch {}
           }
@@ -1292,7 +1295,10 @@ const Rooms = (() => {
         try { await ContentWarning.prepareRoomEntry(name); } catch {}
       }
       if (window.ContentWarning && typeof ContentWarning.gate === 'function') {
-        const cwOk = await ContentWarning.gate(name, { tokenWaitMs: 8000 });
+        const cwOk = await ContentWarning.gate(name, {
+          tokenWaitMs: 8000,
+          knownCw: opts.knownCw,
+        });
         if (!cwOk) {
           try { UI.showToast(`You must confirm you are 18+ to enter #${name}`, 'info'); } catch {}
           return;
@@ -1329,6 +1335,9 @@ const Rooms = (() => {
     State.currentRoom = name;
     State.currentRoomType = type;
     State.dmPeer = dmPeer;
+    if (type !== 'dm' && type !== 'private' && window.ContentWarning?.markVisitAcked) {
+      try { ContentWarning.markVisitAcked(name); } catch {}
+    }
     try {
       if (typeof UI !== 'undefined' && UI.updateTypingBar) UI.updateTypingBar();
     } catch {}
@@ -1775,7 +1784,7 @@ const Rooms = (() => {
           return;
         }
       }
-      await switchToRoom(name, roomType, null, chType);
+      await switchToRoom(name, roomType, null, chType, { knownCw: room?.content_warning });
       try { delete State._explicitRoomNav; } catch {}
       return;
     }
@@ -3359,7 +3368,9 @@ const Rooms = (() => {
 
     const cached = (State.rooms || []).find(r => r.name === raw);
     if (cached && cached.joined) {
-      switchToRoom(raw, cached.type || 'public', null, cached.channel_type || 'text');
+      await switchToRoom(raw, cached.type || 'public', null, cached.channel_type || 'text', {
+        knownCw: cached.content_warning,
+      });
       return;
     }
 
@@ -3400,11 +3411,12 @@ const Rooms = (() => {
 
       try { await loadRooms(); } catch {}
       const fresh = (State.rooms || []).find(r => r.name === target);
-      switchToRoom(
+      await switchToRoom(
         target,
         fresh?.type || roomType,
         null,
         fresh?.channel_type || room.channel_type || 'text',
+        { knownCw: fresh?.content_warning },
       );
     } catch {
       UI.showToast('Network error', 'error');
@@ -4422,7 +4434,11 @@ async function joinDirectoryChannel(name) {
     if (r.ok) {
       document.getElementById('modal-directory')?.classList.add('hidden');
       await Rooms.loadRooms();
-      await Rooms.switchToRoom(name);
+      const roomRow = (State.rooms || []).find((row) => row.name === name);
+      const chType = roomRow?.channel_type || 'text';
+      await Rooms.switchToRoom(name, roomRow?.type || 'public', null, chType, {
+        knownCw: roomRow?.content_warning,
+      });
       UI.showToast(`Joined #${name}!`);
     } else {
       const d = await r.json().catch(() => ({}));
@@ -4440,7 +4456,7 @@ async function joinDirectoryChannel(name) {
 //   • If the viewer isn't a member yet, POST /join silently.
 //   • Close every discovery overlay so the chat view is front-and-center.
 //   • Switch to the room with a short loading flash on the triggering btn.
-async function openChannelFromDiscovery(name, btnEl) {
+async function openChannelFromDiscovery(name, btnEl, knownCw) {
   if (!name) return;
   // Visual feedback on the clicked button.
   let origHtml = '';
@@ -4450,10 +4466,29 @@ async function openChannelFromDiscovery(name, btnEl) {
     btnEl.innerHTML = '<span style="display:inline-block;animation:spin 1s linear infinite">⏳</span> Opening…';
   }
   const restore = () => {
-    if (btnEl) { btnEl.disabled = false; btnEl.innerHTML = origHtml; }
+    if (btnEl) { btnEl.disabled = false; btnEl.innerHTML = origHtml; };
   };
   try {
     try { State._explicitRoomNav = String(name || '').toLowerCase(); } catch {}
+    let profileCw = knownCw;
+    try {
+      if (State._pendingCwHint && String(State._pendingCwHint.name || '').toLowerCase() === String(name || '').toLowerCase()) {
+        profileCw = profileCw || State._pendingCwHint.cw;
+        delete State._pendingCwHint;
+      }
+    } catch {}
+    if (!profileCw || !profileCw.enabled) {
+      try {
+        const pr = await fetch(
+          `/api/directory/channels/${encodeURIComponent(name)}/profile`,
+          { headers: { 'X-Session-Token': State.token } },
+        );
+        if (pr.ok) {
+          const prof = await pr.json();
+          if (prof && prof.content_warning) profileCw = prof.content_warning;
+        }
+      } catch {}
+    }
     const joined = (State.rooms || []).some(r => r.name === name && r.joined);
     if (!joined) {
       const r = await fetch(`/api/rooms/${encodeURIComponent(name)}/join`, {
@@ -4465,9 +4500,11 @@ async function openChannelFromDiscovery(name, btnEl) {
         restore();
         return;
       }
-      try { await Rooms.loadRooms(); } catch {}
       UI.showToast(`✓ Joined #${name}`);
     }
+    try { await Rooms.loadRooms(); } catch {}
+    const roomRow = (State.rooms || []).find((r) => r.name === name);
+    const cwHint = profileCw || roomRow?.content_warning;
     // Close every discovery surface so the channel takes over.
     try { document.getElementById('channel-profile-overlay')?.remove(); } catch {}
     try { document.getElementById('modal-directory')?.classList.add('hidden'); } catch {}
@@ -4477,7 +4514,8 @@ async function openChannelFromDiscovery(name, btnEl) {
         name, type: 'public', channelType: 'text', ts: Date.now(),
       }));
     } catch {}
-    await Rooms.switchToRoom(name, 'public');
+    const chType = roomRow?.channel_type || 'text';
+    await Rooms.switchToRoom(name, roomRow?.type || 'public', null, chType, { knownCw: cwHint });
     restore();
   } catch {
     UI.showToast('Network error', 'error');
@@ -4543,6 +4581,9 @@ async function viewChannelProfile(channelName) {
     const r = await fetch(`/api/directory/channels/${encodeURIComponent(channelName)}/profile`, { headers: { 'X-Session-Token': State.token } });
     if (!r.ok) { UI.showToast('Channel not found', 'error'); return; }
     const ch = await r.json();
+    try {
+      State._pendingCwHint = { name: ch.name, cw: ch.content_warning };
+    } catch {}
 
     let tags = [];
     try { tags = Array.isArray(ch.tags) ? ch.tags : JSON.parse(ch.tags || '[]'); } catch {}

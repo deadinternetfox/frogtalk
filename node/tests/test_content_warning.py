@@ -225,6 +225,41 @@ class ContentWarningTests(unittest.TestCase):
         )
         self.assertTrue(st.json().get("required"))
 
+    def test_leave_rejoin_requires_content_warning_gate(self):
+        owner = self._session("cw_owner_i")
+        member = self._session("cw_member_i")
+        self._create_public_room(
+            owner,
+            "cw-pub-i",
+            cw={"enabled": True, "flags": ["extremism"]},
+        )
+        self.client.post("/api/rooms/cw-pub-i/join", headers=self._hdr(member))
+        self.client.post(
+            "/api/rooms/cw-pub-i/content-warning/ack",
+            json={"confirm": True},
+            headers=self._hdr(member),
+        )
+        ok = self.client.get("/api/messages/cw-pub-i?limit=20", headers=self._hdr(member))
+        self.assertEqual(ok.status_code, 200, ok.text)
+
+        self.client.post("/api/rooms/cw-pub-i/leave", headers=self._hdr(member))
+        self.client.post("/api/rooms/cw-pub-i/join", headers=self._hdr(member))
+
+        st = self.client.get(
+            "/api/rooms/cw-pub-i/content-warning/status",
+            headers=self._hdr(member),
+        )
+        self.assertEqual(st.status_code, 200, st.text)
+        body = st.json()
+        self.assertTrue(body.get("required"), body)
+        self.assertTrue(body["content_warning"]["enabled"])
+
+        blocked = self.client.get(
+            "/api/messages/cw-pub-i?limit=20",
+            headers=self._hdr(member),
+        )
+        self.assertEqual(blocked.status_code, 451, blocked.text)
+
     def test_database_helpers_round_trip(self):
         db = self.db
         uid = db.create_user("cw_db_user", "secret12")
