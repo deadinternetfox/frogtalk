@@ -396,6 +396,13 @@ async def channel_profile(room_name: str, current_user: dict = Depends(get_curre
     # Pick up federation index data if we have it (member_count from peer,
     # home_base_url for "Hosted on" labels). Local row's numbers always win.
     fed = db.get_federation_channel_index_entry(room["name"]) or {}
+    cw_en = int(room.get("content_warning_enabled") or 0)
+    cw_fl = int(room.get("content_warning_flags") or 0) & db.CW_ALL
+    if fed and (not cw_en or not cw_fl):
+        fed_en = int(fed.get("content_warning_enabled") or 0)
+        fed_fl = int(fed.get("content_warning_flags") or 0) & db.CW_ALL
+        if fed_en and fed_fl:
+            cw_en, cw_fl = fed_en, fed_fl
     return {
         "name": room["name"],
         "description": _sanitize_room_text(room.get("description", ""), max_len=256),
@@ -425,10 +432,7 @@ async def channel_profile(room_name: str, current_user: dict = Depends(get_curre
         "is_joined": is_joined,
         "my_role": my_role,
         "is_federated": bool(home_sid),
-        "content_warning": db.content_warning_to_dict(
-            room.get("content_warning_enabled"),
-            room.get("content_warning_flags"),
-        ),
+        "content_warning": db.content_warning_to_dict(cw_en, cw_fl),
     }
 
 

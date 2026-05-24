@@ -52,7 +52,9 @@
         { headers: { 'X-Session-Token': State.token }, cache: 'no-store' },
       );
       if (r.ok) return r.json();
-      if (r.status === 403 || r.status === 404) return { _httpStatus: r.status, required: false };
+      if (r.status === 403 || r.status === 404) {
+        return { _httpStatus: r.status, required: false, content_warning: { enabled: false, flags: [] } };
+      }
     } catch {}
     return null;
   }
@@ -197,7 +199,10 @@
   }
 
   async function prepareRoomEntry(roomName) {
-    await forgetAck(roomName);
+    const name = String(roomName || '').trim().toLowerCase();
+    if (!name || name.startsWith('dm:')) return;
+    _visitAcked.delete(name);
+    await forgetAck(name);
   }
 
   function gate(roomName, opts) {
@@ -208,19 +213,37 @@
     return (async () => {
       if (_visitAcked.has(name)) return true;
 
+      const localCw = _roomMeta(name)?.content_warning;
+      const localMarked = _cwEnabled(localCw);
+
       const hasToken = await _waitForToken(options.tokenWaitMs || 8000);
-      if (!hasToken) return !isCwRoom(name);
+      if (!hasToken) {
+        if (localMarked) {
+          const meta = localCw || await resolveCwMeta(name);
+          return await new Promise((resolve) => {
+            _showGate(name, meta, resolve, !!(window.State && State.currentRoom === name));
+          });
+        }
+        return true;
+      }
 
       const status = await _fetchStatus(name);
-      const cwMeta = (status && status.content_warning) || _roomMeta(name)?.content_warning || {};
-      const shouldGate = !!(status && (status.required || _cwEnabled(status.content_warning)))
-        || _cwEnabled(cwMeta);
+      const cwMeta = await resolveCwMeta(name);
+      const statusMarked = _cwEnabled(status?.content_warning) || _cwEnabled(cwMeta);
+      const statusRequired = !!(status && status.required);
+
+      let shouldGate = statusRequired || statusMarked || localMarked;
+      if (!shouldGate && localMarked) shouldGate = true;
+      if (!shouldGate && statusMarked) shouldGate = true;
+      if (!shouldGate && status === null && (localMarked || isCwRoom(name))) {
+        shouldGate = true;
+      }
 
       if (!shouldGate) return true;
 
       const alreadyInRoom = !!(window.State && State.currentRoom === name);
       return await new Promise((resolve) => {
-        _showGate(name, cwMeta, resolve, alreadyInRoom);
+        _showGate(name, cwMeta.enabled ? cwMeta : (localCw || cwMeta), resolve, alreadyInRoom);
       });
     })();
   }

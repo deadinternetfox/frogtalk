@@ -2431,8 +2431,14 @@ const App = {
   openFirstAvailableRoom() {
     try {
       if (State && State._explicitRoomNav) return;
+      if (State && State._roomSwitchInProgress) return;
       const rooms = (typeof State !== 'undefined' && Array.isArray(State.rooms)) ? State.rooms : [];
       const joined = rooms.filter(r => r.joined);
+      if (!joined.length) {
+        try { localStorage.removeItem('fc_last_room'); } catch {}
+        this.showEmptyOnboarding();
+        return;
+      }
       // Prefer the last channel the user had open — persisted by
       // Rooms.switchToRoom. Only use it if it's still in the joined list.
       let target = null;
@@ -2446,14 +2452,18 @@ const App = {
         }
       } catch {}
       if (!target) target = joined[0] || null;
-      if (target) {
-        const roomType = target.type || 'public';
-        const chType = (target.channel_type === 'voice') ? 'music' : (target.channel_type || 'text');
-        Rooms.switchToRoom(target.name, roomType, null, chType);
+      if (!target) {
+        try { localStorage.removeItem('fc_last_room'); } catch {}
+        this.showEmptyOnboarding();
         return;
       }
+      const roomType = target.type || 'public';
+      const chType = (target.channel_type === 'voice') ? 'music' : (target.channel_type || 'text');
+      Rooms.switchToRoom(target.name, roomType, null, chType);
+      return;
     } catch {}
-    App.showEmptyOnboarding();
+    try { localStorage.removeItem('fc_last_room'); } catch {}
+    this.showEmptyOnboarding();
   },
 
   /**

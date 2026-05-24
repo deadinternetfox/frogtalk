@@ -682,9 +682,14 @@ async def list_rooms(current_user: dict = Depends(get_current_user)):
         if r.get("type") == "private" and not r["joined"] and not is_admin:
             continue
         fed = db.get_federation_channel_index_entry(r.get("name") or "")
-        if fed and not int(r.get("content_warning_enabled") or 0):
-            r["content_warning_enabled"] = int(fed.get("content_warning_enabled") or 0)
-            r["content_warning_flags"] = int(fed.get("content_warning_flags") or 0)
+        if fed:
+            local_en = int(r.get("content_warning_enabled") or 0)
+            local_fl = int(r.get("content_warning_flags") or 0) & db.CW_ALL
+            fed_en = int(fed.get("content_warning_enabled") or 0)
+            fed_fl = int(fed.get("content_warning_flags") or 0) & db.CW_ALL
+            if fed_en and fed_fl and (not local_en or not local_fl):
+                r["content_warning_enabled"] = fed_en
+                r["content_warning_flags"] = fed_fl
         visible.append(_room_with_content_warning(r) or r)
 
     # Remote-node sidebar: only channels the user is actually joined to on
@@ -1096,6 +1101,10 @@ async def get_content_warning_status(
         )
         if not is_public_open and not db.user_can_access_room(uid, name, is_admin=False):
             return JSONResponse(status_code=403, content={"error": "Not a member of this room"})
+    try:
+        db.sync_room_content_warning_from_index(name)
+    except Exception:
+        pass
     enabled, flags = db.get_room_content_warning(name)
     token = session_token_from_request(request) or ""
     required, _ = cw_ack_is_required(name, token)

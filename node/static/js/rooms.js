@@ -1250,7 +1250,9 @@ const Rooms = (() => {
       return;
     }
 
-    const switchSeq = ++_switchSeq;
+    const switchToken = ++_switchSeq;
+    try { State._roomSwitchInProgress = String(name || '').toLowerCase(); } catch {}
+    try {
 
     // Avoid flashing the previous channel while the 18+ gate / join resolves.
     if (prevRoom !== name || prevType !== type) {
@@ -1298,7 +1300,7 @@ const Rooms = (() => {
       }
     }
 
-    if (switchSeq !== _switchSeq) return;
+    if (switchToken !== _switchSeq) return;
 
     // ── Smooth transition: clear DM UI state so no stale DM bleeds through
     if (typeof _activeDM !== 'undefined' && _activeDM) {
@@ -1567,6 +1569,13 @@ const Rooms = (() => {
           <div style="font-size:14px">Click the voice button in the header to join</div>
         </div>
       `;
+    }
+    } finally {
+      try {
+        if (State._roomSwitchInProgress === String(name || '').toLowerCase()) {
+          delete State._roomSwitchInProgress;
+        }
+      } catch {}
     }
   }
 
@@ -1892,8 +1901,32 @@ const Rooms = (() => {
       try { await ContentWarning.forgetAck(name); } catch {}
     }
     if (State.currentRoom === name) {
-      const fallback = State.rooms.find(r => r.joined && r.name !== name);
-      switchToRoom(fallback ? fallback.name : 'general', 'public');
+      _navigateAfterLeavingChannel(name);
+    }
+  }
+
+  /** After leaving the active channel, open another joined room or the welcome screen. */
+  function _navigateAfterLeavingChannel(leftName) {
+    try { localStorage.removeItem('fc_last_room'); } catch {}
+    try { WS?.disconnect?.(); } catch {}
+    const fallback = (State.rooms || []).find((r) => r.joined && r.name !== leftName);
+    if (fallback) {
+      void switchToRoom(
+        fallback.name,
+        fallback.type || 'public',
+        null,
+        fallback.channel_type || 'text',
+      );
+      return;
+    }
+    try {
+      State.currentRoom = null;
+      State.currentRoomType = null;
+      State.currentRoomOwner = null;
+      State.dmPeer = null;
+    } catch {}
+    if (window.App && typeof App.showEmptyOnboarding === 'function') {
+      App.showEmptyOnboarding();
     }
   }
 
@@ -4381,6 +4414,7 @@ function _directoryJoinErrorMessage(d, name) {
 
 async function joinDirectoryChannel(name) {
   try {
+    try { State._explicitRoomNav = String(name || '').toLowerCase(); } catch {}
     const r = await fetch(`/api/rooms/${encodeURIComponent(name)}/join`, {
       method: 'POST',
       headers: { 'X-Session-Token': State.token }
@@ -4396,6 +4430,8 @@ async function joinDirectoryChannel(name) {
     }
   } catch {
     UI.showToast('Failed to join channel', 'error');
+  } finally {
+    try { delete State._explicitRoomNav; } catch {}
   }
 }
 
