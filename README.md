@@ -434,66 +434,29 @@ Detailed structure + migration rules: [`node/README.md`](node/README.md) · secu
 
 ---
 
-## 🐸 Vibe-coded, but open source
+## Open source & contributing
 
-FrogTalk is a **censorship-free platform where messages can stay private** — and it's
-being built in the open with a process we're openly experimenting with: an AI-in-the-loop
-workflow for small, honest software teams.
+FrogTalk is **MIT-licensed** and developed in the open. The encryption primitives are well-studied (X3DH + Double Ratchet for DMs, per-room AES-256-GCM for private channels, DTLS-fingerprint signing for calls). We publish the [security model](docs/SECURITY_MODEL.md) and welcome audits.
 
-### Our development process
+### Get involved
 
-```
-   ┌─────────┐    ┌─────────────┐    ┌──────────────────────┐    ┌────────┐
-   │  Idea   │ ─▶ │  AI slop    │ ─▶ │  Deslop (human pass) │ ─▶ │  Ship  │
-   └─────────┘    └─────────────┘    └──────────────────────┘    └────────┘
-```
-
-- **Idea.** Issue, sketch, "what if we…" — barrier is low on purpose.
-- **AI slop.** The first draft of most code is AI-generated. PRs are labelled `vibe-coded` so reviewers know what they're walking into.
-- **Deslop.** A human reviewer fixes the security holes, kills dead code, tightens
-  the names, rewrites lying comments, and actually exercises the change. Code is
-  not considered done until it has been deslopped.
-- **Ship.** Trunk-based: merge to `main`, deploy, watch the logs.
-
-The encryption primitives are well-studied (X3DH + Double Ratchet for DMs,
-per-room AES-256-GCM for private channels, DTLS-fingerprint signing for calls). The surrounding plumbing — DOM rendering, session handling,
-media URLs, federation glue — is the kind of code that benefits from a second set
-of eyes. **We'd rather hear from you than pretend it's flawless.**
-
-### We need your help
-
-This project is run by a tiny team. Every kind of contribution matters:
-
-- 🐛 **Found a bug or security issue?** Report it at **<https://frogtalk.xyz/security>**
-  — anonymous submissions accepted. For sensitive disclosures: `security@frogtalk.xyz`.
-- 🔎 **Spotted AI slop in the codebase?** Open a [slop sighting](https://github.com/deadinternetfox/frogtalk/issues/new?template=slop_sighting.md)
-  — file path, what looks wrong, why.
-- 🧹 **Want to deslop?** Pick an issue tagged `deslop-needed` and send a PR. After a
-  few solid reviews you can get write access. See [CONTRIBUTING.md](CONTRIBUTING.md).
-- 🛠️ **New feature idea?** Half-formed is fine — file it as a [feature idea](https://github.com/deadinternetfox/frogtalk/issues/new?template=feature_idea.md).
+- 🐛 **Bug or security issue?** Report at **<https://frogtalk.xyz/security>** — anonymous submissions accepted. For sensitive disclosures: `security@frogtalk.xyz`.
+- 🛠️ **Code contribution?** See **[CONTRIBUTING.md](CONTRIBUTING.md)** for branch workflow and review expectations.
+- 🛠️ **Feature idea?** File a [feature request](https://github.com/deadinternetfox/frogtalk/issues/new?template=feature_idea.md).
 - 📣 **Run a node.** More nodes = more censorship-resistance. Self-host guide above.
-- 💬 **Tell people the project exists.** Community projects need a community.
+- 💬 **Spread the word.** Community projects need a community.
 
-Researchers who responsibly disclose are credited in the security advisory and on the
-[Hall of Fame](https://frogtalk.xyz/security#hall-of-fame).
+Researchers who responsibly disclose are credited in the security advisory and on the [Hall of Fame](https://frogtalk.xyz/security#hall-of-fame).
 
-### Contributing
-
-See **[CONTRIBUTING.md](CONTRIBUTING.md)** for the full deslop process: the review
-checklist (Correctness / Security / Operational / Honesty), label conventions
-(`vibe-coded`, `deslopped`, `deslop-needed`, `slop-sighting`), and how to become a
-deslopper. Quick start:
+### Contributing (quick start)
 
 1. Fork the repo and branch from `main`.
-2. If your PR is AI-drafted, label it `vibe-coded` — we'll deslop it together.
-3. Run `node --check node/static/js/<file>.js` for any JS you touched — silent parse
-   errors break every onclick on the page.
-4. Run `python -m py_compile node/<file>.py` for any Python you touched.
-5. Open a PR with the template filled in. For security fixes, include a PoC.
-6. Add yourself to `CONTRIBUTORS.md` in the same PR.
+2. Run `node --check node/static/js/<file>.js` for any JS you touched.
+3. Run `python3 -m py_compile node/<file>.py` for any Python you touched.
+4. Open a PR with the template filled in. For security fixes, include a PoC.
+5. Add yourself to `CONTRIBUTORS.md` in the same PR if you want repo credit.
 
-See [`/security`](https://frogtalk.xyz/security) for scope, threat model, and
-what counts as a vulnerability.
+See [`/security`](https://frogtalk.xyz/security) for scope, threat model, and what counts as a vulnerability.
 
 ---
 

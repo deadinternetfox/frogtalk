@@ -97,8 +97,7 @@ Channels use a simpler model than DMs because trust is membership-based, not 1:1
 
 ### Why not libsignal Sender Keys for channels
 
-Track C (Sender Keys) shipped in early 2026 and was **reverted 2026-05-20**
-(commit `24490ab`). libsignal's `GroupCipher` cannot decrypt its own send chain,
+Track C (Sender Keys) was evaluated and **removed in 2026-05** because libsignal's `GroupCipher` cannot decrypt its own send chain,
 which conflicts with immediate local bubble rendering. We kept per-room AES until
 own-message decrypt is solvable without fragile plaintext caches.
 
@@ -232,7 +231,7 @@ audio). Per-node TURN is published via `/api/network/ice-config`. Full spec:
 
 ---
 
-## 6. Linked devices — Track F Phase 1
+## 6. Linked devices
 
 Up to **5 secondary devices** + primary. Each device has its own Curve25519 identity
 signed by the primary (XEdDSA). DM send encrypts to all active devices of recipient
@@ -329,9 +328,8 @@ Operator setup: [node/deploy/README.md](../node/deploy/README.md),
 - **2026-05-21** — FrogSocial federation: signed `social.*`, plaintext replication
   limited to `public`/`followers`, encrypted cross-node wall with targeted wraps,
   origin binding, no nickname-only user materialization on apply.
-- **2026-05-20** — Runtime tree under `node/`; Track C (Sender Keys) reverted;
-  channels on per-room AES-256-GCM; full message/DM wipe on nodes.
+- **2026-05-20** — Runtime tree under `node/`; per-room AES-256-GCM for channels; full message/DM wipe on nodes.
 - **2026-05-xx** — Wall per-post AEAD + Signal-wrapped keys per follower.
-- **2026-04-xx** — Track F Phase 1 (linked devices).
+- **2026-04-xx** — Linked devices (QR pairing).
 - **2026-03-xx** — Safety Numbers in 🔒 panel.
 - **2026-02-xx** — DM v2 Signal envelope only; v1 legacy AES removed.

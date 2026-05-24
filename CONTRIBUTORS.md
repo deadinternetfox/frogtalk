@@ -7,9 +7,9 @@ Categories are loose; pick the one that fits. Some people belong in several.
 
 ---
 
-## Maintainers / desloppers
+## Maintainers
 
-- [@deadinternetfox](https://github.com/deadinternetfox) — designer, creator, and chief slop machine operator
+- [@deadinternetfox](https://github.com/deadinternetfox) — designer and project lead
 
 ## Code contributors
 

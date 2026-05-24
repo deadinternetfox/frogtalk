@@ -36,7 +36,7 @@
   <main class="wrap">
     <section class="hero">
       <h1>Complete API Reference</h1>
-      <p class="sub">All user-callable API endpoints currently in this codebase, including developer token API and federation update commands.</p>
+      <p class="sub">Complete reference for FrogTalk HTTP and WebSocket APIs: auth, chat, social, bots, federation, and server administration.</p>
       <div class="meta">Base URL: <code>https://your-host/api</code> · Session header: <code>X-Session-Token</code> · Developer header: <code>X-API-Key</code> or <code>Authorization: Bearer KEY</code></div>
     </section>
 
@@ -292,7 +292,7 @@ GET    /api/social/stories/{story_id}/viewers
 GET    /api/wall/users/{username}
 POST   /api/wall/posts                    (plaintext; public or followers privacy)
 GET    /api/wall/audience-recipients      (?audience=followers|friends|list:&lt;id&gt;)
-POST   /api/wall/posts/encrypted          (Track D; friends/followers audiences)
+POST   /api/wall/posts/encrypted          (friends/followers audiences; client-side encryption)
 POST   /api/wall/posts/{post_id}/wrapped-keys  (extend audience after new follower/friend)
 GET    /api/wall/posts/{post_id}
 GET    /api/wall/posts/{post_id}/media
@@ -365,12 +365,12 @@ DELETE /api/developer/channels/{room_name}/bots/{bot_id}
 GET    /api/developer/channels/{room_name}/bots
 GET    /api/developer/bots/public</code></pre>
           <p class="muted">Use these endpoints to mint API keys and manage bot accounts/channels from your own backend tools.</p>
-          <p class="muted"><strong>Permission allowlist (HIGH-9).</strong> User-issued keys may only carry permissions from the set
+          <p class="muted"><strong>Permission allowlist.</strong> User-issued keys may only carry permissions from the set
           <code>{ read, write, dm, bot }</code>. Any other value (including <code>admin</code>) is rejected at create time —
           you cannot self-grant elevated scopes via the API.</p>
           <p class="muted"><strong>Per-user key cap.</strong> Each user is limited to <strong>20</strong> active API keys.
           Delete unused keys before creating new ones, or rotate by deleting first.</p>
-          <p class="muted"><strong>Bot channel membership (HIGH-3).</strong> Bots can only read or post in channels they've been
+          <p class="muted"><strong>Bot channel membership.</strong> Bots can only read or post in channels they've been
           installed into. Server replies with <code>403 Bot is not a member of this channel</code> otherwise. Use
           <code>GET /api/external/me/channels</code> to discover where the bot is installed.</p>
         </article>
@@ -631,8 +631,8 @@ POST   /api/federation/events/emit
 GET    /api/federation/events/outbox
 GET    /api/federation/failover/status</code></pre>
 
-          <h3 class="h-mt-14">Signed update channel (CRIT-3, HIGH-15)</h3>
-          <p class="muted">Update apply now refuses to run unless the release manifest carries an Ed25519 signature
+          <h3 class="h-mt-14">Signed update channel</h3>
+          <p class="muted">Update apply refuses to run unless the release manifest carries an Ed25519 signature
           from a pubkey listed in <code>FROGTALK_RELEASE_SIGNERS</code>. Auto-apply is off by default
           (<code>FROGTALK_AUTO_UPDATE_ENABLED=0</code>) — operators opt in explicitly.</p>
 <pre><code>POST /api/network/updates/publish
@@ -649,7 +649,7 @@ GET    /api/federation/failover/status</code></pre>
           checks <code>package_sha256</code>, and enforces version monotonicity before running the apply
           step.</p>
 
-          <h3 class="h-mt-14">Inbox signing required by default (CRIT-2)</h3>
+          <h3 class="h-mt-14">Inbox signing required by default</h3>
           <p class="muted"><code>FROGTALK_FEDERATION_REQUIRE_SIGS</code> defaults to <code>1</code>. Events
           from origins with no pinned <code>server_pubkey</code> are rejected. Inbox idempotency uses a
           composite <code>(origin_server_id, event_id)</code> key so two peers cannot collide.</p>
@@ -661,8 +661,8 @@ GET    /api/federation/failover/status</code></pre>
           <code>FROGTALK_FEDERATION_INBOX_IDLE_SEC</code> / <code>OUTBOX_IDLE_SEC</code> (default 8s when idle,
           2s when busy). Clearnet hubs reach <code>.onion</code> peers via <code>FROGTALK_TOR_SOCKS_PROXY</code>.</p>
 
-          <h3 class="h-mt-14">No shadow auto-create (CRIT-4)</h3>
-          <p class="muted">Federation events referencing an unknown local nickname or room are now
+          <h3 class="h-mt-14">Foreign user and room materialization</h3>
+          <p class="muted">Federation events referencing an unknown local nickname or room are
           dropped instead of silently creating a placeholder user or room. Encrypted-post recipient
           wraps only attach to <strong>existing</strong> local <code>users</code> rows (materialized
           earlier via signed <code>dm.*</code> / <code>friend.*</code> events).</p>

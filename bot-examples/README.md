@@ -45,7 +45,7 @@ X-API-Key: bot_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 Authorization: Bearer bot_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 ```
 
-**Permission allowlist (HIGH-9).** User-issued API keys may only carry
+**Permission allowlist.** User-issued API keys may only carry
 permissions from `{read, write, dm, bot}`. Any other value — including
 `admin` — is rejected when you POST to `/api/developer/keys`. You cannot
 self-grant elevated scopes via the API.

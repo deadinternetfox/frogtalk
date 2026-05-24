@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta http-equiv="X-UA-Compatible" content="IE=edge">
-<meta name="description" content="FrogTalk security disclosure: how to report vulnerabilities, contribute fixes via GitHub, and help us harden the platform. Vibe-coded but open source.">
+<meta name="description" content="FrogTalk security disclosure: how to report vulnerabilities, contribute fixes via GitHub, and help harden the platform. Open source and community-audited.">
 <meta name="theme-color" content="#4caf50">
 <meta name="referrer" content="strict-origin-when-cross-origin">
 <meta name="robots" content="index, follow">
@@ -12,7 +12,7 @@
 <meta property="og:type" content="article">
 <meta property="og:url" content="https://frogtalk.xyz/security">
 <meta property="og:title" content="FrogTalk — Security &amp; Vulnerability Disclosure">
-<meta property="og:description" content="Vibe-coded but open source. Report a flaw, send a PR, help keep FrogTalk safe.">
+<meta property="og:description" content="Open source and community-audited. Report a flaw, send a PR, help keep FrogTalk safe.">
 <meta property="og:image" content="https://frogtalk.xyz/static/icons/og-image.png">
 <meta property="og:site_name" content="FrogTalk">
 
@@ -38,66 +38,47 @@
 
 <section class="hero">
   <h1>Security &amp; Vulnerability Disclosure</h1>
-  <p>FrogTalk is <strong class="text-accent">vibe-coded but open source</strong>. If something looks off, broken, or exploitable — tell us. If you can write the fix, even better: send a PR. Community projects are only as safe as the community that audits them.</p>
+  <p>FrogTalk is <strong class="text-accent">open source</strong>. If something looks off, broken, or exploitable — tell us. If you can write the fix, even better: send a PR. Community projects are only as safe as the community that audits them.</p>
   <div class="badge">Community-secured · MIT-licensed · No bug bounty (yet) — full credit instead</div>
 </section>
 
 <div class="wrap">
 
   <section class="block" id="philosophy">
-    <h2>What FrogTalk is, and how we build it</h2>
+    <h2>What FrogTalk is</h2>
     <p>
       FrogTalk is a <strong>censorship-free chat platform where messages can stay private</strong>.
       No company sits in the middle; anyone can run a node; DMs are end-to-end encrypted so the
-      server can't read them even if it's seized. That's the point of the project.
+      server cannot read them even if it is seized.
     </p>
     <p>
-      We're also <strong>building it in public with a development process we're openly
-      experimenting with</strong> — the future of how small teams ship software with AI in the
-      loop. We call our flow the <em>deslop pipeline</em>:
-    </p>
-    <div class="pipeline">
-      <span class="pipeline-step pipeline-step--idea">💡 Idea</span>
-      <span class="pipeline-arrow">→</span>
-      <span class="pipeline-step pipeline-step--slop">🤖 AI slop (first draft)</span>
-      <span class="pipeline-arrow">→</span>
-      <span class="pipeline-step pipeline-step--deslop">🧹 Deslop (human review)</span>
-      <span class="pipeline-arrow">→</span>
-      <span class="pipeline-step pipeline-step--ship">🚀 Ship</span>
-    </div>
-    <p>
-      The first draft of most code is AI-generated. A human reviewer then <em>deslops</em> it:
-      tightens the security, kills dead code, fixes lying comments, and actually exercises the
-      change before it merges. <strong>Code is not considered done until it has been
-      deslopped.</strong> The full checklist lives in
-      <a href="https://github.com/deadinternetfox/frogtalk/blob/master/CONTRIBUTING.md" target="_blank" rel="noopener">CONTRIBUTING.md</a>.
+      The codebase is <strong>MIT-licensed and fully public</strong> on GitHub. We publish the
+      security model, encryption details, and API reference so operators and researchers can
+      verify behaviour instead of trusting marketing copy.
     </p>
     <p>
-      We're honest about this because users deserve to know the threat model. <strong>The
-      encryption primitives are standard</strong> (ECDH-P256 → SHA-256 → AES-GCM-256, fresh
-      96-bit IV per message, AAD-bound ciphertext for private channels with automatic key
-      rotation on ban/kick) <strong>but the surrounding plumbing is still being deslopped.</strong>
-      Don't expect bank-grade security or privacy yet — especially in DMs. Help us get there.
+      The encryption primitives are standard (ECDH-P256 → SHA-256 → AES-GCM-256 for channels;
+      Signal Protocol for DMs; DTLS fingerprint signing for calls). As with any fast-moving
+      open-source project, <strong>we welcome audits and responsible disclosure</strong>.
     </p>
     <div class="callout">
       <strong>Threat model:</strong> we assume the server can be compromised. DM bodies are
-      end-to-end encrypted, keys never touch the server, recovery keys are bcrypt-hashed at rest
-      (with legacy SHA-256 rows still accepted during the migration window). Private channels
-      use per-room AES-256-GCM with AAD-bound ciphertext (room id + key version) and automatic
+      end-to-end encrypted, keys never touch the server, and recovery keys are bcrypt-hashed at rest.
+      Private channels use per-room AES-256-GCM with AAD-bound ciphertext (room id + key version) and automatic
       key rotation on ban/kick — a captured ciphertext cannot be replayed against another room
       or an older key, and a banned user cannot read messages sent after the rotation. Bridges
       to Discord/Telegram are blocked for private rooms (they would leak plaintext to a third
       party). If you find a way around any of that — please report it loudly.
     </div>
     <p class="mt-1">
-      <strong>How you can help (any of these are huge):</strong>
+      <strong>How you can help:</strong>
     </p>
     <ul>
       <li>🐛 <strong>File a bug or vulnerability report</strong> via the form below — anonymous is fine.</li>
-      <li>🔎 <strong>Audit a file</strong> and open a <a href="https://github.com/deadinternetfox/frogtalk/issues/new?template=slop_sighting.md" target="_blank" rel="noopener">slop sighting</a> for code that looks AI-written and obviously wrong.</li>
-      <li>🧹 <strong>Send a deslop PR</strong> — pick an issue tagged <code>deslop-needed</code> and tighten it. Vibe-coded PRs are welcome too; just label them.</li>
+      <li>🔎 <strong>Audit the code</strong> on <a href="https://github.com/deadinternetfox/frogtalk" target="_blank" rel="noopener">GitHub</a> and open an issue with file paths and repro steps.</li>
+      <li>🛠️ <strong>Send a pull request</strong> with a focused fix — see <a href="https://github.com/deadinternetfox/frogtalk/blob/master/CONTRIBUTING.md" target="_blank" rel="noopener">CONTRIBUTING.md</a>.</li>
       <li>📣 <strong>Run a node</strong> and join the federation. More nodes = more censorship-resistance.</li>
-      <li>💬 <strong>Tell other people the project exists.</strong> Community projects only work with a community.</li>
+      <li>💬 <strong>Spread the word.</strong> Community projects only work with a community.</li>
     </ul>
   </section>
 
@@ -194,15 +175,14 @@
       rather review a PR than relitigate the bug in an issue tracker.
     </p>
     <div class="callout">
-      <strong>Our pipeline is honest:</strong> Idea → AI slop → <em>Deslop</em> (human review) → Ship.
-      Most code starts as an AI draft; a human reviewer then tightens the security, fixes the
-      dead code, and makes sure it doesn't break anything else before it merges.
-      <a href="https://github.com/deadinternetfox/frogtalk/blob/master/CONTRIBUTING.md" target="_blank" rel="noopener">Read the full process &amp; deslop checklist →</a>
+      <strong>Contributing:</strong> FrogTalk is MIT-licensed on GitHub. Keep PRs small and focused;
+      include a PoC for security fixes. See
+      <a href="https://github.com/deadinternetfox/frogtalk/blob/master/CONTRIBUTING.md" target="_blank" rel="noopener">CONTRIBUTING.md</a>
+      for branch workflow and review expectations.
     </div>
     <ul>
       <li><strong>Repo:</strong> <a href="https://github.com/deadinternetfox/frogtalk" target="_blank" rel="noopener">github.com/deadinternetfox/frogtalk</a></li>
       <li><strong>Branch from <code>main</code></strong>, keep PRs small and focused, write a clear commit message.</li>
-      <li><strong>Vibe-coded PRs welcome</strong> — just label them <code>vibe-coded</code> so the deslop team knows what they're walking into. We'll review and tighten together.</li>
       <li><strong>Touched JS?</strong> Run <code>node --check static/js/&lt;file&gt;.js</code> before pushing — silent parse errors break every onclick on the page.</li>
       <li><strong>Touched Python?</strong> Run <code>python -m py_compile</code> on the changed files; the FastAPI app imports the whole tree at startup.</li>
       <li><strong>Security fixes:</strong> include a PoC in the PR description (or link to the bug-report ID you filed here) so the reviewer can verify the patch closes the hole.</li>
@@ -255,7 +235,7 @@
             <strong>Outcome:</strong> CSS sanitizer tightened (<code>:root</code>, <code>[data-theme]</code>,
             forbidden pseudos, Unicode normalisation), external background images proxied through FrogTalk,
             custom CSS disabled entirely for private channels, message content whitespace preserved,
-            and channel-theme UI warnings added. Fixed and deployed.
+            and channel-theme UI warnings added. Issue resolved.
           </div>
         </div>
       </li>

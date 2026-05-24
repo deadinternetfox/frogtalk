@@ -1,6 +1,6 @@
 # Security Policy
 
-FrogTalk is **vibe-coded but open source**. We welcome responsible disclosure from anyone who finds a flaw — anonymous reports are fine, and fixes often ship the same day for critical issues.
+FrogTalk is **open source**. We welcome responsible disclosure from anyone who finds a flaw — anonymous reports are fine, and fixes often ship the same day for critical issues.
 
 Full details, threat model, and the public report form live at **https://frogtalk.xyz/security**.
 
