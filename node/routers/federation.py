@@ -354,6 +354,44 @@ def enqueue_user_profile_updated(user: dict, *, extra: dict | None = None) -> di
     return enqueue_server_event("user.profile.updated", payload)
 
 
+def _user_block_event_payload(blocker: dict, blocked: dict) -> dict:
+    return {
+        "blocker_nickname": str(blocker.get("nickname") or "").strip(),
+        "blocked_nickname": str(blocked.get("nickname") or "").strip(),
+        "blocker_global_user_id": str(blocker.get("global_user_id") or "").strip(),
+        "blocked_global_user_id": str(blocked.get("global_user_id") or "").strip(),
+    }
+
+
+def enqueue_user_block_mirror(event_type: str, blocker: dict, blocked: dict) -> dict:
+    """Federate a block/unblock from the blocker's home node."""
+    payload = _user_block_event_payload(blocker, blocked)
+    if not payload["blocker_nickname"] or not payload["blocked_nickname"]:
+        return {"ok": False, "error": "missing_nickname"}
+    return enqueue_server_event(str(event_type or "").strip(), payload)
+
+
+def enqueue_user_privacy_updated(user: dict) -> dict:
+    """Federate privacy toggles from the user's home node."""
+    gid = str(user.get("global_user_id") or "").strip()
+    if not gid:
+        return {"ok": False, "error": "no_global_user_id"}
+    payload = {
+        "global_user_id": gid,
+        "nickname": str(user.get("nickname") or "").strip(),
+        "profile_public": 1 if int(user.get("profile_public") or 0) else 0,
+        "allow_friend_requests": 1 if int(user.get("allow_friend_requests") or 0) else 0,
+        "allow_dms_from": str(user.get("allow_dms_from") or "everyone").strip().lower()[:32],
+        "show_last_seen": str(user.get("show_last_seen") or "everyone").strip().lower()[:32],
+        "show_read_receipts": 1 if int(user.get("show_read_receipts") or 0) else 0,
+    }
+    if payload["allow_dms_from"] not in ("everyone", "friends", "nobody"):
+        payload["allow_dms_from"] = "everyone"
+    if payload["show_last_seen"] not in ("everyone", "friends", "nobody"):
+        payload["show_last_seen"] = "everyone"
+    return enqueue_server_event("user.privacy.updated", payload)
+
+
 def emit_local_user_presence(user_id: int, presence: str) -> dict:
     """Persist + federate a user's presence (WS connect/disconnect, manual status)."""
     uid = int(user_id or 0)
@@ -5431,7 +5469,14 @@ async def _handle_user_event(event: dict) -> None:
     # server. We still re-validate that the blocker locally maps to a
     # known user before mutating the blocks table.
     if event_type in ("user.blocked", "user.unblocked"):
-        await _handle_user_block_event(event_type, payload)
+        await _handle_user_block_event(
+            event_type,
+            payload,
+            origin=str(event.get("origin_server_id") or "").strip(),
+        )
+        return
+    if event_type == "user.privacy.updated":
+        await _handle_user_privacy_updated(event)
         return
     if event_type == "user.signal.keys_updated":
         gid = str((payload or {}).get("global_user_id") or "").strip()
@@ -5736,38 +5781,86 @@ def _ensure_local_user_by_nickname(nickname: str) -> dict | None:
     return db.get_user_by_id(uid)
 
 
-async def _handle_user_block_event(event_type: str, payload: dict) -> None:
-    """Apply a federated user.blocked / user.unblocked event locally.
-
-    Authority model: this event is already signature-verified (see the
-    `user.` sensitive prefix in _insert_inbox_events_sync) and pinned
-    to the blocker's home server. We only mutate when both nicknames
-    resolve to local user rows; if the blocked side isn't a real local
-    account, the block is meaningless on this node so we drop the event
-    silently rather than create a stub. The blocker side is always
-    eligible to be auto-mirrored (it's the same federation pattern as
-    other identity events).
-    """
+async def _handle_user_block_event(
+    event_type: str,
+    payload: dict,
+    *,
+    origin: str = "",
+) -> None:
+    """Apply a federated user.blocked / user.unblocked event locally."""
+    blocker_gid = str(payload.get("blocker_global_user_id") or "").strip()
+    blocked_gid = str(payload.get("blocked_global_user_id") or "").strip()
     blocker_nick = _fed_nickname(payload.get("blocker_nickname"))
     blocked_nick = _fed_nickname(payload.get("blocked_nickname"))
     if not blocker_nick or not blocked_nick:
         return
-    blocker = _ensure_local_user_by_nickname(blocker_nick)
-    if not blocker:
+    if blocker_gid:
+        home_sid = str(db.resolve_global_user_home_server_id(blocker_gid) or "").strip()
+        if home_sid and origin and home_sid != origin:
+            _log.info(
+                "federation: drop %s — origin %s is not blocker home %s",
+                event_type, origin, home_sid,
+            )
+            return
+        blocker = db.find_user_by_global_id(blocker_gid) or {}
+        if not int(blocker.get("id") or 0):
+            blocker = db.ensure_federated_dm_local_user(
+                blocker_gid,
+                blocker_nick,
+                origin_server_id=home_sid or origin,
+            )
+    else:
+        blocker = _ensure_local_user_by_nickname(blocker_nick)
+    if not blocker or not int(blocker.get("id") or 0):
         return
-    # Don't auto-create a local mirror for the blocked side — if they
-    # don't already exist locally there's no relationship to enforce.
-    blocked = db.get_user_by_nick(blocked_nick)
-    if not blocked:
+    blocked_origin = str(db.resolve_global_user_home_server_id(blocked_gid) or origin or "").strip()
+    if blocked_gid:
+        blocked = db.ensure_federated_dm_local_user(
+            blocked_gid,
+            blocked_nick,
+            origin_server_id=blocked_origin,
+        )
+    else:
+        blocked = db.get_user_by_nick(blocked_nick)
+    if not blocked or not int(blocked.get("id") or 0):
         return
     try:
         if event_type == "user.blocked":
-            db.block_user(blocker["id"], blocked["id"])
+            db.block_user(int(blocker["id"]), int(blocked["id"]))
         else:
-            db.unblock_user(blocker["id"], blocked["id"])
+            db.unblock_user(int(blocker["id"]), int(blocked["id"]))
     except Exception:
-        _log.exception("federation: failed to apply %s blocker=%s blocked=%s",
-                       event_type, blocker_nick, blocked_nick)
+        _log.exception(
+            "federation: failed to apply %s blocker=%s blocked=%s",
+            event_type, blocker_nick, blocked_nick,
+        )
+
+
+async def _handle_user_privacy_updated(event: dict) -> None:
+    """Apply federated privacy snapshot for a homed user."""
+    payload = event.get("payload") or {}
+    gid = str(payload.get("global_user_id") or "").strip()
+    if not gid:
+        return
+    origin = str(event.get("origin_server_id") or "").strip()
+    home_sid = str(db.resolve_global_user_home_server_id(gid) or "").strip()
+    if home_sid and origin and home_sid != origin:
+        _log.info("federation: drop user.privacy.updated — origin not home")
+        return
+    nick = _fed_nickname(payload.get("nickname"))
+    if nick:
+        db.upsert_federation_user_profile(gid, nick, origin_server_id=home_sid or origin)
+    allow_dm = str(payload.get("allow_dms_from") or "").strip().lower()
+    show_ls = str(payload.get("show_last_seen") or "").strip().lower()
+    db.apply_federation_user_privacy(
+        gid,
+        origin_server_id=home_sid or origin,
+        profile_public=int(payload.get("profile_public") or 0),
+        allow_friend_requests=int(payload.get("allow_friend_requests") or 0),
+        allow_dms_from=allow_dm if allow_dm in ("everyone", "friends", "nobody") else None,
+        show_last_seen=show_ls if show_ls in ("everyone", "friends", "nobody") else None,
+        show_read_receipts=int(payload.get("show_read_receipts") or 0),
+    )
 
 
 async def _handle_dm_disappear_updated(event: dict) -> None:
@@ -5938,6 +6031,13 @@ async def _handle_dm_event(event: dict) -> None:
             sender_nick,
             peer_nick,
             event.get("origin_server_id"),
+        )
+        return
+    if db.is_blocked_either_way(int(sender["id"]), int(peer["id"])):
+        _log.info(
+            "federation: drop dm.message.created — blocked pair sender=%s peer=%s",
+            sender_nick,
+            peer_nick,
         )
         return
     # Do not pin signal_keys_server_id from DM ciphertext origin — each node

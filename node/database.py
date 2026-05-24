@@ -2966,6 +2966,11 @@ def _migrate():
             ("custom_style", "ALTER TABLE federation_user_profiles ADD COLUMN custom_style TEXT DEFAULT ''"),
             ("banner", "ALTER TABLE federation_user_profiles ADD COLUMN banner TEXT DEFAULT ''"),
             ("last_seen", "ALTER TABLE federation_user_profiles ADD COLUMN last_seen TEXT DEFAULT ''"),
+            ("profile_public", "ALTER TABLE federation_user_profiles ADD COLUMN profile_public INTEGER"),
+            ("allow_friend_requests", "ALTER TABLE federation_user_profiles ADD COLUMN allow_friend_requests INTEGER"),
+            ("allow_dms_from", "ALTER TABLE federation_user_profiles ADD COLUMN allow_dms_from TEXT DEFAULT ''"),
+            ("show_last_seen", "ALTER TABLE federation_user_profiles ADD COLUMN show_last_seen TEXT DEFAULT ''"),
+            ("show_read_receipts", "ALTER TABLE federation_user_profiles ADD COLUMN show_read_receipts INTEGER"),
         ):
             if fed_profile_cols and _col not in fed_profile_cols:
                 try:
@@ -5856,8 +5861,180 @@ def dm_channel_exists(user_a: int, user_b: int) -> bool:
 def get_user_dm_policy(user_id: int) -> str:
     """Get a user's DM policy setting."""
     with _conn() as con:
-        row = con.execute("SELECT allow_dms_from FROM users WHERE id=?", (user_id,)).fetchone()
-        return row["allow_dms_from"] if row else "everyone"
+        row = con.execute(
+            "SELECT allow_dms_from, global_user_id FROM users WHERE id=?",
+            (user_id,),
+        ).fetchone()
+        if not row:
+            return "everyone"
+        policy = str(row["allow_dms_from"] or "everyone").strip().lower()
+        gid = str(row["global_user_id"] or "").strip()
+        if gid:
+            cached = get_federation_privacy_snapshot(gid)
+            cached_policy = str(cached.get("allow_dms_from") or "").strip().lower()
+            if cached_policy in ("everyone", "friends", "nobody"):
+                try:
+                    ident = get_or_create_local_server_identity() or {}
+                    local_sid = str(ident.get("server_id") or "").strip()
+                    home_sid = str(resolve_global_user_home_server_id(gid) or "").strip()
+                    if home_sid and local_sid and home_sid != local_sid:
+                        return cached_policy
+                except Exception:
+                    pass
+        if policy in ("everyone", "friends", "nobody"):
+            return policy
+        return "everyone"
+
+
+def get_federation_privacy_snapshot(global_user_id: str) -> dict:
+    """Privacy fields cached from user.privacy.updated federation events."""
+    gid = str(global_user_id or "").strip()
+    if not gid:
+        return {}
+    try:
+        with _conn() as con:
+            row = con.execute(
+                """
+                SELECT profile_public, allow_friend_requests, allow_dms_from,
+                       show_last_seen, show_read_receipts
+                FROM federation_user_profiles WHERE global_user_id=? LIMIT 1
+                """,
+                (gid,),
+            ).fetchone()
+        if not row:
+            return {}
+        out: dict = {}
+        if row["profile_public"] is not None:
+            out["profile_public"] = int(row["profile_public"])
+        if row["allow_friend_requests"] is not None:
+            out["allow_friend_requests"] = int(row["allow_friend_requests"])
+        dm = str(row["allow_dms_from"] or "").strip().lower()
+        if dm in ("everyone", "friends", "nobody"):
+            out["allow_dms_from"] = dm
+        ls = str(row["show_last_seen"] or "").strip().lower()
+        if ls in ("everyone", "friends", "nobody"):
+            out["show_last_seen"] = ls
+        if row["show_read_receipts"] is not None:
+            out["show_read_receipts"] = int(row["show_read_receipts"])
+        return out
+    except Exception:
+        return {}
+
+
+def effective_profile_public(user: dict) -> bool:
+    """Resolve profile_public for local or federated profile rows."""
+    if not user:
+        return True
+    gid = str(user.get("global_user_id") or "").strip()
+    if gid:
+        snap = get_federation_privacy_snapshot(gid)
+        if snap.get("profile_public") is not None:
+            try:
+                ident = get_or_create_local_server_identity() or {}
+                local_sid = str(ident.get("server_id") or "").strip()
+                home_sid = str(resolve_global_user_home_server_id(gid) or "").strip()
+                uid = int(user.get("id") or 0)
+                if (home_sid and local_sid and home_sid != local_sid) or uid <= 0:
+                    return bool(int(snap["profile_public"]))
+            except Exception:
+                pass
+    if user.get("profile_public") is not None:
+        return bool(int(user.get("profile_public") or 0))
+    return True
+
+
+def apply_federation_user_privacy(
+    global_user_id: str,
+    *,
+    origin_server_id: str = "",
+    profile_public: int | None = None,
+    allow_friend_requests: int | None = None,
+    allow_dms_from: str | None = None,
+    show_last_seen: str | None = None,
+    show_read_receipts: int | None = None,
+) -> bool:
+    """Persist privacy snapshot on federation_user_profiles (+ local users if homed)."""
+    gid = str(global_user_id or "").strip()
+    if not gid:
+        return False
+    dm = str(allow_dms_from or "").strip().lower()
+    if dm and dm not in ("everyone", "friends", "nobody"):
+        dm = ""
+    ls = str(show_last_seen or "").strip().lower()
+    if ls and ls not in ("everyone", "friends", "nobody"):
+        ls = ""
+    sets: list[str] = []
+    vals: list = []
+    if profile_public is not None:
+        sets.append("profile_public=?")
+        vals.append(1 if int(profile_public) else 0)
+    if allow_friend_requests is not None:
+        sets.append("allow_friend_requests=?")
+        vals.append(1 if int(allow_friend_requests) else 0)
+    if dm:
+        sets.append("allow_dms_from=?")
+        vals.append(dm)
+    if ls:
+        sets.append("show_last_seen=?")
+        vals.append(ls)
+    if show_read_receipts is not None:
+        sets.append("show_read_receipts=?")
+        vals.append(1 if int(show_read_receipts) else 0)
+    if not sets:
+        return False
+    try:
+        with _conn() as con:
+            row = con.execute(
+                "SELECT 1 FROM federation_user_profiles WHERE global_user_id=? LIMIT 1",
+                (gid,),
+            ).fetchone()
+            if row:
+                con.execute(
+                    f"UPDATE federation_user_profiles SET {', '.join(sets)}, updated_at=datetime('now') WHERE global_user_id=?",
+                    (*vals, gid),
+                )
+            con.commit()
+    except Exception:
+        return False
+    try:
+        with _conn() as con:
+            urow = con.execute(
+                "SELECT id FROM users WHERE global_user_id=? LIMIT 1",
+                (gid,),
+            ).fetchone()
+            if urow:
+                uid = int(urow["id"] if hasattr(urow, "keys") else urow[0])
+                if profile_public is not None or allow_friend_requests is not None:
+                    pp = profile_public if profile_public is not None else None
+                    afr = allow_friend_requests if allow_friend_requests is not None else None
+                    if pp is not None and afr is not None:
+                        con.execute(
+                            "UPDATE users SET profile_public=?, allow_friend_requests=? WHERE id=?",
+                            (1 if int(pp) else 0, 1 if int(afr) else 0, uid),
+                        )
+                    elif pp is not None:
+                        con.execute(
+                            "UPDATE users SET profile_public=? WHERE id=?",
+                            (1 if int(pp) else 0, uid),
+                        )
+                    elif afr is not None:
+                        con.execute(
+                            "UPDATE users SET allow_friend_requests=? WHERE id=?",
+                            (1 if int(afr) else 0, uid),
+                        )
+                if dm:
+                    con.execute("UPDATE users SET allow_dms_from=? WHERE id=?", (dm, uid))
+                if ls:
+                    con.execute("UPDATE users SET show_last_seen=? WHERE id=?", (ls, uid))
+                if show_read_receipts is not None:
+                    con.execute(
+                        "UPDATE users SET show_read_receipts=? WHERE id=?",
+                        (1 if int(show_read_receipts) else 0, uid),
+                    )
+                con.commit()
+    except Exception:
+        pass
+    return True
 
 
 def get_or_create_dm(user_a: int, user_b: int) -> int:
@@ -13742,7 +13919,9 @@ def get_federation_user_profile_row(global_user_id: str) -> dict:
             row = con.execute(
                 """
                 SELECT global_user_id, nickname, display_name, avatar, bio, origin_server_id,
-                       status_msg, mood, presence, custom_style, banner, updated_at, last_seen
+                       status_msg, mood, presence, custom_style, banner, updated_at, last_seen,
+                       profile_public, allow_friend_requests, allow_dms_from,
+                       show_last_seen, show_read_receipts
                 FROM federation_user_profiles WHERE global_user_id=? LIMIT 1
                 """,
                 (gid,),

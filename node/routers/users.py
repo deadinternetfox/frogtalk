@@ -142,6 +142,11 @@ async def block_user(user_id: int, current_user: dict = Depends(get_current_user
     if not ok:
         return JSONResponse(status_code=409, content={"error": "User already blocked"})
     _emit_block_mirror("user.blocked", current_user, target)
+    try:
+        from routers.auth import schedule_travel_push_to_home
+        schedule_travel_push_to_home(int(current_user["id"]), force=True)
+    except Exception:
+        pass
     return {"ok": True}
 
 
@@ -154,25 +159,24 @@ async def unblock_user(user_id: int, current_user: dict = Depends(get_current_us
         return JSONResponse(status_code=404, content={"error": "User not blocked"})
     if target:
         _emit_block_mirror("user.unblocked", current_user, target)
+    try:
+        from routers.auth import schedule_travel_push_to_home
+        schedule_travel_push_to_home(int(current_user["id"]), force=True)
+    except Exception:
+        pass
     return {"ok": True}
 
 
 def _emit_block_mirror(event_type: str, actor: dict, target: dict) -> None:
-    """Push a signed block/unblock event to the federation outbox so peer
-    nodes can mirror the same block relationship locally. Receivers will
-    refuse the event unless it is signed by the actor's origin server
-    (see federation._SENSITIVE_PREFIXES: "user."), so a hostile peer can
-    never forge a block on behalf of someone whose account lives on
-    another node."""
+    """Push a signed block/unblock event to the federation outbox from home."""
     try:
-        db.insert_federation_outbox_event({
-            "event_id": f"evt_{int(time.time() * 1000):016x}_{uuid.uuid4().hex[:8]}",
-            "event_type": event_type,
-            "payload": {
-                "blocker_nickname": actor.get("nickname"),
-                "blocked_nickname": target.get("nickname"),
-            },
-        })
+        from routers.auth import _user_at_account_home
+        from routers import federation as federation_mod
+        if not _user_at_account_home(int(actor.get("id") or 0)):
+            from routers.auth import schedule_travel_push_to_home
+            schedule_travel_push_to_home(int(actor["id"]), force=True)
+            return
+        federation_mod.enqueue_user_block_mirror(event_type, actor, target)
     except Exception:
         pass
 

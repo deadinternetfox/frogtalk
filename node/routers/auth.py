@@ -1308,21 +1308,27 @@ _PROFILE_CARD_MIN_INTERVAL = 45.0
 
 def _federation_profile_payload_from_user_row(row, gid: str, origin_server_id: str) -> dict:
     """Public profile fields safe to mirror on peer nodes."""
-    presence = str(row["presence"] or "offline").strip().lower()
+    d = dict(row) if row is not None else {}
+    presence = str(d.get("presence") or "offline").strip().lower()
     if presence not in ("online", "away", "dnd", "invisible", "offline"):
         presence = "offline"
     return {
         "global_user_id": gid,
-        "nickname": str(row["nickname"] or "")[:64],
-        "display_name": str(row["display_name"] or "")[:64],
-        "avatar": str(row["avatar"] or "")[:256 * 1024],
-        "bio": str(row["bio"] or "")[:500],
-        "status_msg": str(row["status_msg"] or "")[:200],
-        "mood": str(row["mood"] or "")[:200],
+        "nickname": str(d.get("nickname") or "")[:64],
+        "display_name": str(d.get("display_name") or "")[:64],
+        "avatar": str(d.get("avatar") or "")[:256 * 1024],
+        "bio": str(d.get("bio") or "")[:500],
+        "status_msg": str(d.get("status_msg") or "")[:200],
+        "mood": str(d.get("mood") or "")[:200],
         "presence": presence,
-        "custom_style": _sanitize_inline_style(str(row["custom_style"] or "")[:12000]),
-        "banner": str(row["banner"] or "")[:500_000],
+        "custom_style": _sanitize_inline_style(str(d.get("custom_style") or "")[:12000]),
+        "banner": str(d.get("banner") or "")[:500_000],
         "origin_server_id": origin_server_id,
+        "profile_public": 1 if int(d.get("profile_public") if d.get("profile_public") is not None else 1) else 0,
+        "allow_friend_requests": 1 if int(d.get("allow_friend_requests") if d.get("allow_friend_requests") is not None else 1) else 0,
+        "allow_dms_from": str(d.get("allow_dms_from") or "everyone")[:32],
+        "show_last_seen": str(d.get("show_last_seen") or "everyone")[:32],
+        "show_read_receipts": 1 if int(d.get("show_read_receipts") if d.get("show_read_receipts") is not None else 1) else 0,
     }
 
 
@@ -1332,7 +1338,8 @@ def _lookup_federation_profile_gid_payload(gid: str) -> dict | None:
         row = con.execute(
             """
             SELECT id, nickname, display_name, avatar, bio, status_msg, mood, presence,
-                   custom_style, banner
+                   custom_style, banner, profile_public, allow_friend_requests,
+                   allow_dms_from, show_last_seen, show_read_receipts
             FROM users WHERE global_user_id=? LIMIT 1
             """,
             (gid,),
@@ -1356,6 +1363,11 @@ def _lookup_federation_profile_gid_payload(gid: str) -> dict | None:
         "custom_style": _sanitize_inline_style(str(prof.get("custom_style") or "")[:12000]),
         "banner": str(prof.get("banner") or "")[:500_000],
         "origin_server_id": str(prof.get("origin_server_id") or "").strip(),
+        "profile_public": prof.get("profile_public"),
+        "allow_friend_requests": prof.get("allow_friend_requests"),
+        "allow_dms_from": str(prof.get("allow_dms_from") or "")[:32],
+        "show_last_seen": str(prof.get("show_last_seen") or "")[:32],
+        "show_read_receipts": prof.get("show_read_receipts"),
     }
 
 
@@ -1379,6 +1391,17 @@ def _upsert_profile_cache_from_payload(payload: dict) -> None:
             presence=str(payload.get("presence") or "offline")[:32],
             custom_style=_sanitize_inline_style(str(payload.get("custom_style") or "")[:12000]),
             banner=str(payload.get("banner") or "")[:500_000],
+        )
+        allow_dm = str(payload.get("allow_dms_from") or "").strip().lower()
+        show_ls = str(payload.get("show_last_seen") or "").strip().lower()
+        db.apply_federation_user_privacy(
+            gid,
+            origin_server_id=str(payload.get("origin_server_id") or "")[:128],
+            profile_public=int(payload["profile_public"]) if payload.get("profile_public") is not None else None,
+            allow_friend_requests=int(payload["allow_friend_requests"]) if payload.get("allow_friend_requests") is not None else None,
+            allow_dms_from=allow_dm if allow_dm in ("everyone", "friends", "nobody") else None,
+            show_last_seen=show_ls if show_ls in ("everyone", "friends", "nobody") else None,
+            show_read_receipts=int(payload["show_read_receipts"]) if payload.get("show_read_receipts") is not None else None,
         )
     except Exception:
         pass
@@ -4398,6 +4421,17 @@ def _apply_sync_export_to_user(
                 users_nick_collisions += 1
             if db.block_user(uid, peer_id):
                 blocked_linked += 1
+                if merge_mode:
+                    try:
+                        from routers import federation as federation_mod
+                        blocker = db.get_user_by_id(uid) or {}
+                        blocked = db.get_user_by_id(peer_id) or {}
+                        if blocker and blocked:
+                            federation_mod.enqueue_user_block_mirror(
+                                "user.blocked", blocker, blocked,
+                            )
+                    except Exception:
+                        pass
         except Exception:
             continue
         _sync_step("social_graph", "Syncing block list…", "social_graph", following_linked + friends_linked + blocked_linked)
@@ -4512,6 +4546,22 @@ def _apply_sync_export_to_user(
                     ),
                 )
                 con.commit()
+            if merge_mode and my_gid:
+                try:
+                    db.apply_federation_user_privacy(
+                        my_gid,
+                        profile_public=profile_public,
+                        allow_friend_requests=allow_friend_requests,
+                        allow_dms_from=allow_dms_from,
+                        show_last_seen=show_last_seen,
+                        show_read_receipts=show_read_receipts,
+                    )
+                    if _user_at_account_home(uid):
+                        from routers import federation as federation_mod
+                        fresh = db.get_user_by_id(uid) or {}
+                        federation_mod.enqueue_user_privacy_updated(fresh)
+                except Exception:
+                    pass
             if not merge_mode:
                 _apply_sync_pin_from_self_profile(uid, self_profile)
         except Exception:
@@ -8408,6 +8458,16 @@ async def update_profile(request: Request, body: ProfileUpdateRequest, current_u
         profile_public = body.profile_public if body.profile_public is not None else True
         allow_fr = body.allow_friend_requests if body.allow_friend_requests is not None else True
         db.update_privacy(current_user["id"], profile_public, allow_fr)
+    privacy_changed = any(
+        getattr(body, field, None) is not None
+        for field in (
+            "profile_public",
+            "allow_friend_requests",
+            "allow_dms_from",
+            "show_last_seen",
+            "show_read_receipts",
+        )
+    )
     # Update user settings
     with db._conn() as con:
         if body.theme is not None:
@@ -8483,6 +8543,12 @@ async def update_profile(request: Request, body: ProfileUpdateRequest, current_u
         prof = db.get_user_profile(ident.get("nickname") or "") or {}
         merged = {**ident, **{k: prof[k] for k in ("status_msg", "presence", "mood", "banner") if k in prof}}
         federation_mod.enqueue_user_profile_updated(merged)
+        if privacy_changed:
+            fresh_priv = db.get_user_by_id(current_user["id"]) or {}
+            if _user_at_account_home(int(current_user["id"])):
+                federation_mod.enqueue_user_privacy_updated(fresh_priv)
+            else:
+                schedule_travel_push_to_home(int(current_user["id"]), force=True)
     except Exception:
         _log.exception("federation: failed to enqueue user.profile.updated")
     # Return the fresh row so clients can merge without a follow-up /me that

@@ -320,6 +320,9 @@ def _resolve_social_profile_user(nickname: str, *, refresh: bool = False) -> dic
     if row:
         user = db.get_user_profile(str(row.get("nickname") or nick)) or dict(row)
     else:
+        gid = str(card.get("global_user_id") or "").strip()
+        fed_priv = db.get_federation_privacy_snapshot(gid) if gid else {}
+        pp = fed_priv.get("profile_public")
         user = {
             "id": 0,
             "nickname": str(card.get("nickname") or nick),
@@ -332,7 +335,7 @@ def _resolve_social_profile_user(nickname: str, *, refresh: bool = False) -> dic
             "presence": card.get("presence", "offline"),
             "custom_style": card.get("custom_style", ""),
             "global_user_id": gid,
-            "profile_public": True,
+            "profile_public": bool(int(pp)) if pp is not None else True,
         }
     user = _merge_federation_profile_fields(dict(user))
     for key in (
@@ -397,7 +400,7 @@ async def social_profile(
         profile_public = bool(user.get("profile_public", 1))
         is_friend = is_self or (uid > 0 and db.are_friends(viewer_id, uid))
         # Private profile to a non-friend viewer: emit minimal payload.
-        if uid > 0 and not profile_public and not is_self and not is_friend:
+        if uid > 0 and not db.effective_profile_public(user) and not is_self and not is_friend:
             out = {
                 "id": uid,
                 "nickname": user["nickname"],
@@ -426,7 +429,7 @@ async def social_profile(
             "tags": user.get("tags", []),
             "created_at": user.get("created_at"),
             "is_admin": bool(user.get("is_admin")),
-            "profile_public": profile_public,
+            "profile_public": db.effective_profile_public(user),
             "private": False,
             "post_count": db.get_post_count(uid) if uid > 0 else 0,
             "follower_count": db.get_follower_count(uid) if uid > 0 else 0,
@@ -460,7 +463,7 @@ def _private_blocked(user: dict, viewer_id: int) -> bool:
     neither the owner nor a confirmed friend. Used to gate posts / media /
     channels / followers so a private profile leaks nothing beyond the
     /profile endpoint's minimal summary."""
-    if bool(user.get("profile_public", 1)):
+    if db.effective_profile_public(user):
         return False
     if user["id"] == viewer_id:
         return False
