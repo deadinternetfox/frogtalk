@@ -12,7 +12,14 @@ const WS = (() => {
   const _historyInFlight = new Map();
   const _historyLastApplied = new Map();
 
-  // Word-boundary @mention detector. Allows letters, digits, underscore and
+  function _switchUiStillLoading(area) {
+    if (!area) return false;
+    return !!document.getElementById('ft-chat-transition')
+      || area.classList.contains('chat-switching')
+      || !!area.querySelector('#ch-loading-state');
+  }
+
+  // Word-boundary @mention detector.
   // hyphen (NICKNAME_RE on the server), and refuses to fire when the
   // nickname is a strict prefix of a longer handle (so @frog won't match
   // @frogai). Case-insensitive; escapes the nickname for regex safety.
@@ -168,7 +175,7 @@ const WS = (() => {
           try {
             if (State.currentRoom === room) {
               const area = document.getElementById('messages-area');
-              if (area && area.querySelector('#ch-loading-state')) {
+              if (area && _switchUiStillLoading(area)) {
                 const cachedNow = (State.messages && State.messages[room]) || [];
                 Messages.loadHistory(room, cachedNow.slice());
               }
@@ -187,7 +194,7 @@ const WS = (() => {
             try {
               if (State.currentRoom === room) {
                 const area = document.getElementById('messages-area');
-                if (area && (area.querySelector('#ch-loading-state') || !area.children.length)) {
+                if (area && (_switchUiStillLoading(area) || !area.children.length)) {
                   Messages.loadHistory(room, cached.slice());
                 }
               }
@@ -208,7 +215,7 @@ const WS = (() => {
               try {
                 if (State.currentRoom === room) {
                   const area = document.getElementById('messages-area');
-                  if (area && area.querySelector('#ch-loading-state')) {
+                  if (area && _switchUiStillLoading(area)) {
                     Messages.loadHistory(room, cached.slice());
                   }
                 }

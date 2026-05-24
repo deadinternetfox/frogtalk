@@ -9124,8 +9124,19 @@ function _mentionColorWithAlpha(color, alpha, fallback) {
     if (_loadSafetyTimer) clearTimeout(_loadSafetyTimer);
     const expect = _chLoad.room;
     _loadSafetyTimer = setTimeout(() => {
-      if (_chLoad.active && _chLoad.room === expect) finishChannelLoad(expect);
-    }, 22000);
+      if (_chLoad.active && _chLoad.room === expect) {
+        try {
+          if (typeof finishChannelSwitch === 'function') {
+            finishChannelSwitch(expect, { finish: true, force: true });
+          } else {
+            finishChannelLoad(expect);
+            if (typeof clearChatTransition === 'function') {
+              clearChatTransition({ finish: true, force: true });
+            }
+          }
+        } catch {}
+      }
+    }, 12000);
     refresh();
   }
 

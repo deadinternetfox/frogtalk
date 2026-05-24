@@ -2760,8 +2760,10 @@ const Messages = (() => {
     // content as soon as anything arrives (see appendMessage below).
     if (!msgs || msgs.length === 0) {
       mount.innerHTML = _emptyStateHtml(room);
-      try { area.classList.remove('chat-switching'); } catch {}
-      try { if (typeof clearChatTransition === 'function') clearChatTransition({ finish: true }); } catch {}
+      try {
+        if (typeof finishChannelSwitch === 'function') finishChannelSwitch(room, { finish: true });
+        else if (typeof clearChatTransition === 'function') clearChatTransition({ finish: true });
+      } catch {}
       mount.scrollTop = mount.scrollHeight;
       return;
     }
@@ -2806,8 +2808,10 @@ const Messages = (() => {
     });
 
     mount.innerHTML = html;
-    try { area.classList.remove('chat-switching'); } catch {}
-    try { if (typeof clearChatTransition === 'function') clearChatTransition({ finish: true }); } catch {}
+    try {
+      if (typeof finishChannelSwitch === 'function') finishChannelSwitch(room, { finish: true });
+      else if (typeof clearChatTransition === 'function') clearChatTransition({ finish: true });
+    } catch {}
     mount.scrollTop = mount.scrollHeight;
     if (msgs.length) State.oldestMsgId = msgs[0].id;
     bindLongPress(area);

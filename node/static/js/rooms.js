@@ -105,6 +105,8 @@ try { if (typeof window !== 'undefined') window.ensureLoadingShieldStyle = ensur
 
 const Rooms = (() => {
   let _switchSeq = 0;
+  let _switchWatchdogTimer = null;
+  const _SWITCH_WATCHDOG_MS = 10000;
   const _CHAT_TRANSITION_ID = 'ft-chat-transition';
   const _ROOM_NAME_RE = /^[a-z0-9_-]{1,32}$/;
   let _roomMentionClickBound = false;
@@ -1293,6 +1295,7 @@ const Rooms = (() => {
     const label = _chatTransitionLabel(name, type, dmPeer, phaseNorm);
     area.classList.add('chat-switching');
     area.scrollTop = 0;
+    _scrubStaleSwitchChrome(area);
     ensureLoadingShieldStyle();
 
     const existing = document.getElementById(_CHAT_TRANSITION_ID);
@@ -1377,36 +1380,107 @@ const Rooms = (() => {
     }
   }
 
+  function isSwitchOverlayVisible() {
+    const area = document.getElementById('messages-area');
+    return !!(document.getElementById(_CHAT_TRANSITION_ID)
+      || (area && area.classList.contains('chat-switching')));
+  }
+
+  function _scrubStaleSwitchChrome(area) {
+    const mount = area || document.getElementById('messages-area');
+    if (!mount) return;
+    try {
+      mount.querySelectorAll('.chat-transition-overlay').forEach((el) => {
+        if (el.id === _CHAT_TRANSITION_ID) return;
+        el.remove();
+      });
+    } catch {}
+  }
+
+  function _disarmSwitchWatchdog() {
+    if (_switchWatchdogTimer) {
+      clearTimeout(_switchWatchdogTimer);
+      _switchWatchdogTimer = null;
+    }
+  }
+
+  function _armSwitchWatchdog(switchToken, roomName) {
+    _disarmSwitchWatchdog();
+    const expectRoom = String(roomName || '').trim().toLowerCase();
+    if (!expectRoom) return;
+    _switchWatchdogTimer = setTimeout(() => {
+      _switchWatchdogTimer = null;
+      if (switchToken !== _switchSeq) return;
+      if (String(State?.currentRoom || '').trim().toLowerCase() !== expectRoom) return;
+      if (!isSwitchOverlayVisible()) return;
+      try {
+        if (window.ContentWarning?.isGateActive?.()) return;
+      } catch {}
+      const cached = (State.messages && State.messages[expectRoom]) || [];
+      if (cached.length && typeof Messages !== 'undefined' && Messages.loadHistory) {
+        try {
+          Messages.loadHistory(expectRoom, cached.slice());
+          return;
+        } catch {}
+      }
+      finishChannelSwitch(expectRoom, { finish: true, force: true });
+    }, _SWITCH_WATCHDOG_MS);
+  }
+
+  /** Clear loading overlay + compose lock for the active (or given) channel. */
+  function finishChannelSwitch(room, opts) {
+    const options = opts && typeof opts === 'object' ? opts : {};
+    const r = String(room || State?.currentRoom || '').trim().toLowerCase();
+    if (options.onlyIfCurrent !== false && r) {
+      if (String(State?.currentRoom || '').trim().toLowerCase() !== r) return;
+    }
+    clearChatTransition({ finish: options.finish !== false, force: options.force === true });
+    try {
+      if (!r || State._roomSwitchInProgress === r) delete State._roomSwitchInProgress;
+    } catch {}
+    _disarmSwitchWatchdog();
+  }
+
   function clearChatTransition(opts) {
     const options = opts && typeof opts === 'object' ? opts : {};
     const finish = options.finish === true;
+    const force = options.force === true;
     const area = document.getElementById('messages-area');
     const overlay = document.getElementById(_CHAT_TRANSITION_ID);
-    try { area?.classList.remove('chat-switching'); } catch {}
-    if (overlay && !overlay.classList.contains('ch-transition-dismiss')) {
-      overlay.classList.add('ch-transition-dismiss');
-      const done = () => {
-        try { overlay.remove(); } catch {}
-        try {
-          if (finish && window.FtCompose?.finishChannelLoad) {
-            FtCompose.finishChannelLoad(State?.currentRoom);
-          } else {
-            window.FtCompose?.refresh?.();
-          }
-        } catch {}
-      };
-      overlay.addEventListener('animationend', done, { once: true });
-      setTimeout(done, 480);
+
+    const finalize = () => {
+      try { document.getElementById(_CHAT_TRANSITION_ID)?.remove(); } catch {}
+      try { area?.classList.remove('chat-switching'); } catch {}
+      _scrubStaleSwitchChrome(area);
+      try {
+        if (finish && window.FtCompose?.finishChannelLoad) {
+          FtCompose.finishChannelLoad(State?.currentRoom);
+        } else {
+          window.FtCompose?.refresh?.();
+        }
+      } catch {}
+    };
+
+    if (!overlay) {
+      finalize();
       return;
     }
-    try { overlay?.remove(); } catch {}
-    try {
-      if (finish && window.FtCompose?.finishChannelLoad) {
-        FtCompose.finishChannelLoad(State?.currentRoom);
-      } else {
-        window.FtCompose?.refresh?.();
-      }
-    } catch {}
+
+    if (force) {
+      try { overlay.remove(); } catch {}
+      finalize();
+      return;
+    }
+
+    if (overlay.classList.contains('ch-transition-dismiss')) {
+      setTimeout(finalize, 120);
+      return;
+    }
+
+    overlay.classList.add('ch-transition-dismiss');
+    const done = () => finalize();
+    overlay.addEventListener('animationend', done, { once: true });
+    setTimeout(done, 420);
   }
 
   function isChatDomFrozen() {
@@ -1422,7 +1496,7 @@ const Rooms = (() => {
     const wasViewing = !!(o.wasCurrentRoom || State.currentRoom === name);
 
     try { delete State._roomSwitchInProgress; } catch {}
-    clearChatTransition({ finish: false });
+    clearChatTransition({ finish: false, force: true });
     try { window.FtCompose?.cancelChannelSwitch?.(); } catch {}
     if (window.ContentWarning?.unlockUi) {
       try { ContentWarning.unlockUi(); } catch {}
@@ -1562,7 +1636,7 @@ const Rooms = (() => {
     if (type === 'private') {
       key = await _resolvePrivateRoomKey(name);
       if (key === undefined) {
-        clearChatTransition({ finish: false });
+        clearChatTransition({ finish: false, force: true });
         try { delete State._roomSwitchInProgress; } catch {}
         try { window.FtCompose?.cancelChannelSwitch?.(); } catch {}
         return;
@@ -1590,7 +1664,6 @@ const Rooms = (() => {
     if (typeof selectServer === 'function') selectServer(type === 'dm' ? 'dms' : 'main');
 
     // Derive encryption key for this room
-    const hadMessageCache = Object.prototype.hasOwnProperty.call(State.messages || {}, name);
     State.roomKeys[name] = key;
     State.currentRoom = name;
     State.currentRoomType = type;
@@ -1829,45 +1902,48 @@ const Rooms = (() => {
           : `#${name} is not on this node — open a channel from your sidebar or wait for account sync`;
         UI.showToast(msg, 'warning', 7000);
       }
+      finishChannelSwitch(name, { finish: true, force: true });
     }
 
     if (chType !== 'voice' && msgArea) {
-      const hasCached = type !== 'dm' && hadMessageCache && Array.isArray(State.messages[name]);
+      const cachedMsgs = Array.isArray(State.messages[name]) ? State.messages[name] : [];
+      const hasCached = type !== 'dm' && cachedMsgs.length > 0;
       const shell = msgArea.querySelector('#cw-chat-content');
       const hasRendered = !!(shell && shell.children.length);
       if (hasCached && typeof Messages !== 'undefined' && Messages.loadHistory) {
-        const cachedMsgs = State.messages[name].slice();
-        queueMicrotask(() => {
-          try {
-            if (State.currentRoom === name) {
-              Messages.loadHistory(name, cachedMsgs);
-            }
-          } catch {}
-        });
-      } else if (!hasRendered) {
+        try {
+          Messages.loadHistory(name, cachedMsgs.slice());
+        } catch {}
+      } else if (!hasRendered && !document.getElementById(_CHAT_TRANSITION_ID)) {
         showChatTransition(name, type, dmPeer, 'load', {
           room: roomData, channelType: chType, beginSwitch: false,
         });
       }
+      _armSwitchWatchdog(switchToken, name);
     }
     
     // For voice channels, show a prompt to join voice
     if (chType === 'voice') {
-      document.getElementById('messages-area').innerHTML = `
+      finishChannelSwitch(name, { finish: true, force: true });
+      const voiceArea = document.getElementById('messages-area');
+      const voiceMount = (window.ContentWarning?.ensureChatShell?.(voiceArea)) || voiceArea;
+      if (voiceMount) {
+        voiceMount.innerHTML = `
         <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:16px;color:#888">
           <div style="font-size:48px">🔊</div>
           <div style="font-size:18px;font-weight:600">Voice Channel</div>
           <div style="font-size:14px">Click the voice button in the header to join</div>
-        </div>
-      `;
+        </div>`;
+      }
     }
     } finally {
       try {
-        if (State._roomSwitchInProgress === String(name || '').toLowerCase()) {
+        const r = String(name || '').trim().toLowerCase();
+        if (State._roomSwitchInProgress === r && !isSwitchOverlayVisible()) {
           delete State._roomSwitchInProgress;
         }
+        window.FtCompose?.refresh?.();
       } catch {}
-      try { window.FtCompose?.refresh?.(); } catch {}
     }
   }
 
@@ -3811,6 +3887,8 @@ const Rooms = (() => {
     syncContentWarningFields: _syncContentWarningFields,
     showChatTransition,
     clearChatTransition,
+    finishChannelSwitch,
+    isSwitchOverlayVisible,
     isChatDomFrozen,
   };
 })();
@@ -3818,6 +3896,8 @@ const Rooms = (() => {
 try {
   window.showChatTransition = Rooms.showChatTransition;
   window.clearChatTransition = Rooms.clearChatTransition;
+  window.finishChannelSwitch = Rooms.finishChannelSwitch;
+  window.isSwitchOverlayVisible = Rooms.isSwitchOverlayVisible;
   window.isChatDomFrozen = Rooms.isChatDomFrozen;
 } catch {}
 
