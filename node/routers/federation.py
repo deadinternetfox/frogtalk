@@ -96,6 +96,38 @@ def _normalize_base_url(url: str) -> str:
     return (url or "").strip().rstrip("/")
 
 
+def _upgrade_same_host_https_redirect(original_url: str, err_msg: str) -> str | None:
+    """When nginx redirects ``http://ip`` → ``https://ip``, retry once over HTTPS."""
+    m = re.search(r"->\s*(https?://[^\s)]+)", str(err_msg or ""))
+    if not m:
+        return None
+    new_url = _normalize_base_url(m.group(1))
+    try:
+        orig = urllib.parse.urlsplit(original_url)
+        dest = urllib.parse.urlsplit(new_url)
+    except Exception:
+        return None
+    if (orig.scheme or "").lower() != "http":
+        return None
+    if (dest.scheme or "").lower() != "https":
+        return None
+    oh = (orig.hostname or "").strip().lower()
+    dh = (dest.hostname or "").strip().lower()
+    if not oh or not dh:
+        return None
+    if oh != dh:
+        # Allow bare IP ↔ nip.io for the same host.
+        import federation_calls as _fc
+
+        if not (_fc._host_ip_keys(oh) & _fc._host_ip_keys(dh)):
+            return None
+    try:
+        _assert_safe_url(new_url)
+    except Exception:
+        return None
+    return new_url
+
+
 def enqueue_server_event(
     event_type: str,
     payload: dict,
@@ -1124,11 +1156,48 @@ def _fetch_url_bytes(
     headers: dict | None = None,
     data: bytes | None = None,
     max_bytes: int | None = None,
+    _redirect_retry: bool = True,
 ) -> bytes:
     # SSRF allowlist runs first regardless of transport. We only do this
     # for outbound peer fetches — user-supplied URLs (link previews,
     # imageboard, etc.) have their own checks elsewhere.
     _assert_safe_url(url)
+    if max_bytes is None:
+        max_bytes = _FED_RESPONSE_MAX_JSON
+    try:
+        return _fetch_url_bytes_once(
+            url,
+            timeout_s=timeout_s,
+            method=method,
+            headers=headers,
+            data=data,
+            max_bytes=max_bytes,
+        )
+    except _UnsafeURLError as exc:
+        if _redirect_retry:
+            upgraded = _upgrade_same_host_https_redirect(url, str(exc))
+            if upgraded and upgraded != url:
+                return _fetch_url_bytes(
+                    upgraded,
+                    timeout_s=timeout_s,
+                    method=method,
+                    headers=headers,
+                    data=data,
+                    max_bytes=max_bytes,
+                    _redirect_retry=False,
+                )
+        raise
+
+
+def _fetch_url_bytes_once(
+    url: str,
+    *,
+    timeout_s: float = 4.5,
+    method: str = "GET",
+    headers: dict | None = None,
+    data: bytes | None = None,
+    max_bytes: int | None = None,
+) -> bytes:
     if max_bytes is None:
         max_bytes = _FED_RESPONSE_MAX_JSON
     if _url_uses_tor(url):
@@ -4086,6 +4155,8 @@ def _outbox_collect_targets_sync() -> tuple[str, dict[str, str], list[dict]]:
     peers = db.list_federation_servers(official_only=False)
     peer_urls: dict[str, str] = {}
     seen_urls: set[str] = set()
+    import federation_calls as fc
+
     _fed_policy = db.get_federation_policy_settings()
     block_tor = bool(_fed_policy.get("block_tor_peers"))
     block_http = bool(_fed_policy.get("block_http_only_peers"))
@@ -4100,6 +4171,8 @@ def _outbox_collect_targets_sync() -> tuple[str, dict[str, str], list[dict]]:
             continue
         peer_sid = str(srv.get("server_id") or "").strip()
         if not peer_sid or peer_sid == local_server_id:
+            continue
+        if fc.federation_peer_is_local_alias(srv, local):
             continue
         target = _select_peer_push_target(srv)
         if not target:
@@ -4235,6 +4308,29 @@ async def federation_outbox_processor() -> int:
     if not peer_urls or not events:
         return 0
 
+    BATCH_SIZE = 25
+    # Drop rows aimed at unreachable/duplicate-local peers so one bad target
+    # (e.g. http://<our-ip> alias) cannot starve delivery to home/main.
+    reachable_peer_ids = set(peer_urls.keys())
+    orphan_event_ids: list[str] = []
+    deliverable_events: list[dict] = []
+    for row in events:
+        tgt = str(row.get("target_server_id") or "").strip()
+        if tgt and tgt not in reachable_peer_ids:
+            eid = str(row.get("event_id") or "").strip()
+            if eid:
+                orphan_event_ids.append(eid)
+            continue
+        deliverable_events.append(row)
+    if orphan_event_ids:
+        try:
+            await asyncio.to_thread(db.mark_outbox_events_failed, orphan_event_ids[:200])
+        except Exception:
+            _log.exception("federation: failed to drop orphan outbox targets")
+    events = deliverable_events[:BATCH_SIZE]
+    if not events:
+        return len(orphan_event_ids)
+
     _ENCRYPTED_PEER_SCOPED = frozenset({
         "social.post.created.encrypted",
         "social.post.keys.extended",
@@ -4305,8 +4401,7 @@ async def federation_outbox_processor() -> int:
             wire["origin_pubkey_pem"] = origin_pem
         return wire
 
-    BATCH_SIZE = 25
-    batch = events[:BATCH_SIZE]
+    batch = events
     broadcast_rows: list[dict] = []
     targeted_rows: dict[str, list[dict]] = {}
     for row in batch:

@@ -144,6 +144,29 @@ class FederatedDMsTests(unittest.TestCase):
             out = db.get_effective_last_seen(7, gid)
         self.assertEqual(out, "2026-05-24 10:00:00")
 
+    @mock.patch("federation_dms.db.get_or_create_local_server_identity", return_value={
+        "server_id": "srv_au",
+        "base_url": "https://46.250.244.184.nip.io",
+    })
+    @mock.patch("federation_dms.db.list_federation_servers", return_value=[
+        {"server_id": "srv_au", "base_url": "https://46.250.244.184.nip.io", "enabled": 1},
+        {"server_id": "srv_ip_alias", "base_url": "http://46.250.244.184", "enabled": 1},
+        {"server_id": "srv_home", "base_url": "https://frogtalk.xyz", "enabled": 1},
+    ])
+    def test_remote_targets_skip_local_ip_alias(self, _peers, _local):
+        import federation_calls as fc
+
+        alias = {"server_id": "srv_ip_alias", "base_url": "http://46.250.244.184"}
+        local = {"server_id": "srv_au", "base_url": "https://46.250.244.184.nip.io"}
+        self.assertTrue(fc.federation_peer_is_local_alias(alias, local))
+        remote = fd.dm_message_federation_remote_targets(
+            {"id": 1, "global_user_id": "00000000-0000-4000-8000-000000000001"},
+            {"id": 2, "global_user_id": "00000000-0000-4000-8000-000000000002"},
+        )
+        self.assertIn("srv_home", remote)
+        self.assertNotIn("srv_ip_alias", remote)
+        self.assertNotIn("srv_au", remote)
+
 
 if __name__ == "__main__":
     unittest.main()

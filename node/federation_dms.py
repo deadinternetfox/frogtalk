@@ -21,6 +21,26 @@ def _local_server_id() -> str:
     return str(ident.get("server_id") or "").strip()
 
 
+def _filter_remote_federation_targets(targets: list[str]) -> list[str]:
+    """Drop local server id and duplicate directory rows for this host."""
+    local_sid = _local_server_id()
+    peers = {
+        str(r.get("server_id") or "").strip(): r
+        for r in db.list_federation_servers(official_only=False)
+    }
+    local = db.get_or_create_local_server_identity() or {}
+    out: set[str] = set()
+    for sid in targets or []:
+        sid = str(sid or "").strip()
+        if not sid or sid == local_sid:
+            continue
+        row = peers.get(sid) or {}
+        if row and fc.federation_peer_is_local_alias(row, local):
+            continue
+        out.add(sid)
+    return sorted(out)
+
+
 def _peer_connected_on_remote_node(peer_user: dict | None) -> bool:
     """True when federation knows the peer has a WS on another node."""
     gid = str((peer_user or {}).get("global_user_id") or "").strip()
@@ -169,7 +189,7 @@ def dm_message_federation_remote_targets(*users: dict | None) -> list[str]:
         for sid in fc._clearnet_federation_peer_ids():
             if sid and sid != local_sid:
                 targets.add(sid)
-    return sorted(targets)
+    return _filter_remote_federation_targets(sorted(targets))
 
 
 def federation_mirror_targets(*users: dict | None) -> list[str]:

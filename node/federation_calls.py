@@ -24,11 +24,14 @@ Hardening notes (kept inline for future auditors):
 """
 from __future__ import annotations
 
+import ipaddress
 import json
 import logging
 import os
 import re
+import socket
 import time
+import urllib.parse
 import uuid
 from collections import defaultdict, deque
 from datetime import datetime
@@ -278,6 +281,77 @@ def _peer_is_onion_only(server_row: dict) -> bool:
     return transport == "onion"
 
 
+def _normalize_peer_base_url(url: str) -> str:
+    return str(url or "").strip().rstrip("/")
+
+
+def _host_ip_keys(host: str) -> set[str]:
+    """Hostnames/IPs that refer to the same machine (incl. nip.io IP prefixes)."""
+    h = str(host or "").strip().lower().rstrip(".")
+    if not h:
+        return set()
+    keys = {h}
+    try:
+        ipaddress.ip_address(h)
+        return keys
+    except ValueError:
+        pass
+    if h.endswith(".nip.io"):
+        prefix = h[: -len(".nip.io")]
+        try:
+            ipaddress.ip_address(prefix)
+            keys.add(prefix)
+        except ValueError:
+            pass
+    try:
+        for _family, _stype, _proto, _canon, sockaddr in socket.getaddrinfo(h, None):
+            if sockaddr:
+                keys.add(str(sockaddr[0]))
+    except Exception:
+        pass
+    return keys
+
+
+def federation_peer_is_local_alias(server: dict, local: dict | None = None) -> bool:
+    """True when a federation directory row points at this node (duplicate listing).
+
+    Travel nodes often carry both ``http://<ip>`` and ``https://<ip>.nip.io`` rows;
+    targeting the HTTP alias loops locally and can clog the outbox ahead of real
+    peers (e.g. Frog@AU → home never reaches testy@main).
+    """
+    local = dict(local or db.get_or_create_local_server_identity() or {})
+    peer = dict(server or {})
+    local_sid = str(local.get("server_id") or "").strip()
+    peer_sid = str(peer.get("server_id") or "").strip()
+    if local_sid and peer_sid and local_sid == peer_sid:
+        return True
+    local_urls: list[str] = []
+    for key in ("base_url", "onion_url"):
+        u = _normalize_peer_base_url(str(local.get(key) or ""))
+        if u:
+            local_urls.append(u)
+    env_base = _normalize_peer_base_url(os.getenv("FROGTALK_BASE_URL") or "")
+    if env_base:
+        local_urls.append(env_base)
+    peer_url = _normalize_peer_base_url(str(peer.get("base_url") or ""))
+    if not peer_url:
+        return False
+    if peer_url in local_urls:
+        return True
+    local_keys: set[str] = set()
+    peer_keys: set[str] = set()
+    for u in local_urls:
+        try:
+            local_keys |= _host_ip_keys(urllib.parse.urlparse(u).hostname or "")
+        except Exception:
+            pass
+    try:
+        peer_keys |= _host_ip_keys(urllib.parse.urlparse(peer_url).hostname or "")
+    except Exception:
+        pass
+    return bool(local_keys & peer_keys)
+
+
 def _clearnet_federation_peer_ids() -> list[str]:
     """Enabled peers with a clearnet base URL, excluding this node and onion-only rows."""
     ident = db.get_or_create_local_server_identity() or {}
@@ -291,6 +365,8 @@ def _clearnet_federation_peer_ids() -> list[str]:
             if not sid or sid == local_sid:
                 continue
             if _peer_is_onion_only(row):
+                continue
+            if federation_peer_is_local_alias(row, ident):
                 continue
             if not str(row.get("base_url") or "").strip():
                 continue
