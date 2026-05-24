@@ -13,23 +13,24 @@
 <!-- Open Graph (Facebook, Discord, Telegram, etc.) -->
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://frogtalk.xyz/">
-<meta property="og:title" content="FrogTalk — Secure Encrypted Chat, Calls & Social">
-<meta property="og:description" content="E2E encrypted DMs, voice &amp; video calls, social posts, Reels &amp; stories, Frog Channel imageboard threads, shared music, and live Discord/Telegram bridges. One app, no tracking.">
+<meta property="og:title" content="FrogTalk — Chat, Post, Vibe Together">
+<meta property="og:description" content="Pre-alpha encrypted chat, voice &amp; video calls, social posts, Reels, Frog Channel imageboard, federated nodes, and Discord/Telegram bridges. Privacy-first, zero ads.">
 <meta property="og:image" content="https://frogtalk.xyz/static/icons/og-image.png">
 <meta property="og:image:secure_url" content="https://frogtalk.xyz/static/icons/og-image.png">
+<meta property="og:image:type" content="image/png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
-<meta property="og:image:alt" content="FrogTalk secure chat, calls, stories, Frog Channel imageboard, and communities">
+<meta property="og:image:alt" content="FrogTalk — Chat, Post, Vibe Together">
 <meta property="og:site_name" content="FrogTalk">
 <meta property="og:locale" content="en_US">
 
 <!-- Twitter Card -->
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:site" content="@frogtalk">
-<meta name="twitter:title" content="FrogTalk — Secure Encrypted Chat, Calls & Social">
-<meta name="twitter:description" content="Encrypted DMs, calls, social feed, Reels & stories, Frog Channel imageboard, shared music, and live Discord/Telegram bridges. Private by default.">
+<meta name="twitter:title" content="FrogTalk — Chat, Post, Vibe Together">
+<meta name="twitter:description" content="Pre-alpha E2E chat, calls, social feed, Reels, Frog Channel, federation, and live bridges. Private by default.">
 <meta name="twitter:image" content="https://frogtalk.xyz/static/icons/og-image.png">
-<meta name="twitter:image:alt" content="FrogTalk secure chat, calls, stories, Frog Channel imageboard, and communities">
+<meta name="twitter:image:alt" content="FrogTalk — Chat, Post, Vibe Together">
 
 <link rel="icon" href="/static/favicon.ico" sizes="any">
 <link rel="icon" href="/static/icons/icon.svg" type="image/svg+xml">
@@ -44,7 +45,7 @@
 <link rel="sitemap" type="application/xml" title="Sitemap" href="/sitemap.xml">
 <link rel="search" type="application/opensearchdescription+xml" title="FrogTalk" href="/opensearch.xml">
 <link rel="alternate" type="text/plain" title="LLM site summary" href="/llms.txt">
-<title>FrogTalk — Secure Encrypted Chat</title>
+<title>FrogTalk — Chat, Post, Vibe Together</title>
 <script type="application/ld+json">
 {
   "@context": "https://schema.org",
@@ -68,7 +69,7 @@
     },
     {
       "@type": "WebPage",
-      "name": "FrogTalk — Secure Encrypted Chat",
+      "name": "FrogTalk — Chat, Post, Vibe Together",
       "url": "https://frogtalk.xyz/",
       "description": "Privacy-first messaging, voice and video calls, social posting, stories, Frog Channel imageboard threads, shared music, and Discord or Telegram bridges.",
       "isPartOf": {
@@ -116,7 +117,7 @@
         <strong>Censorship-free, private by design</strong> — end-to-end encrypted DMs and open-source code you can audit.
       </div>
       <div class="vb-sub">
-        Report security issues or read the encryption model on our <a href="/security">security page</a>.
+        Report security issues or read the encryption model on our <a class="vb-link" href="/security">security page</a>.
         <span class="vb-prealpha"> · Pre-alpha — no uptime or data guarantees.</span>
       </div>
     </div>
@@ -132,7 +133,7 @@
 
 <!-- NAV (shared: static/partials/site-nav.html) -->
 <div id="ft-site-nav-mount"></div>
-<script src="/static/js/site-nav.js?v=3" defer></script>
+<script src="/static/js/site-nav.js?v=4" defer></script>
 
 <!-- HERO -->
 <section class="hero">
@@ -145,7 +146,7 @@
     <span class="hero-badge hero-badge--prealpha">⚠️ Pre-alpha</span>
     <span class="hero-badge">🔒 E2E Encrypted · 🌐 Federated · 🎞️ Reels · 🖼️ Frog Channel · 🌉 Bridges</span>
   </div>
-  <h1>Private Chat.<br>Built in the Open.</h1>
+  <h1>Chat, Post,<br>Vibe Together</h1>
   <p>FrogTalk is one app for encrypted DMs, voice &amp; video calls, social posts, Reels, stories, Frog Channel imageboard threads, shared music, and live Discord/Telegram bridges — federated across independent nodes. No ads, no tracking. <strong>Pre-alpha:</strong> expect rough edges; we cannot guarantee uptime or data safety yet.</p>
   <div class="hero-cta">
     <a href="/app" class="btn btn-primary btn-lg">🐸 Join the Pond</a>
@@ -567,10 +568,10 @@
 </section>
 
 <!-- OPEN SOURCE -->
-<section class="section opensource-section" id="open-source">
-  <div class="section-title">100% Open Source</div>
+<section class="section opensource-section" aria-labelledby="open-source-heading">
+  <div class="section-title" id="open-source-heading">100% Open Source</div>
   <div class="section-sub">Audit the cryptography, run your own node, build a bot, or hack on the client. Every line of FrogTalk is on GitHub.</div>
-  <div class="opensource-grid">
+  <div class="opensource-grid" id="open-source">
     <div>
       <h2>Built In The Open<br><span class="accent">Owned By Everyone</span></h2>
       <p>FrogTalk is licensed for self-hosting and inspection. The full server, federation layer, web client, Android app, desktop app, and the Tor / onion routing logic all live in one repository — no closed components, no dark services. Verify the build hash on your node against the one published from frogtalk.xyz before federating.</p>
@@ -655,7 +656,7 @@
 
 <!-- FOOTER (shared: static/partials/site-footer.html) -->
 <div id="ft-site-footer-mount"></div>
-<script src="/static/js/site-footer.js?v=6" defer></script>
+<script src="/static/js/site-footer.js?v=7" defer></script>
 
 
   <script src="/static/js/home-vibe-banner.js" defer></script>

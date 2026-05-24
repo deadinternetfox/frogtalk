@@ -11,7 +11,7 @@
   'use strict';
 
   const MOUNT_ID = 'ft-site-nav-mount';
-  const VER = '3';
+  const VER = '4';
 
   function assetUrl(path) {
     const base = path + '?v=' + VER;
@@ -73,6 +73,21 @@
     );
   }
 
+  function scrollHomeHash() {
+    const onHome = location.pathname === '/' || location.pathname === '';
+    if (!onHome || !location.hash || location.hash.length < 2) return;
+    const id = location.hash.slice(1);
+    const run = () => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    };
+    run();
+    requestAnimationFrame(run);
+    setTimeout(run, 120);
+    setTimeout(run, 400);
+  }
+
   async function loadNav() {
     const mount = document.getElementById(MOUNT_ID);
     if (!mount) return;
@@ -95,7 +110,11 @@
     fixHomeAnchors(nav);
     markCurrentLink(nav);
     document.body.classList.add('ft-has-site-nav');
+    scrollHomeHash();
   }
+
+  window.addEventListener('hashchange', scrollHomeHash);
+  window.addEventListener('load', scrollHomeHash);
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', loadNav);

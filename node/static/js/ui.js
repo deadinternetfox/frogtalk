@@ -1805,7 +1805,7 @@ function hidePageLoader() {
 function inlineSpinner(label) {
   const safe = (typeof UI !== 'undefined' && UI.escHtml)
     ? UI.escHtml(label || 'Loading…')
-    : String(label || 'Loading…'));
+    : String(label || 'Loading…');
   return `<div class="chat-transition-overlay" style="position:relative;inset:auto;min-height:120px;background:transparent;backdrop-filter:none">
     <div class="ch-loading-card ch-loading-state" id="ch-loading-state">
       <div class="ch-spin" aria-hidden="true"></div>
