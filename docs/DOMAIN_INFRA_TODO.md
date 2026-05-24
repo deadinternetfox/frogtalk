@@ -23,11 +23,13 @@ Canonical plan for **frogtalk.app** (main) vs **frogtalk.xyz** (dev) and node ho
 
 ## Operator — DNS & VPS (manual)
 
-- [ ] Point `frogtalk.app` + `www` → **31.220.92.120**; TLS cert
-- [ ] Point `frogtalk.xyz` → **46.250.244.184**; TLS cert
-- [ ] Main `.env`: `PUBLIC_URL=https://frogtalk.app`, `FROGTALK_HOME_PAGE=main`
-- [ ] Dev `.env`: `PUBLIC_URL=https://frogtalk.xyz`, `FROGTALK_HOME_PAGE=dev`
-- [ ] Admin `/server`: save public URL + contact emails on each node
+- [x] Main `.env`: `PUBLIC_URL=https://frogtalk.app`, `FROGTALK_HOME_PAGE=main` (31.220.92.120)
+- [x] AU `.env`: `PUBLIC_URL=https://frogtalk.xyz`, `FROGTALK_HOME_PAGE=dev` (46.250.244.184)
+- [x] Stop duplicate `cloudflared` on 161.97.182.73
+- [ ] **Cloudflare:** add `frogtalk.app` + `www` to **main** tunnel → `http://localhost:8080`
+- [ ] **Cloudflare:** create **dev** tunnel for `frogtalk.xyz` + `www` → install token on AU
+- [ ] Run `CF_API_TOKEN=… bash node/scripts/configure_cloudflare_tunnels.sh` (or dashboard)
+- [ ] Admin `/server`: confirm public URL + contacts on each node
 - [ ] Federation directory: label dev node display name “FrogTalk Dev”
 - [ ] Mobile: update `assetlinks.json` / iOS entitlements for `.app` if production moves
 

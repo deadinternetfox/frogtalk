@@ -116,7 +116,27 @@ The image `WORKDIR` is `/app` with `node/` contents copied in; `CMD` is `python 
 
 ## Cloudflare Tunnel
 
-Production clearnet nodes often terminate TLS at Cloudflare and run `cloudflared` locally. Point the tunnel origin at **nginx on port 8080**, not uvicorn directly. When installing nginx on that host, set `FROGTALK_NGINX_TUNNEL_LISTEN=1` so `install_board_nginx.sh` keeps `listen 8080` in the site config. **Community VPS nodes** (app on `127.0.0.1:8080`) must **not** use that flag — otherwise nginx steals port 8080 and `/app` returns 502 while PHP `/board/` still works.
+Production clearnet nodes often terminate TLS at Cloudflare and run `cloudflared` locally. Point the tunnel origin at **nginx on port 8080** (Main) or **uvicorn on 127.0.0.1:8080** (AU dev — no nginx on 8080).
+
+**Fleet layout (target):**
+
+| Domain | VPS | Tunnel | `FROGTALK_HOME_PAGE` |
+|--------|-----|--------|----------------------|
+| frogtalk.app | 31.220.92.120 (Main) | Main tunnel connector | `main` |
+| frogtalk.xyz | 46.250.244.184 (AU) | **Separate** dev tunnel | `dev` |
+
+Use **two tunnels** in Zero Trust (one hostname set per tunnel). Do not run two connectors for the same tunnel ID on different VPSes — Cloudflare load-balances between them.
+
+Automated hostname setup (needs API token):
+
+```bash
+export CF_API_TOKEN='…'   # Cloudflare One Connect Write
+bash node/scripts/configure_cloudflare_tunnels.sh
+```
+
+Manual: Zero Trust → Networks → Tunnels → Public Hostname → `http://localhost:8080`.
+
+On Main only, set `FROGTALK_NGINX_TUNNEL_LISTEN=1` when installing nginx so `listen 8080` is kept. **AU dev** must **not** use that flag (app binds 8080 directly).
 
 1. Install [cloudflared](https://github.com/cloudflare/cloudflared/releases) (`.deb` on Debian/Ubuntu).
 2. In **Cloudflare Zero Trust → Networks → Tunnels**, set the public hostname origin to `http://localhost:8080`.
