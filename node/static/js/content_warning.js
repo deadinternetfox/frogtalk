@@ -140,16 +140,24 @@
     const name = String(roomName || '').trim().toLowerCase();
     markVisitAcked(name);
 
+    const inRoomSwitch = !!(window.State && String(State._roomSwitchInProgress || '').toLowerCase() === name);
+    const unlockMs = inRoomSwitch ? 0 : UNLOCK_MS;
+
     const area = _el('messages-area');
     const overlay = _el(OVERLAY_ID);
 
-    if (area && overlay) {
+    if (area && overlay && unlockMs > 0) {
       area.classList.add('cw-unlocking');
       overlay.classList.add('cw-gate-dismiss');
-      await new Promise((r) => setTimeout(r, UNLOCK_MS));
+      await new Promise((r) => setTimeout(r, unlockMs));
     }
 
     _removeOverlay();
+
+    if (inRoomSwitch) {
+      // switchToRoom owns WS connect + history load after gate() resolves.
+      return;
+    }
 
     try {
       if (typeof clearChatTransition === 'function') clearChatTransition();

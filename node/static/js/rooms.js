@@ -1663,7 +1663,12 @@ const Rooms = (() => {
 
     const roomRow = (State.rooms || []).find((r) => r.name === name);
     const joinedHere = type === 'dm' || !!roomRow?.joined;
+
+    // Connect WS and load history immediately after gate — do not show a
+    // loading overlay on top of content that finishChannelUnlock may have
+    // already painted (that race stuck users until refresh).
     if (joinedHere) {
+      try { WS?.resetHistoryCache?.(name); } catch {}
       WS.connect(name);
     } else {
       try { WS.disconnect && WS.disconnect(); } catch {}
@@ -1675,18 +1680,13 @@ const Rooms = (() => {
       }
     }
 
-    // For text/DM channels, prefer rendering cached history instantly.
-    // Show spinner only when there is no cache yet.
     if (chType !== 'voice' && msgArea) {
-      // An empty array IS a valid cache state (e.g. a freshly-created
-      // channel that has no messages yet). Treat presence of the array
-      // as cache-hit so loadHistory renders the empty-state immediately
-      // instead of showing a perpetual "Loading #room…" spinner that
-      // the WS history dedup will refuse to clear.
       const hasCached = type !== 'dm' && hadMessageCache && Array.isArray(State.messages[name]);
+      const shell = msgArea.querySelector('#cw-chat-content');
+      const hasRendered = !!(shell && shell.children.length);
       if (hasCached && typeof Messages !== 'undefined' && Messages.loadHistory) {
         try { Messages.loadHistory(name, State.messages[name].slice()); } catch {}
-      } else {
+      } else if (!hasRendered) {
         showChatTransition(name, type, dmPeer, 'load');
       }
     }
