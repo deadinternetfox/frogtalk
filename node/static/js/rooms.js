@@ -1412,10 +1412,19 @@ const Rooms = (() => {
       _switchWatchdogTimer = null;
       if (switchToken !== _switchSeq) return;
       if (String(State?.currentRoom || '').trim().toLowerCase() !== expectRoom) return;
-      if (!isSwitchOverlayVisible()) return;
       try {
         if (window.ContentWarning?.isGateActive?.()) return;
       } catch {}
+      const inProgress = String(State._roomSwitchInProgress || '').toLowerCase() === expectRoom;
+      const overlayUp = isSwitchOverlayVisible();
+      const area = document.getElementById('messages-area');
+      const shell = area?.querySelector('#cw-chat-content');
+      const emptyShell = !shell?.children?.length;
+      if (!overlayUp && !inProgress && !emptyShell) return;
+      if (!overlayUp && !inProgress) {
+        finishChannelSwitch(expectRoom, { finish: true, force: true });
+        return;
+      }
       const cached = (State.messages && State.messages[expectRoom]) || [];
       if (cached.length && typeof Messages !== 'undefined' && Messages.loadHistory) {
         try {
@@ -1452,6 +1461,12 @@ const Rooms = (() => {
       try { document.getElementById(_CHAT_TRANSITION_ID)?.remove(); } catch {}
       try { area?.classList.remove('chat-switching'); } catch {}
       _scrubStaleSwitchChrome(area);
+      if (finish) {
+        try {
+          const r = String(State?.currentRoom || '').trim().toLowerCase();
+          if (r && State._roomSwitchInProgress === r) delete State._roomSwitchInProgress;
+        } catch {}
+      }
       try {
         if (finish && window.FtCompose?.finishChannelLoad) {
           FtCompose.finishChannelLoad(State?.currentRoom);
@@ -1463,6 +1478,11 @@ const Rooms = (() => {
 
     if (!overlay) {
       finalize();
+      return;
+    }
+
+    if (!finish && !force) {
+      try { window.FtCompose?.refresh?.(); } catch {}
       return;
     }
 
@@ -1866,14 +1886,16 @@ const Rooms = (() => {
           return;
         }
       }
-      if (document.getElementById(_CHAT_TRANSITION_ID)) {
-        showChatTransition(name, type, dmPeer, 'load', {
-          room: roomData, channelType: chType, beginSwitch: false,
-        });
-      } else {
-        clearChatTransition({ finish: false });
-      }
+      showChatTransition(name, type, dmPeer, 'load', {
+        room: roomData, channelType: chType, beginSwitch: false,
+      });
     }
+
+    // Switch prep done — release DOM freeze so history/cache can paint and finish the switch.
+    try {
+      const r = String(name || '').trim().toLowerCase();
+      if (State._roomSwitchInProgress === r) delete State._roomSwitchInProgress;
+    } catch {}
 
     // Persist last-opened channel only after CW ack (or immediately for private).
     try {

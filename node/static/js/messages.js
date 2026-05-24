@@ -2741,7 +2741,6 @@ const Messages = (() => {
 
   function loadHistory(room, msgs) {
     if (room !== State.currentRoom) return;
-    if (State._roomSwitchInProgress) return;
     try {
       if (window.ContentWarning?.isGateActive?.()) return;
     } catch {}

@@ -215,11 +215,6 @@
   function _unlockUi(roomName) {
     return _dismissGateOverlay().then(() => {
       _unlockComposer();
-      try {
-        if (typeof clearChatTransition === 'function') {
-          clearChatTransition({ finish: false });
-        }
-      } catch {}
       try { window.FtCompose?.beginChannelSwitch?.(roomName); } catch {}
       try { window.FtCompose?.refresh?.(); } catch {}
     });
@@ -350,7 +345,9 @@
   function _showGate(roomName, meta) {
     return new Promise((resolve) => {
       try {
-        if (typeof clearChatTransition === 'function') clearChatTransition({ finish: false });
+        const area = _el('messages-area');
+        try { document.getElementById('ft-chat-transition')?.remove(); } catch {}
+        try { area?.classList.remove('chat-switching'); } catch {}
       } catch {}
 
       _lockComposer();
