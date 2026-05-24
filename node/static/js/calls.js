@@ -2510,8 +2510,14 @@ async function handleVoiceJoined(data) {
     if (_voiceRoom === _presenceRoom) _renderVoicePresenceBar(_voiceRoom);
   }
 
+  const myGid = State.user?.global_user_id || '';
+  const myUid = State.user?.id || 0;
+
   for (const p of data.participants || []) {
     if (!p.user_id && !p.global_user_id) continue;
+    const gid = String(p.global_user_id || '').trim();
+    const uid = Number(p.user_id) || 0;
+    if ((myGid && gid === myGid) || (myUid && uid === myUid)) continue;
     const pc = await _createVoicePeer(
       p.user_id, p.nickname, p.avatar, true, p.global_user_id, p.home_server_id,
     );

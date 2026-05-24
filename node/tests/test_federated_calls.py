@@ -391,6 +391,58 @@ class FederatedVoiceTests(unittest.TestCase):
         self.assertIsNotNone(removed)
         self.assertEqual(reg._origin_count.get("srv_a"), 1)
 
+    def test_session_for_room_preserves_federation_binding(self):
+        reg = fv.FederatedVoiceRegistry()
+        main_sid = "sid-from-main"
+        reg.add_remote(
+            main_sid,
+            global_user_id="gid-remote",
+            nickname="alice",
+            home_server_id="srv_main",
+            room_name="general",
+        )
+        with mock.patch.object(fv, "room_anchor_server_id", return_value="srv_au"), \
+             mock.patch.object(fv, "deterministic_session_id", return_value="sid-from-au"):
+            bound = reg.session_for_room("general")
+        self.assertEqual(bound, main_sid)
+        self.assertEqual(reg.remotes_for_room("general")[0]["global_user_id"], "gid-remote")
+
+    def test_peers_for_joiner_matches_presence_minus_self(self):
+        reg = fv.FederatedVoiceRegistry()
+        sid = "sess-x"
+        reg.add_remote(
+            sid,
+            global_user_id="gid-remote",
+            nickname="remote",
+            home_server_id="srv_main",
+            room_name="general",
+        )
+        vm = mock.MagicMock()
+        vm.participants.return_value = []
+        joiner = {"id": 7, "global_user_id": "gid-local"}
+        with mock.patch.object(fv, "federated_voice_registry", reg), \
+             mock.patch.object(fv.db, "list_federation_voice_remote", return_value=[]):
+            peers = fv.peers_for_joiner("general", vm, joiner)
+        self.assertEqual(len(peers), 1)
+        self.assertEqual(peers[0]["global_user_id"], "gid-remote")
+
+    def test_should_route_voice_signal_federated_for_remote_roster(self):
+        reg = fv.FederatedVoiceRegistry()
+        reg.add_remote(
+            "sid",
+            global_user_id="gid-remote",
+            nickname="r",
+            home_server_id="srv_main",
+            room_name="general",
+        )
+        with mock.patch.object(fv, "federated_voice_registry", reg):
+            self.assertTrue(fv.should_route_voice_signal_federated(
+                "general", "gid-remote", locally_in_voice=True,
+            ))
+            self.assertFalse(fv.should_route_voice_signal_federated(
+                "general", "gid-local", locally_in_voice=True,
+            ))
+
     def test_enqueue_voice_signal_rejects_bad_kind(self):
         out = fv.enqueue_voice_signal(
             {"global_user_id": "g"}, "to-gid",

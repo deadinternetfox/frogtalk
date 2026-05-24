@@ -1809,7 +1809,7 @@ async def websocket_endpoint(
                 # Notify existing participants about new joiner
                 try:
                     import federation_voice as _fv
-                    joined_parts = _fv._combined_participants(room_name, voice_manager)
+                    joined_parts = _fv.participants_for_room(room_name, voice_manager)
                 except Exception:
                     joined_parts = voice_manager.participants(room_name)
                 await manager.broadcast_room(room_name, {
@@ -1825,22 +1825,23 @@ async def websocket_endpoint(
                 # Send joiner the list of existing participants to connect to
                 try:
                     import federation_voice as _fv
-                    remote = _fv.federated_voice_registry.remotes_for_room(room_name)
+                    connect_peers = _fv.peers_for_joiner(room_name, voice_manager, user)
                 except Exception:
-                    remote = []
-                local_parts = []
-                for p in (existing or []):
-                    uid = int(p[0])
-                    u = db.get_user_by_id(uid) or {}
-                    local_parts.append({
-                        "user_id": uid,
-                        "nickname": p[1],
-                        "avatar": p[2],
-                        "global_user_id": str(u.get("global_user_id") or ""),
-                    })
+                    connect_peers = []
+                    for p in (existing or []):
+                        uid = int(p[0])
+                        if uid == int(user["id"]):
+                            continue
+                        u = db.get_user_by_id(uid) or {}
+                        connect_peers.append({
+                            "user_id": uid,
+                            "nickname": p[1],
+                            "avatar": p[2],
+                            "global_user_id": str(u.get("global_user_id") or ""),
+                        })
                 await manager.send_personal(websocket, {
                     "type": "voice_joined",
-                    "participants": local_parts + remote,
+                    "participants": connect_peers,
                 })
 
             elif msg_type == "voice_leave":
@@ -1860,7 +1861,7 @@ async def websocket_endpoint(
                 voice_manager.leave(room_name, user["id"])
                 try:
                     import federation_voice as _fv
-                    left_parts = _fv._combined_participants(room_name, voice_manager)
+                    left_parts = _fv.participants_for_room(room_name, voice_manager)
                 except Exception:
                     left_parts = voice_manager.participants(room_name)
                 await manager.broadcast_room(room_name, {
@@ -1889,6 +1890,13 @@ async def websocket_endpoint(
                 in_voice = to_id and voice_manager.is_in_voice(room_name, to_id)
                 if not in_voice and not to_gid:
                     continue
+                try:
+                    import federation_voice as _fv
+                    use_federation = _fv.should_route_voice_signal_federated(
+                        room_name, to_gid, locally_in_voice=bool(in_voice),
+                    )
+                except Exception:
+                    use_federation = bool(to_gid and not in_voice)
                 payload_vo = {
                     "type": "voice_offer",
                     "from_id": user["id"],
@@ -1897,9 +1905,9 @@ async def websocket_endpoint(
                     "sdp": data.get("sdp"),
                     "room": room_name,
                 }
-                if in_voice:
+                if in_voice and not use_federation:
                     await manager.send_to_user(to_id, payload_vo)
-                if to_gid and not in_voice:
+                if to_gid and use_federation:
                     try:
                         import federation_voice as _fv
                         sid = _fv.federated_voice_registry.session_for_room(room_name)
@@ -1925,6 +1933,13 @@ async def websocket_endpoint(
                 in_voice = to_id and voice_manager.is_in_voice(room_name, to_id)
                 if not in_voice and not to_gid:
                     continue
+                try:
+                    import federation_voice as _fv
+                    use_federation = _fv.should_route_voice_signal_federated(
+                        room_name, to_gid, locally_in_voice=bool(in_voice),
+                    )
+                except Exception:
+                    use_federation = bool(to_gid and not in_voice)
                 payload_va = {
                     "type": "voice_answer",
                     "from_id": user["id"],
@@ -1933,9 +1948,9 @@ async def websocket_endpoint(
                     "sdp": data.get("sdp"),
                     "room": room_name,
                 }
-                if in_voice:
+                if in_voice and not use_federation:
                     await manager.send_to_user(to_id, payload_va)
-                if to_gid and not in_voice:
+                if to_gid and use_federation:
                     try:
                         import federation_voice as _fv
                         sid = _fv.federated_voice_registry.session_for_room(room_name)
@@ -1961,6 +1976,13 @@ async def websocket_endpoint(
                 in_voice = to_id and voice_manager.is_in_voice(room_name, to_id)
                 if not in_voice and not to_gid:
                     continue
+                try:
+                    import federation_voice as _fv
+                    use_federation = _fv.should_route_voice_signal_federated(
+                        room_name, to_gid, locally_in_voice=bool(in_voice),
+                    )
+                except Exception:
+                    use_federation = bool(to_gid and not in_voice)
                 payload_vi = {
                     "type": "voice_ice",
                     "from_id": user["id"],
@@ -1968,9 +1990,9 @@ async def websocket_endpoint(
                     "candidate": data.get("candidate"),
                     "room": room_name,
                 }
-                if in_voice:
+                if in_voice and not use_federation:
                     await manager.send_to_user(to_id, payload_vi)
-                if to_gid and not in_voice:
+                if to_gid and use_federation:
                     try:
                         import federation_voice as _fv
                         sid = _fv.federated_voice_registry.session_for_room(room_name)

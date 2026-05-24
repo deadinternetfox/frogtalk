@@ -77,13 +77,18 @@ class FederatedVoiceRegistry:
         self._origin_count: dict[str, int] = {}
 
     def session_for_room(self, room_name: str) -> str:
-        """Return (and cache) the deterministic session id for ``room_name``.
+        """Return the session id for ``room_name``.
 
-        Uses the room's anchor server, so two nodes converge on the same id.
+        Prefer an existing room binding (set by inbound ``voice.session.join``)
+        so ``session_for_room`` does not fork rosters that live under another
+        node's anchor-derived id.  Only derive a new id when unbound.
         """
         room = (room_name or "").strip().lower()
         if not room:
             return ""
+        bound = self._room_session.get(room, "")
+        if bound:
+            return bound
         anchor = room_anchor_server_id(room)
         sid = deterministic_session_id(room, anchor)
         self._room_session[room] = sid
@@ -156,7 +161,23 @@ class FederatedVoiceRegistry:
         return removed
 
     def remotes_for_room(self, room_name: str) -> list[dict]:
-        sid = self._room_session.get((room_name or "").strip().lower(), "")
+        room = (room_name or "").strip().lower()
+        if not room:
+            return []
+        sid = self._room_session.get(room, "")
+        if sid:
+            remotes = list(self._remote.get(sid, []))
+            if remotes:
+                return remotes
+        # Roster may live under the local anchor sid while the room is still
+        # unbound (e.g. before the first inbound join sets the mapping).
+        anchor = room_anchor_server_id(room)
+        alt = deterministic_session_id(room, anchor)
+        if alt and alt != sid:
+            alt_remotes = list(self._remote.get(alt, []))
+            if alt_remotes:
+                self._room_session[room] = alt
+                return alt_remotes
         return list(self._remote.get(sid, [])) if sid else []
 
     def is_remote_in_room(self, room_name: str, global_user_id: str) -> bool:
@@ -310,6 +331,21 @@ def voice_signal_target_servers(
     if local_sid:
         targets.discard(local_sid)
     return sorted(targets)
+
+
+def should_route_voice_signal_federated(
+    room_name: str,
+    to_global_user_id: str,
+    *,
+    locally_in_voice: bool,
+) -> bool:
+    """True when WebRTC signaling for ``to_global_user_id`` must cross federation."""
+    gid = str(to_global_user_id or "").strip()
+    if not gid:
+        return False
+    if federated_voice_registry.is_remote_in_room(room_name, gid):
+        return True
+    return not locally_in_voice
 
 
 def enqueue_voice_signal(
@@ -497,11 +533,27 @@ def _combined_participants(room_name: str, voice_manager) -> list:
     return local + remote
 
 
+def peers_for_joiner(room_name: str, voice_manager, user: dict) -> list[dict]:
+    """Voice peers the joiner should mesh with (same roster as presence API, minus self)."""
+    my_uid = int((user or {}).get("id") or 0)
+    my_gid = str((user or {}).get("global_user_id") or "").strip()
+    peers: list[dict] = []
+    for p in participants_for_room(room_name, voice_manager):
+        uid = int(p.get("user_id") or 0)
+        gid = str(p.get("global_user_id") or "").strip()
+        if my_gid and gid == my_gid:
+            continue
+        if my_uid and uid == my_uid:
+            continue
+        peers.append(p)
+    return peers
+
+
 def participants_for_room(room_name: str, voice_manager) -> list[dict]:
     """Local + federated voice roster, rehydrating DB rows into the registry."""
     room = (room_name or "").strip().lower()
-    combined = _combined_participants(room, voice_manager)
     sid = federated_voice_registry.session_for_room(room)
+    combined = _combined_participants(room, voice_manager)
     if not sid:
         return combined
     seen = {
@@ -564,10 +616,21 @@ async def _apply_voice_signal(payload, origin, session_id, room_name, _fed_globa
         _log.info("federation: drop voice.signal — sender home != origin")
         return
 
-    # Sender must be a registered remote (or the room must accept them).
+    # Sender must be in the federated voice roster.  Offers may arrive on the
+    # callee node before ``voice.session.join`` is processed; register the
+    # sender from the signed origin so mesh setup is not dropped on latency.
     if not _remote_in_room(room_name, from_gid, voice_manager):
-        _log.info("federation: drop voice.signal — sender not in voice roster")
-        return
+        if kind == "offer" and session_id:
+            federated_voice_registry.add_remote(
+                session_id,
+                global_user_id=from_gid,
+                nickname="remote",
+                home_server_id=origin,
+                room_name=room_name,
+            )
+        if not _remote_in_room(room_name, from_gid, voice_manager):
+            _log.info("federation: drop voice.signal — sender not in voice roster")
+            return
 
     # Receiver must be a local user currently in voice for this room.
     with db._conn() as con:
