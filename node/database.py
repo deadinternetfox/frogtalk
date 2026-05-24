@@ -1162,6 +1162,61 @@ def attach_content_warning(room: Optional[Dict]) -> Optional[Dict]:
     return out
 
 
+def cw_ack_user_get(user_id: int, room_name: str) -> Optional[Dict]:
+    """Return persisted 18+ ack for ``user_id`` in ``room_name``, if any."""
+    uid = int(user_id or 0)
+    name = str(room_name or "").strip().lower()
+    if not uid or not name:
+        return None
+    with _conn() as con:
+        row = con.execute(
+            "SELECT flags_snapshot, acknowledged_at FROM room_cw_ack "
+            "WHERE user_id=? AND room_name=? COLLATE NOCASE",
+            (uid, name),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def cw_ack_user_set(user_id: int, room_name: str, flags_snapshot: int) -> None:
+    uid = int(user_id or 0)
+    name = str(room_name or "").strip().lower()
+    if not uid or not name:
+        return
+    now = datetime.utcnow().isoformat()
+    with _conn() as con:
+        con.execute(
+            "INSERT INTO room_cw_ack (user_id, room_name, flags_snapshot, acknowledged_at) "
+            "VALUES (?, ?, ?, ?) "
+            "ON CONFLICT(user_id, room_name) DO UPDATE SET "
+            "flags_snapshot=excluded.flags_snapshot, acknowledged_at=excluded.acknowledged_at",
+            (uid, name, int(flags_snapshot or 0), now),
+        )
+        con.commit()
+
+
+def cw_ack_user_clear(user_id: int, room_name: str) -> None:
+    uid = int(user_id or 0)
+    name = str(room_name or "").strip().lower()
+    if not uid or not name:
+        return
+    with _conn() as con:
+        con.execute(
+            "DELETE FROM room_cw_ack WHERE user_id=? AND room_name=? COLLATE NOCASE",
+            (uid, name),
+        )
+        con.commit()
+
+
+def cw_ack_invalidate_room_all(room_name: str) -> None:
+    """Drop every user's ack for ``room_name`` (CW flags changed)."""
+    name = str(room_name or "").strip().lower()
+    if not name:
+        return
+    with _conn() as con:
+        con.execute("DELETE FROM room_cw_ack WHERE room_name=? COLLATE NOCASE", (name,))
+        con.commit()
+
+
 def list_rooms() -> List[Dict]:
     with _conn() as con:
         rows = con.execute("""
@@ -2828,6 +2883,17 @@ def _migrate():
             created_at TEXT DEFAULT (datetime('now')),
             UNIQUE(room_name, user_id)
         )""")
+        con.execute("""CREATE TABLE IF NOT EXISTS room_cw_ack (
+            user_id INTEGER NOT NULL,
+            room_name TEXT NOT NULL COLLATE NOCASE,
+            flags_snapshot INTEGER NOT NULL DEFAULT 0,
+            acknowledged_at TEXT NOT NULL DEFAULT (datetime('now')),
+            PRIMARY KEY (user_id, room_name),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        )""")
+        con.execute(
+            "CREATE INDEX IF NOT EXISTS idx_room_cw_ack_room ON room_cw_ack(room_name)"
+        )
         
         # ===================================================================
         # PHASE 7 — Social Profiles & Wall

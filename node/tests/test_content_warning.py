@@ -260,6 +260,31 @@ class ContentWarningTests(unittest.TestCase):
         )
         self.assertEqual(blocked.status_code, 451, blocked.text)
 
+    def test_ack_persists_across_new_session(self):
+        owner = self._session("cw_owner_j")
+        uid = self.db.create_user("cw_member_j", "secret12")
+        member = self.db.create_session(uid)
+        self._create_public_room(
+            owner,
+            "cw-pub-j",
+            cw={"enabled": True, "flags": ["nudity"]},
+        )
+        self.client.post("/api/rooms/cw-pub-j/join", headers=self._hdr(member))
+        self.client.post(
+            "/api/rooms/cw-pub-j/content-warning/ack",
+            json={"confirm": True},
+            headers=self._hdr(member),
+        )
+        member2 = self.db.create_session(uid)
+        st = self.client.get(
+            "/api/rooms/cw-pub-j/content-warning/status",
+            headers=self._hdr(member2),
+        )
+        self.assertEqual(st.status_code, 200, st.text)
+        body = st.json()
+        self.assertFalse(body.get("required"), body)
+        self.assertTrue(body.get("acknowledged"))
+
     def test_database_helpers_round_trip(self):
         db = self.db
         uid = db.create_user("cw_db_user", "secret12")

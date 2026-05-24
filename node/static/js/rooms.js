@@ -1232,6 +1232,8 @@ const Rooms = (() => {
     overlay.setAttribute('aria-live', 'polite');
     overlay.setAttribute('aria-busy', 'true');
     overlay.innerHTML =
+      '<div class="ch-transition-ambient" aria-hidden="true">' +
+      '<span class="ch-orb o1"></span><span class="ch-orb o2"></span><span class="ch-orb o3"></span></div>' +
       '<div class="ch-loading-card ch-loading-state" id="ch-loading-state">' +
       iconBlock +
       '<div class="ch-spin" aria-hidden="true"></div>' +

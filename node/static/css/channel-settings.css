@@ -1078,3 +1078,112 @@ body.cw-composer-locked #msg-input {
   line-height: 1.4;
   box-shadow: inset 0 0 8px rgba(255, 80, 80, 0.08);
 }
+
+/* ── Channel switch / loading overlay (theme-aware) ── */
+#messages-area .cw-chat-loading,
+#messages-area .chat-transition-overlay {
+  background:
+    radial-gradient(ellipse 70% 55% at 18% 38%, color-mix(in srgb, var(--accent-color, #4caf50) 14%, transparent), transparent 70%),
+    radial-gradient(ellipse 55% 45% at 82% 62%, color-mix(in srgb, var(--accent-color, #4caf50) 10%, transparent), transparent 72%),
+    color-mix(in srgb, var(--bg-color, #0d1117) 94%, black);
+  overflow: hidden;
+}
+
+.ch-transition-ambient {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 0;
+}
+
+.ch-transition-ambient .ch-orb {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(42px);
+  opacity: 0.45;
+  animation: chOrbDrift 14s ease-in-out infinite alternate;
+}
+
+.ch-transition-ambient .ch-orb.o1 {
+  width: 220px;
+  height: 220px;
+  left: -4%;
+  top: 18%;
+  background: color-mix(in srgb, var(--accent-color, #4caf50) 55%, transparent);
+  animation-duration: 16s;
+}
+
+.ch-transition-ambient .ch-orb.o2 {
+  width: 180px;
+  height: 180px;
+  right: 6%;
+  top: 8%;
+  background: color-mix(in srgb, var(--accent-color, #4caf50) 35%, var(--surface-color, #161b22));
+  animation-duration: 19s;
+  animation-delay: -4s;
+}
+
+.ch-transition-ambient .ch-orb.o3 {
+  width: 140px;
+  height: 140px;
+  left: 42%;
+  bottom: 8%;
+  background: color-mix(in srgb, var(--text-muted-color, #7d8590) 40%, var(--accent-color, #4caf50));
+  animation-duration: 22s;
+  animation-delay: -7s;
+}
+
+@keyframes chOrbDrift {
+  0% { transform: translate(0, 0) scale(1); opacity: 0.35; }
+  50% { transform: translate(12px, -18px) scale(1.06); opacity: 0.5; }
+  100% { transform: translate(-10px, 14px) scale(0.96); opacity: 0.38; }
+}
+
+.ch-loading-card {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 28px 32px 24px;
+  min-width: min(320px, 88vw);
+  border-radius: 16px;
+  background: linear-gradient(
+    165deg,
+    color-mix(in srgb, var(--surface-color, #161b22) 92%, var(--accent-color, #4caf50) 8%) 0%,
+    color-mix(in srgb, var(--bg-color, #0d1117) 88%, black) 100%
+  );
+  border: 1px solid color-mix(in srgb, var(--border-color, #30363d) 75%, var(--accent-color, #4caf50) 25%);
+  box-shadow:
+    0 18px 48px color-mix(in srgb, var(--bg-color, #000) 72%, transparent),
+    inset 0 1px 0 color-mix(in srgb, var(--text-color, #fff) 8%, transparent);
+  animation: chLoadingCardIn 0.38s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes chLoadingCardIn {
+  from { opacity: 0; transform: translateY(10px) scale(0.98); }
+  to { opacity: 1; transform: none; }
+}
+
+.ch-loading-label {
+  color: var(--text-color, #e6edf3);
+  font-size: 0.95rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  text-align: center;
+}
+
+.ch-spin {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 3px solid color-mix(in srgb, var(--border-color, #30363d) 70%, transparent);
+  border-top-color: var(--accent-color, #4caf50);
+  animation: chSpin 0.85s linear infinite;
+}
+
+@keyframes chSpin {
+  to { transform: rotate(360deg); }
+}

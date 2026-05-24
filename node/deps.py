@@ -583,17 +583,20 @@ _CW_ACK_STATE_MAX = 4096
 
 
 def cw_ack_mark(token: str, room_name: str, flags_snapshot: int) -> None:
-    """Record that this session acknowledged the 18+ gate for ``room_name``."""
+    """Record that this user acknowledged the 18+ gate for ``room_name``."""
+    import database as db
+
     k = _pin_key(token)
     name = str(room_name or "").strip().lower()
     if not k or not name:
         return
     now = time.time()
+    fl = int(flags_snapshot or 0)
     with _cw_ack_lock:
         per = _cw_ack_state.setdefault(k, {})
         per[name] = {
             "acknowledged_at": now,
-            "flags_snapshot": int(flags_snapshot or 0),
+            "flags_snapshot": fl,
         }
         if len(_cw_ack_state) > _CW_ACK_STATE_MAX:
             stale = sorted(
@@ -602,9 +605,17 @@ def cw_ack_mark(token: str, room_name: str, flags_snapshot: int) -> None:
             )
             for ks, _ in stale[: _CW_ACK_STATE_MAX // 2]:
                 _cw_ack_state.pop(ks, None)
+    try:
+        user = db.get_user_by_token(token)
+        if user and user.get("id"):
+            db.cw_ack_user_set(int(user["id"]), name, fl)
+    except Exception:
+        pass
 
 
 def cw_ack_clear_room(token: str, room_name: str) -> None:
+    import database as db
+
     k = _pin_key(token)
     name = str(room_name or "").strip().lower()
     if not k or not name:
@@ -613,16 +624,28 @@ def cw_ack_clear_room(token: str, room_name: str) -> None:
         per = _cw_ack_state.get(k)
         if per:
             per.pop(name, None)
+    try:
+        user = db.get_user_by_token(token)
+        if user and user.get("id"):
+            db.cw_ack_user_clear(int(user["id"]), name)
+    except Exception:
+        pass
 
 
 def cw_ack_invalidate_room(room_name: str) -> None:
-    """Drop all session acks for ``room_name`` (e.g. after CW settings change)."""
+    """Drop all acks for ``room_name`` (e.g. after CW settings change)."""
+    import database as db
+
     name = str(room_name or "").strip().lower()
     if not name:
         return
     with _cw_ack_lock:
         for per in _cw_ack_state.values():
             per.pop(name, None)
+    try:
+        db.cw_ack_invalidate_room_all(name)
+    except Exception:
+        pass
 
 
 def cw_ack_clear_for_token(token: str) -> None:
@@ -650,6 +673,20 @@ def cw_ack_is_required(room_name: str, token: str) -> tuple[bool, int]:
         st = (_cw_ack_state.get(k) or {}).get(name)
         if st and int(st.get("flags_snapshot") or -1) == flags:
             return False, flags
+    try:
+        user = db.get_user_by_token(token)
+        if user and user.get("id"):
+            persisted = db.cw_ack_user_get(int(user["id"]), name)
+            if persisted and int(persisted.get("flags_snapshot") or -1) == flags:
+                with _cw_ack_lock:
+                    per = _cw_ack_state.setdefault(k, {})
+                    per[name] = {
+                        "acknowledged_at": time.time(),
+                        "flags_snapshot": flags,
+                    }
+                return False, flags
+    except Exception:
+        pass
     return True, flags
 
 
