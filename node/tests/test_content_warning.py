@@ -71,7 +71,7 @@ class ContentWarningTests(unittest.TestCase):
         self.assertIn("category", cr.json().get("error", "").lower())
         self.assertIsNone(self.db.get_room_by_name("cw-pub-b"))
 
-    def test_creator_auto_ack_on_create(self):
+    def test_creator_must_ack_after_create(self):
         owner = self._session("cw_owner_f")
         self._create_public_room(
             owner,
@@ -84,13 +84,31 @@ class ContentWarningTests(unittest.TestCase):
         )
         self.assertEqual(st.status_code, 200, st.text)
         body = st.json()
-        self.assertFalse(body["required"])
-        self.assertTrue(body["acknowledged"])
-        hist = self.client.get(
-            "/api/messages/cw-pub-f?limit=20",
-            headers=self._hdr(owner),
+        self.assertTrue(body["required"])
+        self.assertFalse(body["acknowledged"])
+
+    def test_leave_clears_content_warning_ack(self):
+        owner = self._session("cw_owner_g")
+        member = self._session("cw_member_g")
+        self._create_public_room(
+            owner,
+            "cw-pub-g",
+            cw={"enabled": True, "flags": ["violence"]},
         )
-        self.assertEqual(hist.status_code, 200, hist.text)
+        self.client.post("/api/rooms/cw-pub-g/join", headers=self._hdr(member))
+        ack = self.client.post(
+            "/api/rooms/cw-pub-g/content-warning/ack",
+            json={"confirm": True},
+            headers=self._hdr(member),
+        )
+        self.assertEqual(ack.status_code, 200, ack.text)
+        leave = self.client.post("/api/rooms/cw-pub-g/leave", headers=self._hdr(member))
+        self.assertEqual(leave.status_code, 200, leave.text)
+        st = self.client.get(
+            "/api/rooms/cw-pub-g/content-warning/status",
+            headers=self._hdr(member),
+        )
+        self.assertTrue(st.json().get("required"))
 
     def test_private_room_rejects_content_warning(self):
         owner = self._session("cw_owner_c")

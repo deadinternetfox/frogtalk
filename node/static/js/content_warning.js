@@ -146,6 +146,20 @@
     });
   }
 
+  function _lockRoomUntilAck(room) {
+    try {
+      if (window.State && State.messages) State.messages[room] = [];
+      const area = _el('messages-area');
+      if (area) {
+        area.innerHTML =
+          '<div style="display:flex;align-items:center;justify-content:center;min-height:200px;color:#888;font-size:13px">18+ confirmation required…</div>';
+      }
+      if (typeof WS !== 'undefined' && WS.disconnect) {
+        try { WS.disconnect(); } catch {}
+      }
+    } catch {}
+  }
+
   function handleWsUpdate(data) {
     const room = String((data && data.room) || '').trim().toLowerCase();
     if (!room) return;
@@ -155,9 +169,12 @@
       return;
     }
     if (window.State && State.currentRoom === room) {
+      _lockRoomUntilAck(room);
       void gate(room).then((ok) => {
         if (ok && typeof WS !== 'undefined' && WS.connect) {
           try { WS.connect(room); } catch {}
+        } else if (!ok) {
+          try { showDeclinedScreen(room); } catch {}
         }
       });
     }
@@ -173,7 +190,7 @@
     if (!cw || !cw.enabled || !(cw.flags && cw.flags.length)) return '';
     const labels = formatFlags(cw.flags).map((f) => f.label).join(', ');
     const tip = escapeHtml(labels);
-    return '<span class="dir-cw-badge" title="' + tip + '">18+</span>';
+    return '<span class="ch-cw-badge" title="' + tip + '">18+</span>';
   }
 
   window.ContentWarning = {

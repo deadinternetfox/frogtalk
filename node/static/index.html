@@ -2145,6 +2145,19 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
 .channel-item.active .ch-owner-badge{
   box-shadow:0 0 0 2px rgba(255,196,64,.18),inset 0 0 10px rgba(255,196,64,.15);
 }
+.ch-cw-badge{
+  display:inline-flex;align-items:center;justify-content:center;
+  font-size:9px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;
+  color:#ff9b9b;
+  background:linear-gradient(135deg,rgba(255,80,80,.22),rgba(200,40,40,.1));
+  border:1px solid rgba(255,100,100,.42);
+  padding:1px 6px;border-radius:999px;flex-shrink:0;line-height:1.4;
+  margin-left:4px;
+  box-shadow:0 0 0 0 rgba(255,80,80,.25),inset 0 0 8px rgba(255,80,80,.08);
+}
+.channel-item:hover .ch-cw-badge{
+  box-shadow:0 0 0 2px rgba(255,80,80,.12),inset 0 0 10px rgba(255,80,80,.12);
+}
 .channel-browse-btn{padding:8px 12px;color:#4caf50;cursor:pointer;font-size:12px;text-align:center;opacity:0.7}
 .channel-browse-btn:hover{opacity:1;background:#111}
 .dm-row-preview{color:#808896}
@@ -11961,7 +11974,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoa
 <script src="/static/js/cropper.js?v=191"></script>
 <script src="/static/js/ui.js?v=__APP_ASSET_VERSION__"></script>
 <script src="/static/js/dm_lock.js?v=2"></script>
-<script src="/static/js/content_warning.js?v=3"></script>
+<script src="/static/js/content_warning.js?v=4"></script>
 <script src="/static/js/dm_key_manager.js?v=6"></script>
   <script src="/static/js/rooms.js?v=__APP_ASSET_VERSION__"></script>
 <script src="/static/js/sticker-fx.js?v=2"></script>

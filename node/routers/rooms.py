@@ -22,6 +22,8 @@ from deps import (
     session_token_from_request,
     cw_ack_mark,
     cw_ack_is_required,
+    cw_ack_clear_room,
+    cw_ack_invalidate_room,
     cw_http_detail,
 )
 from ws_manager import voice_manager, manager
@@ -647,17 +649,8 @@ def _apply_content_warning_setting(
     enabled = bool(cw_input.enabled)
     if not db.set_room_content_warning(room_name, enabled=enabled, flags=flags):
         return JSONResponse(status_code=400, content={"error": "Failed to update content warning"})
+    cw_ack_invalidate_room(room_name)
     return None
-
-
-def _auto_ack_content_warning(request: Request, room_name: str) -> None:
-    """Editors who enable/update CW are not locked out of their own channel."""
-    token = session_token_from_request(request) or ""
-    if not token:
-        return
-    enabled, flags = db.get_room_content_warning(room_name)
-    if enabled:
-        cw_ack_mark(token, room_name, flags)
 
 
 @router.get("")
@@ -810,8 +803,6 @@ async def create_room(request: Request, body: CreateRoomRequest,
     )
     if cw_err:
         return cw_err
-    if body.content_warning is not None:
-        _auto_ack_content_warning(request, body.name)
     if body.content_warning and body.type == "public":
         try:
             from routers import federation as federation_mod
@@ -1065,7 +1056,6 @@ async def update_room(request: Request, room_name: str, body: UpdateRoomRequest,
         )
         if cw_err:
             return cw_err
-        _auto_ack_content_warning(request, effective_name)
         try:
             from routers import federation as federation_mod
             federation_mod.enqueue_channel_directory_updated(effective_name)
@@ -2223,12 +2213,19 @@ async def get_voice_participants(room_name: str,
 
 
 @router.post("/{room_name}/leave")
-async def leave_room(room_name: str, current_user: dict = Depends(get_current_user)):
+async def leave_room(
+    room_name: str,
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+):
     """Leave a channel. If the leaver is the owner, ownership transfers to
     the longest-serving moderator. If no moderators exist, the room is deleted."""
     room = db.get_room_by_name(room_name)
     if not room:
         return JSONResponse(status_code=404, content={"error": "Room not found"})
+    token = session_token_from_request(request) or ""
+    if token:
+        cw_ack_clear_room(token, room_name)
     was_owner = room.get("owner_id") == current_user["id"]
     db.leave_room(current_user["id"], room["id"])
     await _broadcast_room_member_left(room_name, current_user)

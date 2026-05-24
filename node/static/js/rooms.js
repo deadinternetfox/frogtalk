@@ -2826,6 +2826,14 @@ const Rooms = (() => {
         try { applyChannelTypeUi(name, newChType); } catch {}
       }
       syncActiveRoomHeader(name, { icon, description: desc, channelType: newChType });
+      const cwSaved = (_currentRoomData?.room?.type === 'public') ? _readContentWarningForm('ch-cw') : null;
+      if (cwSaved?.enabled && cwSaved.flags?.length && window.ContentWarning?.gate) {
+        void ContentWarning.gate(name).then((ok) => {
+          if (ok && typeof WS !== 'undefined' && WS.connect) {
+            try { WS.connect(name); } catch {}
+          }
+        });
+      }
     }
     } catch (err) {
       UI.showToast('Failed to save settings', 'error');

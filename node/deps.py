@@ -615,6 +615,16 @@ def cw_ack_clear_room(token: str, room_name: str) -> None:
             per.pop(name, None)
 
 
+def cw_ack_invalidate_room(room_name: str) -> None:
+    """Drop all session acks for ``room_name`` (e.g. after CW settings change)."""
+    name = str(room_name or "").strip().lower()
+    if not name:
+        return
+    with _cw_ack_lock:
+        for per in _cw_ack_state.values():
+            per.pop(name, None)
+
+
 def cw_ack_clear_for_token(token: str) -> None:
     k = _pin_key(token)
     if not k:
