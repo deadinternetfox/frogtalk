@@ -37,6 +37,7 @@ function _cssUrl(raw) {
 
 const Rooms = (() => {
   let _switchSeq = 0;
+  const _CHAT_TRANSITION_ID = 'ft-chat-transition';
   const _ROOM_NAME_RE = /^[a-z0-9_-]{1,32}$/;
   let _roomMentionClickBound = false;
   let _selectedRoomType = 'public';
@@ -1185,6 +1186,52 @@ const Rooms = (() => {
 
   const _ROOM_NAME_SAFE_RE = /^[a-z0-9_-]{1,32}$/;
 
+  function _escTransition(s) {
+    if (typeof UI !== 'undefined' && UI.escHtml) return UI.escHtml(s);
+    return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  function _chatTransitionLabel(name, type, dmPeer, phase) {
+    if (type === 'dm') {
+      const who = String(dmPeer || '…').replace(/^@/, '');
+      return phase === 'load'
+        ? `Loading conversation with ${who}…`
+        : `Opening conversation with ${who}…`;
+    }
+    const nm = String(name || '…').replace(/^#/, '');
+    return phase === 'load' ? `Loading #${nm}…` : `Opening #${nm}…`;
+  }
+
+  /** Full-area loading overlay — blocks stale messages bleeding through during switch. */
+  function showChatTransition(name, type, dmPeer, phase) {
+    const area = document.getElementById('messages-area');
+    if (!area) return;
+    const label = _chatTransitionLabel(name, type, dmPeer, phase || 'open');
+    area.classList.add('chat-switching');
+    area.scrollTop = 0;
+    [...area.children].forEach((ch) => ch.remove());
+    const overlay = document.createElement('div');
+    overlay.id = _CHAT_TRANSITION_ID;
+    overlay.className = 'chat-transition-overlay';
+    overlay.setAttribute('role', 'status');
+    overlay.setAttribute('aria-live', 'polite');
+    overlay.setAttribute('aria-busy', 'true');
+    overlay.innerHTML =
+      '<div class="ch-loading-card ch-loading-state" id="ch-loading-state">' +
+      '<div class="ch-spin" aria-hidden="true"></div>' +
+      '<div class="ch-loading-label">' + _escTransition(label) + '</div></div>';
+    area.appendChild(overlay);
+  }
+
+  function clearChatTransition() {
+    try { document.getElementById('messages-area')?.classList.remove('chat-switching'); } catch {}
+    try { document.getElementById(_CHAT_TRANSITION_ID)?.remove(); } catch {}
+  }
+
+  function isChatDomFrozen() {
+    try { return !!State._roomSwitchInProgress; } catch { return false; }
+  }
+
   /** User declined the 18+ gate — leave the channel and restore prior UI. */
   async function _handleCwDecline(name, opts = {}) {
     const o = opts && typeof opts === 'object' ? opts : {};
@@ -1194,6 +1241,7 @@ const Rooms = (() => {
     const wasViewing = !!(o.wasCurrentRoom || State.currentRoom === name);
 
     try { delete State._roomSwitchInProgress; } catch {}
+    clearChatTransition();
     try { WS?.disconnect?.(); } catch {}
     try {
       const lastRaw = localStorage.getItem('fc_last_room');
@@ -1319,16 +1367,13 @@ const Rooms = (() => {
     try { State._roomSwitchInProgress = String(name || '').toLowerCase(); } catch {}
     try {
 
-    // Avoid flashing the previous channel while the 18+ gate / join resolves.
+    // Freeze stale WS traffic and paint a full-area overlay while the gate resolves.
+    try { WS?.disconnect?.(); } catch {}
     if (prevRoom !== name || prevType !== type) {
+      showChatTransition(name, type, dmPeer, 'open');
       try {
-        const areaPre = document.getElementById('messages-area');
-        if (areaPre) {
-          areaPre.innerHTML =
-            '<div class="ch-loading-state">' +
-            '<div class="ch-spin" aria-hidden="true"></div>' +
-            '<div>Opening #' + String(name || '') + '…</div></div>';
-        }
+        const previewIcon = _roomDataEarly?.icon || null;
+        setRoomHeader(name, type, previewIcon, dmPeer, _chTypeEarly);
       } catch {}
     }
 
@@ -1349,7 +1394,11 @@ const Rooms = (() => {
     let key = null;
     if (type === 'private') {
       key = await _resolvePrivateRoomKey(name);
-      if (key === undefined) return;
+      if (key === undefined) {
+        clearChatTransition();
+        try { delete State._roomSwitchInProgress; } catch {}
+        return;
+      }
     }
 
     if (type !== 'dm' && type !== 'private') {
@@ -1383,9 +1432,6 @@ const Rooms = (() => {
     // We're entering an actual channel now — drop the welcome-screen flag
     // so the composer / members panel / encryption banner reappear.
     document.body.classList.remove('in-welcome');
-    // Immediately blank the messages area to avoid flash of old content
-    const area0 = document.getElementById('messages-area');
-    if (area0) area0.innerHTML = '';
     const _enc = document.getElementById('encrypt-indicator');
     const _encBtn = document.getElementById('encrypt-btn');
     if (_enc) _enc.style.display = 'none';
@@ -1602,6 +1648,11 @@ const Rooms = (() => {
     if (roomData?.channel_theme) {
       try { applyChannelThemeOverride(JSON.parse(roomData.channel_theme)); } catch {}
     }
+    try {
+      if (State._roomSwitchInProgress === String(name || '').toLowerCase()) {
+        delete State._roomSwitchInProgress;
+      }
+    } catch {}
     // Clear messages and reply state
     const msgArea = document.getElementById('messages-area');
     if (msgArea) msgArea.innerHTML = '';
@@ -1622,14 +1673,7 @@ const Rooms = (() => {
       if (hasCached && typeof Messages !== 'undefined' && Messages.loadHistory) {
         try { Messages.loadHistory(name, State.messages[name].slice()); } catch {}
       } else {
-        const label = type === 'dm'
-          ? `Loading conversation with ${dmPeer}…`
-          : `Loading #${name}…`;
-        msgArea.innerHTML = `
-          <div class="ch-loading-state" id="ch-loading-state">
-            <div class="ch-spin"></div>
-            <div>${label.replace(/[<>&]/g, c => ({ '<':'&lt;','>':'&gt;','&':'&amp;' }[c]))}</div>
-          </div>`;
+        showChatTransition(name, type, dmPeer, 'load');
       }
     }
     
@@ -3590,8 +3634,17 @@ const Rooms = (() => {
     patchMemberCount,
     patchContentWarning,
     syncContentWarningFields: _syncContentWarningFields,
+    showChatTransition,
+    clearChatTransition,
+    isChatDomFrozen,
   };
 })();
+
+try {
+  window.showChatTransition = Rooms.showChatTransition;
+  window.clearChatTransition = Rooms.clearChatTransition;
+  window.isChatDomFrozen = Rooms.isChatDomFrozen;
+} catch {}
 
 // expose to HTML onclick
 function showCreateRoom() { Rooms.showCreateRoom(); }

@@ -2730,6 +2730,7 @@ const Messages = (() => {
 
   function loadHistory(room, msgs) {
     if (room !== State.currentRoom) return;
+    if (State._roomSwitchInProgress) return;
     const area = document.getElementById('messages-area');
     _lastNick = null;
     _lastBridge = null;
@@ -2744,6 +2745,7 @@ const Messages = (() => {
     // content as soon as anything arrives (see appendMessage below).
     if (!msgs || msgs.length === 0) {
       area.innerHTML = _emptyStateHtml(room);
+      try { area.classList.remove('chat-switching'); } catch {}
       area.scrollTop = area.scrollHeight;
       return;
     }
@@ -2788,6 +2790,7 @@ const Messages = (() => {
     });
 
     area.innerHTML = html;
+    try { area.classList.remove('chat-switching'); } catch {}
     area.scrollTop = area.scrollHeight;
     if (msgs.length) State.oldestMsgId = msgs[0].id;
     bindLongPress(area);
@@ -2883,6 +2886,18 @@ const Messages = (() => {
         }
         const n = State._unreadRooms[room];
         badge.textContent = n > 99 ? '99+' : String(n);
+      }
+      return;
+    }
+
+    // During channel switch the overlay covers the pane — cache only, no DOM.
+    if (State._roomSwitchInProgress) {
+      if (!State.messages[room]) State.messages[room] = [];
+      if (msg && msg.id) {
+        const exists = State.messages[room].some((m) => m && m.id === msg.id);
+        if (!exists) State.messages[room].push(msg);
+      } else if (msg) {
+        State.messages[room].push(msg);
       }
       return;
     }

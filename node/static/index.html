@@ -2394,7 +2394,33 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
   flex:1;overflow-y:auto;overflow-x:hidden;padding:16px;
   display:flex;flex-direction:column;gap:2px;
   min-height:0;min-width:0;
+  position:relative;
   background:linear-gradient(180deg,rgba(17,35,29,.92) 0%,rgba(13,27,22,.92) 100%)
+}
+#messages-area.chat-switching{overflow:hidden}
+.chat-transition-overlay{
+  position:absolute;inset:0;z-index:30;
+  display:flex;align-items:center;justify-content:center;
+  padding:24px;
+  background:linear-gradient(180deg,
+    color-mix(in srgb, var(--bg-color) 94%, transparent) 0%,
+    color-mix(in srgb, var(--bg-color) 88%, transparent) 100%);
+  backdrop-filter:blur(8px);
+  -webkit-backdrop-filter:blur(8px);
+  animation:ftFadeIn .18s ease-out;
+}
+.ch-loading-card{
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:12px;padding:22px 28px;border-radius:14px;
+  min-width:min(320px,100%);
+  background:color-mix(in srgb, var(--surface-color) 90%, transparent);
+  border:1px solid color-mix(in srgb, var(--accent-color) 18%, var(--border-color));
+  box-shadow:0 12px 40px rgba(0,0,0,.32);
+}
+.ch-loading-label{
+  font-size:13px;font-weight:500;
+  color:color-mix(in srgb, var(--text-color) 70%, var(--text-muted));
+  text-align:center;line-height:1.45;
 }
 .msg-date-divider{
   display:flex;align-items:center;gap:10px;margin:16px 0 8px;
@@ -7210,8 +7236,8 @@ a.status-music-link:hover *{
 .ft-inline-chip.on{border-color:#2e5a2e;color:#9ad89a;background:#0f1a0f}
 .ft-inline-chip.off{opacity:.6}
 /* Channel loading skeleton */
-.ch-loading-state{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:10px;color:#666;font-size:13px;animation:ftFadeIn .2s ease-out}
-.ch-loading-state .ch-spin{width:28px;height:28px;border:2px solid #2a2a2a;border-top-color:#4caf50;border-radius:50%;animation:ftSpin .8s linear infinite}
+.ch-loading-state{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;color:var(--text-muted);font-size:13px;animation:ftFadeIn .2s ease-out}
+.ch-loading-state .ch-spin,.ch-loading-card .ch-spin{width:28px;height:28px;border:2px solid color-mix(in srgb, var(--border-color) 80%, transparent);border-top-color:var(--accent-color,#4caf50);border-radius:50%;animation:ftSpin .8s linear infinite}
 @keyframes ftSpin{to{transform:rotate(360deg)}}
 @keyframes ftFadeIn{from{opacity:0}to{opacity:1}}
 
@@ -11998,7 +12024,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoa
 <script src="/static/js/cropper.js?v=191"></script>
 <script src="/static/js/ui.js?v=__APP_ASSET_VERSION__"></script>
 <script src="/static/js/dm_lock.js?v=2"></script>
-<script src="/static/js/content_warning.js?v=12"></script>
+<script src="/static/js/content_warning.js?v=13"></script>
 <script src="/static/js/dm_key_manager.js?v=6"></script>
   <script src="/static/js/rooms.js?v=__APP_ASSET_VERSION__"></script>
 <script src="/static/js/sticker-fx.js?v=2"></script>

@@ -288,10 +288,14 @@
   function _lockRoomUntilAck(room) {
     try {
       _clearRoomCache(room);
-      const area = _el('messages-area');
-      if (area) {
-        area.innerHTML =
-          '<div style="display:flex;align-items:center;justify-content:center;min-height:200px;color:#888;font-size:13px">18+ confirmation required…</div>';
+      if (typeof showChatTransition === 'function') {
+        showChatTransition(room, 'public', null, 'open');
+      } else {
+        const area = _el('messages-area');
+        if (area) {
+          area.innerHTML =
+            '<div style="display:flex;align-items:center;justify-content:center;min-height:200px;color:#888;font-size:13px">18+ confirmation required…</div>';
+        }
       }
       if (typeof WS !== 'undefined' && WS.disconnect) {
         try { WS.disconnect(); } catch {}

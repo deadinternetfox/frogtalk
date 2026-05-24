@@ -2552,6 +2552,9 @@ async function openDMChannel (id, nickname, avatar) {
     if (typingBar) typingBar.textContent = '';
   } catch {}
 
+  try { WS?.disconnect?.(); } catch {}
+  try { State._roomSwitchInProgress = `dm:${id}`; } catch {}
+
   // Smooth transition: if we're coming from a public channel, clear its state
   if (State.currentRoomType && State.currentRoomType !== 'dm') {
     State.currentRoom = null;
@@ -2575,9 +2578,13 @@ async function openDMChannel (id, nickname, avatar) {
   // ECDH shared secret + fetch messages.
   const area0 = document.getElementById('messages-area');
   if (area0) {
-    area0.innerHTML = (typeof inlineSpinner === 'function')
-      ? inlineSpinner('Opening conversation with ' + (nickname || '…') + '…')
-      : '';
+    if (typeof showChatTransition === 'function') {
+      showChatTransition('', 'dm', nickname, 'open');
+    } else if (typeof inlineSpinner === 'function') {
+      area0.innerHTML = inlineSpinner('Opening conversation with ' + (nickname || '…') + '…');
+    } else {
+      area0.innerHTML = '';
+    }
   }
   // DMs have no voice channel — always hide the presence bar.
   const vpb = document.getElementById('voice-presence-bar');
@@ -2676,6 +2683,10 @@ async function openDMChannel (id, nickname, avatar) {
     const unlocked = await DmLock.gate(id, nickname);
     if (!unlocked) {
       DmLock.renderLockOverlay(nickname);
+      try {
+        if (typeof clearChatTransition === 'function') clearChatTransition();
+        delete State._roomSwitchInProgress;
+      } catch {}
       _dmMessagesLoading = false;
       _updateDmComposeState();
       return;
@@ -3120,6 +3131,10 @@ async function loadDMMessages (pageOffset = 0, options = {}) {
 function renderDMChat () {
   const area = document.getElementById('messages-area');
   if (!area || !_activeDM) return;
+  try {
+    if (typeof clearChatTransition === 'function') clearChatTransition();
+    delete State._roomSwitchInProgress;
+  } catch {}
   if (!_dmMessages.length) {
     const onTravel = !!(window.App && typeof App.isAtHomeNode === 'function' && !App.isAtHomeNode());
     const travelNote = onTravel

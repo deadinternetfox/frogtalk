@@ -1803,9 +1803,14 @@ function hidePageLoader() {
 
 /* Inline spinner HTML snippet */
 function inlineSpinner(label) {
-  return `<div style="display:flex;align-items:center;justify-content:center;gap:10px;padding:28px;color:#888">
-    <span class="spinner-ring"></span>
-    <span style="font-size:13px">${UI.escHtml(label || 'Loading…')}</span>
+  const safe = (typeof UI !== 'undefined' && UI.escHtml)
+    ? UI.escHtml(label || 'Loading…')
+    : String(label || 'Loading…'));
+  return `<div class="chat-transition-overlay" style="position:relative;inset:auto;min-height:120px;background:transparent;backdrop-filter:none">
+    <div class="ch-loading-card ch-loading-state" id="ch-loading-state">
+      <div class="ch-spin" aria-hidden="true"></div>
+      <div class="ch-loading-label">${safe}</div>
+    </div>
   </div>`;
 }
 
