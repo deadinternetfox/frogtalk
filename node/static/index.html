@@ -3429,6 +3429,9 @@ body.ft-incoming-call-active #incoming-call{z-index:20000}
 .ft-key-inv-sub{font-size:11px;color:var(--text-muted);margin-top:3px;line-height:1.4}
 .ft-key-inv-meta{font-size:11px;color:var(--text-muted);line-height:1.5;margin-bottom:4px}
 .ft-key-inv-empty{font-size:12px;color:var(--text-muted);padding:16px;text-align:center}
+.ft-key-keys-actions{display:flex;justify-content:flex-end;margin-top:10px}
+.ft-key-row-delete{flex-shrink:0;align-self:center;font-size:11px;padding:4px 10px;border-radius:6px;border:1px solid #5a2a2a;background:rgba(255,80,80,.06);color:#c99;color:var(--text-muted);cursor:pointer}
+.ft-key-row-delete:hover{color:#eaa;border-color:#7a3a3a;background:rgba(255,80,80,.12)}
 .ft-key-badge{font-size:10px;font-weight:600;padding:2px 6px;border-radius:4px;background:color-mix(in srgb, var(--accent-color) 18%, var(--surface-color));color:var(--accent-color);margin-left:4px}
 .ft-key-badge-ok{background:color-mix(in srgb, var(--accent-color) 28%, var(--bg-color));color:color-mix(in srgb, var(--accent-color) 85%, #fff)}
 .ft-privacy-keys-panel{margin:20px 0 0;padding-top:16px;border-top:1px solid var(--border-color)}
@@ -10971,6 +10974,11 @@ window.ConnErr = (function(){
     <div id="ft-key-pane-keys" class="ft-key-manager-pane">
       <div id="ft-key-inventory-summary"></div>
       <div id="ft-key-inventory-list" class="ft-key-inv-list" aria-live="polite"></div>
+      <div class="ft-key-keys-actions">
+        <button type="button" class="modal-btn" id="ft-key-delete-selected"
+          style="font-size:12px;color:#c99;background:rgba(255,80,80,.04);border:1px solid #5a2a2a"
+          title="Remove checked DM sessions and private group secrets from this browser">Delete selected</button>
+      </div>
     </div>
     <div id="ft-key-pane-export" class="ft-key-manager-pane" hidden>
       <p class="modal-label">Backs up whichever chats you checked on <b>All keys</b>. Use <b>Select all</b> for a full backup, or pick only the DMs and groups you need.</p>
@@ -11990,7 +11998,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoa
 <script src="/static/js/cropper.js?v=191"></script>
 <script src="/static/js/ui.js?v=__APP_ASSET_VERSION__"></script>
 <script src="/static/js/dm_lock.js?v=2"></script>
-<script src="/static/js/content_warning.js?v=11"></script>
+<script src="/static/js/content_warning.js?v=12"></script>
 <script src="/static/js/dm_key_manager.js?v=6"></script>
   <script src="/static/js/rooms.js?v=__APP_ASSET_VERSION__"></script>
 <script src="/static/js/sticker-fx.js?v=2"></script>

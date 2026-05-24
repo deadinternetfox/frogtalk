@@ -1185,6 +1185,67 @@ const Rooms = (() => {
 
   const _ROOM_NAME_SAFE_RE = /^[a-z0-9_-]{1,32}$/;
 
+  /** User declined the 18+ gate — leave the channel and restore prior UI. */
+  async function _handleCwDecline(name, opts = {}) {
+    const o = opts && typeof opts === 'object' ? opts : {};
+    const prevRoom = o.prevRoom;
+    const prevType = o.prevType || 'public';
+    const leaveChannel = o.leaveChannel !== false;
+    const wasViewing = !!(o.wasCurrentRoom || State.currentRoom === name);
+
+    try { delete State._roomSwitchInProgress; } catch {}
+    try { WS?.disconnect?.(); } catch {}
+    try {
+      const lastRaw = localStorage.getItem('fc_last_room');
+      if (lastRaw) {
+        const parsed = JSON.parse(lastRaw);
+        if (parsed && String(parsed.name || '').toLowerCase() === String(name || '').toLowerCase()) {
+          localStorage.removeItem('fc_last_room');
+        }
+      }
+    } catch {}
+
+    if (leaveChannel) {
+      const joined = (State.rooms || []).some((r) => r.name === name && r.joined);
+      if (joined) {
+        try {
+          await fetch(`/api/rooms/${encodeURIComponent(name)}/leave`, {
+            method: 'POST', headers: { 'X-Session-Token': State.token },
+          });
+          await loadRooms();
+        } catch {}
+        if (window.ContentWarning?.forgetAck) {
+          try { await ContentWarning.forgetAck(name); } catch {}
+        }
+      }
+    }
+
+    try { renderRooms(); } catch {}
+
+    if (wasViewing || State.currentRoom === name) {
+      try {
+        State.currentRoom = null;
+        State.currentRoomType = null;
+        State.currentRoomOwner = null;
+        State.dmPeer = null;
+      } catch {}
+    }
+
+    const prevStillJoined = prevRoom && prevRoom !== name
+      && (State.rooms || []).some((r) => r.name === prevRoom && r.joined);
+    if (prevStillJoined) {
+      const prevRow = (State.rooms || []).find((r) => r.name === prevRoom);
+      void switchToRoom(prevRoom, prevType, null, prevRow?.channel_type || 'text');
+      return;
+    }
+
+    if (wasViewing || !State.currentRoom || State.currentRoom === name) {
+      if (window.App && typeof App.showEmptyOnboarding === 'function') {
+        App.showEmptyOnboarding();
+      }
+    }
+  }
+
   function migrateRoomChannelState(oldRoom, newRoom) {
     if (!oldRoom || !newRoom || oldRoom === newRoom) return;
     if (!_ROOM_NAME_SAFE_RE.test(String(oldRoom)) || !_ROOM_NAME_SAFE_RE.test(String(newRoom))) return;
@@ -1246,7 +1307,8 @@ const Rooms = (() => {
             forceRecheck: true,
           });
           if (!cwOk) {
-            try { ContentWarning.showDeclinedScreen?.(name); } catch {}
+            ++_switchSeq;
+            await _handleCwDecline(name, { prevRoom: null, prevType: null, wasCurrentRoom: true });
           }
         }
       }
@@ -1300,7 +1362,9 @@ const Rooms = (() => {
           knownCw: opts.knownCw,
         });
         if (!cwOk) {
+          ++_switchSeq;
           try { UI.showToast(`You must confirm you are 18+ to enter #${name}`, 'info'); } catch {}
+          await _handleCwDecline(name, { prevRoom, prevType, leaveChannel: opts.leaveOnCwDecline !== false });
           return;
         }
       }
@@ -1784,7 +1848,10 @@ const Rooms = (() => {
           return;
         }
       }
-      await switchToRoom(name, roomType, null, chType, { knownCw: room?.content_warning });
+      await switchToRoom(name, roomType, null, chType, {
+        knownCw: room?.content_warning,
+        leaveOnCwDecline: true,
+      });
       try { delete State._explicitRoomNav; } catch {}
       return;
     }
@@ -3496,7 +3563,7 @@ const Rooms = (() => {
   }
 
   return { 
-    loadRooms, switchToRoom, openDM, showCreateRoom, createRoom, deleteRoom,
+    loadRooms, switchToRoom, handleCwDecline: _handleCwDecline, openDM, showCreateRoom, createRoom, deleteRoom,
     joinRoom, leaveRoom, closeLeaveOwnerWarning, leaveOwnerOpenTransferSettings, confirmLeaveOwnerChannel,
     openChannelSettings, addModerator, removeModerator, unbanUser, saveChannelSettings, deleteChannelFromSettings,
     switchChannelTab,
@@ -4509,13 +4576,11 @@ async function openChannelFromDiscovery(name, btnEl, knownCw) {
     try { document.getElementById('channel-profile-overlay')?.remove(); } catch {}
     try { document.getElementById('modal-directory')?.classList.add('hidden'); } catch {}
     try { if (window.Social && typeof Social.close === 'function') Social.close(); } catch {}
-    try {
-      localStorage.setItem('fc_last_room', JSON.stringify({
-        name, type: 'public', channelType: 'text', ts: Date.now(),
-      }));
-    } catch {}
     const chType = roomRow?.channel_type || 'text';
-    await Rooms.switchToRoom(name, roomRow?.type || 'public', null, chType, { knownCw: cwHint });
+    await Rooms.switchToRoom(name, roomRow?.type || 'public', null, chType, {
+      knownCw: cwHint,
+      leaveOnCwDecline: true,
+    });
     restore();
   } catch {
     UI.showToast('Network error', 'error');

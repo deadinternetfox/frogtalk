@@ -307,6 +307,12 @@
     }
   }
 
+  function _getDeleteSelectionFromUi() {
+    const peerLocalIds = new Set(_selectedPeerIds);
+    const roomStorageKeys = new Set(_selectedRoomKeys);
+    return { peerLocalIds, roomStorageKeys };
+  }
+
   function _getExportOptionsFromUi() {
     const peerTotal = (_inventory?.peers || []).length;
     const roomTotal = (_inventory?.rooms || []).length;
@@ -392,8 +398,20 @@
         body.appendChild(title);
         body.appendChild(sub1);
         body.appendChild(sub2);
+        const delBtn = document.createElement('button');
+        delBtn.type = 'button';
+        delBtn.className = 'ft-key-row-delete';
+        delBtn.title = 'Delete keys for this contact';
+        delBtn.setAttribute('aria-label', `Delete keys for @${p.nickname}`);
+        delBtn.textContent = 'Delete';
+        delBtn.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          void _deleteKeys({ peerLocalIds: new Set([p.localUserId]), roomStorageKeys: new Set() });
+        });
         label.appendChild(cb);
         label.appendChild(body);
+        label.appendChild(delBtn);
         peerSection.appendChild(label);
       }
     }
@@ -440,8 +458,20 @@
         sub.textContent = 'Room secret stored locally · server cannot decrypt';
         body.appendChild(title);
         body.appendChild(sub);
+        const delBtn = document.createElement('button');
+        delBtn.type = 'button';
+        delBtn.className = 'ft-key-row-delete';
+        delBtn.title = 'Delete room secret from this device';
+        delBtn.setAttribute('aria-label', `Delete secret for #${r.roomName}`);
+        delBtn.textContent = 'Delete';
+        delBtn.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          void _deleteKeys({ peerLocalIds: new Set(), roomStorageKeys: new Set([r.storageKey]) });
+        });
         label.appendChild(cb);
         label.appendChild(body);
+        label.appendChild(delBtn);
         roomSection.appendChild(label);
       });
     }
@@ -468,6 +498,58 @@
         void _renderInventory();
       };
     }
+  }
+
+  async function _deleteKeys({ peerLocalIds, roomStorageKeys }) {
+    const peers = peerLocalIds instanceof Set ? peerLocalIds : new Set(peerLocalIds || []);
+    const rooms = roomStorageKeys instanceof Set ? roomStorageKeys : new Set(roomStorageKeys || []);
+    if (!peers.size && !rooms.size) {
+      _toast('Select at least one DM or private group to delete.', 'warning');
+      return;
+    }
+    const peerNames = (_inventory?.peers || [])
+      .filter((p) => peers.has(p.localUserId))
+      .map((p) => `@${p.nickname}`);
+    const roomNames = (_inventory?.rooms || [])
+      .filter((r) => rooms.has(r.storageKey))
+      .map((r) => `#${r.roomName}`);
+    const parts = [];
+    if (peerNames.length) parts.push(`${peerNames.length} DM key${peerNames.length !== 1 ? 's' : ''}`);
+    if (roomNames.length) parts.push(`${roomNames.length} private group secret${roomNames.length !== 1 ? 's' : ''}`);
+    const detail = [...peerNames, ...roomNames].slice(0, 6).join(', ');
+    const more = peerNames.length + roomNames.length > 6 ? '…' : '';
+    const ok = await UI.confirm({
+      title: 'Delete selected keys?',
+      message: `Remove ${parts.join(' and ')} from this browser only? ${detail}${more} — you can restore from a backup later.`,
+      confirmLabel: 'Delete keys',
+      cancelLabel: 'Cancel',
+      danger: true,
+    });
+    if (!ok) return;
+    const btn = _el('ft-key-delete-selected');
+    if (btn) { btn.disabled = true; btn.textContent = 'Deleting…'; }
+    try {
+      await _ensureCryptoReady();
+      const result = await DeviceCrypto.deleteSelectedKeys({ peerLocalIds: peers, roomStorageKeys: rooms });
+      for (const id of peers) _selectedPeerIds.delete(id);
+      for (const k of rooms) _selectedRoomKeys.delete(k);
+      _toast(
+        `Deleted ${result.deletedSessions || 0} session${(result.deletedSessions || 0) !== 1 ? 's' : ''}`
+        + (result.deletedRooms ? ` and ${result.deletedRooms} room secret${result.deletedRooms !== 1 ? 's' : ''}` : '')
+        + ' from this device.',
+        'success',
+      );
+      void _loadInventory();
+    } catch {
+      _toast('Could not delete keys — try again.', 'error');
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = 'Delete selected'; }
+    }
+  }
+
+  async function runDeleteSelected() {
+    const sel = _getDeleteSelectionFromUi();
+    await _deleteKeys(sel);
   }
 
   async function _loadInventory() {
@@ -785,6 +867,7 @@
     _el('ft-key-preview-btn')?.addEventListener('click', () => { void runImportPreview(); });
     _el('ft-key-import-confirm')?.addEventListener('click', () => { void runImportConfirm(); });
     _el('ft-key-import-back')?.addEventListener('click', () => _hideImportPreview());
+    _el('ft-key-delete-selected')?.addEventListener('click', () => { void runDeleteSelected(); });
     _el('ft-key-manager-close')?.addEventListener('click', () => close());
     _el('ft-key-reset-device')?.addEventListener('click', () => { void _resetDeviceKeys(); });
     _el('ft-key-open-from-privacy')?.addEventListener('click', (e) => {
@@ -818,6 +901,7 @@
     runImport: runImportConfirm,
     runImportPreview,
     runImportConfirm,
+    runDeleteSelected,
     refreshInventory: _loadInventory,
     MODAL_ID,
   };

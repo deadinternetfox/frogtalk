@@ -116,7 +116,7 @@
       'This channel is marked for mature audiences.</p></div>';
   }
 
-  function _showGate(roomName, meta, resolve, showDeclinedOnBack) {
+  function _showGate(roomName, meta, resolve) {
     _removeOverlay();
     _clearRoomCache(roomName);
     const flags = (meta && meta.flags) || [];
@@ -149,7 +149,6 @@
 
     const onBack = () => {
       _removeOverlay();
-      if (showDeclinedOnBack) showDeclinedScreen(roomName);
       resolve(false);
     };
     const onEnter = async () => {
@@ -253,7 +252,7 @@
       if (!hasToken) {
         if (knownMarked || localMarked) {
           return await new Promise((resolve) => {
-            _showGate(name, displayMeta, resolve, _isViewingRoom(name));
+            _showGate(name, displayMeta, resolve);
           });
         }
         return true;
@@ -281,7 +280,7 @@
       if (!shouldGate) return true;
 
       return await new Promise((resolve) => {
-        _showGate(name, resolvedMeta, resolve, _isViewingRoom(name));
+        _showGate(name, resolvedMeta, resolve);
       });
     })();
   }
@@ -316,7 +315,13 @@
       if (ok && typeof WS !== 'undefined' && WS.connect) {
         try { WS.connect(room); } catch {}
       } else if (!ok) {
-        try { showDeclinedScreen(room); } catch {}
+        try {
+          if (window.Rooms && typeof Rooms.handleCwDecline === 'function') {
+            void Rooms.handleCwDecline(room, { wasCurrentRoom: true });
+          } else {
+            showDeclinedScreen(room);
+          }
+        } catch {}
       }
     });
   }
@@ -333,7 +338,13 @@
       if (ok && typeof WS !== 'undefined' && WS.connect) {
         try { WS.connect(room); } catch {}
       } else if (!ok) {
-        try { showDeclinedScreen(room); } catch {}
+        try {
+          if (window.Rooms && typeof Rooms.handleCwDecline === 'function') {
+            void Rooms.handleCwDecline(room, { wasCurrentRoom: true });
+          } else {
+            showDeclinedScreen(room);
+          }
+        } catch {}
       }
     });
   }

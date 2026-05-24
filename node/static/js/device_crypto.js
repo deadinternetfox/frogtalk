@@ -470,6 +470,64 @@
     return out;
   }
 
+  async function deleteSelectedKeys({ peerLocalIds, roomStorageKeys } = {}) {
+    const peers = peerLocalIds instanceof Set ? peerLocalIds : new Set(peerLocalIds || []);
+    const rooms = roomStorageKeys instanceof Set ? roomStorageKeys : new Set(roomStorageKeys || []);
+    let deletedSessions = 0;
+    let deletedRooms = 0;
+
+    if (peers.size && window.SignalStore) {
+      const store = new window.SignalStore();
+      for (const localId of peers) {
+        const uid = Number(localId) || 0;
+        if (uid <= 0) continue;
+        const prefix = `${uid}.`;
+        try {
+          const snap = await store.exportSnapshot();
+          for (const row of (snap.sessions || [])) {
+            const key = String(row.key || '');
+            if (key.startsWith(prefix)) {
+              await store.removeSession(key);
+              deletedSessions++;
+            }
+          }
+          for (const row of (snap.identities || [])) {
+            const key = String(row.key || '');
+            if (key.startsWith(prefix)) {
+              await store.removeIdentity(key);
+            }
+          }
+        } catch (e) {
+          if (window.__ftDctDebug) console.warn('[DeviceCrypto] deleteSelectedKeys peer', e);
+        }
+      }
+    }
+
+    for (const storageKey of rooms) {
+      const k = String(storageKey || '');
+      if (!k.startsWith(ROOM_SECRET_PREFIX)) continue;
+      const roomName = k.slice(ROOM_SECRET_PREFIX.length);
+      try {
+        const toRemove = [];
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i);
+          if (!key) continue;
+          if (key === k
+            || key.startsWith(`${ROOM_SECRET_PREFIX}${roomName}`)
+            || key === `${ROOM_KEYVER_PREFIX}${roomName}`) {
+            toRemove.push(key);
+          }
+        }
+        for (const key of toRemove) localStorage.removeItem(key);
+        deletedRooms++;
+      } catch (e) {
+        if (window.__ftDctDebug) console.warn('[DeviceCrypto] deleteSelectedKeys room', e);
+      }
+    }
+
+    return { deletedSessions, deletedRooms, deletedPeers: peers.size, deletedRoomKeys: deletedRooms };
+  }
+
   function _recordKeyExportMeta(peerGids) {
     const at = Date.now();
     try {
@@ -1069,6 +1127,7 @@
     keyfileExtensionOk: _keyfileExtensionOk,
     ensureReadyForExport: _ensureSignalReadyForExport,
     listKeyInventory,
+    deleteSelectedKeys,
     recordKeyExportMeta: _recordKeyExportMeta,
     recordKeyImportMeta: _recordKeyImportMeta,
     stageRoomSecretsForHomeSync,
