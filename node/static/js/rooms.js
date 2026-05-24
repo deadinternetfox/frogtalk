@@ -1264,6 +1264,9 @@ const Rooms = (() => {
     }
 
     if (type !== 'dm' && type !== 'private') {
+      if (window.ContentWarning?.prepareRoomEntry) {
+        try { await ContentWarning.prepareRoomEntry(name); } catch {}
+      }
       if (window.ContentWarning && typeof ContentWarning.gate === 'function') {
         const cwOk = await ContentWarning.gate(name, { tokenWaitMs: 8000 });
         if (!cwOk) {
@@ -1855,6 +1858,9 @@ const Rooms = (() => {
       try { UI.showToast(`Left #${name}`, 'success'); } catch {}
     }
     await loadRooms();
+    if (window.ContentWarning?.forgetAck) {
+      try { await ContentWarning.forgetAck(name); } catch {}
+    }
     if (State.currentRoom === name) {
       const fallback = State.rooms.find(r => r.joined && r.name !== name);
       switchToRoom(fallback ? fallback.name : 'general', 'public');
@@ -4347,7 +4353,7 @@ async function joinDirectoryChannel(name) {
     if (r.ok) {
       document.getElementById('modal-directory')?.classList.add('hidden');
       await Rooms.loadRooms();
-      Rooms.switchToRoom(name);
+      await Rooms.switchToRoom(name);
       UI.showToast(`Joined #${name}!`);
     } else {
       const d = await r.json().catch(() => ({}));
@@ -4394,7 +4400,7 @@ async function openChannelFromDiscovery(name, btnEl) {
     try { document.getElementById('channel-profile-overlay')?.remove(); } catch {}
     try { document.getElementById('modal-directory')?.classList.add('hidden'); } catch {}
     try { if (window.Social && typeof Social.close === 'function') Social.close(); } catch {}
-    Rooms.switchToRoom(name, 'public');
+    await Rooms.switchToRoom(name, 'public');
   } catch {
     UI.showToast('Network error', 'error');
     restore();
@@ -4469,6 +4475,9 @@ async function viewChannelProfile(channelName) {
     const aboutText = ch.about || desc;
     const showListingHint = !!ch.is_owner && !!ch.about && !!desc && ch.about.trim() !== desc.trim();
     const alreadyJoined = !!(State.rooms || []).find(r => r.name === ch.name && r.joined);
+    const cwBadge = (window.ContentWarning && typeof ContentWarning.badgeHtml === 'function')
+      ? ContentWarning.badgeHtml(ch.content_warning)
+      : '';
 
     let overlay = document.getElementById('channel-profile-overlay');
     if (!overlay) {
@@ -4489,7 +4498,7 @@ async function viewChannelProfile(channelName) {
           <div class="ch-prof-head-left">
             <div class="ch-prof-avatar">${iconHtml}</div>
             <div class="ch-prof-titlewrap">
-              <div class="ch-prof-name">${UI.escHtml(ch.name)}</div>
+              <div class="ch-prof-name">${UI.escHtml(ch.name)}${cwBadge}</div>
               <div class="ch-prof-meta">
                 ${ch.category ? `<span>${catIcons[ch.category]||''} ${UI.escHtml(ch.category)}</span>` : ''}
                 <span>👥 ${ch.member_count || 0}</span>

@@ -167,7 +167,6 @@
   async function forgetAck(roomName) {
     const name = String(roomName || '').trim().toLowerCase();
     if (!name || name.startsWith('dm:') || !window.State || !State.token) return;
-    if (!isCwRoom(name)) return;
     try {
       await fetch('/api/rooms/' + encodeURIComponent(name) + '/content-warning/forget', {
         method: 'POST',
@@ -175,6 +174,11 @@
       });
     } catch {}
     _clearRoomCache(name);
+  }
+
+  /** Clear any prior session ack before entering a channel (18+ re-prompt). */
+  async function prepareRoomEntry(roomName) {
+    await forgetAck(roomName);
   }
 
   function gate(roomName, opts) {
@@ -197,7 +201,12 @@
 
       const localCw = _roomMeta(name)?.content_warning;
       const cwMeta = (data && data.content_warning) || localCw || {};
+      const cwEnabled = !!(cwMeta && cwMeta.enabled && (cwMeta.flags || []).length);
       let required = !!(data && data.required);
+
+      if (!required && cwEnabled && data && data.acknowledged === false) {
+        required = true;
+      }
 
       // Fail-closed when status is unavailable but sidebar metadata marks 18+.
       if (!required && isCwRoom(name) && (!data || data._httpStatus >= 400)) {
@@ -270,6 +279,7 @@
   window.ContentWarning = {
     gate,
     forgetAck,
+    prepareRoomEntry,
     isCwRoom,
     formatFlags,
     handleWsUpdate,

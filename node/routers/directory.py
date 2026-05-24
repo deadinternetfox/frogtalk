@@ -365,6 +365,10 @@ async def channel_profile(room_name: str, current_user: dict = Depends(get_curre
             "my_role": None,
             "is_federated": True,
             "remote_only": True,
+            "content_warning": db.content_warning_to_dict(
+                fed.get("content_warning_enabled"),
+                fed.get("content_warning_flags"),
+            ),
         }
     owner = db.get_user_by_id(room["owner_id"])
     tags = []
@@ -421,6 +425,10 @@ async def channel_profile(room_name: str, current_user: dict = Depends(get_curre
         "is_joined": is_joined,
         "my_role": my_role,
         "is_federated": bool(home_sid),
+        "content_warning": db.content_warning_to_dict(
+            room.get("content_warning_enabled"),
+            room.get("content_warning_flags"),
+        ),
     }
 
 
