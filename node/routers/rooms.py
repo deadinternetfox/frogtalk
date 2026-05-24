@@ -1818,9 +1818,11 @@ async def get_channel_members(room_name: str,
         return JSONResponse(status_code=403, content={"error": "Not authorized to view this channel's members"})
     members = db.get_channel_members(room["id"])
     try:
+        # Room-scoped WS only — a user connected elsewhere (DM, other channel)
+        # must not appear live in this channel's member sidebar.
         online_ids = {
             int(u.get("user_id"))
-            for u in manager.online_users_snapshot()
+            for u in manager.online_nicknames(room["name"])
             if u.get("user_id") is not None
         }
     except Exception:

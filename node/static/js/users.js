@@ -456,8 +456,9 @@ const Users = (() => {
     if (changed) _renderFiltered();
   }
 
-  function updatePresence(userId, nickname, presence, statusMsg, globalUserId) {
+  function updatePresence(userId, nickname, presence, statusMsg, globalUserId, opts) {
     let changed = false;
+    const roomScoped = !!(opts && opts.roomScoped);
     const p = presence === undefined ? undefined : String(presence || '').toLowerCase();
     const nextPresence = p;
     const gid = globalUserId ? String(globalUserId).trim() : '';
@@ -482,25 +483,17 @@ const Users = (() => {
       if (matches(m)) {
         if (nextPresence !== undefined) {
           m.presence = nextPresence;
-          m.live_online = isLive;
+          if (roomScoped) {
+            m.live_online = isLive;
+          } else if (!isLive) {
+            // Global disconnect / invisible — clear live in every channel.
+            m.live_online = false;
+          }
+          // Global profile_update (connect elsewhere): refresh status
+          // label only — live_online stays room-scoped via online_users.
         }
         if (statusMsg !== undefined) m.status_msg = statusMsg;
         changed = true;
-        // Keep WS online mirror in sync when presence arrives without
-        // a preceding online_users frame (common in private/secret groups
-        // during channel switch before the socket catches up).
-        if (isLive && !_allUsers.some(u => matches(u))) {
-          _allUsers.push({
-            user_id: m.user_id,
-            nickname: m.nickname,
-            display_name: m.display_name,
-            avatar: m.avatar,
-            global_user_id: m.global_user_id,
-            presence: nextPresence,
-            status_msg: statusMsg,
-          });
-          changed = true;
-        }
       }
     }
     if (State.onlineUsers) {

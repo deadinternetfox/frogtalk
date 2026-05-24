@@ -390,9 +390,9 @@ const WS = (() => {
             live ? p : 'offline',
             undefined,
             data.global_user_id,
+            { roomScoped: true },
           );
         }
-        try { patchFriendPresence && patchFriendPresence(data); } catch {}
         break;
       }
       case 'bot_added':
