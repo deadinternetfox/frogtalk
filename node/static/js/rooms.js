@@ -138,25 +138,6 @@ const Rooms = (() => {
     return !!(shell && shell.children.length);
   }
 
-  /** Cached messages for a channel we've already opened this session. */
-  function _snapshotWarmCache(name, type, channelType) {
-    if (type === 'dm') return null;
-    if (normalizeChannelType(channelType) === 'voice') return null;
-    const msgs = State.messages?.[name];
-    if (!Array.isArray(msgs) || !msgs.length) return null;
-    return msgs.slice();
-  }
-
-  function _paintWarmCache(name, msgs) {
-    if (!msgs?.length || typeof Messages === 'undefined' || !Messages.loadHistory) return false;
-    try {
-      Messages.loadHistory(name, msgs, { fromCache: true });
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
   /** Paint cached/empty history or dismiss — never leave a blank pane under the overlay. */
   function recoverChannelSwitch(room) {
     const r = String(room || State?.currentRoom || '').trim().toLowerCase();
@@ -1512,6 +1493,7 @@ const Rooms = (() => {
       if (key && r && key !== r) return;
     }
     if (!options.contentReady && !options.force && overlay && !_shellHasContent(r)) return;
+    if (options.contentReady && overlay && !_shellHasContent(r)) return;
     if (options.force && !options.contentReady && !_shellHasContent(r)) {
       recoverChannelSwitch(r);
       return;
@@ -1727,19 +1709,15 @@ const Rooms = (() => {
 
     const switchToken = ++_switchSeq;
     _disarmSwitchWatchdog();
-    const warmCache = _snapshotWarmCache(name, type, _chTypeEarly);
-    const warmRevisit = !!warmCache;
     try { State._roomSwitchInProgress = String(name || '').toLowerCase(); } catch {}
     try {
 
     // Freeze stale WS traffic and paint a full-area overlay while the gate resolves.
     try { WS?.disconnect?.(); } catch {}
     if (prevRoom !== name || prevType !== type) {
-      if (!warmRevisit) {
-        showChatTransition(name, type, dmPeer, 'open', {
-          room: _roomDataEarly, channelType: _chTypeEarly, switchToken,
-        });
-      }
+      showChatTransition(name, type, dmPeer, 'open', {
+        room: _roomDataEarly, channelType: _chTypeEarly, switchToken,
+      });
       _clearMessageContent();
       try {
         const previewIcon = _roomDataEarly?.icon || null;
@@ -1990,27 +1968,17 @@ const Rooms = (() => {
         }
       }
       if (!_isSwitchAlive(switchToken)) return;
-      if (!warmRevisit) {
-        showChatTransition(name, type, dmPeer, 'load', {
-          room: roomData, channelType: chType, beginSwitch: false, switchToken,
-        });
-      }
+      showChatTransition(name, type, dmPeer, 'load', {
+        room: roomData, channelType: chType, beginSwitch: false, switchToken,
+      });
+    } else if (type === 'private' && chType !== 'voice') {
+      if (!_isSwitchAlive(switchToken)) return;
+      showChatTransition(name, type, dmPeer, 'load', {
+        room: roomData, channelType: chType, beginSwitch: false, switchToken,
+      });
     }
 
     if (!_isSwitchAlive(switchToken)) return;
-
-    // Warm revisit: paint cached history instantly — no loading overlay.
-    let warmPainted = false;
-    if (warmRevisit && warmCache) {
-      warmPainted = _paintWarmCache(name, warmCache);
-      if (warmPainted) {
-        try { finishChannelSwitch(name, { finish: true, contentReady: true }); } catch {}
-      } else if (type !== 'dm' && chType !== 'voice') {
-        showChatTransition(name, type, dmPeer, 'load', {
-          room: roomData, channelType: chType, beginSwitch: false, switchToken,
-        });
-      }
-    }
 
     // Persist last-opened channel only after CW ack (or immediately for private).
     try {
@@ -2030,7 +1998,8 @@ const Rooms = (() => {
     // already painted (that race stuck users until refresh).
     if (!_isSwitchAlive(switchToken)) return;
     if (joinedHere) {
-      WS.connect(name, warmPainted ? { keepHistoryCache: true } : undefined);
+      try { WS?.resetHistoryCache?.(name); } catch {}
+      WS.connect(name);
     } else {
       try { WS.disconnect && WS.disconnect(); } catch {}
       if (typeof UI !== 'undefined' && UI.showToast) {
@@ -2044,20 +2013,21 @@ const Rooms = (() => {
 
     if (!_isSwitchAlive(switchToken)) return;
     if (chType !== 'voice' && msgArea) {
-      if (!warmRevisit) {
-        const shell = msgArea.querySelector('#cw-chat-content');
-        const hasRendered = !!(shell && shell.children.length);
-        if (!hasRendered && !document.getElementById(_CHAT_TRANSITION_ID)) {
-          showChatTransition(name, type, dmPeer, 'load', {
-            room: roomData, channelType: chType, beginSwitch: false, switchToken,
-          });
-        } else if (type === 'private' && document.getElementById(_CHAT_TRANSITION_ID)) {
-          showChatTransition(name, type, dmPeer, 'load', {
-            room: roomData, channelType: chType, beginSwitch: false, switchToken,
-          });
-        }
+      const cachedMsgs = Array.isArray(State.messages[name]) ? State.messages[name] : [];
+      const hasCached = type !== 'dm' && cachedMsgs.length > 0;
+      if (hasCached && typeof Messages !== 'undefined' && Messages.loadHistory) {
+        try {
+          Messages.loadHistory(name, cachedMsgs.slice(), { deferFinish: true });
+        } catch {}
       }
-      if (!warmPainted) _armSwitchWatchdog(switchToken, name);
+      const shell = msgArea.querySelector('#cw-chat-content');
+      const hasRendered = !!(shell && shell.children.length);
+      if (!hasRendered && !document.getElementById(_CHAT_TRANSITION_ID)) {
+        showChatTransition(name, type, dmPeer, 'load', {
+          room: roomData, channelType: chType, beginSwitch: false, switchToken,
+        });
+      }
+      _armSwitchWatchdog(switchToken, name);
     }
     
     // For voice channels, show a prompt to join voice
