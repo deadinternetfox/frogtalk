@@ -149,6 +149,7 @@
     }
     if (inputArea) inputArea.removeAttribute('aria-disabled');
     try { window.FtCompose?.restoreFocus?.(); } catch {}
+    try { window.FtCompose?.refresh?.(); } catch {}
   }
 
   function _setChatGated(on) {

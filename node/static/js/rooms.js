@@ -1232,8 +1232,9 @@ const Rooms = (() => {
     overlay.setAttribute('aria-live', 'polite');
     overlay.setAttribute('aria-busy', 'true');
     overlay.innerHTML =
+      '<div class="ch-transition-shimmer" aria-hidden="true"></div>' +
       '<div class="ch-transition-ambient" aria-hidden="true">' +
-      '<span class="ch-orb o1"></span><span class="ch-orb o2"></span><span class="ch-orb o3"></span></div>' +
+      '<span class="ch-orb o1"></span><span class="ch-orb o2"></span><span class="ch-orb o3"></span><span class="ch-orb o4"></span></div>' +
       '<div class="ch-loading-card ch-loading-state" id="ch-loading-state">' +
       iconBlock +
       '<div class="ch-spin" aria-hidden="true"></div>' +
@@ -1256,8 +1257,28 @@ const Rooms = (() => {
   }
 
   function clearChatTransition() {
-    try { document.getElementById('messages-area')?.classList.remove('chat-switching'); } catch {}
-    try { document.getElementById(_CHAT_TRANSITION_ID)?.remove(); } catch {}
+    const area = document.getElementById('messages-area');
+    const overlay = document.getElementById(_CHAT_TRANSITION_ID);
+    try { area?.classList.remove('chat-switching'); } catch {}
+    if (overlay) {
+      overlay.classList.add('ch-transition-dismiss');
+      const done = () => {
+        try { overlay.remove(); } catch {}
+        try {
+          if (window.FtCompose?.finishChannelLoad) {
+            FtCompose.finishChannelLoad(State?.currentRoom);
+          }
+        } catch {}
+      };
+      overlay.addEventListener('animationend', done, { once: true });
+      setTimeout(done, 480);
+      return;
+    }
+    try {
+      if (window.FtCompose?.finishChannelLoad) {
+        FtCompose.finishChannelLoad(State?.currentRoom);
+      }
+    } catch {}
   }
 
   function isChatDomFrozen() {
@@ -1389,6 +1410,7 @@ const Rooms = (() => {
 
     const switchToken = ++_switchSeq;
     try { State._roomSwitchInProgress = String(name || '').toLowerCase(); } catch {}
+    try { window.FtCompose?.beginChannelSwitch?.(name); } catch {}
     try {
 
     // Freeze stale WS traffic and paint a full-area overlay while the gate resolves.
@@ -1414,6 +1436,7 @@ const Rooms = (() => {
       if (key === undefined) {
         clearChatTransition();
         try { delete State._roomSwitchInProgress; } catch {}
+        try { window.FtCompose?.finishChannelLoad?.(name); } catch {}
         return;
       }
     }
@@ -1701,6 +1724,7 @@ const Rooms = (() => {
           delete State._roomSwitchInProgress;
         }
       } catch {}
+      try { window.FtCompose?.refresh?.(); } catch {}
     }
   }
 

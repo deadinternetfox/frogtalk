@@ -756,7 +756,9 @@
 }
 
 #messages-area.chat-switching {
-  background: color-mix(in srgb, var(--bg-color, #0d1117) 88%, transparent);
+  background: linear-gradient(180deg,
+    color-mix(in srgb, var(--accent-color) 10%, var(--bg-color)) 0%,
+    color-mix(in srgb, var(--accent-color) 5%, var(--bg-color)) 100%) !important;
 }
 .ch-transition-icon-wrap {
   display: flex;
@@ -771,9 +773,10 @@
   line-height: 56px;
   text-align: center;
   border-radius: 14px;
-  background: color-mix(in srgb, var(--accent-color, #4caf50) 12%, var(--surface-color, #161b22));
-  border: 1px solid color-mix(in srgb, var(--accent-color, #4caf50) 25%, var(--border-color, #30363d));
+  background: color-mix(in srgb, var(--accent-color) 14%, var(--surface-color));
+  border: 1px solid color-mix(in srgb, var(--accent-color) 28%, var(--border-color));
   overflow: hidden;
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--accent-color) 12%, transparent);
 }
 .ch-transition-icon.is-image img {
   width: 100%;
@@ -1091,10 +1094,43 @@ body.cw-composer-locked #msg-input {
 #messages-area .cw-chat-loading,
 #messages-area .chat-transition-overlay {
   background:
-    radial-gradient(ellipse 70% 55% at 18% 38%, color-mix(in srgb, var(--accent-color, #4caf50) 14%, transparent), transparent 70%),
-    radial-gradient(ellipse 55% 45% at 82% 62%, color-mix(in srgb, var(--accent-color, #4caf50) 10%, transparent), transparent 72%),
-    color-mix(in srgb, var(--bg-color, #0d1117) 94%, black);
+    radial-gradient(ellipse 72% 58% at 14% 32%, color-mix(in srgb, var(--accent-color) 18%, transparent), transparent 68%),
+    radial-gradient(ellipse 58% 48% at 86% 68%, color-mix(in srgb, var(--accent-color) 12%, transparent), transparent 70%),
+    radial-gradient(ellipse 40% 35% at 50% 50%, color-mix(in srgb, var(--accent-color) 6%, var(--surface-color)), transparent 72%),
+    linear-gradient(180deg,
+      color-mix(in srgb, var(--accent-color) 8%, var(--bg-color)) 0%,
+      color-mix(in srgb, var(--accent-color) 4%, var(--bg-color)) 100%);
+  backdrop-filter: blur(10px) saturate(1.08);
+  -webkit-backdrop-filter: blur(10px) saturate(1.08);
   overflow: hidden;
+  animation: chTransitionFadeIn 0.28s ease-out;
+}
+
+@keyframes chTransitionFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.ch-transition-shimmer {
+  position: absolute;
+  inset: -40%;
+  z-index: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    115deg,
+    transparent 38%,
+    color-mix(in srgb, var(--accent-color) 14%, transparent) 48%,
+    color-mix(in srgb, var(--text-color) 6%, transparent) 52%,
+    transparent 62%
+  );
+  animation: chTransitionShimmer 4.8s ease-in-out infinite;
+  opacity: 0.55;
+}
+
+@keyframes chTransitionShimmer {
+  0% { transform: translateX(-28%); opacity: 0.35; }
+  45% { opacity: 0.65; }
+  100% { transform: translateX(28%); opacity: 0.35; }
 }
 
 .ch-transition-ambient {
@@ -1102,7 +1138,7 @@ body.cw-composer-locked #msg-input {
   inset: 0;
   pointer-events: none;
   overflow: hidden;
-  z-index: 0;
+  z-index: 1;
 }
 
 .ch-transition-ambient .ch-orb {
@@ -1133,24 +1169,34 @@ body.cw-composer-locked #msg-input {
 }
 
 .ch-transition-ambient .ch-orb.o3 {
-  width: 140px;
-  height: 140px;
-  left: 42%;
-  bottom: 8%;
-  background: color-mix(in srgb, var(--text-muted-color, #7d8590) 40%, var(--accent-color, #4caf50));
+  width: 160px;
+  height: 160px;
+  left: 38%;
+  bottom: 6%;
+  background: color-mix(in srgb, var(--text-muted) 35%, var(--accent-color));
   animation-duration: 22s;
   animation-delay: -7s;
 }
 
-@keyframes chOrbDrift {
-  0% { transform: translate(0, 0) scale(1); opacity: 0.35; }
-  50% { transform: translate(12px, -18px) scale(1.06); opacity: 0.5; }
-  100% { transform: translate(-10px, 14px) scale(0.96); opacity: 0.38; }
+.ch-transition-ambient .ch-orb.o4 {
+  width: 120px;
+  height: 120px;
+  right: 28%;
+  bottom: 18%;
+  background: color-mix(in srgb, var(--accent-color) 22%, var(--surface-color));
+  animation-duration: 18s;
+  animation-delay: -11s;
 }
 
-.ch-loading-card {
+@keyframes chOrbDrift {
+  0% { transform: translate(0, 0) scale(1); opacity: 0.32; }
+  50% { transform: translate(14px, -20px) scale(1.08); opacity: 0.52; }
+  100% { transform: translate(-12px, 16px) scale(0.94); opacity: 0.36; }
+}
+
+#messages-area .ch-loading-card {
   position: relative;
-  z-index: 1;
+  z-index: 2;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1160,38 +1206,123 @@ body.cw-composer-locked #msg-input {
   border-radius: 16px;
   background: linear-gradient(
     165deg,
-    color-mix(in srgb, var(--surface-color, #161b22) 92%, var(--accent-color, #4caf50) 8%) 0%,
-    color-mix(in srgb, var(--bg-color, #0d1117) 88%, black) 100%
+    color-mix(in srgb, var(--surface-color) 86%, var(--accent-color) 14%) 0%,
+    color-mix(in srgb, var(--surface-color) 94%, var(--bg-color)) 56%,
+    color-mix(in srgb, var(--surface-color) 98%, var(--bg-color)) 100%
   );
-  border: 1px solid color-mix(in srgb, var(--border-color, #30363d) 75%, var(--accent-color, #4caf50) 25%);
+  border: 1px solid color-mix(in srgb, var(--accent-color) 28%, var(--border-color));
   box-shadow:
-    0 18px 48px color-mix(in srgb, var(--bg-color, #000) 72%, transparent),
-    inset 0 1px 0 color-mix(in srgb, var(--text-color, #fff) 8%, transparent);
-  animation: chLoadingCardIn 0.38s cubic-bezier(0.22, 1, 0.36, 1);
+    0 20px 52px color-mix(in srgb, var(--bg-color) 65%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--accent-color) 10%, transparent) inset,
+    inset 0 1px 0 color-mix(in srgb, var(--text-color) 10%, transparent);
+  animation: chLoadingCardIn 0.42s cubic-bezier(0.22, 1, 0.36, 1),
+    chLoadingCardPulse 3.2s ease-in-out infinite 0.5s;
 }
 
 @keyframes chLoadingCardIn {
-  from { opacity: 0; transform: translateY(10px) scale(0.98); }
+  from { opacity: 0; transform: translateY(12px) scale(0.97); }
   to { opacity: 1; transform: none; }
 }
 
-.ch-loading-label {
-  color: var(--text-color, #e6edf3);
+@keyframes chLoadingCardPulse {
+  0%, 100% {
+    box-shadow:
+      0 20px 52px color-mix(in srgb, var(--bg-color) 65%, transparent),
+      0 0 0 1px color-mix(in srgb, var(--accent-color) 10%, transparent) inset,
+      inset 0 1px 0 color-mix(in srgb, var(--text-color) 10%, transparent);
+  }
+  50% {
+    box-shadow:
+      0 22px 56px color-mix(in srgb, var(--accent-color) 18%, var(--bg-color)),
+      0 0 28px color-mix(in srgb, var(--accent-color) 12%, transparent),
+      0 0 0 1px color-mix(in srgb, var(--accent-color) 22%, transparent) inset,
+      inset 0 1px 0 color-mix(in srgb, var(--text-color) 12%, transparent);
+  }
+}
+
+#messages-area .ch-loading-label {
+  color: var(--text-color);
   font-size: 0.95rem;
   font-weight: 600;
   letter-spacing: 0.01em;
   text-align: center;
+  text-shadow: 0 1px 12px color-mix(in srgb, var(--bg-color) 40%, transparent);
 }
 
-.ch-spin {
+#messages-area .ch-loading-card .ch-spin,
+#messages-area .ch-loading-state .ch-spin {
   width: 34px;
   height: 34px;
   border-radius: 50%;
-  border: 3px solid color-mix(in srgb, var(--border-color, #30363d) 70%, transparent);
-  border-top-color: var(--accent-color, #4caf50);
+  border: 3px solid color-mix(in srgb, var(--border-color) 70%, transparent);
+  border-top-color: var(--accent-color);
   animation: chSpin 0.85s linear infinite;
 }
 
 @keyframes chSpin {
   to { transform: rotate(360deg); }
+}
+
+#messages-area .chat-transition-overlay.ch-transition-dismiss {
+  animation: chTransitionDismiss 0.42s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+  pointer-events: none;
+}
+
+#messages-area .chat-transition-overlay.ch-transition-dismiss .ch-loading-card {
+  animation: chLoadingCardOut 0.38s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+@keyframes chTransitionDismiss {
+  from { opacity: 1; backdrop-filter: blur(10px) saturate(1.08); }
+  to { opacity: 0; backdrop-filter: blur(0) saturate(1); }
+}
+
+@keyframes chLoadingCardOut {
+  from { opacity: 1; transform: none; }
+  to { opacity: 0; transform: translateY(-8px) scale(0.97); }
+}
+
+/* Composer locked while channel history loads */
+#input-area.ft-compose-loading {
+  position: relative;
+  opacity: 0.62;
+  filter: saturate(0.88);
+  transition: opacity 0.32s ease, filter 0.32s ease;
+}
+
+#input-area.ft-compose-loading::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  z-index: 2;
+  border-radius: 2px 2px 0 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    color-mix(in srgb, var(--accent-color) 35%, transparent) 35%,
+    var(--accent-color) 50%,
+    color-mix(in srgb, var(--accent-color) 35%, transparent) 65%,
+    transparent 100%
+  );
+  background-size: 220% 100%;
+  animation: ftComposeLoadBar 1.8s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@keyframes ftComposeLoadBar {
+  0% { background-position: 120% 0; opacity: 0.45; }
+  50% { opacity: 0.95; }
+  100% { background-position: -120% 0; opacity: 0.45; }
+}
+
+#input-area.ft-compose-loading #msg-input {
+  cursor: wait;
+}
+
+#input-area.ft-compose-loading .input-wrap {
+  border-color: color-mix(in srgb, var(--accent-color) 22%, var(--border-color)) !important;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent-color) 8%, transparent);
 }

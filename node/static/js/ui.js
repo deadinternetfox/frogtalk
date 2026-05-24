@@ -8931,9 +8931,11 @@ function _mentionColorWithAlpha(color, alpha, fallback) {
   return fallback;
 }
 
-/** Preserve #msg-input focus across brief disable/readonly/loading toggles. */
+/** Preserve #msg-input focus; gate compose until channel/DM is ready. */
 (function () {
   const _saved = { active: false, start: null, end: null };
+  const _chLoad = { room: '', active: false };
+  let _loadSafetyTimer = null;
 
   function msgInput() {
     return document.getElementById('msg-input');
@@ -8982,7 +8984,169 @@ function _mentionColorWithAlpha(color, alpha, fallback) {
     });
   }
 
-  window.FtCompose = { captureFocus, restoreFocus, isFocused, msgInput };
+  function _isDmView() {
+    try { return typeof isDMView === 'function' && isDMView(); } catch { return false; }
+  }
+
+  function _isCwLocked() {
+    try {
+      return document.body.classList.contains('cw-composer-locked')
+        || !!document.getElementById('ft-content-warning-gate');
+    } catch { return false; }
+  }
+
+  function _isMuteOrBanLocked() {
+    try {
+      return !!document.getElementById('room-mute-banner')
+        || !!document.getElementById('room-ban-banner');
+    } catch { return false; }
+  }
+
+  function _loadingOverlayVisible() {
+    try {
+      return !!document.getElementById('ch-loading-state')
+        || !!document.getElementById('ft-chat-transition');
+    } catch { return false; }
+  }
+
+  function _roomJoined() {
+    try {
+      const room = State?.currentRoom;
+      if (!room) return false;
+      if (State.currentRoomType === 'dm') return true;
+      const row = (State.rooms || []).find((r) => r.name === room);
+      return !!row?.joined;
+    } catch { return false; }
+  }
+
+  function channelLoadBlocked() {
+    if (_isDmView()) return false;
+    if (!State?.currentRoom) return true;
+    if (State.currentChannelType === 'voice') return true;
+    if (_chLoad.active) return true;
+    try {
+      if (State._roomSwitchInProgress) return true;
+    } catch {}
+    if (_loadingOverlayVisible()) return true;
+    if (_isCwLocked()) return true;
+    if (!_roomJoined()) return true;
+    return false;
+  }
+
+  function isSendBlocked() {
+    if (_isDmView()) {
+      const input = msgInput();
+      return !!(input && (input.disabled || input.getAttribute('readonly') != null));
+    }
+    if (_isMuteOrBanLocked()) {
+      const input = msgInput();
+      return !!(input && input.disabled);
+    }
+    return channelLoadBlocked();
+  }
+
+  function _composePlaceholder() {
+    if (_isDmView()) return null;
+    const room = String(State?.currentRoom || '').replace(/^#/, '');
+    if (_loadingOverlayVisible() || _chLoad.active) {
+      return room ? `Loading #${room}…` : 'Loading channel…';
+    }
+    try {
+      if (State._roomSwitchInProgress) {
+        return room ? `Opening #${room}…` : 'Opening channel…';
+      }
+    } catch {}
+    return room ? `Message #${room}` : 'Message channel';
+  }
+
+  function refresh() {
+    if (_isDmView()) return;
+    if (_isCwLocked() || _isMuteOrBanLocked()) return;
+
+    const blocked = channelLoadBlocked();
+    const input = msgInput();
+    const sendBtn = document.getElementById('send-btn');
+    const inputArea = document.getElementById('input-area');
+    const wasBlocked = !!(input && (input.disabled || input.getAttribute('aria-disabled') === 'true'));
+
+    if (blocked && !wasBlocked) {
+      try { captureFocus(); } catch {}
+    }
+
+    if (inputArea) {
+      inputArea.classList.toggle('ft-compose-loading', blocked);
+      inputArea.setAttribute('aria-busy', blocked ? 'true' : 'false');
+    }
+
+    if (input) {
+      input.disabled = blocked;
+      input.setAttribute('aria-disabled', blocked ? 'true' : 'false');
+      const ph = _composePlaceholder();
+      if (blocked) {
+        if (input.dataset.ftChOrigPh == null) {
+          input.dataset.ftChOrigPh = input.placeholder || '';
+        }
+        if (ph) input.placeholder = ph;
+      } else {
+        input.placeholder = input.dataset.ftChOrigPh || ph || input.placeholder || '';
+        delete input.dataset.ftChOrigPh;
+      }
+    }
+
+    if (sendBtn) {
+      sendBtn.disabled = blocked || sendBtn.classList.contains('is-sending');
+    }
+
+    try {
+      document.querySelectorAll(
+        '#input-area .input-tools button, #input-area .attach-btn, #input-area .icon-btn, #input-area .gif-btn, #input-area .emoji-btn',
+      ).forEach((btn) => { btn.disabled = blocked; });
+    } catch {}
+
+    if (!blocked && wasBlocked) {
+      try { restoreFocus(); } catch {}
+    }
+  }
+
+  function beginChannelSwitch(room) {
+    _chLoad.room = String(room || '').trim().toLowerCase();
+    _chLoad.active = true;
+    if (_loadSafetyTimer) clearTimeout(_loadSafetyTimer);
+    const expect = _chLoad.room;
+    _loadSafetyTimer = setTimeout(() => {
+      if (_chLoad.active && _chLoad.room === expect) finishChannelLoad(expect);
+    }, 22000);
+    refresh();
+  }
+
+  function finishChannelLoad(room) {
+    const r = String(room || '').trim().toLowerCase();
+    if (!r || _chLoad.room === r || !_chLoad.room) {
+      _chLoad.active = false;
+    }
+    if (_loadSafetyTimer) {
+      clearTimeout(_loadSafetyTimer);
+      _loadSafetyTimer = null;
+    }
+    refresh();
+  }
+
+  function isChannelLoading() {
+    return _chLoad.active || channelLoadBlocked();
+  }
+
+  window.FtCompose = {
+    captureFocus,
+    restoreFocus,
+    isFocused,
+    msgInput,
+    refresh,
+    beginChannelSwitch,
+    finishChannelLoad,
+    isSendBlocked,
+    isChannelLoading,
+    channelLoadBlocked,
+  };
 })();
 
 function syncMentionDropdownTheme(dropdownEl) {
