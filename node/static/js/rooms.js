@@ -115,7 +115,7 @@ try { if (typeof window !== 'undefined') window.ensureLoadingShieldStyle = ensur
 const Rooms = (() => {
   let _switchSeq = 0;
   let _switchWatchdogTimer = null;
-  const _SWITCH_WATCHDOG_MS = 10000;
+  const _SWITCH_WATCHDOG_MS = 8000;
   const _CHAT_TRANSITION_ID = 'ft-chat-transition';
 
   function _isSwitchAlive(token) {
@@ -129,6 +129,31 @@ const Rooms = (() => {
     const r = String(room || '').trim().toLowerCase();
     if (!key || !r) return true;
     return key === r;
+  }
+
+  function _shellHasContent(room) {
+    const area = document.getElementById('messages-area');
+    if (!area) return false;
+    const shell = area.querySelector('#cw-chat-content');
+    return !!(shell && shell.children.length);
+  }
+
+  /** Paint cached/empty history or dismiss — never leave a blank pane under the overlay. */
+  function recoverChannelSwitch(room) {
+    const r = String(room || State?.currentRoom || '').trim().toLowerCase();
+    if (!r || String(State?.currentRoom || '').trim().toLowerCase() !== r) return;
+    if (_shellHasContent(r)) {
+      finishChannelSwitch(r, { finish: true, contentReady: true });
+      return;
+    }
+    const cached = (State.messages && State.messages[r]) || [];
+    if (cached.length && typeof Messages !== 'undefined' && Messages.loadHistory) {
+      try { Messages.loadHistory(r, cached.slice()); return; } catch {}
+    }
+    if (typeof Messages !== 'undefined' && Messages.loadHistory) {
+      try { Messages.loadHistory(r, []); return; } catch {}
+    }
+    finishChannelSwitch(r, { finish: true, contentReady: true, force: true });
   }
   const _ROOM_NAME_RE = /^[a-z0-9_-]{1,32}$/;
   let _roomMentionClickBound = false;
@@ -1441,24 +1466,9 @@ const Rooms = (() => {
       try {
         if (window.ContentWarning?.isGateActive?.()) return;
       } catch {}
-      const inProgress = String(State._roomSwitchInProgress || '').toLowerCase() === expectRoom;
-      const overlayUp = isSwitchOverlayVisible();
-      const area = document.getElementById('messages-area');
-      const shell = area?.querySelector('#cw-chat-content');
-      const emptyShell = !shell?.children?.length;
-      if (!overlayUp && !inProgress && !emptyShell) return;
-      if (!overlayUp && !inProgress) {
-        finishChannelSwitch(expectRoom, { finish: true, force: true });
-        return;
+      if (!_shellHasContent(expectRoom) || isSwitchOverlayVisible()) {
+        recoverChannelSwitch(expectRoom);
       }
-      const cached = (State.messages && State.messages[expectRoom]) || [];
-      if (cached.length && typeof Messages !== 'undefined' && Messages.loadHistory) {
-        try {
-          Messages.loadHistory(expectRoom, cached.slice());
-          return;
-        } catch {}
-      }
-      finishChannelSwitch(expectRoom, { finish: true, force: true });
     }, _SWITCH_WATCHDOG_MS);
   }
 
@@ -1474,6 +1484,11 @@ const Rooms = (() => {
       if (overlay.dataset.ftSwitchSeq && Number(overlay.dataset.ftSwitchSeq) !== _switchSeq) return;
       const key = String(overlay.dataset.ftSwitchKey || '').trim().toLowerCase();
       if (key && r && key !== r) return;
+    }
+    if (!options.contentReady && !options.force && overlay && !_shellHasContent(r)) return;
+    if (options.force && !options.contentReady && !_shellHasContent(r)) {
+      recoverChannelSwitch(r);
+      return;
     }
     clearChatTransition({ finish: options.finish !== false, force: options.force === true });
     try {
@@ -1935,12 +1950,6 @@ const Rooms = (() => {
 
     if (!_isSwitchAlive(switchToken)) return;
 
-    // Switch prep done — release DOM freeze so history/cache can paint and finish the switch.
-    try {
-      const r = String(name || '').trim().toLowerCase();
-      if (State._roomSwitchInProgress === r) delete State._roomSwitchInProgress;
-    } catch {}
-
     // Persist last-opened channel only after CW ack (or immediately for private).
     try {
       if (type !== 'dm') {
@@ -1959,7 +1968,6 @@ const Rooms = (() => {
     // already painted (that race stuck users until refresh).
     if (!_isSwitchAlive(switchToken)) return;
     if (joinedHere) {
-      try { WS?.resetHistoryCache?.(name); } catch {}
       WS.connect(name);
     } else {
       try { WS.disconnect && WS.disconnect(); } catch {}
@@ -1974,9 +1982,20 @@ const Rooms = (() => {
 
     if (!_isSwitchAlive(switchToken)) return;
     if (chType !== 'voice' && msgArea) {
+      const cachedMsgs = Array.isArray(State.messages[name]) ? State.messages[name] : [];
+      const hasCached = type !== 'dm' && cachedMsgs.length > 0;
+      if (hasCached && typeof Messages !== 'undefined' && Messages.loadHistory) {
+        try {
+          Messages.loadHistory(name, cachedMsgs.slice(), { deferFinish: true });
+        } catch {}
+      }
       const shell = msgArea.querySelector('#cw-chat-content');
       const hasRendered = !!(shell && shell.children.length);
       if (!hasRendered && !document.getElementById(_CHAT_TRANSITION_ID)) {
+        showChatTransition(name, type, dmPeer, 'load', {
+          room: roomData, channelType: chType, beginSwitch: false, switchToken,
+        });
+      } else if (type === 'private' && document.getElementById(_CHAT_TRANSITION_ID)) {
         showChatTransition(name, type, dmPeer, 'load', {
           room: roomData, channelType: chType, beginSwitch: false, switchToken,
         });
@@ -1987,7 +2006,6 @@ const Rooms = (() => {
     // For voice channels, show a prompt to join voice
     if (chType === 'voice') {
       if (!_isSwitchAlive(switchToken)) return;
-      finishChannelSwitch(name, { finish: true, force: true });
       const voiceArea = document.getElementById('messages-area');
       const voiceMount = (window.ContentWarning?.ensureChatShell?.(voiceArea)) || voiceArea;
       if (voiceMount) {
@@ -1998,6 +2016,7 @@ const Rooms = (() => {
           <div style="font-size:14px">Click the voice button in the header to join</div>
         </div>`;
       }
+      finishChannelSwitch(name, { finish: true, contentReady: true, force: true });
     }
     } finally {
       try {
@@ -3952,6 +3971,7 @@ const Rooms = (() => {
     showChatTransition,
     clearChatTransition,
     finishChannelSwitch,
+    recoverChannelSwitch,
     isSwitchOverlayVisible,
     isSwitchOverlayForRoom,
     isChatDomFrozen,
@@ -3962,6 +3982,7 @@ try {
   window.showChatTransition = Rooms.showChatTransition;
   window.clearChatTransition = Rooms.clearChatTransition;
   window.finishChannelSwitch = Rooms.finishChannelSwitch;
+  window.recoverChannelSwitch = Rooms.recoverChannelSwitch;
   window.isSwitchOverlayVisible = Rooms.isSwitchOverlayVisible;
   window.isSwitchOverlayForRoom = Rooms.isSwitchOverlayForRoom;
   window.isChatDomFrozen = Rooms.isChatDomFrozen;

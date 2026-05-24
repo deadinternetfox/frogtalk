@@ -2753,8 +2753,11 @@ const Messages = (() => {
         if (typeof isSwitchOverlayForRoom === 'function' && !isSwitchOverlayForRoom(room)) return;
       } catch {}
       try {
-        if (typeof finishChannelSwitch === 'function') finishChannelSwitch(room, { finish: true });
-        else if (typeof clearChatTransition === 'function') clearChatTransition({ finish: true });
+        if (typeof finishChannelSwitch === 'function') {
+          finishChannelSwitch(room, { finish: true, contentReady: true });
+        } else if (typeof clearChatTransition === 'function') {
+          clearChatTransition({ finish: true });
+        }
       } catch {}
     };
     try {
@@ -2766,7 +2769,8 @@ const Messages = (() => {
     finish();
   }
 
-  function loadHistory(room, msgs) {
+  function loadHistory(room, msgs, opts) {
+    const options = opts && typeof opts === 'object' ? opts : {};
     if (room !== State.currentRoom) return;
     try {
       if (window.ContentWarning?.isGateActive?.()) return;
@@ -2785,6 +2789,7 @@ const Messages = (() => {
     // chat doesn't look broken on first open. The note is replaced by real
     // content as soon as anything arrives (see appendMessage below).
     if (!msgs || msgs.length === 0) {
+      if (options.deferFinish) return;
       mount.innerHTML = _emptyStateHtml(room);
       _finishSwitchAfterPaint(room);
       mount.scrollTop = mount.scrollHeight;
@@ -2831,7 +2836,9 @@ const Messages = (() => {
     });
 
     mount.innerHTML = html;
-    _finishSwitchAfterPaint(room);
+    if (!options.deferFinish) {
+      _finishSwitchAfterPaint(room);
+    }
     mount.scrollTop = mount.scrollHeight;
     if (msgs.length) State.oldestMsgId = msgs[0].id;
     bindLongPress(area);

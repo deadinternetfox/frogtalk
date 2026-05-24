@@ -9126,8 +9126,10 @@ function _mentionColorWithAlpha(color, alpha, fallback) {
     _loadSafetyTimer = setTimeout(() => {
       if (_chLoad.active && _chLoad.room === expect) {
         try {
-          if (typeof finishChannelSwitch === 'function') {
-            finishChannelSwitch(expect, { finish: true, force: true });
+          if (typeof recoverChannelSwitch === 'function') {
+            recoverChannelSwitch(expect);
+          } else if (typeof finishChannelSwitch === 'function') {
+            finishChannelSwitch(expect, { finish: true, contentReady: true, force: true });
           } else {
             finishChannelLoad(expect);
             if (typeof clearChatTransition === 'function') {

@@ -177,7 +177,10 @@ const WS = (() => {
               const area = document.getElementById('messages-area');
               if (area && _switchUiStillLoading(area)) {
                 const cachedNow = (State.messages && State.messages[room]) || [];
-                Messages.loadHistory(room, cachedNow.slice());
+                const decrypting = _historyInFlight.get(room) != null;
+                if (cachedNow.length || !decrypting) {
+                  Messages.loadHistory(room, cachedNow.slice());
+                }
               }
             }
           } catch {}
