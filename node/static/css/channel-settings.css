@@ -728,12 +728,35 @@
   overflow: hidden;
 }
 
-#messages-area.cw-chat-gated > :not(.cw-gate-inline) {
-  filter: blur(16px) saturate(0.75) brightness(0.72);
+#messages-area.cw-chat-gated .cw-chat-content {
+  filter: blur(18px) saturate(0.7) brightness(0.68);
   pointer-events: none;
   user-select: none;
-  transform: scale(1.02);
+  transform: scale(1.015);
   transform-origin: center center;
+}
+
+#messages-area.cw-chat-gated .cw-chat-loading,
+#messages-area.cw-chat-gated #ft-chat-transition,
+#messages-area.cw-chat-gated > .chat-transition-overlay {
+  filter: none !important;
+  transform: none !important;
+  pointer-events: none;
+}
+
+#messages-area .cw-chat-loading {
+  position: absolute;
+  inset: 0;
+  z-index: 28;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  pointer-events: none;
+}
+
+#messages-area .cw-chat-content {
+  min-height: 100%;
 }
 
 .cw-gate-inline {

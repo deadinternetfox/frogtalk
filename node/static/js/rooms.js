@@ -1206,13 +1206,19 @@ const Rooms = (() => {
   function showChatTransition(name, type, dmPeer, phase) {
     const area = document.getElementById('messages-area');
     if (!area) return;
+    if (window.ContentWarning && typeof ContentWarning.ensureChatShell === 'function') {
+      try { ContentWarning.ensureChatShell(area); } catch {}
+    }
     const label = _chatTransitionLabel(name, type, dmPeer, phase || 'open');
     area.classList.add('chat-switching');
     area.scrollTop = 0;
-    [...area.children].forEach((ch) => ch.remove());
+    try { area.querySelector('#' + _CHAT_TRANSITION_ID)?.remove(); } catch {}
+    try { area.querySelector('.cw-chat-loading')?.remove(); } catch {}
+    const content = area.querySelector('#cw-chat-content');
+    if (content) content.innerHTML = '';
     const overlay = document.createElement('div');
     overlay.id = _CHAT_TRANSITION_ID;
-    overlay.className = 'chat-transition-overlay';
+    overlay.className = 'cw-chat-loading chat-transition-overlay';
     overlay.setAttribute('role', 'status');
     overlay.setAttribute('aria-live', 'polite');
     overlay.setAttribute('aria-busy', 'true');
@@ -1666,7 +1672,6 @@ const Rooms = (() => {
     }
 
     if (type !== 'dm' && type !== 'private') {
-      clearChatTransition();
       if (window.ContentWarning?.gate) {
         const cwOk = await ContentWarning.gate(name, {
           tokenWaitMs: 8000,
@@ -1682,6 +1687,7 @@ const Rooms = (() => {
       if (window.ContentWarning?.markVisitAcked) {
         try { ContentWarning.markVisitAcked(name); } catch {}
       }
+      clearChatTransition();
     }
     
     // For voice channels, show a prompt to join voice

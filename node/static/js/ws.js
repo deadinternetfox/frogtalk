@@ -33,9 +33,11 @@ const WS = (() => {
     _historyLastApplied.delete(room);
   }
 
-  function connect(room) {
+  function connect(room, opts) {
+    const options = opts && typeof opts === 'object' ? opts : {};
+    const force = !!options.force;
     resetHistoryCache(room);
-    if (_ws && _room === room) {
+    if (!force && _ws && _room === room) {
       if (_ws.readyState === WebSocket.CONNECTING || _ws.readyState === WebSocket.OPEN) {
         return;
       }

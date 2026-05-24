@@ -2728,10 +2728,22 @@ const Messages = (() => {
     return null;
   }
 
+  function _historyMount(area) {
+    if (!area) return area;
+    if (window.ContentWarning && typeof ContentWarning.historyMount === 'function') {
+      try {
+        const m = ContentWarning.historyMount();
+        if (m) return m;
+      } catch {}
+    }
+    return area.querySelector('#cw-chat-content') || area;
+  }
+
   function loadHistory(room, msgs) {
     if (room !== State.currentRoom) return;
     if (State._roomSwitchInProgress) return;
     const area = document.getElementById('messages-area');
+    const mount = _historyMount(area);
     _lastNick = null;
     _lastBridge = null;
     _lastBridgeSource = null;
@@ -2744,9 +2756,9 @@ const Messages = (() => {
     // chat doesn't look broken on first open. The note is replaced by real
     // content as soon as anything arrives (see appendMessage below).
     if (!msgs || msgs.length === 0) {
-      area.innerHTML = _emptyStateHtml(room);
+      mount.innerHTML = _emptyStateHtml(room);
       try { area.classList.remove('chat-switching'); } catch {}
-      area.scrollTop = area.scrollHeight;
+      mount.scrollTop = mount.scrollHeight;
       return;
     }
 
@@ -2789,9 +2801,9 @@ const Messages = (() => {
       if (previewUrl && !msg.preview_suppressed) linksToPreview.push({ id: msg.id, url: previewUrl });
     });
 
-    area.innerHTML = html;
+    mount.innerHTML = html;
     try { area.classList.remove('chat-switching'); } catch {}
-    area.scrollTop = area.scrollHeight;
+    mount.scrollTop = mount.scrollHeight;
     if (msgs.length) State.oldestMsgId = msgs[0].id;
     bindLongPress(area);
     observeLazyMedia(area);
@@ -3038,15 +3050,16 @@ const Messages = (() => {
     if (msg.id && !msg._pending && document.getElementById(`msg-${msg.id}`)) return;
 
     const area = document.getElementById('messages-area');
+    const mount = _historyMount(area);
     // "At bottom" with a generous threshold so tiny composer-height shifts /
     // reply preview / attachment preview don't flip us into "user scrolled up".
-    const atBottom = area.scrollHeight - area.scrollTop - area.clientHeight < 220;
+    const atBottom = mount.scrollHeight - mount.scrollTop - mount.clientHeight < 220;
     // Always auto-scroll when it's OUR own message — user clearly wants to
     // see their send land, even if they were a bit scrolled up while composing.
     const isOwn = msg.nickname && State.user && msg.nickname === State.user.nickname;
 
     // Clear the empty-state placeholder the moment any real message arrives.
-    const emptyEl = area.querySelector('#msg-empty-state');
+    const emptyEl = mount.querySelector('#msg-empty-state');
     if (emptyEl) emptyEl.remove();
 
     const dateLabel = _dateChanged(msg);
@@ -3065,7 +3078,7 @@ const Messages = (() => {
 
     const wrapper = document.createElement('div');
     wrapper.innerHTML = html;
-    while (wrapper.firstChild) area.appendChild(wrapper.firstChild);
+    while (wrapper.firstChild) mount.appendChild(wrapper.firstChild);
 
     if (!State.messages[room]) State.messages[room] = [];
     State.messages[room].push(msg);

@@ -5,6 +5,7 @@
   'use strict';
 
   const OVERLAY_ID = 'ft-content-warning-gate';
+  const CHAT_CONTENT_ID = 'cw-chat-content';
   const FLAG_META = {
     nudity: { label: 'Nudity / sexual content', desc: 'May contain nudity or sexual themes' },
     violence: { label: 'Violence', desc: 'May contain graphic violence' },
@@ -96,9 +97,53 @@
     else area.classList.remove('cw-chat-gated');
   }
 
+  /** Blur target for messages — keeps loading UI and gate banner sharp. */
+  function ensureChatShell(area) {
+    const mount = area || _el('messages-area');
+    if (!mount) return null;
+    let content = mount.querySelector('#' + CHAT_CONTENT_ID);
+    if (!content) {
+      content = document.createElement('div');
+      content.id = CHAT_CONTENT_ID;
+      content.className = 'cw-chat-content';
+      const keepIds = new Set([OVERLAY_ID, 'ft-chat-transition']);
+      const toMove = [];
+      for (const ch of [...mount.children]) {
+        if (keepIds.has(ch.id)) continue;
+        if (ch.classList.contains('cw-gate-inline')) continue;
+        if (ch.classList.contains('cw-chat-loading')) continue;
+        if (ch.classList.contains('chat-transition-overlay')) continue;
+        toMove.push(ch);
+      }
+      for (const ch of toMove) content.appendChild(ch);
+      mount.appendChild(content);
+    }
+    return content;
+  }
+
+  function historyMount() {
+    const area = _el('messages-area');
+    if (!area) return null;
+    return area.querySelector('#' + CHAT_CONTENT_ID) || area;
+  }
+
+  function finishChannelUnlock(roomName) {
+    const name = String(roomName || '').trim().toLowerCase();
+    markVisitAcked(name);
+    _removeOverlay();
+    try {
+      if (typeof clearChatTransition === 'function') clearChatTransition();
+    } catch {}
+    try {
+      if (typeof WS !== 'undefined' && WS.resetHistoryCache) WS.resetHistoryCache(name);
+      if (typeof WS !== 'undefined' && WS.connect) WS.connect(name, { force: true });
+    } catch {}
+  }
+
   function _preflightInline() {
     _lockComposer();
     _setChatGated(true);
+    ensureChatShell();
   }
 
   async function _fetchStatus(roomName) {
@@ -171,7 +216,6 @@
   }
 
   function _showGate(roomName, meta, resolve) {
-    _removeOverlay();
     _lockComposer();
     _setChatGated(true);
 
@@ -180,6 +224,9 @@
       resolve(false);
       return;
     }
+    ensureChatShell(area);
+    const existing = _el(OVERLAY_ID);
+    if (existing) existing.remove();
 
     const overlay = document.createElement('div');
     overlay.id = OVERLAY_ID;
@@ -222,7 +269,7 @@
           }
           return;
         }
-        _removeOverlay();
+        finishChannelUnlock(roomName);
         resolve(true);
       } catch {
         if (enterBtn) {
@@ -352,9 +399,7 @@
     _visitAcked.delete(room);
     _lockRoomUntilAck(room);
     void gate(room, { knownCw: cw, forceRecheck: true }).then((ok) => {
-      if (ok && typeof WS !== 'undefined' && WS.connect) {
-        try { WS.connect(room); } catch {}
-      } else if (!ok) {
+      if (!ok) {
         try {
           if (window.Rooms && typeof Rooms.handleCwDecline === 'function') {
             void Rooms.handleCwDecline(room, { wasCurrentRoom: true });
@@ -375,9 +420,7 @@
     _visitAcked.delete(room);
     _lockRoomUntilAck(room);
     void gate(room, { knownCw: cw, forceRecheck: true }).then((ok) => {
-      if (ok && typeof WS !== 'undefined' && WS.connect) {
-        try { WS.connect(room); } catch {}
-      } else if (!ok) {
+      if (!ok) {
         try {
           if (window.Rooms && typeof Rooms.handleCwDecline === 'function') {
             void Rooms.handleCwDecline(room, { wasCurrentRoom: true });
@@ -420,5 +463,8 @@
     showDeclinedScreen,
     badgeHtml,
     unlockUi: _removeOverlay,
+    finishChannelUnlock,
+    ensureChatShell,
+    historyMount,
   };
 })();
