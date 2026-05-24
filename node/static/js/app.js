@@ -446,13 +446,13 @@ const App = {
   },
 
   isAtHomeNode() {
+    if (State.user && State.user.at_home_node === true) return true;
+    if (State.user && State.user.at_home_node === false) return false;
     const here = this._normalizeOrigin(window.location.origin);
     // After node switch, trust the origin we left (frogtalk.xyz) over a
     // mistaken account_home pin on the travel mirror.
     const syncFrom = this._normalizeOrigin(this.getSyncSourceBase());
     if (syncFrom && here && syncFrom !== here) return false;
-    if (State.user && State.user.at_home_node === true) return true;
-    if (State.user && State.user.at_home_node === false) return false;
     const home = this._normalizeOrigin(
       (State.user && State.user.account_home_base_url) || syncFrom
     );
@@ -473,7 +473,19 @@ const App = {
         try { _mergeUserSettingsFromMe(fresh); } catch {}
       }
       if (fresh.account_home_base_url) {
-        this.rememberSyncSourceBase(fresh.account_home_base_url);
+        const home = this._normalizeOrigin(fresh.account_home_base_url);
+        const here = this._normalizeOrigin(window.location.origin);
+        const traveling = fresh.at_home_node === false;
+        // Never overwrite the real home with the travel mirror's URL.
+        if (traveling || (home && here && home !== here)) {
+          this.rememberSyncSourceBase(fresh.account_home_base_url);
+        } else if (home && here && home === here) {
+          const syncFrom = this._normalizeOrigin(this.getSyncSourceBase());
+          if (syncFrom && syncFrom !== here) {
+            try { localStorage.removeItem('ft_sync_source_base'); } catch {}
+            try { sessionStorage.removeItem('ft_switch_from'); } catch {}
+          }
+        }
       }
       try { State.save(); } catch {}
       if (fresh.federation_sync) {

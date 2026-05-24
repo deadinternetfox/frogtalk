@@ -1109,6 +1109,10 @@ def _sync_state_set(user_id: int, patch: dict) -> None:
         if src:
             cur["source_base"] = src
             cur["source_public_url"] = src
+            if not str(cur.get("source_server_id") or "").strip():
+                sid = _resolve_server_id_for_base(src)
+                if sid:
+                    cur["source_server_id"] = sid
         _federation_sync_state[uid] = cur
     if _sync_persist_enabled():
         try:
@@ -2795,6 +2799,69 @@ def _account_home_server_id(user_id: int) -> str:
     return local_sid
 
 
+def _local_server_bases() -> set[str]:
+    """Normalized public URLs that refer to this node."""
+    urls: set[str] = set()
+    try:
+        ident = db.get_or_create_local_server_identity() or {}
+        for key in ("base_url", "public_url", "onion_url"):
+            b = _norm_base(str(ident.get(key) or ""))
+            if b:
+                urls.add(b)
+    except Exception:
+        pass
+    for env_key in (
+        "PUBLIC_URL",
+        "FROGTALK_BASE_URL",
+        "FROGTALK_PUBLIC_URL",
+        "FROGTALK_ONION_URL",
+    ):
+        b = _norm_base(os.getenv(env_key, ""))
+        if b:
+            urls.add(b)
+    return urls
+
+
+def _sync_source_points_remote(user_id: int, local_sid: str) -> bool:
+    """True when persisted sync state indicates account data lives elsewhere."""
+    uid = int(user_id or 0)
+    sid = str(local_sid or "").strip()
+    if uid <= 0:
+        return False
+    try:
+        st = db.get_user_federation_sync_state(uid) or {}
+    except Exception:
+        return False
+    src_sid = str(st.get("source_server_id") or "").strip()
+    if src_sid and sid and src_sid != sid:
+        return True
+    src_base = _norm_base(str(st.get("source_base") or st.get("source_public_url") or ""))
+    if not src_base:
+        return False
+    local_bases = _local_server_bases()
+    if src_base in local_bases:
+        return False
+    remote_sid = _resolve_server_id_for_base(src_base)
+    if remote_sid and sid and remote_sid != sid:
+        return True
+    # source_base set to a foreign URL (ticket login before source_server_id is filled)
+    return bool(sid and src_base not in local_bases)
+
+
+def _pin_account_home_from_source_base(user_id: int, source_base: str) -> None:
+    """Pin federation home from a peer URL without overwriting an existing pin."""
+    uid = int(user_id or 0)
+    src = _norm_base(str(source_base or ""))
+    if uid <= 0 or not src:
+        return
+    ident = db.get_or_create_local_server_identity() or {}
+    local_sid = str(ident.get("server_id") or "").strip()
+    src_sid = _resolve_server_id_for_base(src)
+    if not src_sid or not local_sid or src_sid == local_sid:
+        return
+    db.set_user_account_home_server_id(uid, src_sid, force=False)
+
+
 def _user_at_account_home(user_id: int) -> bool:
     """True when the signed-in user is on the node that owns their account."""
     uid = int(user_id or 0)
@@ -2807,17 +2874,12 @@ def _user_at_account_home(user_id: int) -> bool:
     pinned = db.get_user_account_home_server_id(uid)
     if pinned:
         return pinned == local_sid
+    if _sync_source_points_remote(uid, local_sid):
+        return False
     # Legacy accounts registered here before home-pin existed: no explicit
     # pin but also no travel sync from another node → treat as home and
     # self-heal the pin so Network → Re-sync does not ask to "re-pin" the
     # URL they are already on.
-    try:
-        st = db.get_user_federation_sync_state(uid) or {}
-        src_sid = str(st.get("source_server_id") or "").strip()
-        if src_sid and src_sid != local_sid:
-            return False
-    except Exception:
-        pass
     db.set_user_account_home_server_id(uid, local_sid, force=False)
     return True
 
@@ -6269,6 +6331,7 @@ def _ensure_local_user_from_ticket(payload: dict) -> dict | None:
             con.commit()
     except Exception:
         pass
+    _pin_account_home_from_source_base(int(user["id"]), str(payload.get("src") or ""))
     return db.get_user_by_id(user["id"]) or user
 
 
@@ -6902,6 +6965,8 @@ async def login_with_federation_ticket(
     # Import only when landing on a peer node. Switching *back* to your home
     # node carries `src` = the node you left, not where account data lives.
     uid = int(user["id"])
+    if source_base and here and source_base != here:
+        _pin_account_home_from_source_base(uid, source_base)
     should_sync = (
         source_base
         and source_base != here

@@ -73,7 +73,8 @@ class DMSpoilerRequest(BaseModel):
 
 class CryptoSyncNoticeBody(BaseModel):
     peer_user_id: int = Field(..., ge=1)
-    reason: str = Field(default="auto", max_length=32)
+    reason: str = Field(default="heal", max_length=32)
+    actor: str = Field(default="both", max_length=16)  # peer | self | both
 
 
 class HistorySyncNoticeBody(BaseModel):
@@ -435,6 +436,7 @@ async def send_message(request: Request, channel_id: int, body: DMMessageBody,
             media_blur=int(body.media_blur or 0),
             view_once=int(body.view_once or 0),
             created_at=dm_broadcast["created_at"],
+            source_message_id=str(msg_id),
         )
     except Exception:
         _log.exception("federation: failed to enqueue DM message")
@@ -686,7 +688,15 @@ async def post_crypto_sync_notice(
     if await run_in_threadpool(channel_has_recent_dmsys, int(channel_id), "crypto_sync", 600.0):
         return {"ok": True, "skipped": "recent_notice"}
 
-    content = crypto_sync_content(current_user.get("nickname") or "")
+    peer_profile = db.get_user_by_id(other_id) or {}
+    actor = str(body.actor or "both").strip().lower()
+    if actor not in ("peer", "self", "both"):
+        actor = "both"
+    content = crypto_sync_content(
+        actor=actor,
+        self_nick=current_user.get("nickname") or "",
+        peer_nick=peer_profile.get("nickname") or "",
+    )
     msg_id = await run_in_threadpool(
         db.send_dm_message,
         int(channel_id),

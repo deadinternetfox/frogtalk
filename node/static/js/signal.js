@@ -644,11 +644,46 @@
     await _clearPeerSession(pid);
   }
 
-  async function decryptDM(peerUserId, envelope) {
+  async function _checkPeerIdentityDrift(peerUserId, opts = {}) {
+    const pid = Number(peerUserId) || 0;
+    if (!pid || !_store) return false;
+    const addr = _addr(pid);
+    let existing = null;
+    try {
+      existing = await _store.loadSession(addr.toString());
+    } catch {}
+    if (!existing) return false;
+    try {
+      const serverB64 = await _fetchPeerIdentityPub(pid, {
+        peerHomeServerId: opts.peerHomeServerId,
+        noCache: true,
+      });
+      if (!serverB64 || typeof _store.loadStoredIdentity !== 'function') return false;
+      const localBuf = await _store.loadStoredIdentity(addr.toString());
+      const serverBytes = _identityB64ToBytes(serverB64);
+      const localBytes = localBuf ? _identityPubBytes(localBuf) : null;
+      if (serverBytes && localBytes && !_identityBytesEqual(serverBytes, localBytes)) {
+        const logKey = String(pid);
+        if (!_identityRotateLogged.has(logKey)) {
+          _identityRotateLogged.add(logKey);
+          console.info(
+            '[Signal] peer ' + pid
+            + ' identity drift on decrypt — refreshing session',
+          );
+        }
+        await _clearPeerSession(pid);
+        return true;
+      }
+    } catch {}
+    return false;
+  }
+
+  async function decryptDM(peerUserId, envelope, opts = {}) {
     if (!_libsignal || !_store) throw new Error('Signal not initialised');
     if (!envelope || envelope.v !== ENVELOPE_VERSION || typeof envelope.b !== 'string') {
       throw new Error('not a v2 envelope');
     }
+    await _checkPeerIdentityDrift(peerUserId, opts);
     const addr = _addr(peerUserId);
     const cipher = new _libsignal.SessionCipher(_store, addr);
     const binaryBody = _b64ToBinaryString(envelope.b);
@@ -703,8 +738,7 @@
   async function requestDmCryptoResync(peerUserId) {
     const pid = Number(peerUserId) || 0;
     if (!pid || !_store) return { ok: false };
-    _peerIdentCache.delete(String(pid));
-    await _clearPeerSession(pid);
+    await invalidatePeerCrypto(pid);
     try {
       await ensureMyBundleFresh();
     } catch (e) {
@@ -760,6 +794,12 @@
     try {
       if (typeof window._retryPendingDmDecrypts === 'function') {
         await window._retryPendingDmDecrypts();
+      }
+    } catch {}
+    try {
+      const activePid = Number(typeof _activeDM !== 'undefined' && _activeDM?.user_id) || 0;
+      if (activePid === pid && typeof window._dmPostCryptoSyncNotice === 'function') {
+        void window._dmPostCryptoSyncNotice(pid, { actor: 'peer', reason: 'heal' });
       }
     } catch {}
     try {
@@ -1124,6 +1164,18 @@
     return _bundleHealthy;
   }
 
+  async function hasPeerSession(peerUserId) {
+    if (!_store) return false;
+    const pid = Number(peerUserId) || 0;
+    if (!pid) return false;
+    try {
+      const existing = await _store.loadSession(_addr(pid).toString());
+      return !!existing;
+    } catch {
+      return false;
+    }
+  }
+
   // ── Public surface ───────────────────────────────────────────────────
 
   const Signal = {
@@ -1143,6 +1195,7 @@
     isPeerBundleBackedOff,
     refreshPeerForDecrypt,
     invalidatePeerCrypto,
+    hasPeerSession,
     peerKeysDiagnostics,
     warmPeerBundleForSend,
     // Eager session pre-warm (e.g. on DM open). Builds an outbound

@@ -32,6 +32,28 @@ def test_maybe_history_sync_notice_travel_locked(monkeypatch):
     assert inserted and inserted[0][2] == "history_locked"
 
 
+def test_crypto_sync_content_peer_actor():
+    raw = dmsys.crypto_sync_content(actor="peer", peer_nick="frog", self_nick="testy")
+    meta = json.loads(raw[len(dmsys.DMSYS_PREFIX) :])
+    assert meta["kind"] == "crypto_sync"
+    assert "@frog" in meta["subtitle"]
+    assert "Both sides synced" in meta["subtitle"]
+    assert "@testy" not in meta["subtitle"]
+
+
+def test_crypto_sync_content_self_actor():
+    raw = dmsys.crypto_sync_content(actor="self", peer_nick="frog", self_nick="testy")
+    meta = json.loads(raw[len(dmsys.DMSYS_PREFIX) :])
+    assert "You refreshed" in meta["subtitle"]
+    assert "@frog" in meta["subtitle"]
+
+
+def test_crypto_sync_content_both_actor():
+    raw = dmsys.crypto_sync_content(actor="both", peer_nick="frog", self_nick="testy")
+    meta = json.loads(raw[len(dmsys.DMSYS_PREFIX) :])
+    assert "you and @frog" in meta["subtitle"].lower()
+
+
 def test_maybe_history_sync_notice_failed_import(monkeypatch):
     inserted = []
 

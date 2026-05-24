@@ -825,6 +825,7 @@ const _DM_CRYPTO_RESYNC_COOLDOWN_MS = 10 * 60 * 1000;
 const _DM_LIVE_CRYPTO_RESYNC_COOLDOWN_MS = 45 * 1000;
 const _DM_INBOUND_RESYNC_ECHO_MS = 60 * 1000;
 const _DM_HEAL_COOLDOWN_MS = 90 * 1000;
+const _dmPendingPeerHeal = new Set(); // peers needing heal delivery retry after reconnect
 const _DM_DECRYPT_LOCKED_HOME = '\u{1F512} Encrypted on your home node';
 
 function _dmIsLockPlaceholder(text) {
@@ -1065,6 +1066,10 @@ async function _tryAutoUnlockImportedHistory() {
   if (!_dmSkipHistoricalDecrypt()) {
     await _redecryptStaleDMMessages();
     await _refreshDmLockPlaceholders();
+  } else if (window.__ftDctImported) {
+    await _redecryptTravelDMMessages();
+    await _retryPendingDmDecrypts();
+    await _refreshDmLockPlaceholders();
   }
   const after = _dmCountHistoryCryptoState();
   const unlocked = Math.max(0, before.lockable - after.lockable);
@@ -1146,18 +1151,21 @@ function _dmMarkInboundResync(peerUserId) {
 }
 try { window._dmMarkInboundResync = _dmMarkInboundResync; } catch {}
 
-/** Polished in-chat system line when keys were auto-synced (both users via federation). */
+/** In-chat system line after a successful bilateral key heal (node-local, not federated). */
 async function _dmPostCryptoSyncNotice(peerUserId, opts = {}) {
-  if (!opts.manual) return;
-  const chId = Number(_activeDM?.id) || 0;
+  if (opts.silent) return;
+  const chId = Number(opts.channelId || _activeDM?.id) || 0;
   const pid = Number(peerUserId) || 0;
   if (!chId || !pid) return;
   const dedupeKey = `${chId}:crypto_sync`;
-  if ((_dmCryptoSyncNoticeAt.get(dedupeKey) || 0) > Date.now() - 120000) return;
+  if ((_dmCryptoSyncNoticeAt.get(dedupeKey) || 0) > Date.now() - 600000) return;
+  const actor = String(opts.actor || 'both').toLowerCase();
+  const safeActor = (actor === 'peer' || actor === 'self') ? actor : 'both';
   try {
     const res = await apiFetch(`/api/dms/${chId}/crypto-sync-notice`, 'POST', {
       peer_user_id: pid,
-      reason: 'auto',
+      reason: String(opts.reason || 'heal').slice(0, 32),
+      actor: safeActor,
     });
     if (!res.ok) return;
     _dmCryptoSyncNoticeAt.set(dedupeKey, Date.now());
@@ -1228,7 +1236,42 @@ function _dmClearChannelDecryptBlocks() {
 }
 try { window._dmClearChannelDecryptBlocks = _dmClearChannelDecryptBlocks; } catch {}
 
-/** Wipe stale ratchet state on both ends and retry pending ciphertext. */
+/** True when local keys can attempt historical decrypt (home export or DCT import). */
+async function _dmHasDecryptKeys() {
+  if (window.__ftDctImported) return true;
+  try {
+    if (window.DeviceCrypto?.hasExportableCrypto) {
+      return await DeviceCrypto.hasExportableCrypto();
+    }
+  } catch {}
+  return false;
+}
+
+/** Brief poll after coordinated resync/heal before retrying decrypt. */
+async function _waitForCryptoSync(peerId, opts = {}) {
+  const maxMs = Math.max(400, Math.min(Number(opts.maxMs) || 2500, 6000));
+  const stepMs = 200;
+  const pid = Number(peerId) || 0;
+  const checkSession = opts.checkSession !== false;
+  const t0 = Date.now();
+  while (Date.now() - t0 < maxMs) {
+    await new Promise((r) => setTimeout(r, stepMs));
+    if (!checkSession || !pid || !window.Signal?.hasPeerSession) continue;
+    try {
+      if (await window.Signal.hasPeerSession(pid)) return true;
+    } catch {}
+  }
+  return false;
+}
+
+/** Wipe stale ratchet state on both ends and retry pending ciphertext.
+
+  Notice trigger matrix (actor credited in 🔐 bubble):
+  - trigger=inbound  → peer refreshed keys (decrypt failed on their message)
+  - trigger=open     → both sides synced (opening chat with locked history)
+  - trigger=manual   → self refreshed (key import / reset in key manager)
+  Inbound WS heal posts a deduped notice when that peer is the active DM.
+*/
 async function _dmAutoHealChannel(peerUserId, opts = {}) {
   const pid = Number(peerUserId) || 0;
   if (!pid) return { ok: false };
@@ -1238,7 +1281,6 @@ async function _dmAutoHealChannel(peerUserId, opts = {}) {
     return { ok: false, skipped: 'cooldown' };
   }
   _dmHealAt.set(pid, now);
-  _dmMarkInboundResync(pid);
   _dmLiveDecryptFails.set(pid, 0);
   _dmClearChannelDecryptBlocks();
   try {
@@ -1262,7 +1304,28 @@ async function _dmAutoHealChannel(peerUserId, opts = {}) {
   if (State.currentRoomType === 'dm' && typeof renderDMChat === 'function') {
     renderDMChat();
   }
-  return out?.ok ? out : { ok: true, local: true };
+  const success = !!(out?.ok || out?.delivered);
+  const delivered = !!(out && out.delivered);
+  if (success && !delivered) _dmPendingPeerHeal.add(pid);
+  else if (delivered) _dmPendingPeerHeal.delete(pid);
+  const postNotice = opts.notice !== false
+    && (delivered || String(opts.reason || opts.trigger || '').toLowerCase() === 'manual');
+  if (success && postNotice) {
+    const trigger = String(opts.trigger || '').toLowerCase();
+    let actor = opts.actor;
+    if (!actor) {
+      if (trigger === 'inbound') actor = 'peer';
+      else if (trigger === 'outbound' || trigger === 'manual') actor = 'self';
+      else actor = 'both';
+    }
+    void _dmPostCryptoSyncNotice(pid, {
+      actor,
+      reason: opts.reason || (trigger === 'manual' ? 'manual' : 'heal'),
+    });
+  }
+  return success
+    ? { ...(out || {}), ok: true, delivered: !!(out && out.delivered) }
+    : { ...(out || {}), ok: false };
 }
 try { window._dmAutoHealChannel = _dmAutoHealChannel; } catch {}
 
@@ -1338,6 +1401,20 @@ try {
   });
   window.addEventListener('ft:federation-sync', () => {
     void _refreshDmLockPlaceholders();
+  });
+  window.addEventListener('ws:open', () => {
+    if (!_dmPendingPeerHeal.size) return;
+    for (const pid of [..._dmPendingPeerHeal]) {
+      void _dmAutoHealChannel(pid, { force: true, notice: false, trigger: 'open' })
+        .then(async () => {
+          try {
+            await _retryPendingDmDecrypts();
+            if (_dmSkipHistoricalDecrypt()) await _redecryptTravelDMMessages();
+            else await _redecryptStaleDMMessages();
+            if (typeof renderDMChannels === 'function') renderDMChannels();
+          } catch {}
+        });
+    }
   });
 } catch {}
 
@@ -1529,7 +1606,10 @@ async function _decryptDMPreviewContent(cipher, peerId, _peerNick, opts = {}) {
           await window.Signal.resetSessionWith(peerNum);
         }
       } catch {}
-    } else if (_dmInboundIsCrossNode({ ...opts, peerUserId: peerNum }) && peerNum && !opts._fedPeerPrimed) {
+    } else if (_dmInboundIsCrossNode({ ...opts, peerUserId: peerNum }) && peerNum
+        && env?.t === 'pre' && !opts._fedPeerPrimed) {
+      // Only wipe before inbound prekey handshakes — not every t:'msg' (that
+      // breaks healthy ratchet chains on cross-node threads).
       opts._fedPeerPrimed = true;
       try {
         if (typeof window.Signal.invalidatePeerCrypto === 'function') {
@@ -1609,7 +1689,10 @@ async function _decryptDMPreviewContent(cipher, peerId, _peerNick, opts = {}) {
       }
       if (!opts.live && !opts.federated && !opts.originServerId
           && (noDevice || isPre || errMsg.includes('Bad MAC') || expected)) {
-        _dmMarkDecryptPermafail(raw);
+        const hasKeys = await _dmHasDecryptKeys();
+        if (hasKeys && !_federationSyncInProgress()) {
+          _dmMarkDecryptPermafail(raw);
+        }
       }
     }
     return null;
@@ -1619,6 +1702,9 @@ async function _decryptDMPreviewContent(cipher, peerId, _peerNick, opts = {}) {
     const plain = await _tryDecrypt(!!opts.retry);
     if (plain !== null) {
       if (peerNum) _dmLiveDecryptFails.set(peerNum, 0);
+      if (opts.live && typeof renderDMChannels === 'function') {
+        void renderDMChannels();
+      }
       return plain;
     }
     if (opts.live && peerNum && !opts._resyncAttempted
@@ -1628,7 +1714,7 @@ async function _decryptDMPreviewContent(cipher, peerId, _peerNick, opts = {}) {
         travel: _dmSkipHistoricalDecrypt(),
       });
       if (out?.ok) {
-        await new Promise((r) => setTimeout(r, 1200));
+        await _waitForCryptoSync(peerNum, { maxMs: 2800 });
         return _decryptDMPreviewContent(raw, peerId, _peerNick, {
           ...opts,
           _resyncAttempted: true,
@@ -1641,8 +1727,12 @@ async function _decryptDMPreviewContent(cipher, peerId, _peerNick, opts = {}) {
       _dmLiveDecryptFails.set(peerNum, fails);
       const cross = _dmInboundIsCrossNode({ ...opts, peerUserId: peerNum });
       if (cross && (fails >= 1 || opts._resyncAttempted) && !opts._healAttempted) {
-        await _dmAutoHealChannel(peerNum, { force: fails >= 2 });
-        await new Promise((r) => setTimeout(r, 1500));
+        const healOut = await _dmAutoHealChannel(peerNum, { force: fails >= 2, trigger: 'inbound' });
+        if (healOut?.delivered) {
+          await _waitForCryptoSync(peerNum, { maxMs: 3200 });
+        } else {
+          await _waitForCryptoSync(peerNum, { maxMs: 1500, checkSession: false });
+        }
         const healed = await _decryptDMPreviewContent(raw, peerId, _peerNick, {
           ...opts,
           _healAttempted: true,
@@ -1749,6 +1839,7 @@ async function _redecryptStaleDMMessages() {
   const myId = Number(STATE?.user?.id) || 0;
   if (!peerId) return;
   const peerNick = String(dm.nickname || '');
+  const canRetry = await _dmHasDecryptKeys();
   let changed = false;
   try {
     for (const m of _dmMessages) {
@@ -1760,7 +1851,7 @@ async function _redecryptStaleDMMessages() {
         plain = _resolveOwnDMPlaintext(m.content, m.id, m.channel_id || dm.id);
       } else {
         plain = await _decryptDMPreviewContent(
-          m.content, peerId, peerNick, { retry: false, silent: true, live: false },
+          m.content, peerId, peerNick, { retry: canRetry, silent: true, live: false },
         );
       }
       if (plain && !_looksEncryptedBlob(plain)) {
@@ -1787,6 +1878,7 @@ async function _redecryptTravelDMMessages() {
   const peerNick = String(dm.nickname || '');
   let changed = false;
   let triedResync = false;
+  const canRetry = !!(window.__ftDctImported || await _dmHasDecryptKeys());
   try {
     for (const m of _dmMessages) {
       if (!dm?.id || _activeDM?.id !== dm.id) break;
@@ -1804,7 +1896,7 @@ async function _redecryptTravelDMMessages() {
       }
       const cipher = rawCipher || String(m.content || '');
       const plain = await _decryptDMPreviewContent(
-        cipher, peerId, peerNick, { retry: false, silent: true, live: true },
+        cipher, peerId, peerNick, { retry: canRetry, silent: true, live: true },
       );
       if (plain && !_looksEncryptedBlob(plain) && !_isDmLockPlaceholder(plain)) {
         m.content = plain;
@@ -2119,6 +2211,7 @@ async function openDMChannel (id, nickname, avatar) {
     renderDMChat();
     scrollChatBottom();
     if (!_dmSkipHistoricalDecrypt()) void _redecryptStaleDMMessages();
+    else void _redecryptTravelDMMessages();
   }
 
   // Switch app to DM view
@@ -2260,7 +2353,7 @@ async function openDMChannel (id, nickname, avatar) {
     else void _redecryptTravelDMMessages();
     const pid = Number(_activeDM.user_id) || 0;
     if (pid && _dmPeerIsCrossNode(pid) && _dmCountLockedInbound() > 0) {
-      void _dmAutoHealChannel(pid).then(() => _retryPendingDmDecrypts());
+      void _dmAutoHealChannel(pid, { trigger: 'open' }).then(() => _retryPendingDmDecrypts());
     }
   }
   // Only mark as read when the app is actually visible + focused. If the user
@@ -2540,7 +2633,15 @@ async function loadDMMessages (pageOffset = 0, options = {}) {
       }
     }
     if (next.reply_content) {
-      try { next.reply_content = await _decryptDMPreviewContent(next.reply_content, _peerUserId, _peerNick); } catch {}
+      try {
+        next.reply_content = await _decryptDMPreviewContent(next.reply_content, _peerUserId, _peerNick, {
+          silent: true,
+          live: false,
+          retry: true,
+          federated: _dmPeerIsCrossNode(_peerUserId),
+          peerHomeServerId: String(_activeDM?.peer_home_server_id || '').trim(),
+        });
+      } catch {}
     }
     return next;
   }));
@@ -2586,6 +2687,8 @@ async function loadDMMessages (pageOffset = 0, options = {}) {
     const prevH = area.scrollHeight;
     renderDMChat();
     area.scrollTop = area.scrollHeight - prevH;
+    if (!_dmSkipHistoricalDecrypt()) void _redecryptStaleDMMessages();
+    else void _redecryptTravelDMMessages();
   }
   // Clear unread badge
   const ch = _dmChannels.find(c => c.id === _reqRoomId);
@@ -3879,8 +3982,15 @@ async function sendDMMessage () {
     } catch {}
     const _peerHomeForEnc = _activeDM?.peer_home_server_id || _dmChanEntry?.peer_home_server_id || '';
     const _crossNodeSend = _dmPeerIsCrossNode(_peerUidForEnc) || _isTravelNode();
-    const _runEncrypt = async () => {
+    const _runEncrypt = async (forceHandshake) => {
       let encTimeoutMs = 22000;
+      let needHandshake = !!forceHandshake;
+      if (_crossNodeSend && !needHandshake
+          && typeof Signal.hasPeerSession === 'function') {
+        try {
+          needHandshake = !(await Signal.hasPeerSession(_peerUidForEnc));
+        } catch {}
+      }
       try {
         const diag = (typeof Signal.warmPeerBundleForSend === 'function')
           ? await Signal.warmPeerBundleForSend(_peerUidForEnc)
@@ -3891,8 +4001,8 @@ async function sendDMMessage () {
       } catch {}
       const encPromise = Signal.encryptDM(_peerUidForEnc, content, {
         peerHomeServerId: _peerHomeForEnc,
-        forceRefresh: _crossNodeSend,
-        forcePreKey: _crossNodeSend,
+        forceRefresh: needHandshake,
+        forcePreKey: needHandshake,
       });
       const encTimeout = new Promise((_, rej) => {
         setTimeout(() => rej(new Error('encrypt_timeout')), encTimeoutMs);
@@ -3902,14 +4012,17 @@ async function sendDMMessage () {
     try {
       let env;
       try {
-        env = await _runEncrypt();
+        env = await _runEncrypt(false);
       } catch (e1) {
         const em1 = String((e1 && e1.message) || e1 || '');
         const missingKeys = em1.includes('404') || em1.includes('no_bundle')
           || em1.includes('peer bundle fetch failed');
         if (missingKeys) {
           await new Promise((r) => setTimeout(r, 3000));
-          env = await _runEncrypt();
+          env = await _runEncrypt(true);
+        } else if (em1.includes('Bad MAC') || em1.includes('session')
+            || em1.includes('Message key not found') || em1.includes('UntrustedIdentity')) {
+          env = await _runEncrypt(true);
         } else {
           throw e1;
         }

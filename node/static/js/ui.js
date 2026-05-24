@@ -2622,8 +2622,8 @@ function ensureNetworkPaneContent() {
 
     <div style="background:#121816;border:1px solid #2a3a32;border-radius:8px;padding:10px;margin-bottom:12px;font-size:11px;color:#8da59b;line-height:1.5">
       <strong style="color:#9ec59e">Routing vs account home</strong><br>
-      <span style="color:#7a8a82">Preferred routing</span> (mode + server list below) chooses which node you open by default — travel convenience only.<br>
-      <span style="color:#7a8a82">Account home</span> (sync panel above) is your federation identity: peers import from it, and changes you make while traveling merge back to it. Changing routing does <em>not</em> change home; use <strong>Set home node…</strong> in the sync panel when needed.
+      <span style="color:#7a8a82">Preferred routing</span> (mode + custom URL below) only chooses which node opens when you connect — it does <em>not</em> change your account home.<br>
+      <span style="color:#7a8a82">Account home</span> (sync panel above) is your federation identity: peers import from it, and changes while traveling merge back to it. Use <strong>Set home node…</strong> only if you registered on the wrong node by mistake.
     </div>
 
     <label class="modal-label" style="margin-top:0">Connection Mode</label>
@@ -3139,10 +3139,26 @@ function _renderNetworkSelection() {
 
 function _networkSyncSourceLabel() {
   try {
-    const fromMe = (State.user && State.user.account_home_base_url) ? State.user.account_home_base_url : '';
-    const raw = fromMe || ((typeof App !== 'undefined' && App.getSyncSourceBase)
+    const norm = (u) => {
+      let s = String(u || '').trim().toLowerCase().replace(/\/$/, '');
+      if (s && !/^https?:\/\//.test(s)) s = 'https://' + s;
+      return s;
+    };
+    const here = norm(window.location.origin || '');
+    const switchFrom = norm((typeof App !== 'undefined' && App.getSyncSourceBase)
       ? App.getSyncSourceBase()
-      : (localStorage.getItem('ft_sync_source_base') || ''));
+      : (localStorage.getItem('ft_sync_source_base') || sessionStorage.getItem('ft_switch_from') || ''));
+    const fromMe = (State.user && State.user.account_home_base_url) ? State.user.account_home_base_url : '';
+    const meHome = norm(fromMe);
+    const serverTravel = State.user && State.user.at_home_node === false;
+    let raw = '';
+    if (serverTravel && fromMe) raw = fromMe;
+    else if (meHome && here && meHome !== here && fromMe) raw = fromMe;
+    else if (switchFrom && here && switchFrom !== here) raw = switchFrom;
+    else if (fromMe) raw = fromMe;
+    else raw = (typeof App !== 'undefined' && App.getSyncSourceBase)
+      ? App.getSyncSourceBase()
+      : (localStorage.getItem('ft_sync_source_base') || '');
     return String(raw || '').replace(/^https?:\/\//, '').replace(/\/$/, '');
   } catch {
     return '';
@@ -3227,13 +3243,19 @@ function _networkSyncSummaryLine(st) {
   return parts.join(' · ');
 }
 
+function _networkUserIsAtHome() {
+  if (State.user && State.user.at_home_node === false) return false;
+  if (State.user && State.user.at_home_node === true) return true;
+  return (typeof App !== 'undefined' && App.isAtHomeNode && App.isAtHomeNode())
+    || _networkSyncSourceMatchesHere();
+}
+
 function _renderNetworkAccountSyncPanel(st, opts) {
   const panel = document.getElementById('network-account-sync-panel');
   if (!panel) return;
   const options = opts || {};
   const loading = !!options.loading;
-  const atHome = (typeof App !== 'undefined' && App.isAtHomeNode && App.isAtHomeNode())
-    || _networkSyncSourceMatchesHere();
+  const atHome = _networkUserIsAtHome();
   const here = String(window.location.origin || '').replace(/\/$/, '');
   const home = _networkSyncSourceLabel();
   const esc = (t) => (typeof UI !== 'undefined' && UI.escHtml) ? UI.escHtml(t) : String(t || '');
@@ -3308,8 +3330,7 @@ async function refreshNetworkAccountSyncPanel(opts) {
   const seq = options.seq;
   const panel = document.getElementById('network-account-sync-panel');
   if (!panel) return;
-  const atHome = (typeof App !== 'undefined' && App.isAtHomeNode && App.isAtHomeNode())
-    || _networkSyncSourceMatchesHere();
+  const atHome = _networkUserIsAtHome();
   let st = (window.App && App.federationSyncState) ? App.federationSyncState : (window.__ftFederationSync || {});
   _renderNetworkAccountSyncPanel(st, { loading: false });
 
@@ -3366,7 +3387,7 @@ async function networkResyncFromHome() {
     }
     return;
   }
-  if ((App.isAtHomeNode && App.isAtHomeNode()) || _networkSyncSourceMatchesHere()) {
+  if (_networkUserIsAtHome()) {
     if (typeof UI !== 'undefined' && UI.showToast) {
       UI.showToast('You are on your home node — no import needed.', 'info', 5000);
     }

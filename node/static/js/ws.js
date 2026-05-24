@@ -641,6 +641,15 @@ const WS = (() => {
             if (window.Signal && typeof window.Signal.ensureMyBundleFresh === 'function') {
               await window.Signal.ensureMyBundleFresh();
             }
+            if (typeof window.__ftDmDecryptReset === 'function') {
+              window.__ftDmDecryptReset();
+            }
+            if (typeof window._retryPendingDmDecrypts === 'function') {
+              await window._retryPendingDmDecrypts();
+            }
+            if (typeof renderDMChannels === 'function') {
+              renderDMChannels();
+            }
           } catch (e) {
             console.warn('[ws] signal_publish_keys failed', e);
           }

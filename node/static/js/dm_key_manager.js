@@ -557,6 +557,16 @@
     try {
       window.dispatchEvent(new CustomEvent('ft:crypto-ready'));
     } catch {}
+    try {
+      if (typeof _dmPostCryptoSyncNotice === 'function'
+          && typeof _activeDM !== 'undefined' && _activeDM?.user_id && _activeDM?.id) {
+        void _dmPostCryptoSyncNotice(_activeDM.user_id, {
+          actor: 'self',
+          reason: 'manual',
+          channelId: _activeDM.id,
+        });
+      }
+    } catch {}
     void _loadInventory();
   }
 

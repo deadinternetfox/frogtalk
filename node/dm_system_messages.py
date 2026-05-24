@@ -133,16 +133,38 @@ def insert_dm_system_notice(
         return None
 
 
-def crypto_sync_content(actor_nick: str) -> str:
-    nick = str(actor_nick or "Someone").strip().lstrip("@") or "Someone"
+def crypto_sync_content(
+    *,
+    actor: str = "both",
+    self_nick: str = "",
+    peer_nick: str = "",
+) -> str:
+    """Build a crypto-sync system line.
+
+    actor: who rotated keys — ``peer`` (contact), ``self`` (viewer), or ``both``.
+    """
+    me = str(self_nick or "you").strip().lstrip("@") or "you"
+    peer = str(peer_nick or "peer").strip().lstrip("@") or "peer"
+    actor_k = str(actor or "both").strip().lower()
+    if actor_k == "peer":
+        subtitle = (
+            f"@{peer} refreshed encryption keys. "
+            "Both sides synced sessions — new messages decrypt normally here."
+        )
+    elif actor_k == "self":
+        subtitle = (
+            "You refreshed encryption keys. "
+            f"@{peer}'s device synced sessions — send or receive a new message to continue."
+        )
+    else:
+        subtitle = (
+            f"Encryption synced — you and @{peer} both refreshed sessions for this chat. "
+            "New messages are end-to-end encrypted."
+        )
     return dm_sys_content(
         kind="crypto_sync",
         title="Encryption keys synced",
-        subtitle=(
-            f"@{nick} refreshed encryption for this chat. "
-            "New messages here are end-to-end encrypted on this node. "
-            "Older messages from other nodes may stay locked — that is expected."
-        ),
+        subtitle=subtitle,
         icon="🔐",
     )
 

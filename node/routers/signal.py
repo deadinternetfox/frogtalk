@@ -482,6 +482,13 @@ async def publish_bundle(
     spk_pub = _b64_decode(body.signed_prekey.pub, expected_len=32, field="signed_prekey.pub")
     spk_sig = _b64_decode(body.signed_prekey.sig, expected_len=64, field="signed_prekey.sig")
 
+    uid = int(user["id"])
+    old_identity: bytes | None = None
+    try:
+        old_identity = await run_in_threadpool(db.signal_get_identity_pub, uid)
+    except Exception:
+        pass
+
     otpks: list[dict] = []
     seen_ids: set[int] = set()
     for entry in body.one_time_prekeys:
@@ -508,6 +515,12 @@ async def publish_bundle(
         await run_in_threadpool(_enqueue_signal_keys_updated, user, identity_pub)
     except Exception:
         pass
+    identity_rotated = old_identity is not None and old_identity != identity_pub
+    if identity_rotated or old_identity is None:
+        try:
+            asyncio.create_task(_notify_dm_peers_key_rotation(user))
+        except Exception:
+            pass
     return {
         "ok": True,
         "otpks_added": int(result.get("otpks_added", 0)),
@@ -675,6 +688,27 @@ async def deliver_dm_crypto_resync(peer_id: int, from_user: dict) -> bool:
 
 async def deliver_dm_crypto_heal(peer_id: int, from_user: dict) -> bool:
     return await _deliver_dm_crypto_peer_signal(peer_id, from_user, "dm_crypto_heal")
+
+
+async def _notify_dm_peers_key_rotation(user: dict, limit: int = 16) -> None:
+    """Ask recent DM partners to drop stale sessions after we rotate identity."""
+    uid = int(user.get("id") or 0)
+    if uid <= 0:
+        return
+    try:
+        channels = await run_in_threadpool(db.get_dm_channels, uid)
+    except Exception:
+        return
+    peers: list[int] = []
+    for ch in (channels or [])[: max(1, min(int(limit), 32))]:
+        other = int(ch.get("other_id") or 0)
+        if other > 0 and other not in peers:
+            peers.append(other)
+    for peer_id in peers:
+        try:
+            await deliver_dm_crypto_resync(peer_id, user)
+        except Exception:
+            pass
 
 
 async def _fetch_peer_bundle_payload(uid: int) -> dict:

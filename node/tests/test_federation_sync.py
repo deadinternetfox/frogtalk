@@ -281,7 +281,7 @@ class FederationSyncTests(unittest.TestCase):
         import bcrypt as _bcrypt
 
         local_sid = str((db.get_or_create_local_server_identity() or {}).get("server_id") or "")
-        gid = "00000000-0000-4000-8000-000000000097"
+        gid = "00000000-0000-4000-8000-000000000095"
         pw_hash = _bcrypt.hashpw(b"secret12", _bcrypt.gensalt()).decode()
         uid = db.create_user_with_hash("pinned_traveler", pw_hash, gid)
         self.assertIsNotNone(uid)
@@ -398,15 +398,15 @@ class FederationSyncTests(unittest.TestCase):
         uid = int(db.create_user("travel_creator", "secret12"))
         db.set_user_account_home_server_id(uid, "srv_home_other", force=True)
         db.set_config("federation.server_id", "srv_au_visit")
-        travel_id = db.create_room("u", "secret grp", "private", uid, "hint")
+        travel_id = db.create_room("travel-prune-room", "secret grp", "private", uid, "hint")
         self.assertIsNotNone(travel_id)
         db.join_room(uid, int(travel_id))
-        db.add_room_to_sync_allowlist(uid, "u")
+        db.add_room_to_sync_allowlist(uid, "travel-prune-room")
         pruned = db.apply_sync_room_allowlist(uid, {"general"})
         self.assertEqual(pruned, 0)
         joined = set(db.get_user_joined_room_ids(uid))
         self.assertIn(int(travel_id), joined)
-        self.assertIn("u", db.get_user_sync_room_allowlist(uid))
+        self.assertIn("travel-prune-room", db.get_user_sync_room_allowlist(uid))
 
     @mock.patch("routers.auth._verify_travel_merge_export")
     def test_merge_travel_private_room_owned_on_home(self, _verify):
@@ -1522,6 +1522,20 @@ class FederationSyncLoginApiTests(unittest.TestCase):
         auth_mod._sync_state_set(uid, {"source_server_id": remote_sid, "source_base": "https://remote-home.test"})
         self.assertFalse(auth_mod._user_at_account_home(uid))
 
+    def test_user_at_home_false_when_only_sync_source_base(self):
+        import routers.auth as auth_mod
+
+        db = self.db
+        uid = int(db.create_user("travel_base_only", "secret12"))
+        local_sid = str((db.get_or_create_local_server_identity() or {}).get("server_id") or "")
+        remote_sid = "srv_travel_base_only_home"
+        if remote_sid == local_sid:
+            remote_sid = "srv_travel_base_only_home_b"
+        db.upsert_federation_server(remote_sid, "Remote", "https://real-home.test", official=True)
+        auth_mod._sync_state_set(uid, {"source_base": "https://real-home.test"})
+        self.assertFalse(auth_mod._user_at_account_home(uid))
+        self.assertNotEqual(db.get_user_account_home_server_id(uid), local_sid)
+
     def test_repin_account_home_api(self):
         db = self.db
         ident = db.get_or_create_local_server_identity() or {}
@@ -1934,7 +1948,7 @@ class FederationDirectoryJoinApiTests(unittest.TestCase):
 
         db = self.db
         uid = int(db.create_user("prefs_sync_user", "secret12"))
-        prefs = auth_mod._sanitize_client_prefs_json({
+        prefs = auth_mod._finalize_client_prefs_for_storage(uid, {
             "prefer_onion": 1,
             "preferred_node_url": "https://travel.example",
             "custom_sounds": {
@@ -1952,7 +1966,11 @@ class FederationDirectoryJoinApiTests(unittest.TestCase):
         cp = prof.get("client_prefs") or {}
         self.assertEqual(cp.get("prefer_onion"), 1)
         self.assertEqual(cp.get("preferred_node_url"), "https://travel.example")
-        self.assertTrue(str((cp.get("custom_sounds") or {}).get("app:msg") or "").startswith("data:audio/"))
+        sound = str((cp.get("custom_sounds") or {}).get("app:msg") or "")
+        self.assertTrue(
+            sound.startswith("/api/auth/app-sounds/") or sound.startswith("data:audio/"),
+            sound,
+        )
 
     def test_users_profile_hides_custom_css_from_viewers(self):
         owner = int(self.db.create_user("css_owner", "secret12"))
@@ -2099,7 +2117,7 @@ class FederationDirectoryJoinApiTests(unittest.TestCase):
             title="local",
             thumbnail="",
         )
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             fed_mod._handle_room_music_event("snap-room", "room.music.queue.snapshot", {
                 "tracks": [{
                     "submitter_nick": "remote",
