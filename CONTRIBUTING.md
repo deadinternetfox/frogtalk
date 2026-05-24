@@ -6,14 +6,12 @@ FrogTalk is **pre-alpha** software: features ship quickly, APIs may change, and 
 
 ## Branches
 
-| Branch | Purpose |
-|--------|---------|
-| **`dev`** | Active development. May be broken or incomplete. Use for day-to-day feature work and experiments. |
-| **`master`** | Pre-alpha production line. What we deploy to [frogtalk.xyz](https://frogtalk.xyz) and recommend for self-hosters who accept untested code. |
+| Branch | Deploy target | Purpose |
+|--------|---------------|---------|
+| **`dev`** | [frogtalk.xyz](https://frogtalk.xyz) | Active development. May be broken or incomplete. |
+| **`master`** | [frogtalk.app](https://frogtalk.app) | Pre-alpha production line for the public instance. |
 
 **Workflow:** branch from `dev`, open PRs into `dev`. Maintainers promote tested changes from `dev` → `master` for production deploys. Hotfixes for production can branch from `master` and be back-merged into `dev`.
-
-If `dev` does not exist yet on your clone, use `master` and ask in an issue — we are splitting dev/production hosts next.
 
 ---
 
@@ -31,11 +29,11 @@ Good issues have a specific title, repro steps when behavioural, and file/line l
 
 ## Security vulnerabilities
 
-1. **Web form (most issues):** [frogtalk.xyz/security](https://frogtalk.xyz/security) — anonymous OK.
-2. **Sensitive disclosures:** `security@frogtalk.xyz` — account takeover, E2EE bypass, RCE, etc.
+1. **Web form (most issues):** [frogtalk.app/security](https://frogtalk.app/security) — anonymous OK.
+2. **Sensitive disclosures:** `security@frogtalk.app` — account takeover, E2EE bypass, RCE, etc.
 3. **Do not** open public GitHub issues for unfixed security bugs.
 
-See [SECURITY.md](SECURITY.md) and the live [security page](https://frogtalk.xyz/security) for scope and safe testing guidance.
+See [SECURITY.md](SECURITY.md) and the live [security page](https://frogtalk.app/security) for scope and safe testing guidance.
 
 ---
 
@@ -68,7 +66,7 @@ Follow-up gaps can ship as separate PRs — note them in the template.
 
 ## Credit
 
-Add yourself to [CONTRIBUTORS.md](CONTRIBUTORS.md) in the same PR if you want repo credit. Security researchers are also listed on the [Hall of Fame](https://frogtalk.xyz/security#hall-of-fame).
+Add yourself to [CONTRIBUTORS.md](CONTRIBUTORS.md) in the same PR if you want repo credit. Security researchers are also listed on the [Hall of Fame](https://frogtalk.app/security#hall-of-fame).
 
 ---
 

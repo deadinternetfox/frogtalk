@@ -1,6 +1,6 @@
 # FrogTalk Node Deploy Templates
 
-Full documentation: **[Node operator guide](https://frogtalk.xyz/docs/node)** (`node/static/docs-node.html` in the repo).
+Full documentation: **[Node operator guide](https://frogtalk.app/docs/node)** (`node/static/docs-node.html` in the repo).
 
 This folder ships production templates the setup wizard copies or references:
 
@@ -129,7 +129,7 @@ sudo systemctl enable --now cloudflared
 
 Manual run: `cloudflared tunnel run --token <TUNNEL_TOKEN>`
 
-**nginx:** enable only the live `frogtalk` site under `/etc/nginx/sites-enabled/`. Stale `frogtalk.bak.*` vhosts can route `Host: frogtalk.xyz` to the wrong upstream and cause 502s.
+**nginx:** enable only the live `frogtalk` site under `/etc/nginx/sites-enabled/`. Stale `frogtalk.bak.*` vhosts can route `Host: frogtalk.app` to the wrong upstream and cause 502s.
 
 **Upgrade cloudflared:** reinstall the same package (`dpkg -i` …), then `systemctl restart cloudflared` (brief reconnect).
 
@@ -195,9 +195,9 @@ Full reference: `node/deploy/nginx.conf` (CSP is emitted by FastAPI; do not dupl
 bash node/scripts/node_federation_join.sh --install-dir /opt/frogtalk -y
 ```
 
-The CLI fixes common footguns (`node/data` / `node/secrets` symlinks, board permissions), enables federation in `.env`, syncs the [official directory](https://frogtalk.xyz/api/network/servers) (retries + built-in fallback to **FrogTalk Main** + **Tor Mirror** if HTTP fails), **announces this node on the hub** (`POST /api/network/servers/register` when `FROGTALK_FEDERATION_TOKEN` matches Main), TOFU-pins peer Ed25519 keys from `/api/network/status`, and links imageboard peer nav pills (`.onion` boards via `FROGTALK_TOR_SOCKS_PROXY`).
+The CLI fixes common footguns (`node/data` / `node/secrets` symlinks, board permissions), enables federation in `.env`, syncs the [official directory](https://frogtalk.app/api/network/servers) (retries + built-in fallback to **FrogTalk Main** + **Tor Mirror** if HTTP fails), **announces this node on the hub** (`POST /api/network/servers/register` when `FROGTALK_FEDERATION_TOKEN` matches Main), TOFU-pins peer Ed25519 keys from `/api/network/status`, and links imageboard peer nav pills (`.onion` boards via `FROGTALK_TOR_SOCKS_PROXY`).
 
-**Hub listing:** set the same `FROGTALK_FEDERATION_TOKEN` on FrogTalk Main and on the community node (`openssl rand -hex 32` on Main; distribute securely). Optional override: `FROGTALK_OFFICIAL_DIRECTORY_REGISTER_URL` (default derived from `FROGTALK_OFFICIAL_DIRECTORY_URL` + `/register`). Verify with `curl -sS https://frogtalk.xyz/api/network/servers` — your node’s own `/api/network/servers` always includes local identity and is not proof of global listing.
+**Hub listing:** set the same `FROGTALK_FEDERATION_TOKEN` on FrogTalk Main and on the community node (`openssl rand -hex 32` on Main; distribute securely). Optional override: `FROGTALK_OFFICIAL_DIRECTORY_REGISTER_URL` (default derived from `FROGTALK_OFFICIAL_DIRECTORY_URL` + `/register`). Verify with `curl -sS https://frogtalk.app/api/network/servers` — your node’s own `/api/network/servers` always includes local identity and is not proof of global listing.
 
 | Flag | Effect |
 |------|--------|
@@ -212,7 +212,7 @@ Re-run safely after deploys: `bash node/scripts/node_federation_join.sh --instal
 
 Restart if the script did not: `sudo systemctl restart frogtalk`.
 
-**FrogSocial replication:** only plaintext posts with `privacy` `public` or `followers` federate to peers. Friends-only audiences use encrypted wall posts and targeted federation events — see [API docs](https://frogtalk.xyz/docs/api) (Federation section).
+**FrogSocial replication:** only plaintext posts with `privacy` `public` or `followers` federate to peers. Friends-only audiences use encrypted wall posts and targeted federation events — see [API docs](https://frogtalk.app/docs/api) (Federation section).
 
 ## Deploy scripts (operators)
 
@@ -255,4 +255,4 @@ See `env.example` for GIF (KLIPY), push (APNs/FCM), IndexNow, and federation tok
 - [Node README](../README.md) — layout, tests, operator scripts
 - [Routers README](../routers/README.md) — API module map
 - [Repository README](../../README.md) — encryption model and downloads
-- Live: [Node docs](https://frogtalk.xyz/docs/node) · [API reference](https://frogtalk.xyz/docs/api)
+- Live: [Node docs](https://frogtalk.app/docs/node) · [API reference](https://frogtalk.app/docs/api)

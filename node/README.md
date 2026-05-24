@@ -143,5 +143,5 @@ Covers sanitizers, federation/Tor behaviour, media proxy guards, and related sec
 ## See also
 
 - [Repository README](../README.md) — product overview, encryption model, downloads
-- [frogtalk.xyz](https://frogtalk.xyz) — public node
-- [API docs](https://frogtalk.xyz/docs/api) · [Node docs](https://frogtalk.xyz/docs/node)
+- [frogtalk.app](https://frogtalk.app) — public node
+- [API docs](https://frogtalk.app/docs/api) · [Node docs](https://frogtalk.app/docs/node)

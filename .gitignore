@@ -120,3 +120,6 @@ node/scripts/deploy_board.sh
 
 # Internal operator / planning docs (not for public repo)
 docs/internal/
+
+# Local node homepage variants (operator-only, not on GitHub)
+Node Pages/

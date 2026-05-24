@@ -14,21 +14,21 @@
 
 <p>
 A censorship-free, federated, end-to-end encrypted chat platform.<br>
-Self-host your own node and join the mesh — or use the public instance at frogtalk.xyz.<br>
+Self-host your own node and join the mesh — or use the public instance at frogtalk.app.<br>
 <strong>Pre-alpha:</strong> expect bugs, breaking changes, and incomplete hardening. Not production-ready.
 </p>
 
-[![Pre-alpha](https://img.shields.io/badge/status-pre--alpha-orange)](https://frogtalk.xyz/security)
+[![Pre-alpha](https://img.shields.io/badge/status-pre--alpha-orange)](https://frogtalk.app/security)
 [![Release](https://img.shields.io/github/v/release/deadinternetfox/frogtalk?display_name=release&sort=semver&color=4caf50)](https://github.com/deadinternetfox/frogtalk/releases)
 [![License](https://img.shields.io/github/license/deadinternetfox/frogtalk?color=4caf50)](LICENSE)
 [![Docker](https://img.shields.io/badge/ghcr.io-frogtalk-4caf50?logo=docker&logoColor=white)](https://github.com/deadinternetfox/frogtalk/pkgs/container/frogtalk)
 [![Stars](https://img.shields.io/github/stars/deadinternetfox/frogtalk?label=stars&style=flat&color=4caf50)](https://github.com/deadinternetfox/frogtalk/stargazers)
 
-[🌐 frogtalk.xyz](https://frogtalk.xyz) ·
-[📥 Downloads](https://frogtalk.xyz/#downloads) ·
-[📚 Node Docs](https://frogtalk.xyz/docs/node) ·
-[🔌 API Docs](https://frogtalk.xyz/docs/api) ·
-[🛡️ Security](https://frogtalk.xyz/security)
+[🌐 frogtalk.app](https://frogtalk.app) ·
+[📥 Downloads](https://frogtalk.app/#downloads) ·
+[📚 Node Docs](https://frogtalk.app/docs/node) ·
+[🔌 API Docs](https://frogtalk.app/docs/api) ·
+[🛡️ Security](https://frogtalk.app/security)
 
 </div>
 
@@ -41,15 +41,15 @@ vanilla JS in the browser, optional Frog Channel imageboard, Discord/Telegram br
 and **Ed25519-signed federation** between independent operators. Clients encrypt DMs (Signal Protocol)
 and private channels (AES-GCM) before data reaches your disk.
 
-- **Use the public instance:** [frogtalk.xyz/app](https://frogtalk.xyz/app) — **pre-alpha**, no uptime or data guarantees
-- **Run your own:** install under `/opt/frogtalk`, complete the **CLI setup wizard**, join the mesh — **[full VPS guide](docs/NODE_INSTALL.md)** · **[web guide](https://frogtalk.xyz/docs/node)**
+- **Use the public instance:** [frogtalk.app/app](https://frogtalk.app/app) — **pre-alpha**, no uptime or data guarantees
+- **Run your own:** install under `/opt/frogtalk`, complete the **CLI setup wizard**, join the mesh — **[full VPS guide](docs/NODE_INSTALL.md)** · **[web guide](https://frogtalk.app/docs/node)**
 
-### Branches
+### Branches & hosts
 
-| Branch | Use |
-|--------|-----|
-| **`dev`** | Day-to-day development. May be unstable. |
-| **`master`** | Pre-alpha production line deployed to frogtalk.xyz. Untested code — use at your own risk. |
+| Branch | Deploy target | Use |
+|--------|---------------|-----|
+| **`dev`** | [frogtalk.xyz](https://frogtalk.xyz) (dev node) | Day-to-day development. May be unstable. |
+| **`master`** | [frogtalk.app](https://frogtalk.app) (main node) | Pre-alpha production line. Untested code — use at your own risk. |
 
 Feature PRs target **`dev`**; tested changes promote to **`master`**. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
@@ -101,21 +101,21 @@ Feature PRs target **`dev`**; tested changes promote to **`master`**. See [CONTR
 
 | Platform | Latest | Notes |
 |----------|--------|-------|
-| 🌐 **Web** | [Open in browser](https://frogtalk.xyz) | No install needed |
-| 🤖 **Android** | [Latest APK](https://frogtalk.xyz/download/android) | v1.6.27 (232) — sideload; FCM incoming calls |
+| 🌐 **Web** | [Open in browser](https://frogtalk.app) | No install needed |
+| 🤖 **Android** | [Latest APK](https://frogtalk.app/download/android) | v1.6.27 (232) — sideload; FCM incoming calls |
 | 📦 **Android (Play)** | [AAB in build mirror](github-build-mirror/frogtalk-v232.aab) | Google Play upload bundle |
-| 🐧 **Linux AppImage** | [Latest AppImage](https://frogtalk.xyz/download/linux) | `chmod +x` then run |
-| 📦 **Linux .deb** | [Latest .deb](https://frogtalk.xyz/download/deb) | `sudo dpkg -i <downloaded_file>.deb` |
-| 🪟 **Windows (Portable .exe)** | [Latest portable .exe](https://frogtalk.xyz/download/windows) | Portable single-file — just run |
-| 🪟 **Windows (.zip)** | [Latest .zip](https://frogtalk.xyz/download/windows-zip) | Unzip, then run `FrogTalk.exe` |
-| 🍎 **macOS** | [Open in browser](https://frogtalk.xyz) | Native macOS build not published yet |
+| 🐧 **Linux AppImage** | [Latest AppImage](https://frogtalk.app/download/linux) | `chmod +x` then run |
+| 📦 **Linux .deb** | [Latest .deb](https://frogtalk.app/download/deb) | `sudo dpkg -i <downloaded_file>.deb` |
+| 🪟 **Windows (Portable .exe)** | [Latest portable .exe](https://frogtalk.app/download/windows) | Portable single-file — just run |
+| 🪟 **Windows (.zip)** | [Latest .zip](https://frogtalk.app/download/windows-zip) | Unzip, then run `FrogTalk.exe` |
+| 🍎 **macOS** | [Open in browser](https://frogtalk.app) | Native macOS build not published yet |
 
 ---
 
 ## Linux quick start (chat client)
 
 Pick one way to run FrogTalk on Linux — all clients talk to a node (default
-[`frogtalk.xyz`](https://frogtalk.xyz); change server in **Settings → Network**).
+[`frogtalk.app`](https://frogtalk.app); change server in **Settings → Network**).
 
 ### Download (fastest)
 
@@ -133,7 +133,7 @@ sudo dpkg -i frogtalk.deb
 frogtalk
 ```
 
-Or use the buttons on **[GitHub Releases](https://github.com/deadinternetfox/frogtalk/releases/latest)** or [frogtalk.xyz/download](https://frogtalk.xyz).
+Or use the buttons on **[GitHub Releases](https://github.com/deadinternetfox/frogtalk/releases/latest)** or [frogtalk.app/download](https://frogtalk.app).
 
 ### Build from source (desktop)
 
@@ -148,14 +148,14 @@ Details: [`client/README.md`](client/README.md).
 
 ### Browser only
 
-Open **[frogtalk.xyz/app](https://frogtalk.xyz/app)** — no install; works on Linux mobile and desktop browsers.
+Open **[frogtalk.app/app](https://frogtalk.app/app)** — no install; works on Linux mobile and desktop browsers.
 
 ---
 
 ## Self-Host (run your own node)
 
 **Docs:** [docs/NODE_INSTALL.md](docs/NODE_INSTALL.md) (VPS, DNS, firewall, nginx, HTTPS, backups) ·
-[https://frogtalk.xyz/docs/node](https://frogtalk.xyz/docs/node) (same flow on the live site)
+[https://frogtalk.app/docs/node](https://frogtalk.app/docs/node) (same flow on the live site)
 
 ### Quick start (fresh Linux VPS)
 
@@ -202,8 +202,8 @@ bash node/scripts/node_federation_join.sh --install-dir /opt/frogtalk -y \
   --public-url https://chat.yourdomain.com
 ```
 
-- Directory feed (default): `https://frogtalk.xyz/api/network/servers`
-- **Hub announce:** with the same `FROGTALK_FEDERATION_TOKEN` on Main and your node, federation join POSTs to `…/servers/register` so you appear on [frogtalk.xyz](https://frogtalk.xyz/api/network/servers) (verify with curl to Main, not only your local `/api/network/servers`)
+- Directory feed (default): `https://frogtalk.app/api/network/servers`
+- **Hub announce:** with the same `FROGTALK_FEDERATION_TOKEN` on Main and your node, federation join POSTs to `…/servers/register` so you appear on [frogtalk.app](https://frogtalk.app/api/network/servers) (verify with curl to Main, not only your local `/api/network/servers`)
 - Peer **Ed25519 keys** are pinned from each peer’s `/api/network/status`
 - Re-run after changing `PUBLIC_URL`, onion URL, or major upgrades
 
@@ -211,7 +211,7 @@ bash node/scripts/node_federation_join.sh --install-dir /opt/frogtalk -y \
 
 | Node | Clearnet |
 |------|----------|
-| FrogTalk Main | `https://frogtalk.xyz` |
+| FrogTalk Main | `https://frogtalk.app` |
 | FrogTalk Tor Mirror | Onion address in app **Settings → Network** |
 
 ### Manual install (no wizard)
@@ -241,7 +241,7 @@ bash node/scripts/install.sh federation -y   # refresh peers after releases
 - `FROGTALK_FEDERATION_REQUIRE_SIGS=1` (default in wizard) — reject unsigned federation events
 - `FROGTALK_AUTO_UPDATE_ENABLED=0` until `FROGTALK_RELEASE_SIGNERS` is set
 - Expose **nginx** on 443, not raw uvicorn on the public internet
-- Report issues: [frogtalk.xyz/security](https://frogtalk.xyz/security)
+- Report issues: [frogtalk.app/security](https://frogtalk.app/security)
 
 ### Troubleshooting
 
@@ -337,7 +337,7 @@ server {
 }
 ```
 
-Full node setup: **[docs/NODE_INSTALL.md](docs/NODE_INSTALL.md)** · **[frogtalk.xyz/docs/node](https://frogtalk.xyz/docs/node)**
+Full node setup: **[docs/NODE_INSTALL.md](docs/NODE_INSTALL.md)** · **[frogtalk.app/docs/node](https://frogtalk.app/docs/node)**
 
 ---
 
@@ -351,7 +351,7 @@ POST /api/messages       # send a message (with bridge_token)
 WS   /ws/{room}          # real-time message stream
 ```
 
-Full reference: **[frogtalk.xyz/docs/api](https://frogtalk.xyz/docs/api)**
+Full reference: **[frogtalk.app/docs/api](https://frogtalk.app/docs/api)**
 
 ---
 
@@ -453,13 +453,13 @@ FrogTalk is **MIT-licensed** and developed in the open. The encryption primitive
 
 ### Get involved
 
-- 🐛 **Bug or security issue?** Report at **<https://frogtalk.xyz/security>** — anonymous submissions accepted. For sensitive disclosures: `security@frogtalk.xyz`.
+- 🐛 **Bug or security issue?** Report at **<https://frogtalk.app/security>** — anonymous submissions accepted. For sensitive disclosures: `security@frogtalk.app`.
 - 🛠️ **Code contribution?** See **[CONTRIBUTING.md](CONTRIBUTING.md)** for branch workflow and review expectations.
 - 🛠️ **Feature idea?** File a [feature request](https://github.com/deadinternetfox/frogtalk/issues/new?template=feature_idea.md).
 - 📣 **Run a node.** More nodes = more censorship-resistance. Self-host guide above.
 - 💬 **Spread the word.** Community projects need a community.
 
-Researchers who responsibly disclose are credited in the security advisory and on the [Hall of Fame](https://frogtalk.xyz/security#hall-of-fame).
+Researchers who responsibly disclose are credited in the security advisory and on the [Hall of Fame](https://frogtalk.app/security#hall-of-fame).
 
 ### Contributing (quick start)
 
@@ -469,7 +469,7 @@ Researchers who responsibly disclose are credited in the security advisory and o
 4. Open a PR with the template filled in. For security fixes, include a PoC.
 5. Add yourself to `CONTRIBUTORS.md` in the same PR if you want repo credit.
 
-See [`/security`](https://frogtalk.xyz/security) for scope, threat model, and what counts as a vulnerability.
+See [`/security`](https://frogtalk.app/security) for scope, threat model, and what counts as a vulnerability.
 
 ---
 

@@ -6,19 +6,19 @@
 
 ## Core links
 
-- [Home](https://frogtalk.xyz/): Landing page with feature overview and downloads.
-- [Web app](https://frogtalk.xyz/app): Full chat client (login required).
-- [Security](https://frogtalk.xyz/security): Disclosure policy, threat model, pre-alpha notice.
-- [Android download](https://frogtalk.xyz/download/android): Pre-alpha Android APK.
-- [iOS](https://frogtalk.xyz/ios): Pre-alpha iPhone / TestFlight page.
-- [Linux AppImage](https://frogtalk.xyz/download/linux): Pre-alpha desktop build.
-- [Windows portable](https://frogtalk.xyz/download/windows): Pre-alpha Windows .exe.
-- [Sitemap](https://frogtalk.xyz/sitemap.xml): Machine-readable site index.
+- [Home](https://frogtalk.app/): Landing page with feature overview and downloads.
+- [Web app](https://frogtalk.app/app): Full chat client (login required).
+- [Security](https://frogtalk.app/security): Disclosure policy, threat model, pre-alpha notice.
+- [Android download](https://frogtalk.app/download/android): Pre-alpha Android APK.
+- [iOS](https://frogtalk.app/ios): Pre-alpha iPhone / TestFlight page.
+- [Linux AppImage](https://frogtalk.app/download/linux): Pre-alpha desktop build.
+- [Windows portable](https://frogtalk.app/download/windows): Pre-alpha Windows .exe.
+- [Sitemap](https://frogtalk.app/sitemap.xml): Machine-readable site index.
 
 ## Documentation
 
-- [REST API](https://frogtalk.xyz/docs/api): Bots, integrations, federation endpoints.
-- [Run a node](https://frogtalk.xyz/docs/node): VPS install, federation, HTTPS, account sync, calls.
+- [REST API](https://frogtalk.app/docs/api): Bots, integrations, federation endpoints.
+- [Run a node](https://frogtalk.app/docs/node): VPS install, federation, HTTPS, account sync, calls.
 
 ## Features
 
@@ -36,7 +36,7 @@
 ## Branches
 
 - `dev` — active development (may be unstable).
-- `master` — pre-alpha production line deployed to frogtalk.xyz.
+- `master` — pre-alpha production line deployed to frogtalk.app.
 
 ## Privacy
 

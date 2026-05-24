@@ -69,7 +69,7 @@ fetch the channel's recent history and act on anything newer:
 last_seen = 0
 while True:
     r = requests.get(
-        f"https://frogtalk.xyz/api/external/channels/{channel}/messages",
+        f"https://frogtalk.app/api/external/channels/{channel}/messages",
         headers={"X-API-Key": BOT_TOKEN},
         params={"limit": 50},
         timeout=15,
@@ -87,7 +87,7 @@ while True:
 
 ```python
 requests.post(
-    f"https://frogtalk.xyz/api/external/channels/{channel}/messages",
+    f"https://frogtalk.app/api/external/channels/{channel}/messages",
     headers={"X-API-Key": BOT_TOKEN},
     json={"content": "hello, world", "reply_to": m["id"]},
     timeout=15,
@@ -119,7 +119,7 @@ CLI, hit the same endpoint with `apiFetch`-equivalent cookies.
 - **`GET /api/external/health`** — no auth; uptime checks.
 - **`GET /api/external/docs`** — JSON summary of endpoints and rate limits.
 
-Full reference: [frogtalk.xyz/docs/api](https://frogtalk.xyz/docs/api) (External Token API section).
+Full reference: [frogtalk.app/docs/api](https://frogtalk.app/docs/api) (External Token API section).
 
 ## Bot etiquette
 
@@ -136,5 +136,5 @@ Full reference: [frogtalk.xyz/docs/api](https://frogtalk.xyz/docs/api) (External
 
 The examples are MIT-licensed; do whatever you want with them.
 
-[FrogTalk External API]: https://frogtalk.xyz/docs/api
+[FrogTalk External API]: https://frogtalk.app/docs/api
 [RunPod]: https://runpod.io

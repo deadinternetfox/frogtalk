@@ -6,7 +6,7 @@ WKWebView wrapper for FrogTalk with full feature parity to the Android app:
 - **APNs push notifications** (via Firebase Cloud Messaging iOS SDK)
 - **CallKit + PushKit** for cold-launch incoming-call ringing (Snapchat/WhatsApp-style)
 - **Background audio** for the music player
-- **Universal Links** so `https://frogtalk.xyz/*` opens in the app
+- **Universal Links** so `https://frogtalk.app/*` opens in the app
 - **Native bridge** mirroring the Android `window.Android.*` API so the existing
   `static/js/` codebase needs no per-platform forks
 
@@ -47,7 +47,7 @@ xcodebuild -exportArchive -archivePath build/FrogTalk.xcarchive \
    - Push Notifications
    - Background Modes: Audio, AirPlay, Picture in Picture; Voice over IP;
      Background fetch; Remote notifications
-   - Associated Domains: `applinks:frogtalk.xyz`
+   - Associated Domains: `applinks:frogtalk.app`
 4. **Firebase Cloud Messaging** (optional but recommended, since we already
    use it for Android):
    - Add an iOS app to the existing Firebase project, bundle id
@@ -66,7 +66,7 @@ iOS has no `.apk`-equivalent free sideload path. Distribution channels:
 | Channel | Reach | Notes |
 |---|---|---|
 | **App Store** | All iPhones | Required for general public; 1–7 day first review |
-| **TestFlight** | Up to 10,000 testers via public link | Closest analog to the APK download — post link on frogtalk.xyz |
+| **TestFlight** | Up to 10,000 testers via public link | Closest analog to the APK download — post link on frogtalk.app |
 | Ad-Hoc `.ipa` | 100 pre-registered UDIDs | Not "download from website" — user must pre-register |
 | Enterprise | Internal only | Apple revokes for public distribution; do NOT use |
 

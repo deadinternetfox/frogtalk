@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta http-equiv="X-UA-Compatible" content="IE=edge">
 <title>Run Your FrogTalk Node — FrogTalk</title>
-<meta name="description" content="Install a FrogTalk federation node on a Linux VPS: setup wizard, HTTPS, systemd, and mesh sync with frogtalk.xyz.">
+<meta name="description" content="Install a FrogTalk federation node on a Linux VPS: setup wizard, HTTPS, systemd, and mesh sync with frogtalk.app.">
 <meta name="theme-color" content="#4caf50">
 <meta name="keywords" content="FrogTalk node, self-hosted chat, federation, VPS install, FastAPI node">
 <meta name="author" content="FrogTalk">
@@ -13,13 +13,13 @@
 <meta name="apple-mobile-web-app-title" content="FrogTalk">
 <meta name="referrer" content="strict-origin-when-cross-origin">
 <meta name="robots" content="index, follow, max-image-preview:large">
-<link rel="canonical" href="https://frogtalk.xyz/docs/node">
+<link rel="canonical" href="https://frogtalk.app/docs/node">
 <meta property="og:type" content="website">
-<meta property="og:url" content="https://frogtalk.xyz/docs/node">
+<meta property="og:url" content="https://frogtalk.app/docs/node">
 <meta property="og:title" content="Run Your FrogTalk Node">
 <meta property="og:description" content="Pre-alpha VPS install guide for a self-hosted FrogTalk node with federation, nginx, and the CLI setup wizard.">
-<meta property="og:image" content="https://frogtalk.xyz/static/icons/og-image.png">
-<meta property="og:image:secure_url" content="https://frogtalk.xyz/static/icons/og-image.png">
+<meta property="og:image" content="https://frogtalk.app/static/icons/og-image.png">
+<meta property="og:image:secure_url" content="https://frogtalk.app/static/icons/og-image.png">
 <meta property="og:image:type" content="image/png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
@@ -30,7 +30,7 @@
 <meta name="twitter:site" content="@frogtalk">
 <meta name="twitter:title" content="Run Your FrogTalk Node">
 <meta name="twitter:description" content="Deploy and federate your own FrogTalk node on a fresh Linux VPS.">
-<meta name="twitter:image" content="https://frogtalk.xyz/static/icons/og-image.png">
+<meta name="twitter:image" content="https://frogtalk.app/static/icons/og-image.png">
 <meta name="twitter:image:alt" content="FrogTalk node installation guide">
 <link rel="icon" href="/static/favicon.ico" sizes="any">
 <link rel="icon" href="/static/icons/icon.svg" type="image/svg+xml">
@@ -41,15 +41,15 @@
   "@context": "https://schema.org",
   "@type": "WebPage",
   "name": "Run Your FrogTalk Node",
-  "url": "https://frogtalk.xyz/docs/node",
+  "url": "https://frogtalk.app/docs/node",
   "description": "Install and federate a self-hosted FrogTalk node on Linux.",
   "inLanguage": "en",
   "isPartOf": {
     "@type": "WebSite",
     "name": "FrogTalk",
-    "url": "https://frogtalk.xyz/"
+    "url": "https://frogtalk.app/"
   },
-  "primaryImageOfPage": "https://frogtalk.xyz/static/icons/og-image.png"
+  "primaryImageOfPage": "https://frogtalk.app/static/icons/og-image.png"
 }
 </script>
 <link rel="stylesheet" href="/static/css/docs-node.css">
@@ -60,7 +60,7 @@
   <main class="wrap">
     <section class="hero">
       <h1>Run a FrogTalk Node</h1>
-      <p class="sub">Self-host a federated chat node on a fresh Linux VPS — CLI setup wizard, nginx, systemd, and sync with the public mesh anchored at <a href="https://frogtalk.xyz">frogtalk.xyz</a>.</p>
+      <p class="sub">Self-host a federated chat node on a fresh Linux VPS — CLI setup wizard, nginx, systemd, and sync with the public mesh anchored at <a href="https://frogtalk.app">frogtalk.app</a>.</p>
       <p class="hint hero-meta"><strong>Pre-alpha:</strong> expect breaking changes between releases. Pin a git tag or verify SHA-256 from the release feed before production use.</p>
       <nav class="toc" aria-label="On this page">
         <a href="#quick">Quick install</a>
@@ -104,7 +104,7 @@ cd /opt/frogtalk
 
 export PUBLIC_URL="http://&lt;YOUR_VPS_IP&gt;"
 export FROGTALK_SERVER_NAME="My FrogTalk Node"
-# Same token as on FrogTalk Main (frogtalk.xyz) — generate once on Main:
+# Same token as on FrogTalk Main (frogtalk.app) — generate once on Main:
 export FROGTALK_FEDERATION_TOKEN="&lt;openssl-rand-hex-32-on-main&gt;"
 
 sudo bash node/scripts/install.sh setup -y --install-dir /opt/frogtalk --public-url "$PUBLIC_URL"
@@ -118,7 +118,7 @@ bash node/scripts/install.sh federation -y --install-dir /opt/frogtalk --public-
 sudo ufw allow OpenSSH &amp;&amp; sudo ufw allow 80/tcp &amp;&amp; sudo ufw allow 443/tcp
 sudo ufw --force enable
 
-curl -sS https://frogtalk.xyz/api/network/servers | python3 -m json.tool
+curl -sS https://frogtalk.app/api/network/servers | python3 -m json.tool
 grep ADMIN_PASSWORD /opt/frogtalk/.env</code></pre>
       <p class="hint"><code>setup -y</code> (root) installs board nginx, <strong>auto HTTPS</strong> for <code>http://</code> IPs (self-signed), then updates <code>PUBLIC_URL</code> to <code>https://</code>. See <a href="#https">HTTPS</a>.</p>
       <p class="hint">Open <code>$PUBLIC_URL/app</code>, log in as <code>admin</code> (password in <code>.env</code>), rotate the password.</p>
@@ -197,16 +197,16 @@ FROGTALK_SYNC_PAGINATION=1
 # Or directly:
 bash node/scripts/node_federation_join.sh --install-dir /opt/frogtalk -y \
   --public-url "$PUBLIC_URL"</code></pre>
-      <p class="hint">Pulls the <a href="https://frogtalk.xyz/api/network/servers">official directory</a>, <strong>announces this node on the hub</strong> (<code>POST …/servers/register</code>), imports peers, and pins Ed25519 keys from each peer’s <code>/api/network/status</code> (run after <code>frogtalk</code> is up).</p>
-      <p class="hint"><strong>Token:</strong> set the same <code>FROGTALK_FEDERATION_TOKEN</code> on FrogTalk Main and on this node (<code>openssl rand -hex 32</code> on Main; never commit). Without it, join warns and you won’t appear on frogtalk.xyz until you set the token and re-run federation.</p>
+      <p class="hint">Pulls the <a href="https://frogtalk.app/api/network/servers">official directory</a>, <strong>announces this node on the hub</strong> (<code>POST …/servers/register</code>), imports peers, and pins Ed25519 keys from each peer’s <code>/api/network/status</code> (run after <code>frogtalk</code> is up).</p>
+      <p class="hint"><strong>Token:</strong> set the same <code>FROGTALK_FEDERATION_TOKEN</code> on FrogTalk Main and on this node (<code>openssl rand -hex 32</code> on Main; never commit). Without it, join warns and you won’t appear on frogtalk.app until you set the token and re-run federation.</p>
       <pre><code># Verify global listing (authoritative feed on Main):
-curl -sS https://frogtalk.xyz/api/network/servers | python3 -m json.tool
+curl -sS https://frogtalk.app/api/network/servers | python3 -m json.tool
 
 # Your own node's /api/network/servers always includes local identity —
-# that is NOT proof you are listed on frogtalk.xyz.</code></pre>
+# that is NOT proof you are listed on frogtalk.app.</code></pre>
       <table>
         <tr><th>Name</th><th>Role</th></tr>
-        <tr><td>FrogTalk Main</td><td><code>https://frogtalk.xyz</code></td></tr>
+        <tr><td>FrogTalk Main</td><td><code>https://frogtalk.app</code></td></tr>
         <tr><td>FrogTalk Tor Mirror</td><td>Onion mirror — network list in app</td></tr>
       </table>
       <pre><code>FROGTALK_FEDERATION_ENABLED=1
@@ -276,14 +276,14 @@ journalctl -u frogtalk -n 40 --no-pager</code></pre>
         <tr><td>Call does not ring on foreign node</td><td>Callee may be homed elsewhere — they must be online here or at home; friends-only gate default</td></tr>
         <tr><td>Channel name clash after sync</td><td>Local channel kept; home channel listed in federated directory only — join via directory may return <code>name_collision</code></td></tr>
         <tr><td>Friend theme missing on travel node</td><td>Re-sync from home; profiles merge <code>federation_user_profiles</code> cache</td></tr>
-        <tr><td>Not on frogtalk.xyz directory</td><td>Match <code>FROGTALK_FEDERATION_TOKEN</code> on Main + node; re-run <code>federation -y</code></td></tr>
+        <tr><td>Not on frogtalk.app directory</td><td>Match <code>FROGTALK_FEDERATION_TOKEN</code> on Main + node; re-run <code>federation -y</code></td></tr>
         <tr><td>CORS errors</td><td>Add your URL to <code>ALLOWED_ORIGINS</code></td></tr>
         <tr><td><code>/board/</code> OK but <code>/app</code> 502</td><td>nginx must not <code>listen 8080</code> when app uses <code>PORT=8080</code> — re-run <code>board-nginx</code> (wizard strips tunnel port by default)</td></tr>
         <tr><td><code>/board/</code> 404</td><td>Re-run <code>sudo bash node/scripts/install.sh board-nginx</code>; check php-fpm + nginx test</td></tr>
         <tr><td>Board pills / <code>curl_init</code></td><td><code>sudo apt install php-cli php-curl</code>; re-run federation</td></tr>
         <tr><td><code>systemd</code> permission denied</td><td><code>sudo chown -R deploy:deploy /opt/frogtalk</code>; <code>sudo bash node/scripts/install.sh systemd -y</code></td></tr>
       </table>
-      <p class="hint">Security reports: <a href="/security">frogtalk.xyz/security</a></p>
+      <p class="hint">Security reports: <a href="/security">frogtalk.app/security</a></p>
     </section>
 
     <section class="step" id="tor">
@@ -319,7 +319,7 @@ bash node/scripts/install.sh federation -y --public-url "$PUBLIC_URL"</code></pr
         <tr><td>18+ labels</td><td>Voluntary public-channel content warnings with session age gate (not automated scanning)</td></tr>
         <tr><td>Federation UI</td><td>Release feed SHA-256 checks, trust badges, onion handoffs to <code>/app</code></td></tr>
       </table>
-      <p class="hint">API reference: <a href="/docs/api">frogtalk.xyz/docs/api</a> · Encryption detail: <a href="https://github.com/deadinternetfox/frogtalk/blob/master/docs/SECURITY_MODEL.md" rel="noopener noreferrer">docs/SECURITY_MODEL.md</a></p>
+      <p class="hint">API reference: <a href="/docs/api">frogtalk.app/docs/api</a> · Encryption detail: <a href="https://github.com/deadinternetfox/frogtalk/blob/master/docs/SECURITY_MODEL.md" rel="noopener noreferrer">docs/SECURITY_MODEL.md</a></p>
     </section>
 
     <section class="step">

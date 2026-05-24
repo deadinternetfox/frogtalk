@@ -162,7 +162,7 @@ nicknames in wraps — recipients must already exist (matched by `global_user_id
 
 Cross-node friends therefore need: mutual follow/friend graph sync, encrypted post +
 wraps, and often a re-wrap after the relationship exists on both sides. Details:
-[API reference](https://frogtalk.xyz/docs/api) (Federation section).
+[API reference](https://frogtalk.app/docs/api) (Federation section).
 
 ### Account sync (visiting another node)
 
@@ -301,7 +301,7 @@ private channel bodies, call media, or encrypted wall bodies without endpoint ke
 
 ## 11. Platform and federation hardening
 
-Server-side controls (see also [frogtalk.xyz/security](https://frogtalk.xyz/security)):
+Server-side controls (see also [frogtalk.app/security](https://frogtalk.app/security)):
 
 | Area | Behaviour |
 | ---- | --------- |

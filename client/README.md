@@ -12,7 +12,7 @@ web client + ops scripts) lives in `../node/`.
 | **Build here** | `bash client/desktop/scripts/build-linux-release.sh` |
 
 The app loads the same web UI as the node (`node/static/`). Point **Settings →
-Network** at your node (`https://frogtalk.xyz` or your self-hosted URL / `.onion`).
+Network** at your node (`https://frogtalk.app` or your self-hosted URL / `.onion`).
 
 ## Layout
 
@@ -38,7 +38,7 @@ client/
 
 The Electron renderer is the same web client served by the node at
 `node/static/`. The desktop shell points at an installed node (default
-`https://frogtalk.xyz`) but can be flipped to any node, including a Tor onion
+`https://frogtalk.app`) but can be flipped to any node, including a Tor onion
 address, via the in-app Network Settings panel.
 
 ## Building the desktop client

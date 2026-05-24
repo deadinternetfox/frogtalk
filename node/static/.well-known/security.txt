@@ -1,4 +1,4 @@
-Contact: mailto:security@frogtalk.xyz
+Contact: mailto:security@frogtalk.app
 Expires: 2027-12-31T23:59:59.000Z
 Preferred-Languages: en
-Canonical: https://frogtalk.xyz/.well-known/security.txt
+Canonical: https://frogtalk.app/.well-known/security.txt

@@ -1,11 +1,11 @@
 # FrogTalk node — VPS install guide
 
-> **Pre-alpha:** FrogTalk is experimental. Expect breaking changes and no uptime SLA. Deploy from `master`; track `dev` for bleeding-edge work. Read [frogtalk.xyz/security](https://frogtalk.xyz/security) before exposing a node to the public internet.
+> **Pre-alpha:** FrogTalk is experimental. Expect breaking changes and no uptime SLA. Deploy from `master`; track `dev` for bleeding-edge work. Read [frogtalk.app/security](https://frogtalk.app/security) before exposing a node to the public internet.
 
 This guide walks through running a **FrogTalk federation node** on a clean Linux VPS: clone the repo, run the **CLI setup wizard**, join the public mesh, put **nginx** in front, and verify sync with the official directory.
 
-- **Public reference node:** [https://frogtalk.xyz](https://frogtalk.xyz)
-- **Live operator page (same content, shorter):** [https://frogtalk.xyz/docs/node](https://frogtalk.xyz/docs/node)
+- **Public reference node:** [https://frogtalk.app](https://frogtalk.app)
+- **Live operator page (same content, shorter):** [https://frogtalk.app/docs/node](https://frogtalk.app/docs/node)
 - **Node quick start (scripts):** [node/README.md](../node/README.md)
 - **Typical install root:** `/opt/frogtalk`
 
@@ -23,7 +23,7 @@ A FrogTalk **node** is a self-contained stack:
 | **SQLite** (`data/frogtalk.db`) | Users, rooms, federation inbox/outbox |
 | **Vanilla JS UI** (`node/static/`) | Browser app at `/app` |
 | **Optional PHP board** (`node/board/`) | Frog Channel imageboard at `/board/` |
-| **Federation** | Ed25519-signed events; directory sync from `frogtalk.xyz` |
+| **Federation** | Ed25519-signed events; directory sync from `frogtalk.app` |
 
 The **install wizard** is a **bash CLI** (`node/scripts/node_setup_wizard.sh` via `install.sh setup`) — not a browser page. After the node is up, users register at `/app` and admins use the `admin` account from `.env`.
 
@@ -64,7 +64,7 @@ cd /opt/frogtalk
 # 4) Public URL, display name, hub token (generate token on FrogTalk Main only)
 export PUBLIC_URL="http://<YOUR_VPS_IP>"
 export FROGTALK_SERVER_NAME="My FrogTalk Node"
-export FROGTALK_FEDERATION_TOKEN="<same-as-main-on-frogtalk.xyz>"
+export FROGTALK_FEDERATION_TOKEN="<same-as-main-on-frogtalk.app>"
 
 # 5) Install wizard + mesh + systemd (non-interactive -y)
 # Optional board branding (wizard also sets from server name):
@@ -92,7 +92,7 @@ sudo ufw --force enable
 bash node/scripts/install.sh status --install-dir /opt/frogtalk
 curl -sk "$PUBLIC_URL/api/ping"
 curl -sk "$PUBLIC_URL/api/network/status" | python3 -m json.tool
-curl -sS https://frogtalk.xyz/api/network/servers | python3 -m json.tool
+curl -sS https://frogtalk.app/api/network/servers | python3 -m json.tool
 ```
 
 Open **`$PUBLIC_URL/app`**, log in as user **`admin`** (password in `/opt/frogtalk/.env` → `ADMIN_PASSWORD`), and rotate the password.
@@ -232,7 +232,7 @@ sudo bash node/scripts/install.sh systemd -y --install-dir /opt/frogtalk
 - Symlinks `node/data` → `../data`, `node/.env` → `../.env`, `node/secrets` → `../secrets`
 - When run with `sudo`, installs nginx + php-fpm for `/board/` and applies board identity from `FROGTALK_SERVER_NAME`
 - Offers HTTPS options in the wizard: **recommended** free trusted cert (Let's Encrypt/certbot, domain) or self-signed fallback
-- Prompts for `FROGTALK_FEDERATION_TOKEN` (must match FrogTalk Main at `frogtalk.xyz`)
+- Prompts for `FROGTALK_FEDERATION_TOKEN` (must match FrogTalk Main at `frogtalk.app`)
 - Optionally runs `node_federation_join.sh` (passes your `--public-url`)
 
 In **`-y` mode**, git pull during setup is skipped (use `install.sh update-apply -y` later). Scripts also avoid reading stdin when not attached to a TTY, so piping a multi-line shell script into `setup -y` is safe.
@@ -274,7 +274,7 @@ nano /opt/frogtalk/.env
 | `FROGTALK_FEDERATION_ENABLED=1` | Enable federation |
 | `FROGTALK_FEDERATION_REQUIRE_SIGS=1` | Reject unsigned inbox events (recommended) |
 | `FROGTALK_TOR_ENABLED=0` | Clearnet node (set `1` + `FROGTALK_ONION_URL` for Tor-only) |
-| `FROGTALK_OFFICIAL_DIRECTORY_URL` | Default `https://frogtalk.xyz/api/network/servers` |
+| `FROGTALK_OFFICIAL_DIRECTORY_URL` | Default `https://frogtalk.app/api/network/servers` |
 | `FROGTALK_FEDERATION_TOKEN` | Same value on **Main** and community nodes — hub register + signed push |
 | `FROGTALK_OFFICIAL_DIRECTORY_REGISTER_URL` | Optional override (default: directory URL + `/register`) |
 | `FROGTALK_AUTO_UPDATE_ENABLED=0` | Opt-in updates only |
@@ -291,7 +291,7 @@ nano /opt/frogtalk/.env
 | `FROGTALK_SYNC_PAGINATION` | `1` | Chunk social posts beyond 300 per export page |
 | `FROGTALK_SYNC_STALE_HOURS` | `0` | Re-sync after N hours when prior import completed (`24` recommended on busy foreign nodes) |
 
-Imports include joined channel shells (with sanitized `channel_theme`), contact profile styling, your app theme preset, and profile inline CSS. See [SECURITY_MODEL.md](SECURITY_MODEL.md) (Account sync section) and the live [API reference](https://frogtalk.xyz/docs/api) (Auth + Federation).
+Imports include joined channel shells (with sanitized `channel_theme`), contact profile styling, your app theme preset, and profile inline CSS. See [SECURITY_MODEL.md](SECURITY_MODEL.md) (Account sync section) and the live [API reference](https://frogtalk.app/docs/api) (Auth + Federation).
 
 Generate a federation shared secret once on FrogTalk Main, then distribute to operators (never commit):
 
@@ -321,7 +321,7 @@ This script:
 
 1. Ensures `node/data` is a **symlink** (not an empty real folder)
 2. Enables federation keys in `.env`
-3. Pulls the [official directory](https://frogtalk.xyz/api/network/servers)
+3. Pulls the [official directory](https://frogtalk.app/api/network/servers)
 4. **Announces** this node on the hub (`POST …/servers/register` with `X-Federation-Token`) when `FROGTALK_FEDERATION_TOKEN` matches Main
 5. **TOFU-pins** peer Ed25519 keys from each peer’s `GET /api/network/status` (after the service is running)
 6. Links Frog Channel peer nav pills (unless `--skip-board` or `php` is not installed)
@@ -330,7 +330,7 @@ If the directory is unreachable, a built-in fallback seeds two **verified produc
 
 | Display name | Role |
 |--------------|------|
-| **FrogTalk Main** | `https://frogtalk.xyz` |
+| **FrogTalk Main** | `https://frogtalk.app` |
 | **FrogTalk Tor Mirror** | `.onion` mirror (see directory / network UI) |
 
 Re-run safely after changing `PUBLIC_URL` or onion settings:
@@ -356,7 +356,7 @@ Re-run federation after the service is up if peer `pubkey` lengths are still zer
 The authoritative mesh list is **Main’s** database, exposed at:
 
 ```bash
-curl -sS https://frogtalk.xyz/api/network/servers | python3 -m json.tool
+curl -sS https://frogtalk.app/api/network/servers | python3 -m json.tool
 ```
 
 **On FrogTalk Main** (once per fleet): add the same token to `/opt/frogtalk/.env`:
@@ -372,7 +372,7 @@ sudo systemctl restart frogtalk
 ```mermaid
 sequenceDiagram
   participant Node as Community node
-  participant Main as frogtalk.xyz (Main)
+  participant Main as frogtalk.app (Main)
 
   Node->>Main: GET /api/network/servers (import peers)
   Node->>Main: POST /api/network/servers/register
@@ -383,17 +383,17 @@ sequenceDiagram
 **Verify global listing** (not your local API):
 
 ```bash
-curl -sS https://frogtalk.xyz/api/network/servers \
+curl -sS https://frogtalk.app/api/network/servers \
   | python3 -c "import sys,json; print([s.get('display_name') for s in json.load(sys.stdin).get('servers',[])])"
 ```
 
-**Important:** `GET /api/network/servers` on **your own** node injects the local server into the JSON even when you are **not** on Main — that is not proof of global listing. Always check `frogtalk.xyz`.
+**Important:** `GET /api/network/servers` on **your own** node injects the local server into the JSON even when you are **not** on Main — that is not proof of global listing. Always check `frogtalk.app`.
 
 **Troubleshooting — “peers see me only locally”**
 
 | Symptom | Fix |
 |---------|-----|
-| Join OK but absent on `frogtalk.xyz` | Set matching `FROGTALK_FEDERATION_TOKEN` on Main and node; re-run `federation -y` |
+| Join OK but absent on `frogtalk.app` | Set matching `FROGTALK_FEDERATION_TOKEN` on Main and node; re-run `federation -y` |
 | Register returns 403 | Token mismatch or missing on Main |
 | Skipped with `no_public_base_url` | Set `PUBLIC_URL` to a reachable clearnet URL (onion-only needs manual hub listing) |
 | `register_http_4xx` | Check `PUBLIC_URL` is not `localhost`; hub host must match directory URL |
@@ -490,7 +490,7 @@ curl -sS "$PUBLIC_URL/api/network/build/local"
 
 Open `$PUBLIC_URL/app` — register a test user, join a room, confirm WebSocket connectivity.
 
-In the app: **Settings → Network** — probe peers, compare build hash with [frogtalk.xyz](https://frogtalk.xyz) when federating.
+In the app: **Settings → Network** — probe peers, compare build hash with [frogtalk.app](https://frogtalk.app) when federating.
 
 ### Public URL, TLS, and Server Admin warnings
 
@@ -552,8 +552,8 @@ Use `bash node/scripts/install.sh update-apply` (or `node_update_check.sh --appl
 | API works on `:8080` but not via domain | nginx upstream port mismatch | Match `PORT` in `.env` and `proxy_pass` |
 | `nginx -t` fails on `proxy_set_header` | Config pasted with mangled `$host` | Use the heredoc in quick install (`<<'EOF'`) so `$` is literal |
 | Federation peers, no delivery | Missing pubkey pin | Start frogtalk, then re-run `federation -y` |
-| Listed locally, not on frogtalk.xyz | No hub register | Set `FROGTALK_FEDERATION_TOKEN` on Main + node; re-run `federation -y`; verify curl to `frogtalk.xyz` |
-| Directory sync fails | Outbound firewall / DNS | Check `curl` to `frogtalk.xyz`; fallback peers still seed mesh |
+| Listed locally, not on frogtalk.app | No hub register | Set `FROGTALK_FEDERATION_TOKEN` on Main + node; re-run `federation -y`; verify curl to `frogtalk.app` |
+| Directory sync fails | Outbound firewall / DNS | Check `curl` to `frogtalk.app`; fallback peers still seed mesh |
 | CORS errors in browser | `ALLOWED_ORIGINS` | Add your public URL |
 | Board step fails on `curl_init` | Missing PHP curl extension | `sudo apt install php-curl` and re-run federation |
 | `systemd` step permission denied | Not root | `sudo bash node/scripts/install.sh systemd -y` |
@@ -574,7 +574,7 @@ Logs: `journalctl -u frogtalk -n 100 --no-pager`, nginx `error.log`.
 - [ ] `.env` mode `600`, owned by service user
 - [ ] Do not expose uvicorn directly on the public internet
 
-Report issues: [frogtalk.xyz/security](https://frogtalk.xyz/security)
+Report issues: [frogtalk.app/security](https://frogtalk.app/security)
 
 ---
 
@@ -583,6 +583,6 @@ Report issues: [frogtalk.xyz/security](https://frogtalk.xyz/security)
 - [Repository README](../README.md)
 - [Node README](../node/README.md)
 - [Deploy templates](../node/deploy/README.md)
-- [API docs](https://frogtalk.xyz/docs/api)
+- [API docs](https://frogtalk.app/docs/api)
 - [Security model](SECURITY_MODEL.md)
 - [Federated calls](FEDERATED_CALLS.md)

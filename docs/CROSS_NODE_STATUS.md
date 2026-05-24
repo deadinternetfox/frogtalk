@@ -25,7 +25,7 @@ This is a living report — not a promise that everything below is finished.
 
 ### 1. Keys are per physical node (browser origin)
 
-- Signal identity + prekeys live in **IndexedDB per origin** (e.g. `frogtalk.xyz` vs AU nip.io).
+- Signal identity + prekeys live in **IndexedDB per origin** (e.g. `frogtalk.app` vs AU nip.io).
 - Default travel policy: **`fresh_keys`** (`device_crypto.js`) — new keys on travel; **no** DM key export in sync.
 - Server stores ciphertext only; it **cannot** decrypt.
 
@@ -88,7 +88,7 @@ This is a living report — not a promise that everything below is finished.
 | This node type | Sees in picker |
 |----------------|----------------|
 | **Clearnet-only** (e.g. AU) | Other clearnet nodes + official hub (HTTPS) |
-| **Hybrid** (`FROGTALK_HYBRID_NODE=1`, frogtalk.xyz) | Clearnet + Tor mirror (.onion) |
+| **Hybrid** (`FROGTALK_HYBRID_NODE=1`, frogtalk.app) | Clearnet + Tor mirror (.onion) |
 | **Tor-only** | Tor mirror + hybrid hub (not clearnet-only community nodes) |
 
 Server Admin **Block Tor federation peers** toggle appears only on **hybrid** hubs (not on clearnet-only or Tor-only nodes).

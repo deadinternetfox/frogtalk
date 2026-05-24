@@ -5,7 +5,7 @@ Android WebView wrapper for FrogTalk with full feature support:
 - **WebRTC** voice & video calls (camera + microphone permissions)
 - **Push notifications** (POST_NOTIFICATIONS permission for Android 13+)
 - **File uploads** (photos, documents)
-- **Deep linking** (https://frogtalk.xyz/* URLs open in app)
+- **Deep linking** (https://frogtalk.app/* URLs open in app)
 - **Offline error handling** with retry button
 - **Edge-to-edge** dark UI matching the web app
 

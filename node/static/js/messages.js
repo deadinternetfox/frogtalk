@@ -127,7 +127,7 @@ const Messages = (() => {
       const o = String(location.origin || '').trim();
       if (o.startsWith('http://') || o.startsWith('https://')) return o;
     } catch {}
-    return 'https://frogtalk.xyz';
+    return 'https://frogtalk.app';
   }
 
   function _canonicalEmbedUrl(kind, id, rawUrl) {

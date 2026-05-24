@@ -6,11 +6,13 @@ from unittest import mock
 import database as db
 from public_url_policy import (
     OFFICIAL_HUB_URL_DEFAULT,
+    LEGACY_OFFICIAL_HUB_URL,
     SITE_PUBLIC_URL_CONFIG_KEY,
     normalize_public_url,
     public_invite_url,
     resolve_public_site_url,
     is_known_frog_host,
+    substitute_site_url_in_text,
 )
 
 
@@ -44,6 +46,16 @@ class PublicUrlPolicyTests(unittest.TestCase):
         with mock.patch("public_url_policy.resolve_public_site_host", return_value="chat.example.com"):
             self.assertTrue(is_known_frog_host("chat.example.com"))
             self.assertFalse(is_known_frog_host("evil.example.com"))
+
+    def test_substitute_replaces_legacy_xyz_and_app(self):
+        with mock.patch("public_url_policy.resolve_public_site_url", return_value="https://mine.test"):
+            out = substitute_site_url_in_text(
+                "See https://frogtalk.xyz/docs and https://frogtalk.app/app"
+            )
+            self.assertIn("https://mine.test/docs", out)
+            self.assertIn("https://mine.test/app", out)
+            self.assertNotIn("frogtalk.xyz", out)
+            self.assertNotIn("frogtalk.app", out)
 
     def test_default_official_hub(self):
         with mock.patch.object(db, "get_config", return_value=None):

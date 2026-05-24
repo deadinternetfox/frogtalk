@@ -2,7 +2,7 @@
 
 Operator and security documentation published with the repository.
 
-**Project status:** Pre-alpha — expect breaking changes; see [security](https://frogtalk.xyz/security) before production use.
+**Project status:** Pre-alpha — expect breaking changes; see [security](https://frogtalk.app/security) before production use.
 
 | Document | Audience |
 | -------- | -------- |
@@ -12,4 +12,4 @@ Operator and security documentation published with the repository.
 
 **Branches:** `dev` (development) · `master` (pre-alpha production deploys)
 
-Live site: [docs/node](https://frogtalk.xyz/docs/node), [docs/api](https://frogtalk.xyz/docs/api), [security](https://frogtalk.xyz/security), [privacy](https://frogtalk.xyz/privacy).
+Live site: [docs/node](https://frogtalk.app/docs/node), [docs/api](https://frogtalk.app/docs/api), [security](https://frogtalk.app/security), [privacy](https://frogtalk.app/privacy).

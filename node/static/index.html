@@ -20,11 +20,11 @@
 
 <!-- Open Graph (Facebook, Discord, Telegram, Slack, iMessage, …) -->
 <meta property="og:type" content="website">
-<meta property="og:url" content="https://frogtalk.xyz/app">
+<meta property="og:url" content="https://frogtalk.app/app">
 <meta property="og:title" content="FrogTalk — Secure Encrypted Chat">
 <meta property="og:description" content="Signal-level privacy meets Discord-style features. E2E encrypted DMs, voice & video calls, group channels, stories. No tracking, no ads.">
-<meta property="og:image" content="https://frogtalk.xyz/static/icons/og-image.png">
-<meta property="og:image:secure_url" content="https://frogtalk.xyz/static/icons/og-image.png">
+<meta property="og:image" content="https://frogtalk.app/static/icons/og-image.png">
+<meta property="og:image:secure_url" content="https://frogtalk.app/static/icons/og-image.png">
 <meta property="og:image:type" content="image/png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
@@ -37,7 +37,7 @@
 <meta name="twitter:site" content="@frogtalk">
 <meta name="twitter:title" content="FrogTalk — Secure Encrypted Chat">
 <meta name="twitter:description" content="E2E encrypted DMs, voice & video calls, channels & stories. Privacy-first messaging.">
-<meta name="twitter:image" content="https://frogtalk.xyz/static/icons/og-image.png">
+<meta name="twitter:image" content="https://frogtalk.app/static/icons/og-image.png">
 <meta name="twitter:image:alt" content="FrogTalk — secure encrypted chat">
 <meta name="application-name" content="FrogTalk">
 
@@ -46,14 +46,14 @@
      The canonical points to the public home page so any crawler that
      lands here is pointed at the indexable landing page instead. -->
 <meta name="robots" content="noindex, nofollow">
-<link rel="canonical" href="https://frogtalk.xyz/">
+<link rel="canonical" href="https://frogtalk.app/">
 <title>FrogTalk</title>
 <script type="application/ld+json">
 {
   "@context": "https://schema.org",
   "@type": "WebSite",
   "name": "FrogTalk",
-  "url": "https://frogtalk.xyz/"
+  "url": "https://frogtalk.app/"
 }
 </script>
 <!-- Social script font for the FrogSocial wordmark -->
@@ -9607,12 +9607,12 @@ window.ConnErr = (function(){
           </div>
           <p class="ch-vanity-card__desc">
             Claim a memorable short link for your channel. Anyone visiting
-            <code class="ch-vanity-card__code" data-ft-vanity-prefix>frogtalk.xyz/i/&lt;name&gt;</code>
+            <code class="ch-vanity-card__code" data-ft-vanity-prefix>frogtalk.app/i/&lt;name&gt;</code>
             will land on a join page.
           </p>
           <div id="ch-vanity-row" class="ch-vanity-row">
             <div class="ch-vanity-input-wrap">
-              <span class="ch-vanity-input-prefix" data-ft-vanity-prefix>frogtalk.xyz/i/</span>
+              <span class="ch-vanity-input-prefix" data-ft-vanity-prefix>frogtalk.app/i/</span>
               <input id="ch-vanity-input" class="ch-vanity-input" type="text" maxlength="32" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="frogs">
             </div>
             <button id="ch-vanity-save-btn" type="button" class="ch-vanity-save-btn" onclick="Rooms.saveVanity()" disabled>Save</button>
@@ -10431,7 +10431,7 @@ window.ConnErr = (function(){
       <label style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid #1e1e1e;cursor:pointer">
         <div>
           <div style="font-size:14px;color:#e0e0e0">Public Profile</div>
-          <div style="font-size:12px;color:#666;margin-top:2px">Let anyone — even without a FrogTalk account — view your basic profile at <span style="color:#4caf50" data-ft-profile-url-hint>frogtalk.xyz/u/you</span>. Turn off to keep it hidden from search &amp; anonymous visitors.</div>
+          <div style="font-size:12px;color:#666;margin-top:2px">Let anyone — even without a FrogTalk account — view your basic profile at <span style="color:#4caf50" data-ft-profile-url-hint>frogtalk.app/u/you</span>. Turn off to keep it hidden from search &amp; anonymous visitors.</div>
         </div>
         <input type="checkbox" id="profile-public" style="width:18px;height:18px;cursor:pointer;accent-color:#4caf50">
       </label>
@@ -10710,9 +10710,9 @@ window.ConnErr = (function(){
       </label>
 
       <label class="modal-label">Custom Server URL</label>
-      <input id="network-custom-url" class="modal-input" placeholder="frogtalk.xyz" value="frogtalk.xyz">
+      <input id="network-custom-url" class="modal-input" placeholder="frogtalk.app" value="frogtalk.app">
       <div style="font-size:11px;color:#7a8a82;margin-top:6px;line-height:1.45">
-        Official node: <strong style="color:#9ec59e">frogtalk.xyz</strong> — edit the field above for your own server.
+        Official node: <strong style="color:#9ec59e">frogtalk.app</strong> — edit the field above for your own server.
       </div>
 
       <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
@@ -10891,7 +10891,7 @@ window.ConnErr = (function(){
 
     <label style="display:block;font-size:12px;color:#9dc4b2;margin-bottom:6px">Home node URL</label>
     <input type="url" id="account-home-repin-input" class="modal-input" inputmode="url" autocomplete="off"
-           placeholder="https://frogtalk.xyz" maxlength="512"
+           placeholder="https://frogtalk.app" maxlength="512"
            onkeydown="if(event.key==='Enter')submitAccountHomeRepin();else if(event.key==='Escape')closeAccountHomeRepinModal()">
     <div style="font-size:11px;color:#6f8e77;margin-top:6px;line-height:1.45">
       Must be a public FrogTalk node listed in the federation directory. Use <code style="color:#9ec59e">https://</code> or hostname only — we normalize and validate before saving.

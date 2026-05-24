@@ -3,9 +3,9 @@
   <ShortName>FrogTalk</ShortName>
   <Description>Search FrogTalk users, public channels, and social posts.</Description>
   <InputEncoding>UTF-8</InputEncoding>
-  <Image width="16" height="16" type="image/x-icon">https://frogtalk.xyz/static/favicon.ico</Image>
-  <Image width="192" height="192" type="image/png">https://frogtalk.xyz/static/icons/icon-192.png</Image>
-  <Url type="text/html" method="get" template="https://frogtalk.xyz/app/search?q={searchTerms}"/>
-  <Url type="application/opensearchdescription+xml" rel="self" template="https://frogtalk.xyz/opensearch.xml"/>
-  <moz:SearchForm xmlns:moz="http://www.mozilla.org/2006/browser/search/">https://frogtalk.xyz/app/search</moz:SearchForm>
+  <Image width="16" height="16" type="image/x-icon">https://frogtalk.app/static/favicon.ico</Image>
+  <Image width="192" height="192" type="image/png">https://frogtalk.app/static/icons/icon-192.png</Image>
+  <Url type="text/html" method="get" template="https://frogtalk.app/app/search?q={searchTerms}"/>
+  <Url type="application/opensearchdescription+xml" rel="self" template="https://frogtalk.app/opensearch.xml"/>
+  <moz:SearchForm xmlns:moz="http://www.mozilla.org/2006/browser/search/">https://frogtalk.app/app/search</moz:SearchForm>
 </OpenSearchDescription>

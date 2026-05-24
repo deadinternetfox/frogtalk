@@ -713,6 +713,18 @@ def _site_url(request: Request | None = None) -> str:
     return resolve_public_site_url(request=request)
 
 
+def _home_page_path() -> str:
+    """Homepage variant: main (marketing), dev (contributors), tor (onion landing)."""
+    variant = (os.getenv("FROGTALK_HOME_PAGE") or "main").strip().lower()
+    paths = {
+        "main": "static/home.html",
+        "dev": "static/home-dev.html",
+        "tor": "static/home-tor.html",
+    }
+    path = paths.get(variant, "static/home.html")
+    return path if os.path.exists(path) else "static/home.html"
+
+
 def _serve_static_html_page(path: str, request: Request | None = None) -> HTMLResponse:
     """Serve a static HTML file with official-hub URLs replaced by this node's public URL."""
     try:
@@ -806,7 +818,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 # `*` + credentials is invalid per the CORS spec and silently breaks
 # credentialed cross-origin in modern browsers. Default to the canonical
 # domain; operators override via ALLOWED_ORIGINS env (comma-separated).
-_default_origins = "https://frogtalk.xyz,https://www.frogtalk.xyz"
+_default_origins = "https://frogtalk.app,https://www.frogtalk.app,https://frogtalk.xyz,https://www.frogtalk.xyz"
 
 
 def _normalize_origin_url(raw: str) -> str:
@@ -938,7 +950,7 @@ def _build_csp_header(nonce: str) -> str:
     _ = nonce  # reserved for Phase B — not emitted in directives yet
     return (
         "default-src 'self'; "
-        "script-src 'self' 'unsafe-inline' https://frogtalk.xyz; "
+        "script-src 'self' 'unsafe-inline' https://frogtalk.app https://frogtalk.xyz; "
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
         "font-src 'self' https://fonts.gstatic.com data:; "
         "img-src 'self' data: blob: https:; "
@@ -1229,7 +1241,9 @@ def _serve_app_shell_response() -> HTMLResponse:
     else:
         with open(_APP_HTML_PATH, "r", encoding="utf-8") as fh:
             raw = fh.read()
-        html = raw.replace("__APP_ASSET_VERSION__", asset_version)
+        html = substitute_operator_content(
+            raw.replace("__APP_ASSET_VERSION__", asset_version)
+        )
         cached["html"] = html
         cached["mtime"] = html_mtime
         cached["asset_version"] = asset_version
@@ -3267,7 +3281,7 @@ async def docs_api_page(request: Request):
     page = "static/docs-api.html"
     if os.path.exists(page):
         return _serve_static_html_page(page, request=request)
-    return _serve_static_html_page("static/home.html", request=request)
+    return _serve_static_html_page(_home_page_path(), request=request)
 
 
 @app.get("/docs/node")
@@ -3275,7 +3289,7 @@ async def docs_node_page(request: Request):
     page = "static/docs-node.html"
     if os.path.exists(page):
         return _serve_static_html_page(page, request=request)
-    return _serve_static_html_page("static/home.html", request=request)
+    return _serve_static_html_page(_home_page_path(), request=request)
 
 
 @app.get("/privacy")
@@ -3283,7 +3297,7 @@ async def privacy_page(request: Request):
     page = "static/privacy.html"
     if os.path.exists(page):
         return _serve_static_html_page(page, request=request)
-    return _serve_static_html_page("static/home.html", request=request)
+    return _serve_static_html_page(_home_page_path(), request=request)
 
 
 @app.get("/security")
@@ -3296,7 +3310,15 @@ async def security_page(request: Request):
     page = "static/security.html"
     if os.path.exists(page):
         return _serve_static_html_page(page, request=request)
-    return _serve_static_html_page("static/home.html", request=request)
+    return _serve_static_html_page(_home_page_path(), request=request)
+
+
+@app.get("/tor")
+async def tor_landing_page(request: Request):
+    page = "static/home-tor.html"
+    if os.path.exists(page):
+        return _serve_static_html_page(page, request=request)
+    return _serve_static_html_page(_home_page_path(), request=request)
 
 
 @app.get("/")
@@ -3322,7 +3344,7 @@ async def serve_home(request: Request):
     code = (qp.get("invite") or qp.get("i") or "").strip()
     if code:
         return await serve_invite_landing(request, code)
-    home = "static/home.html"
+    home = _home_page_path()
     if os.path.exists(home):
         return _serve_static_html_page(home, request=request)
     return _serve_static_html_page("static/index.html", request=request)

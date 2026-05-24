@@ -57,14 +57,14 @@ address, posting via an official social media account, or acting as an
 appointed representative at an online or offline event.
 
 Community spaces include, but are not limited to: GitHub (issues, pull requests,
-discussions, and comments), [frogtalk.xyz](https://frogtalk.xyz) and other
+discussions, and comments), [frogtalk.app](https://frogtalk.app) and other
 FrogTalk nodes, project chat rooms, and security disclosure channels.
 
 ## Enforcement
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may be
 reported to the FrogTalk maintainers responsible for enforcement at
-**security@frogtalk.xyz** (include `Code of Conduct` in the subject line).
+**security@frogtalk.app** (include `Code of Conduct` in the subject line).
 
 Reports may also be filed through [GitHub Discussions](https://github.com/deadinternetfox/frogtalk/discussions)
 for community-visible moderation when appropriate, or via a

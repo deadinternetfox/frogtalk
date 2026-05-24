@@ -1,6 +1,6 @@
 # Frog Channel board
 
-Anonymous imageboard ("Frog Channel") for [FrogTalk](https://frogtalk.xyz): threads, replies, greentext, media uploads, live board chat, moderation, and optional federation between nodes.
+Anonymous imageboard ("Frog Channel") for [FrogTalk](https://frogtalk.app): threads, replies, greentext, media uploads, live board chat, moderation, and optional federation between nodes.
 
 This folder lives under **`node/board/`** — it ships with the federated server, not as a separate top-level repo tree.
 

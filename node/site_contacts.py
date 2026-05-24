@@ -21,10 +21,10 @@ DISPLAY_NAME_KEY = "federation.display_name"
 
 # Official defaults replaced on self-hosted nodes via admin / env.
 DEFAULT_EMAILS = {
-    "security": "security@frogtalk.xyz",
-    "privacy": "privacy@frogtalk.xyz",
-    "support": "hello@frogtalk.xyz",
-    "vapid": "admin@frogtalk.xyz",
+    "security": "security@frogtalk.app",
+    "privacy": "privacy@frogtalk.app",
+    "support": "hello@frogtalk.app",
+    "vapid": "admin@frogtalk.app",
 }
 
 ENV_EMAIL_KEYS = {
@@ -185,12 +185,19 @@ def substitute_contacts_in_text(text: str) -> str:
     """Replace official default contact emails with this node's configured values."""
     out = text or ""
     contacts = resolve_site_contacts()
+    legacy_defaults = {
+        "security": "security@frogtalk.xyz",
+        "privacy": "privacy@frogtalk.xyz",
+        "support": "hello@frogtalk.xyz",
+        "vapid": "admin@frogtalk.xyz",
+    }
     for kind, default in DEFAULT_EMAILS.items():
         current = contacts.get(kind) or default
-        if current and current != default:
-            out = out.replace(default, current)
-            # mailto: variants
-            out = out.replace(f"mailto:{default}", f"mailto:{current}")
+        for old in (default, legacy_defaults.get(kind, "")):
+            if not old or old == current:
+                continue
+            out = out.replace(old, current)
+            out = out.replace(f"mailto:{old}", f"mailto:{current}")
     return out
 
 

@@ -1,6 +1,6 @@
 # RunPod AI Bot for FrogTalk
 
-A reference channel-chat bot for [FrogTalk](https://frogtalk.xyz) that
+A reference channel-chat bot for [FrogTalk](https://frogtalk.app) that
 replies whenever it is `@`-mentioned, or when someone replies to one of
 its own messages. The brain is a [RunPod] serverless endpoint — swap in
 any chat model you like.
@@ -93,7 +93,7 @@ CLI flags. CLI > env > defaults.
 
 | Variable | Flag | Default | Meaning |
 | --- | --- | --- | --- |
-| `FROGTALK_SERVER` | `--server-url` | `https://frogtalk.xyz` | Base URL of the FrogTalk server |
+| `FROGTALK_SERVER` | `--server-url` | `https://frogtalk.app` | Base URL of the FrogTalk server |
 | `FROGTALK_BOT_TOKEN` | `--bot-token` | *(required)* | `bot_…` token issued in the app |
 | `FROGTALK_BOT_NAME` | `--bot-name` | *(required)* | Handle the bot was registered as (used to detect `@mentions`) |
 | `FROGTALK_CHANNELS` | `--channels` | *(empty)* | Comma-separated channels to listen in. Leave empty to auto-discover from the server. |

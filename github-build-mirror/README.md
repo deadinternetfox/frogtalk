@@ -27,5 +27,5 @@ Checksums: [SHA256SUMS-v241.txt](./SHA256SUMS-v241.txt)
 
 ## Website download endpoints
 
-- https://frogtalk.xyz/download/android
+- https://frogtalk.app/download/android
 - Your node: `https://<host>/download/android`

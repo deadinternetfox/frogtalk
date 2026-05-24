@@ -1,19 +1,19 @@
 # Security Policy
 
-FrogTalk is **open source** and currently in **pre-alpha**. We welcome responsible disclosure, but we **cannot guarantee** uptime, data durability, or that every build has been professionally audited. Use at your own risk — especially on the public instance at [frogtalk.xyz](https://frogtalk.xyz).
+FrogTalk is **open source** and currently in **pre-alpha**. We welcome responsible disclosure, but we **cannot guarantee** uptime, data durability, or that every build has been professionally audited. Use at your own risk — especially on the public instance at [frogtalk.app](https://frogtalk.app).
 
-Full details, threat model, and the public report form: **https://frogtalk.xyz/security**
+Full details, threat model, and the public report form: **https://frogtalk.app/security**
 
 ## Supported versions
 
-**Pre-alpha:** we ship continuously from **`master`** (production) and develop on **`dev`**. Only the latest deploy on frogtalk.xyz and nodes that have pulled recent updates are supported. There are no long-term release branches or SLA.
+**Pre-alpha:** we ship continuously from **`master`** (production) and develop on **`dev`**. Only the latest deploy on frogtalk.app and nodes that have pulled recent updates are supported. There are no long-term release branches or SLA.
 
 ## How to report a vulnerability
 
-**Preferred (most issues):** use the form at https://frogtalk.xyz/security  
+**Preferred (most issues):** use the form at https://frogtalk.app/security  
 Anonymous submissions are accepted. Include repro steps, a PoC if you have one, and optional contact info for follow-up and credit.
 
-**Sensitive disclosures:** email **security@frogtalk.xyz**  
+**Sensitive disclosures:** email **security@frogtalk.app**  
 Use this for issues you would rather not put in the web form (account takeover, E2EE bypass, RCE, etc.). Include:
 
 - A clear description of the issue
@@ -59,7 +59,7 @@ Or use Docker — see the README.
 ## Response & credit
 
 - We aim to acknowledge reports within **48 hours** and ship fixes for critical issues as fast as we can (often same day).
-- There is **no paid bug bounty** yet. We offer public credit in advisories and on the [Hall of Fame](https://frogtalk.xyz/security#hall-of-fame), plus honest write-ups of what broke and why.
+- There is **no paid bug bounty** yet. We offer public credit in advisories and on the [Hall of Fame](https://frogtalk.app/security#hall-of-fame), plus honest write-ups of what broke and why.
 - Add yourself to `CONTRIBUTORS.md` under **Security researchers** if you want a permanent repo credit, or tell us how to name you in the advisory.
 
 ## Threat model (summary)
@@ -70,11 +70,11 @@ Or use Docker — see the README.
 - We assume the server *can* be compromised; E2EE exists so that compromise does not expose DM plaintext.
 - Bridges to Discord/Telegram are blocked for private rooms.
 
-More detail: [docs/SECURITY_MODEL.md](docs/SECURITY_MODEL.md) and https://frogtalk.xyz/security
+More detail: [docs/SECURITY_MODEL.md](docs/SECURITY_MODEL.md) and https://frogtalk.app/security
 
 ## Security researchers we have thanked
 
-See the live Hall of Fame at https://frogtalk.xyz/security#hall-of-fame (e.g. **@frogtalk_is_insecure** — channel CSS / IP-leak audit, May 2026).
+See the live Hall of Fame at https://frogtalk.app/security#hall-of-fame (e.g. **@frogtalk_is_insecure** — channel CSS / IP-leak audit, May 2026).
 
 ---
 

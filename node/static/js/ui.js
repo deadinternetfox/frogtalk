@@ -2648,9 +2648,9 @@ function ensureNetworkPaneContent() {
     </label>
 
     <label class="modal-label">Custom Server URL</label>
-    <input id="network-custom-url" class="modal-input" placeholder="frogtalk.xyz" value="frogtalk.xyz">
+    <input id="network-custom-url" class="modal-input" placeholder="frogtalk.app" value="frogtalk.app">
     <div style="font-size:11px;color:#7a8a82;margin-top:6px;line-height:1.45">
-      Preferred routing when using <strong>Custom</strong> mode — not the node you are on now (see <em>Connected</em> below). Official: <strong style="color:#9ec59e">frogtalk.xyz</strong>.
+      Preferred routing when using <strong>Custom</strong> mode — not the node you are on now (see <em>Connected</em> below). Official: <strong style="color:#9ec59e">frogtalk.app</strong>.
     </div>
 
     <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
@@ -3038,7 +3038,7 @@ function _guessNetworkRegionFromBaseUrl(baseUrl) {
   } catch {
     host = String(base).toLowerCase();
   }
-  if (host === 'frogtalk.xyz' || host.endsWith('.frogtalk.xyz')) return 'Spain';
+  if (host === 'frogtalk.app' || host.endsWith('.frogtalk.app') || host === 'frogtalk.xyz' || host.endsWith('.frogtalk.xyz')) return 'Spain';
   if (host.endsWith('.es')) return 'Spain';
   if (host.endsWith('.fr')) return 'France';
   if (host.endsWith('.de')) return 'Germany';
@@ -3528,7 +3528,7 @@ function openAccountHomeRepinModal() {
     || localStorage.getItem('ft_sync_source_base')
     || '';
   const preferred = localStorage.getItem('ft_network_selected') || '';
-  const def = home || preferred || 'frogtalk.xyz';
+  const def = home || preferred || 'frogtalk.app';
 
   if (nowEl) nowEl.textContent = _hostLabelFromUrl(window.location.origin);
   if (curEl) {
@@ -4154,7 +4154,7 @@ async function runAutoNetworkSelect() {
   }
 }
 
-const OFFICIAL_NETWORK_INPUT = 'frogtalk.xyz';
+const OFFICIAL_NETWORK_INPUT = 'frogtalk.app';
 
 function useOfficialNetworkUrl() {
   const customEl = document.getElementById('network-custom-url');
@@ -4164,7 +4164,7 @@ function useOfficialNetworkUrl() {
   localStorage.setItem('ft_network_mode', 'custom');
   localStorage.setItem('ft_network_custom_url', OFFICIAL_NETWORK_INPUT);
   _syncNativeServerUrl(OFFICIAL_NETWORK_INPUT);
-  UI.showToast('Using official FrogTalk node (frogtalk.xyz)', 'success');
+  UI.showToast('Using official FrogTalk node (frogtalk.app)', 'success');
 }
 
 function _syncNativeServerUrl(url) {

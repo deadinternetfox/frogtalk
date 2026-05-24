@@ -9,7 +9,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from starlette.requests import Request
 
-OFFICIAL_HUB_URL_DEFAULT = "https://frogtalk.xyz"
+OFFICIAL_HUB_URL_DEFAULT = "https://frogtalk.app"
+LEGACY_OFFICIAL_HUB_URL = "https://frogtalk.xyz"
 SITE_PUBLIC_URL_CONFIG_KEY = "site.public_url"
 _LEGACY_KNOWN_HOSTS = frozenset({"frogtalk.xyz", "www.frogtalk.xyz", "frogtalk.app", "www.frogtalk.app"})
 
@@ -254,9 +255,12 @@ def is_known_frog_host(hostname: str) -> bool:
 def substitute_site_url_in_text(text: str, *, request: Request | None = None) -> str:
     """Replace official-hub URLs in static HTML with this node's public URL."""
     base = resolve_public_site_url(request=request)
-    if not base or base.rstrip("/") == OFFICIAL_HUB_URL_DEFAULT.rstrip("/"):
+    if not base:
         return text
-    official = OFFICIAL_HUB_URL_DEFAULT.rstrip("/")
-    return text.replace(official, base.rstrip("/")).replace(
-        f"{official}/", f"{base.rstrip('/')}/"
-    )
+    base_norm = base.rstrip("/")
+    if base_norm in {OFFICIAL_HUB_URL_DEFAULT.rstrip("/"), LEGACY_OFFICIAL_HUB_URL.rstrip("/")}:
+        return text
+    out = text
+    for official in (OFFICIAL_HUB_URL_DEFAULT.rstrip("/"), LEGACY_OFFICIAL_HUB_URL.rstrip("/")):
+        out = out.replace(official, base_norm).replace(f"{official}/", f"{base_norm}/")
+    return out

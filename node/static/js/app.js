@@ -757,7 +757,7 @@ const App = {
             9000,
           );
         } else if (err === 'home_unreachable') {
-          UI.showToast('Home node URL unknown on this server — open Settings → Network and confirm account home is frogtalk.xyz.', 'warn', 9000);
+          UI.showToast('Home node URL unknown on this server — open Settings → Network and confirm account home is frogtalk.app.', 'warn', 9000);
         } else {
           UI.showToast(`Could not sync travel data to home: ${err.slice(0, 80)}`, 'warn', 7000);
         }

@@ -5,14 +5,14 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>FrogTalk Full API Reference</title>
 <meta name="description" content="Complete FrogTalk API reference including auth, chat, social, federation, developer token API, and server-admin endpoints.">
-<link rel="canonical" href="https://frogtalk.xyz/docs/api">
+<link rel="canonical" href="https://frogtalk.app/docs/api">
 <meta name="robots" content="index,follow,max-image-preview:large">
 <meta property="og:type" content="website">
-<meta property="og:url" content="https://frogtalk.xyz/docs/api">
+<meta property="og:url" content="https://frogtalk.app/docs/api">
 <meta property="og:title" content="FrogTalk API Reference">
 <meta property="og:description" content="Complete FrogTalk API reference for auth, chat, social, federation, bot API, and server-admin endpoints.">
-<meta property="og:image" content="https://frogtalk.xyz/static/icons/og-image.png">
-<meta property="og:image:secure_url" content="https://frogtalk.xyz/static/icons/og-image.png">
+<meta property="og:image" content="https://frogtalk.app/static/icons/og-image.png">
+<meta property="og:image:secure_url" content="https://frogtalk.app/static/icons/og-image.png">
 <meta property="og:image:type" content="image/png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
@@ -23,7 +23,7 @@
 <meta name="twitter:site" content="@frogtalk">
 <meta name="twitter:title" content="FrogTalk API Reference">
 <meta name="twitter:description" content="Auth, messaging, social, federation, and bot integration endpoints in one complete reference.">
-<meta name="twitter:image" content="https://frogtalk.xyz/static/icons/og-image.png">
+<meta name="twitter:image" content="https://frogtalk.app/static/icons/og-image.png">
 <meta name="twitter:image:alt" content="FrogTalk API Reference page preview">
 <meta name="theme-color" content="#4caf50">
 <meta name="keywords" content="FrogTalk API, bot API, federation API, encrypted chat API, developer documentation">
@@ -40,15 +40,15 @@
   "@context": "https://schema.org",
   "@type": "WebPage",
   "name": "FrogTalk API Reference",
-  "url": "https://frogtalk.xyz/docs/api",
+  "url": "https://frogtalk.app/docs/api",
   "description": "Complete FrogTalk HTTP and WebSocket API reference.",
   "inLanguage": "en",
   "isPartOf": {
     "@type": "WebSite",
     "name": "FrogTalk",
-    "url": "https://frogtalk.xyz/"
+    "url": "https://frogtalk.app/"
   },
-  "primaryImageOfPage": "https://frogtalk.xyz/static/icons/og-image.png"
+  "primaryImageOfPage": "https://frogtalk.app/static/icons/og-image.png"
 }
 </script>
 
@@ -143,7 +143,7 @@ GET    /api/federation/profile-card</code></pre>
 <pre><code>PATCH /api/auth/client-prefs
 {
   "prefer_onion": true,
-  "preferred_node_url": "https://frogtalk.xyz",
+  "preferred_node_url": "https://frogtalk.app",
   "custom_sounds": {
     "app:msg": "data:audio/wav;base64,…",
     "app:ring": "data:audio/wav;base64,…"
@@ -439,7 +439,7 @@ Authorization: Bearer bot_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx</code></pre>
 
 BOT_TOKEN = "bot_…"
 CHANNEL   = "general"
-SERVER    = "https://frogtalk.xyz"
+SERVER    = "https://frogtalk.app"
 
 last_seen = 0
 while True:
@@ -539,7 +539,7 @@ python bot.py</code></pre>
 <pre><code class="lang-python">import os, time, requests
 
 TOKEN   = os.environ["FROGTALK_BOT_TOKEN"]    # bot_xxx from /api/developer/bots
-BASE    = "https://frogtalk.xyz/api/external"
+BASE    = "https://frogtalk.app/api/external"
 CHANNEL = "general"
 HEADERS = {"X-API-Key": TOKEN}
 seen = set()
@@ -560,7 +560,7 @@ while True:
 
           <h4 class="h-mt-14">🟦 TypeScript / Node.js</h4>
 <pre><code class="lang-typescript">const TOKEN   = process.env.FROGTALK_BOT_TOKEN!;
-const BASE    = "https://frogtalk.xyz/api/external";
+const BASE    = "https://frogtalk.app/api/external";
 const CHANNEL = "general";
 const headers = { "X-API-Key": TOKEN, "Content-Type": "application/json" };
 const seen = new Set&lt;number&gt;();
@@ -603,7 +603,7 @@ POST   /api/external/channels/{name}/messages
 GET    /api/external/users/{user_id}
 POST   /api/external/dms/{user_id}
 POST   /api/external/webhooks</code></pre>
-          <pre><code>curl -X GET https://frogtalk.xyz/api/external/me \
+          <pre><code>curl -X GET https://frogtalk.app/api/external/me \
   -H "X-API-Key: frog_your_key_here"</code></pre>
           <p class="muted"><strong>Bot keys only:</strong> <code>GET /api/external/me/channels</code> returns the list of channels the bot has been installed in (via Settings → Bots → Add to channel). Auto-discovery clients should poll this every ~30s instead of hardcoding a channel list. Reference bots and setup guides live in the repo under
           <a href="https://github.com/deadinternetfox/frogtalk/tree/master/bot-examples" target="_blank" rel="noopener noreferrer"><code>bot-examples/</code></a>
@@ -669,7 +669,7 @@ GET    /api/federation/failover/status</code></pre>
 <pre><code>POST /api/network/updates/publish
 {
   "version": "1.5.4-pre-alpha",
-  "package_url": "https://frogtalk.xyz/releases/frogtalk-1.5.4-pre-alpha.tar.gz",
+  "package_url": "https://frogtalk.app/releases/frogtalk-1.5.4-pre-alpha.tar.gz",
   "package_sha256": "&lt;sha256&gt;",
   "build_hash": "&lt;web-build-hash&gt;",
   "signature": "&lt;ed25519-sig-over-canonical-manifest&gt;",

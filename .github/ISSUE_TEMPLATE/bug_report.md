@@ -25,7 +25,7 @@ assignees: ''
 ## Environment
 
 - Client: web / Android / desktop / other
-- Node URL (if not frogtalk.xyz):
+- Node URL (if not frogtalk.app):
 - Browser or app version (if known):
 
 ## Notes

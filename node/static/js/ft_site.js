@@ -46,7 +46,7 @@
       const o = String(global.location && global.location.origin || '').trim();
       if (/^https?:\/\//i.test(o)) return o.replace(/\/$/, '');
     } catch {}
-    return 'https://frogtalk.xyz';
+    return 'https://frogtalk.app';
   }
 
   function ftPublicHost() {
@@ -59,7 +59,7 @@
     try {
       return (new URL(ftPublicOrigin())).hostname.toLowerCase();
     } catch {
-      return String(global.location && global.location.hostname || 'frogtalk.xyz').toLowerCase();
+      return String(global.location && global.location.hostname || 'frogtalk.app').toLowerCase();
     }
   }
 
@@ -116,7 +116,7 @@
           publicHost: publicHost || (function () {
             try { return new URL(publicUrl).hostname; } catch { return ''; }
           })(),
-          officialHubUrl: normOrigin(data.official_hub_url) || 'https://frogtalk.xyz',
+          officialHubUrl: normOrigin(data.official_hub_url) || 'https://frogtalk.app',
         };
         writeCache(publicUrl, global.FT_SITE.publicHost);
       }
