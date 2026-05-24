@@ -465,6 +465,12 @@ const Users = (() => {
       if (_sameUser(u.user_id, u.nickname, userId, nickname)) return true;
       return !!(gid && String(u.global_user_id || '').trim() === gid);
     };
+    const isLive = nextPresence === 'online' || nextPresence === 'away' || nextPresence === 'dnd';
+    if (nextPresence === 'offline' || nextPresence === 'invisible') {
+      const before = _allUsers.length;
+      _allUsers = _allUsers.filter(u => !matches(u));
+      if (_allUsers.length !== before) changed = true;
+    }
     for (const u of _allUsers) {
       if (matches(u)) {
         if (nextPresence !== undefined) u.presence = nextPresence;
@@ -476,10 +482,25 @@ const Users = (() => {
       if (matches(m)) {
         if (nextPresence !== undefined) {
           m.presence = nextPresence;
-          m.live_online = nextPresence === 'online' || nextPresence === 'away' || nextPresence === 'dnd';
+          m.live_online = isLive;
         }
         if (statusMsg !== undefined) m.status_msg = statusMsg;
         changed = true;
+        // Keep WS online mirror in sync when presence arrives without
+        // a preceding online_users frame (common in private/secret groups
+        // during channel switch before the socket catches up).
+        if (isLive && !_allUsers.some(u => matches(u))) {
+          _allUsers.push({
+            user_id: m.user_id,
+            nickname: m.nickname,
+            display_name: m.display_name,
+            avatar: m.avatar,
+            global_user_id: m.global_user_id,
+            presence: nextPresence,
+            status_msg: statusMsg,
+          });
+          changed = true;
+        }
       }
     }
     if (State.onlineUsers) {

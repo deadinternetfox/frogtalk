@@ -366,6 +366,23 @@ async def websocket_endpoint(
                 emit_user_last_seen(user)
             except Exception:
                 pass
+            # Friends list + member sidebars outside this room only learn
+            # about global connect via profile_update. Federation outbox
+            # apply is async; push live WS immediately.
+            try:
+                row = db.get_user_by_id(int(user["id"])) or user
+                pres = str(row.get("presence") or "online").strip().lower()
+                if pres not in ("online", "away", "dnd", "invisible", "offline"):
+                    pres = "online"
+                await manager.broadcast_all({
+                    "type": "profile_update",
+                    "user_id": int(user["id"]),
+                    "nickname": user.get("nickname") or "",
+                    "global_user_id": str(user.get("global_user_id") or "").strip(),
+                    "presence": pres,
+                })
+            except Exception:
+                pass
     db.update_last_seen(user["id"])
 
     # Drain any ICE candidates that the other side trickled while this user
@@ -2018,6 +2035,16 @@ async def websocket_endpoint(
                 emit_local_user_presence(int(user["id"]), "offline")
                 db.update_last_seen(user["id"])
                 emit_user_last_seen(user)
+                try:
+                    await manager.broadcast_all({
+                        "type": "profile_update",
+                        "user_id": int(user["id"]),
+                        "nickname": user.get("nickname") or "",
+                        "global_user_id": str(user.get("global_user_id") or "").strip(),
+                        "presence": "offline",
+                    })
+                except Exception:
+                    pass
         except Exception:
             pass
         try:

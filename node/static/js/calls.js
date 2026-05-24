@@ -74,6 +74,15 @@ function _formatCallSetupError(e) {
   return 'Call setup failed: ' + (msg || 'unknown error');
 }
 
+let _callSetupToastAt = 0;
+function _toastCallSetupError(msg) {
+  const now = Date.now();
+  console.error(msg);
+  if (now - _callSetupToastAt < 120_000) return;
+  _callSetupToastAt = now;
+  try { toast(msg, 'error'); } catch {}
+}
+
 /** Per-node TURN from GET /api/network/ice-config (local + optional peer home). */
 function _toastCallTamper(msg) {
   const now = Date.now();
@@ -370,6 +379,15 @@ try {
     setTimeout(() => {
       _flushOutboundCallQueue();
       _flushVoiceOutboundQueue();
+      if (_pendingAnswerSend) {
+        try {
+          if (_wsLooksOpen()) {
+            wsSend(_pendingAnswerSend);
+            _pendingAnswerSend = null;
+            clearTimeout(_pendingAnswerRetryTimer);
+          }
+        } catch {}
+      }
     }, 0);
   });
 } catch {}
@@ -471,6 +489,27 @@ async function _verifyCallFp(envelope, callId, fromId, sdp, opts) {
     } catch {}
   }
   if (!expectedIdentityPub) {
+    // Federated travel keys may 404 from the local bundle proxy — still verify
+    // the Ed25519 signature against env.i embedded in the envelope.
+    if (federated && envelope) {
+      try {
+        const laneOpts = {
+          expectedFingerprint: fp,
+          skipIdentityPin: true,
+          skipPeerUserId: true,
+          federated: true,
+        };
+        if (myGid) laneOpts.expectedPeerGlobalUserId = myGid;
+        if (!(opts && opts.bindCallId === false)) laneOpts.expectedCallId = Number(callId);
+        const sigRes = await Signal.verifyCallFingerprint(envelope, laneOpts);
+        if (sigRes && sigRes.ok) {
+          return { ok: 'unverified', reason: 'identity_lane_mismatch' };
+        }
+        if (sigRes && _isVerifyFatal(sigRes.reason)) {
+          return { ok: false, reason: sigRes.reason };
+        }
+      } catch {}
+    }
     return { ok: 'unverified', reason: 'no_peer_identity' };
   }
 
@@ -812,7 +851,7 @@ async function _startCallBody (type, nick, uid) {
   } catch (e) {
     // Any WebRTC / signaling failure should NOT crash the whole app.
     console.error('startCall setup failed', e);
-    toast(_formatCallSetupError(e), 'error');
+    _toastCallSetupError(_formatCallSetupError(e));
     endCall();
   }
 }
@@ -1043,7 +1082,7 @@ async function acceptCall () {
     }
   } catch (e) {
     console.error('acceptCall setup failed', e);
-    toast(_formatCallSetupError(e), 'error');
+    _toastCallSetupError(_formatCallSetupError(e));
     endCall(true, { wasConnected: false });
     return;
   } finally {
@@ -1943,6 +1982,10 @@ function clearStaleIncomingCallUi(reason) {
   try { hideIncomingCall(); } catch {}
   try { Notifications.stopRinging(); } catch {}
   try { window.Android?.dismissRing?.(); } catch {}
+  _clearPersistedIncomingCall();
+  try { window.App?.clearPendingIncomingCall?.(); } catch {}
+  _pendingOffer = null;
+  _autoAcceptPending = false;
   if (_callState === 'ringing') {
     resetCall();
     if (reason === 'gone') toast('This call is no longer available', 'info');
@@ -1950,9 +1993,68 @@ function clearStaleIncomingCallUi(reason) {
   }
 }
 
+/**
+ * Cold boot / bfcache restore: hide any leftover call UI. Does not notify peer
+ * (no live WebRTC session exists after a full reload).
+ */
+function resetStaleCallUiOnBoot() {
+  try { hideIncomingCall(); } catch {}
+  try { closeCallOverlay(); } catch {}
+  try { Notifications.stopRinging(); } catch {}
+  try { window.Android?.dismissRing?.(); } catch {}
+  try { window.Android?.endCallNotification?.(); } catch {}
+  _pendingOffer = null;
+  _autoAcceptPending = false;
+  clearTimeout(_pendingAnswerRetryTimer);
+  _pendingAnswerSend = null;
+  if (!_pc && (_callState === 'ringing' || _callState === 'calling' || _callState === 'active')) {
+    resetCall();
+  }
+}
+
+function _abandonCallOnPageHide() {
+  if (_callState !== 'ringing' && _callState !== 'calling' && _callState !== 'active') return;
+  const token = (typeof State !== 'undefined' && State.token) ? String(State.token) : '';
+  if (!token) return;
+  const body = JSON.stringify({ call_id: _callId || undefined });
+  try {
+    fetch('/api/calls/abandon', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Session-Token': token,
+      },
+      body,
+      keepalive: true,
+    }).catch(() => {});
+  } catch {}
+}
+
+async function reconcileCallSessionOnLogin() {
+  const token = (typeof State !== 'undefined' && State.token) ? String(State.token) : '';
+  if (!token) return;
+  try {
+    const res = await fetch('/api/calls/reconcile', {
+      method: 'POST',
+      headers: { 'X-Session-Token': token },
+    });
+    if (!res.ok) return;
+    const data = await res.json().catch(() => ({}));
+    if (!data?.pending_call_id) {
+      _clearPersistedIncomingCall();
+      try { window.App?.clearPendingIncomingCall?.(); } catch {}
+      if (_callState === 'ringing' && !_pendingOffer?.sdp) {
+        clearStaleIncomingCallUi('gone');
+      }
+    }
+  } catch {}
+}
+
 try { window.isIncomingCallActive = isIncomingCallActive; } catch {}
 try { window.ensureIncomingCallSurfaceVisible = ensureIncomingCallSurfaceVisible; } catch {}
 try { window.clearStaleIncomingCallUi = clearStaleIncomingCallUi; } catch {}
+try { window.resetStaleCallUiOnBoot = resetStaleCallUiOnBoot; } catch {}
+try { window.reconcileCallSessionOnLogin = reconcileCallSessionOnLogin; } catch {}
 
 function hideIncomingCall () {
   document.getElementById('incoming-call')?.classList.add('hidden');
@@ -2785,11 +2887,17 @@ function _maybeRecoverPendingIncomingCall () {
 }
 
 try {
+  resetStaleCallUiOnBoot();
   window.addEventListener('ws:open', _maybeRecoverPendingIncomingCall);
   window.addEventListener('ws:open', () => {
     setTimeout(() => _refreshIncomingAcceptAvailability(), 0);
   });
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') _maybeRecoverPendingIncomingCall();
+  });
+  window.addEventListener('pagehide', _abandonCallOnPageHide, { capture: true });
+  window.addEventListener('beforeunload', _abandonCallOnPageHide);
+  window.addEventListener('pageshow', (ev) => {
+    if (ev.persisted) resetStaleCallUiOnBoot();
   });
 } catch {}

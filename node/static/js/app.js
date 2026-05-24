@@ -1513,6 +1513,12 @@ const App = {
     }
 
     // Cold-boot from FCM: recover the offer before the permissions wizard can block Accept.
+    try {
+      if (typeof resetStaleCallUiOnBoot === 'function') resetStaleCallUiOnBoot();
+      if (typeof reconcileCallSessionOnLogin === 'function') {
+        await reconcileCallSessionOnLogin();
+      }
+    } catch {}
     if (this.pendingIncomingCall) {
       const restored = await this.ensureIncomingCallPipeline(this.pendingIncomingCall);
       if (restored) this.pendingIncomingCall = null;
@@ -1906,7 +1912,12 @@ const App = {
         headers: { 'X-Session-Token': State.token }
       });
       if (!res.ok) {
-        if (res.status === 404 || res.status === 409) this.clearPendingIncomingCall();
+        if (res.status === 404 || res.status === 409) {
+          this.clearPendingIncomingCall();
+          if (typeof clearStaleIncomingCallUi === 'function') {
+            clearStaleIncomingCallUi(res.status === 404 ? 'gone' : 'ended');
+          }
+        }
         return false;
       }
       const offer = await res.json();

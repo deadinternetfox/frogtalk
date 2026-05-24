@@ -132,6 +132,17 @@ const WS = (() => {
     return !!(_ws && _ws.readyState === WebSocket.OPEN);
   }
 
+  /** True when a room-scoped WS frame applies to the channel the user is viewing. */
+  function _wsRoomMatches(dataRoom) {
+    const dr = String(dataRoom || '');
+    if (!dr) return false;
+    if (dr === String(_room || '')) return true;
+    try {
+      if (dr === String(State.currentRoom || '')) return true;
+    } catch {}
+    return false;
+  }
+
   async function handleServerMsg(data) {
     const room = _room;
     switch (data.type) {
@@ -337,6 +348,9 @@ const WS = (() => {
       }
       case 'presence': {
         UI.showPresence(data.event, data.nickname);
+        if (_wsRoomMatches(data.room) && Array.isArray(data.users) && typeof Users !== 'undefined' && Users.updateList) {
+          Users.updateList(data.users);
+        }
         // A user just came online — they may be a brand-new channel member
         // who isn't in our cached @mention list yet. Trigger a throttled
         // refresh so the autocomplete includes them next time.
@@ -346,7 +360,9 @@ const WS = (() => {
         break;
       }
       case 'online_users': {
-        if (data.room === room) Users.updateList(data.users || []);
+        if (_wsRoomMatches(data.room) && typeof Users !== 'undefined' && Users.updateList) {
+          Users.updateList(data.users || []);
+        }
         // Refresh mentionable list when room roster updates so new members
         // appear in the @ autocomplete.
         try { window.refreshMentionUsers && window.refreshMentionUsers(); } catch {}
@@ -357,14 +373,14 @@ const WS = (() => {
         // first-time WS connect). Refresh the channel-members cache so
         // the right-hand sidebar shows them immediately, even if they
         // haven't opened a WS to this room yet.
-        if (data.room === room && typeof Users !== 'undefined' && Users.loadChannelMembers) {
+        if (_wsRoomMatches(data.room) && typeof Users !== 'undefined' && Users.loadChannelMembers) {
           try { Users.loadChannelMembers(data.room); } catch {}
         }
         try { window.refreshMentionUsers && window.refreshMentionUsers(); } catch {}
         break;
       }
       case 'room_presence': {
-        if (data.room !== room) break;
+        if (!_wsRoomMatches(data.room)) break;
         const p = String(data.presence || 'offline').toLowerCase();
         const live = p === 'online' || p === 'away' || p === 'dnd';
         if (typeof Users !== 'undefined' && Users.updatePresence) {
@@ -376,6 +392,7 @@ const WS = (() => {
             data.global_user_id,
           );
         }
+        try { patchFriendPresence && patchFriendPresence(data); } catch {}
         break;
       }
       case 'bot_added':
@@ -503,7 +520,9 @@ const WS = (() => {
         }
         // Propagate to friends list cache + re-render if panel open
         try {
-          if (typeof _allFriends !== 'undefined' && Array.isArray(_allFriends)) {
+          if (typeof patchFriendPresence === 'function') {
+            patchFriendPresence(data);
+          } else if (typeof _allFriends !== 'undefined' && Array.isArray(_allFriends)) {
             let fChanged = false;
             for (const f of _allFriends) {
               const sameById = data.user_id && (String(f.user_id || f.id || '') === String(data.user_id));
@@ -518,17 +537,7 @@ const WS = (() => {
                 }
               }
             }
-            if (fChanged) {
-              const fp = document.getElementById('friends-panel');
-              if (fp && !fp.classList.contains('hidden') && typeof renderFriendTab === 'function') {
-                renderFriendTab();
-              }
-              const frogPanel = document.getElementById('frog-friends-panel');
-              if (frogPanel && frogPanel.classList.contains('open') && typeof renderFfpContent === 'function') {
-                const activeTab = document.querySelector('.ffp-tab.active')?.dataset?.tab || 'online';
-                renderFfpContent(activeTab);
-              }
-            }
+            if (fChanged && typeof rerenderFriendsPanels === 'function') rerenderFriendsPanels();
           }
         } catch {}
         // Propagate to DM channel cache + re-render sidebar

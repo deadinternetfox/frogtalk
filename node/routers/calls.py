@@ -17,6 +17,88 @@ class DeclineCallRequest(BaseModel):
     peer_nick: Optional[str] = None
 
 
+class AbandonCallRequest(BaseModel):
+    call_id: Optional[int] = None
+
+
+async def _notify_call_abandoned(call_row: dict, user_id: int) -> None:
+    """Tell the peer this call ended and silence other sessions for ``user_id``."""
+    call_id = int(call_row["id"])
+    caller_id = int(call_row["caller_id"])
+    callee_id = int(call_row["callee_id"])
+    peer_id = callee_id if user_id == caller_id else caller_id
+    status = str(call_row.get("status") or "")
+    was_connected = status == "active"
+    end_payload = {
+        "type": "call_end",
+        "from_id": user_id,
+        "call_id": call_id,
+        "was_connected": was_connected,
+    }
+    from_user = db.get_user_by_id(user_id) or {}
+    end_payload["from_nickname"] = from_user.get("nickname") or ""
+    await manager.send_to_user(peer_id, end_payload)
+    await manager.send_to_user(user_id, {
+        "type": "call_handled",
+        "action": "ended",
+        "call_id": call_id,
+    })
+    try:
+        import federation_calls as _fc
+        peer = db.get_user_by_id(peer_id) or {}
+        gid = str(call_row.get("global_call_id") or "").strip()
+        if gid and _fc.is_remote_peer(peer):
+            pgid = str(peer.get("global_user_id") or "")
+            if pgid:
+                _fc.enqueue_call_end(
+                    from_user,
+                    pgid,
+                    global_call_id=gid,
+                    status="ended" if was_connected else "missed",
+                )
+    except Exception:
+        pass
+
+
+@router.post("/abandon")
+async def abandon_open_call(
+    payload: AbandonCallRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Best-effort hangup when the client closes mid-call (fetch keepalive / pagehide)."""
+    uid = int(current_user["id"])
+    row = db.find_open_call_for_user(uid, call_id=int(payload.call_id or 0))
+    if not row:
+        return {"ok": True, "cleared": False}
+    call_id = int(row["id"])
+    status = str(row.get("status") or "")
+    ended_at = datetime.utcnow().isoformat()
+    db.delete_pending_call_offer(call_id)
+    if status == "ringing":
+        db.update_call_status(call_id, "missed", ended_at=ended_at)
+    else:
+        db.update_call_status(call_id, "ended", ended_at=ended_at)
+    await _notify_call_abandoned(row, uid)
+    return {"ok": True, "cleared": True, "call_id": call_id}
+
+
+@router.post("/reconcile")
+async def reconcile_call_session(current_user: dict = Depends(get_current_user)):
+    """On login/boot: expire stale server rows so recovery does not resurrect ghost rings."""
+    uid = int(current_user["id"])
+    ringing = db.expire_stale_ringing_calls()
+    active = db.expire_stale_active_calls()
+    open_row = db.find_open_call_for_user(uid)
+    pending = db.get_latest_pending_call_offer(uid)
+    return {
+        "ok": True,
+        "expired_ringing": ringing,
+        "expired_active": active,
+        "open_call_id": int(open_row["id"]) if open_row else None,
+        "pending_call_id": int(pending["call_id"]) if pending else None,
+    }
+
+
 @router.get("/{call_id}/pending")
 async def get_pending_call(call_id: int, current_user: dict = Depends(get_current_user)):
     row = db.get_pending_call_offer(call_id, current_user["id"])

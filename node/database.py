@@ -6948,6 +6948,66 @@ def expire_stale_ringing_calls(max_age_sec: int = PENDING_CALL_MAX_AGE_SEC) -> i
         return len(ids)
 
 
+ACTIVE_CALL_MAX_AGE_SEC = 4 * 3600
+
+
+def expire_stale_active_calls(max_age_sec: int = ACTIVE_CALL_MAX_AGE_SEC) -> int:
+    """End active calls with no recent activity (orphaned after app kill)."""
+    age = max(300, int(max_age_sec or ACTIVE_CALL_MAX_AGE_SEC))
+    with _conn() as con:
+        stale = con.execute(
+            """
+            SELECT id FROM calls
+            WHERE status='active'
+              AND COALESCE(started_at, created_at) <= datetime('now', ?)
+            """,
+            (f"-{age} seconds",),
+        ).fetchall()
+        ids = [int(r["id"]) for r in stale if r and r["id"]]
+        if not ids:
+            return 0
+        ended = datetime.utcnow().isoformat()
+        for cid in ids:
+            con.execute(
+                "UPDATE calls SET status='ended', ended_at=? WHERE id=? AND status='active'",
+                (ended, cid),
+            )
+        con.commit()
+        return len(ids)
+
+
+def find_open_call_for_user(user_id: int, call_id: int = 0) -> Optional[Dict]:
+    """Most recent ringing/active call involving ``user_id``."""
+    expire_stale_ringing_calls()
+    expire_stale_active_calls()
+    uid = int(user_id)
+    cid = int(call_id or 0)
+    with _conn() as con:
+        if cid:
+            row = con.execute(
+                """
+                SELECT id, caller_id, callee_id, status, call_type, started_at, global_call_id
+                FROM calls
+                WHERE id=? AND (caller_id=? OR callee_id=?)
+                  AND status IN ('ringing', 'active')
+                """,
+                (cid, uid, uid),
+            ).fetchone()
+        else:
+            row = con.execute(
+                """
+                SELECT id, caller_id, callee_id, status, call_type, started_at, global_call_id
+                FROM calls
+                WHERE (caller_id=? OR callee_id=?)
+                  AND status IN ('ringing', 'active')
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (uid, uid),
+            ).fetchone()
+    return dict(row) if row else None
+
+
 def get_latest_pending_call_offer(callee_id: int) -> Optional[Dict]:
     expire_stale_ringing_calls()
     max_age = PENDING_CALL_MAX_AGE_SEC

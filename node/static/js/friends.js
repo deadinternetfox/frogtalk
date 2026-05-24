@@ -352,6 +352,55 @@ function isFriendOnlinePresence(friend) {
   return p === 'online' || p === 'away' || p === 'dnd';
 }
 
+/** Live WS patch for friend presence (friends panel + frog friends drawer). */
+function patchFriendPresence(data) {
+  if (!data || !Array.isArray(_allFriends) || !_allFriends.length) return false;
+  const userId = data.user_id != null ? String(data.user_id) : '';
+  const nick = String(data.nickname || '').trim();
+  const nickKey = nick.toLowerCase();
+  const gid = String(data.global_user_id || '').trim();
+  let changed = false;
+  for (const f of _allFriends) {
+    const sameById = userId && String(f.user_id || f.id || '') === userId;
+    const sameByNick = nickKey && String(f.nickname || '').toLowerCase() === nickKey;
+    const sameByGid = gid && String(f.global_user_id || '').trim() === gid;
+    if (!sameById && !sameByNick && !sameByGid) continue;
+    if (data.presence !== undefined) {
+      const p = String(data.presence || 'offline').toLowerCase();
+      f.presence = p;
+      changed = true;
+    }
+    if (data.status_msg !== undefined && data.status_msg) {
+      f.status_msg = String(data.status_msg).slice(0, 128);
+      changed = true;
+    }
+    if (data.avatar !== undefined) { f.avatar = data.avatar; changed = true; }
+    if (data.display_name !== undefined) { f.display_name = data.display_name || null; changed = true; }
+  }
+  if (changed) rerenderFriendsPanels();
+  return changed;
+}
+
+function rerenderFriendsPanels() {
+  try {
+    const fp = document.getElementById('friends-panel');
+    if (fp && !fp.classList.contains('hidden') && typeof renderFriendTab === 'function') {
+      renderFriendTab();
+    }
+  } catch {}
+  try {
+    const frogPanel = document.getElementById('frog-friends-panel');
+    if (frogPanel && frogPanel.classList.contains('open') && typeof renderFfpContent === 'function') {
+      const activeTab = document.querySelector('.ffp-tab.active')?.dataset?.tab || 'online';
+      renderFfpContent(activeTab);
+    }
+  } catch {}
+  try { updateFrogBadge(); } catch {}
+}
+
+try { window.patchFriendPresence = patchFriendPresence; } catch {}
+try { window.rerenderFriendsPanels = rerenderFriendsPanels; } catch {}
+
 /* ── Receive WS push notification for friend request ───────────────────────── */
 function handleFriendNotify (data) {
   if (data.type === 'friend_notify') {

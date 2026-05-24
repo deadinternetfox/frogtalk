@@ -311,6 +311,38 @@ class FederatedCallsTests(unittest.TestCase):
             self.assertNotIn(url, seen)
             seen.add(url)
 
+    @mock.patch("federation_calls._call_home_origin_mismatch", return_value=False)
+    @mock.patch("federation_calls._participants_match_gid", return_value=True)
+    @mock.patch("federation_calls._lookup_local_user_by_gid")
+    @mock.patch.object(db, "resolve_local_call_id", return_value=42)
+    @mock.patch.object(db, "queue_ice_candidate")
+    def test_apply_call_ice_queues_with_correct_from_id(self, mock_q, _resolve, mock_lookup, *_mocks):
+        to_user = {"id": 10, "global_user_id": "gid-to", "nickname": "bob"}
+        from_user = {"id": 20, "global_user_id": "gid-from", "nickname": "alice"}
+        mock_lookup.side_effect = lambda gid: to_user if gid == "gid-to" else from_user
+
+        async def _run():
+            with mock.patch("ws_manager.manager") as mock_mgr:
+                mock_mgr.send_to_user = mock.AsyncMock(return_value=False)
+                await fc._apply_call_ice(
+                    {
+                        "to_global_user_id": "gid-to",
+                        "from_global_user_id": "gid-from",
+                        "candidate": '{"candidate":"x"}',
+                    },
+                    "srv_home",
+                    "gid-call",
+                    lambda x: x,
+                )
+
+        asyncio.run(_run())
+        mock_q.assert_called_once()
+        args = mock_q.call_args[0]
+        self.assertEqual(args[0], 42)
+        self.assertEqual(args[1], 10)
+        self.assertEqual(args[2], 20)
+        self.assertEqual(args[3], "alice")
+
 
 class FederatedVoiceTests(unittest.TestCase):
     def setUp(self):

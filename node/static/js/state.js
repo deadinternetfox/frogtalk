@@ -35,6 +35,16 @@ const State = {
   clear() {
     try { if (typeof _dmPtCacheFlush === 'function') _dmPtCacheFlush(); } catch {}
     try { if (window.Pin && typeof Pin.reset === 'function') Pin.reset(); } catch {}
+    try {
+      if (typeof _callState !== 'undefined'
+          && (_callState === 'ringing' || _callState === 'calling' || _callState === 'active')
+          && typeof endCall === 'function') {
+        endCall(true);
+      } else if (typeof resetStaleCallUiOnBoot === 'function') {
+        resetStaleCallUiOnBoot();
+      }
+    } catch {}
+    try { localStorage.removeItem('ft_pending_incoming_call'); } catch {}
     localStorage.removeItem('fc_token');
     localStorage.removeItem('fc_user');
     localStorage.removeItem('fc_last_room');

@@ -435,6 +435,7 @@
   async function _fetchPeerIdentityPub(peerUserId, { noCache = false, peerHomeServerId = '', keysServerId = '' } = {}) {
     // Identity drift check uses /api/signal/identity/{id}; the server proxies
     // to the peer's home node when keys are not stored locally.
+    const ks = String(keysServerId || peerHomeServerId || '').trim();
     const key = String(peerUserId) + '|' + (ks || 'local');
     const now = Date.now();
     if (!noCache) {
@@ -442,7 +443,6 @@
       if (hit && (now - hit.ts) < _PEER_IDENT_TTL_MS) return hit.b64;
     }
     const apiFetch = window.apiFetch || ((u) => fetch(u, { credentials: 'include' }));
-    const ks = String(keysServerId || peerHomeServerId || '').trim();
     const qs = ks ? ('?keys_server=' + encodeURIComponent(ks)) : '';
     const path = `/api/signal/identity/${encodeURIComponent(peerUserId)}${qs}`;
     try {

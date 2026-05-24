@@ -1007,8 +1007,11 @@ async def _apply_call_ice(payload, origin, gid_call, _fed_global_id):
     if not delivered and cand:
         try:
             db.queue_ice_candidate(
-                local_id, int(to_user["id"]),
-                from_user.get("nickname") or "", cand,
+                local_id,
+                int(to_user["id"]),
+                int(from_user["id"]),
+                from_user.get("nickname") or "",
+                cand,
             )
         except Exception:
             _log.exception("queue_ice_candidate(fed) failed")
