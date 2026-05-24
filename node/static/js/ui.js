@@ -2644,7 +2644,7 @@ function ensureNetworkPaneContent() {
     <label class="modal-label">Custom Server URL</label>
     <input id="network-custom-url" class="modal-input" placeholder="frogtalk.xyz" value="frogtalk.xyz">
     <div style="font-size:11px;color:#7a8a82;margin-top:6px;line-height:1.45">
-      Official node: <strong style="color:#9ec59e">frogtalk.xyz</strong> — edit the field above for your own server.
+      Preferred routing when using <strong>Custom</strong> mode — not the node you are on now (see <em>Connected</em> below). Official: <strong style="color:#9ec59e">frogtalk.xyz</strong>.
     </div>
 
     <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
@@ -2684,6 +2684,32 @@ function _networkServersListIdleHtml(message) {
   return `<div style="color:#8da59b;font-size:12px;text-align:center;padding:14px 8px">${msg}</div>`;
 }
 
+function _networkRoutingCustomUrlDisplay() {
+  const here = _normalizeNetworkUrl(window.location.origin || '');
+  let storedNorm = _normalizeNetworkUrl(localStorage.getItem('ft_network_custom_url') || '');
+
+  const accountHome = (State.user && State.user.account_home_base_url)
+    || (typeof App !== 'undefined' && App.getSyncSourceBase ? App.getSyncSourceBase() : '')
+    || '';
+  const homeNorm = accountHome ? _normalizeNetworkUrl(accountHome) : '';
+
+  // Never show the travel mirror as the routing preference — that's where
+  // you are browsing, not where you want to connect by default.
+  if (storedNorm && here && storedNorm === here) storedNorm = '';
+  const selectedNorm = _normalizeNetworkUrl(localStorage.getItem('ft_network_selected') || '');
+  if (storedNorm && here && selectedNorm && storedNorm === selectedNorm && storedNorm === here) {
+    storedNorm = '';
+  }
+
+  if (storedNorm && (!here || storedNorm !== here)) {
+    return _hostLabelFromUrl(storedNorm);
+  }
+  if (homeNorm && (!here || homeNorm !== here)) {
+    return _hostLabelFromUrl(homeNorm);
+  }
+  return OFFICIAL_NETWORK_INPUT;
+}
+
 function _applyNetworkFormFromStorage() {
   const modeEl = document.getElementById('network-mode');
   const onionEl = document.getElementById('network-prefer-onion');
@@ -2691,7 +2717,13 @@ function _applyNetworkFormFromStorage() {
   if (!modeEl || !onionEl || !customEl) return;
   modeEl.value = localStorage.getItem('ft_network_mode') || 'auto';
   onionEl.checked = localStorage.getItem('ft_network_prefer_onion') === '1';
-  customEl.value = localStorage.getItem('ft_network_custom_url') || OFFICIAL_NETWORK_INPUT;
+  const display = _networkRoutingCustomUrlDisplay();
+  customEl.value = display;
+  const here = _normalizeNetworkUrl(window.location.origin || '');
+  const storedNorm = _normalizeNetworkUrl(localStorage.getItem('ft_network_custom_url') || '');
+  if (storedNorm && here && storedNorm === here) {
+    try { localStorage.setItem('ft_network_custom_url', display); } catch {}
+  }
   if (!onionEl.dataset.bound) {
     onionEl.addEventListener('change', () => {
       saveNetworkSettings(true);
@@ -4147,7 +4179,9 @@ function saveNetworkSettings(silent = false) {
   const customUrl = _normalizeNetworkUrl(document.getElementById('network-custom-url')?.value || '');
   localStorage.setItem('ft_network_mode', mode);
   localStorage.setItem('ft_network_prefer_onion', preferOnion);
-  localStorage.setItem('ft_network_custom_url', customUrl);
+  if (mode === 'custom') {
+    localStorage.setItem('ft_network_custom_url', customUrl || OFFICIAL_NETWORK_INPUT);
+  }
   const selectedAddr = _preferredNetworkUrl(_networkSelectedServer || {});
   if (selectedAddr) {
     localStorage.setItem('ft_network_selected', selectedAddr);
@@ -4825,7 +4859,14 @@ function _applyClientPrefsFromSync(prefs) {
     }
     if (typeof prefs.preferred_node_url === 'string' && prefs.preferred_node_url) {
       const url = String(prefs.preferred_node_url).slice(0, 512);
-      localStorage.setItem('ft_network_selected', url);
+      const urlNorm = _normalizeNetworkUrl(url);
+      const here = _normalizeNetworkUrl(window.location.origin || '');
+      const homeNorm = _normalizeNetworkUrl(
+        (State.user && State.user.account_home_base_url) || '',
+      );
+      if (!(urlNorm && here && urlNorm === here && homeNorm && homeNorm !== here)) {
+        localStorage.setItem('ft_network_selected', url);
+      }
     }
     if (prefs.custom_sounds && typeof prefs.custom_sounds === 'object') {
       const cur = (() => {

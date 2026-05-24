@@ -246,10 +246,31 @@
 
   // ── Bundle upload / fetch ────────────────────────────────────────────
 
+  /** Ensure server-side PIN gate is open before Signal bundle/heal ops. */
+  async function _ensurePinUnlockedForSignal() {
+    if (!window.Pin) return true;
+    try {
+      if (typeof Pin.refreshFromServer === 'function') await Pin.refreshFromServer();
+    } catch {}
+    const cfg = (typeof Pin.config === 'function') ? Pin.config() : {};
+    if (!cfg.has_pin || !cfg.pin_require_on_unlock) return true;
+    if (typeof Pin.isLocked === 'function' && Pin.isLocked()) {
+      if (typeof Pin.gateRequest === 'function') {
+        try { return !!(await Pin.gateRequest()); } catch { return false; }
+      }
+      return false;
+    }
+    return true;
+  }
+
   async function ensureMyBundleFresh() {
     if (!_libsignal || !_store) return;
     if (_bundlePromise) return _bundlePromise;
     _bundlePromise = (async () => {
+      if (!(await _ensurePinUnlockedForSignal())) {
+        _signalDebug('bundle upload skipped — PIN required');
+        return;
+      }
       const libsignal = _libsignal;
       const store = _store;
       const signed = await _ensureSignedPreKey(libsignal, store);
@@ -278,8 +299,12 @@
       }));
       const res = await apiFetch('/api/signal/bundle', 'POST', body);
       if (!res.ok) {
-        // 503 \u2192 server still has flag off. Not an error from our side.
+        // 503 → server still has flag off. Not an error from our side.
         if (res.status === 503) { _bundleHealthy = false; return; }
+        if (res.status === 423) {
+          _signalDebug('bundle upload pin-gated');
+          return;
+        }
         throw new Error('bundle upload failed: ' + res.status);
       }
       _bundleHealthy = true;
@@ -738,6 +763,9 @@
   async function requestDmCryptoResync(peerUserId) {
     const pid = Number(peerUserId) || 0;
     if (!pid || !_store) return { ok: false };
+    if (!(await _ensurePinUnlockedForSignal())) {
+      return { ok: false, skipped: 'pin_required' };
+    }
     await invalidatePeerCrypto(pid);
     try {
       await ensureMyBundleFresh();
@@ -812,6 +840,9 @@
   async function requestDmCryptoHeal(peerUserId) {
     const pid = Number(peerUserId) || 0;
     if (!pid || !_store) return { ok: false };
+    if (!(await _ensurePinUnlockedForSignal())) {
+      return { ok: false, skipped: 'pin_required' };
+    }
     await invalidatePeerCrypto(pid);
     try {
       await ensureMyBundleFresh();

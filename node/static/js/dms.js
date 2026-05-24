@@ -1416,6 +1416,22 @@ try {
         });
     }
   });
+  window.addEventListener('ft:pin-unlocked', () => {
+    try {
+      if (window.Signal && typeof Signal.ensureMyBundleFresh === 'function') {
+        void Signal.ensureMyBundleFresh();
+      }
+    } catch {}
+    if (!_dmPendingPeerHeal.size && !_activeDM?.id) return;
+    for (const pid of [..._dmPendingPeerHeal]) {
+      void _dmAutoHealChannel(pid, { force: true, notice: false, trigger: 'open' })
+        .then(() => _retryPendingDmDecrypts());
+    }
+    if (_activeDM?.id && _dmMessages.length) {
+      if (!_dmSkipHistoricalDecrypt()) void _redecryptStaleDMMessages();
+      else void _redecryptTravelDMMessages();
+    }
+  });
 } catch {}
 
 function _federationSyncInProgress() {

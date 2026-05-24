@@ -310,6 +310,7 @@
         }
         _adminGatePending = false;
         _hideLockScreen();
+        try { window.dispatchEvent(new CustomEvent('ft:pin-unlocked')); } catch {}
         if (_unlockResolvers.length) {
           // Drain — every parked caller proceeds with this single unlock.
           const pending = _unlockResolvers.splice(0, _unlockResolvers.length);
