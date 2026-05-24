@@ -2742,6 +2742,9 @@ const Messages = (() => {
   function loadHistory(room, msgs) {
     if (room !== State.currentRoom) return;
     if (State._roomSwitchInProgress) return;
+    try {
+      if (window.ContentWarning?.isGateActive?.()) return;
+    } catch {}
     const area = document.getElementById('messages-area');
     const mount = _historyMount(area);
     _lastNick = null;
@@ -2915,6 +2918,19 @@ const Messages = (() => {
       }
       return;
     }
+
+    try {
+      if (window.ContentWarning?.isGateActive?.()) {
+        if (!State.messages[room]) State.messages[room] = [];
+        if (msg && msg.id) {
+          const exists = State.messages[room].some((m) => m && m.id === msg.id);
+          if (!exists) State.messages[room].push(msg);
+        } else if (msg) {
+          State.messages[room].push(msg);
+        }
+        return;
+      }
+    } catch {}
 
     // Reconcile optimistic pending message from this client with the server
     // echo in-place so it never disappears before becoming delivered.

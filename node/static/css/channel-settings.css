@@ -733,12 +733,24 @@
 }
 
 #messages-area.cw-chat-gated .cw-chat-content {
-  filter: blur(18px) saturate(0.7) brightness(0.68);
-  pointer-events: none;
-  user-select: none;
-  transform: scale(1.015);
+  visibility: hidden !important;
+  opacity: 0 !important;
+  filter: blur(24px) saturate(0.5) brightness(0.5) !important;
+  pointer-events: none !important;
+  user-select: none !important;
+  transform: scale(1.02);
   transform-origin: center center;
-  transition: filter 0.42s ease, transform 0.42s ease, opacity 0.35s ease;
+  transition: filter 0.42s ease, transform 0.42s ease, opacity 0.35s ease, visibility 0.35s ease;
+}
+
+/* Stray message nodes outside the shell must not peek through the gate */
+#messages-area.cw-chat-gated > .msg,
+#messages-area.cw-chat-gated > .msg-date-divider,
+#messages-area.cw-chat-gated > .msg-system,
+#messages-area.cw-chat-gated > .msg-group {
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
 }
 
 #messages-area.cw-unlocking .cw-chat-content {
@@ -824,7 +836,8 @@
   z-index: 30;
   display: flex;
   flex-direction: column;
-  justify-content: flex-end;
+  align-items: center;
+  justify-content: center;
   pointer-events: none;
   animation: cwGateOverlayIn 0.28s ease-out;
   overflow: hidden;
@@ -849,9 +862,11 @@
   position: absolute;
   inset: 0;
   background:
-    radial-gradient(ellipse 70% 55% at 18% 38%, color-mix(in srgb, var(--accent-color, #4caf50) 14%, transparent), transparent 70%),
-    radial-gradient(ellipse 55% 45% at 82% 62%, color-mix(in srgb, var(--accent-color, #4caf50) 10%, transparent), transparent 72%),
-    color-mix(in srgb, var(--bg-color, #0d1117) 90%, var(--surface-color, #161b22));
+    radial-gradient(ellipse 70% 55% at 18% 38%, color-mix(in srgb, var(--accent-color, #4caf50) 10%, transparent), transparent 70%),
+    radial-gradient(ellipse 55% 45% at 82% 62%, color-mix(in srgb, var(--accent-color, #4caf50) 8%, transparent), transparent 72%),
+    color-mix(in srgb, var(--bg-color, #0d1117) 97%, var(--surface-color, #161b22));
+  backdrop-filter: blur(24px) saturate(0.85);
+  -webkit-backdrop-filter: blur(24px) saturate(0.85);
   pointer-events: none;
   animation: cwGateBackdropIn 0.32s ease-out;
 }
@@ -869,7 +884,9 @@
 .cw-gate-banner {
   position: relative;
   z-index: 2;
-  margin: 12px 14px 16px;
+  margin: 16px;
+  max-width: min(440px, 92vw);
+  width: 100%;
   pointer-events: auto;
   animation: cwGateBannerIn 0.34s cubic-bezier(0.22, 1, 0.36, 1);
 }

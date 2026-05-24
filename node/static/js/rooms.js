@@ -77,6 +77,17 @@ const FT_LOADING_SHIELD_CSS = `
 #main #messages-area #ft-chat-transition .ch-spin {
   display: block !important;
 }
+#main #messages-area.cw-chat-gated .cw-chat-content {
+  visibility: hidden !important;
+  opacity: 0 !important;
+  filter: blur(24px) saturate(0.5) brightness(0.5) !important;
+  pointer-events: none !important;
+}
+#main #messages-area.cw-chat-gated #ft-content-warning-gate {
+  visibility: visible !important;
+  opacity: 1 !important;
+  display: flex !important;
+}
 `;
 
 function ensureLoadingShieldStyle() {

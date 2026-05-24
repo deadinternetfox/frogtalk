@@ -114,8 +114,10 @@
   }
 
   function isGateActive(roomName) {
+    if (_el(OVERLAY_ID)) return true;
+    if (!roomName) return _gateInflight.size > 0;
     const name = String(roomName || '').trim().toLowerCase();
-    return !!_el(OVERLAY_ID) || (name && _gateInflight.has(name));
+    return name && _gateInflight.has(name);
   }
 
   function resetSession() {
@@ -153,8 +155,13 @@
   function _setChatGated(on) {
     const area = _el('messages-area');
     if (!area) return;
-    if (on) area.classList.add('cw-chat-gated');
-    else area.classList.remove('cw-chat-gated', 'cw-unlocking');
+    if (on) {
+      area.classList.add('cw-chat-gated');
+      try { ensureChatShell(area); } catch {}
+      try { if (typeof ensureLoadingShieldStyle === 'function') ensureLoadingShieldStyle(); } catch {}
+    } else {
+      area.classList.remove('cw-chat-gated', 'cw-unlocking');
+    }
   }
 
   function ensureChatShell(area) {
@@ -165,17 +172,16 @@
       content = document.createElement('div');
       content.id = CHAT_CONTENT_ID;
       content.className = 'cw-chat-content';
-      const keepIds = new Set([OVERLAY_ID, 'ft-chat-transition']);
-      const toMove = [];
-      for (const ch of [...mount.children]) {
-        if (keepIds.has(ch.id)) continue;
-        if (ch.classList.contains('cw-gate-inline')) continue;
-        if (ch.classList.contains('cw-chat-loading')) continue;
-        if (ch.classList.contains('chat-transition-overlay')) continue;
-        toMove.push(ch);
-      }
-      for (const ch of toMove) content.appendChild(ch);
       mount.appendChild(content);
+    }
+    const keepIds = new Set([OVERLAY_ID, 'ft-chat-transition']);
+    for (const ch of [...mount.children]) {
+      if (ch === content) continue;
+      if (keepIds.has(ch.id)) continue;
+      if (ch.classList.contains('cw-gate-inline')) continue;
+      if (ch.classList.contains('cw-chat-loading')) continue;
+      if (ch.classList.contains('chat-transition-overlay')) continue;
+      content.appendChild(ch);
     }
     return content;
   }
@@ -183,7 +189,7 @@
   function historyMount() {
     const area = _el('messages-area');
     if (!area) return null;
-    return area.querySelector('#' + CHAT_CONTENT_ID) || area;
+    return ensureChatShell(area) || area.querySelector('#' + CHAT_CONTENT_ID) || area;
   }
 
   function _dismissGateOverlay() {
