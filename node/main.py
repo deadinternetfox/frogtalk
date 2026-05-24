@@ -2715,6 +2715,23 @@ def _downloads_resolve_artifact(
     }
 
 
+def _prealpha_label(text: str) -> str:
+    t = (text or "").strip()
+    low = t.lower()
+    if "pre-alpha" in low or "prealpha" in low:
+        return t
+    return f"{t} (Pre-alpha)"
+
+
+def _prealpha_display_filename(fname: str) -> str:
+    if not fname:
+        return fname
+    base, ext = os.path.splitext(fname)
+    if "prealpha" in base.lower() or "pre-alpha" in base.lower():
+        return fname
+    return f"{base}-pre-alpha{ext}"
+
+
 def _downloads_catalog_entry(
     entry_id: str,
     label: str,
@@ -2729,15 +2746,17 @@ def _downloads_catalog_entry(
 ) -> dict:
     ok = always_available or resolved.get("available")
     source = resolved.get("source") or "none"
+    fname = resolved.get("filename")
     return {
         "id": entry_id,
-        "label": label,
-        "format": fmt,
+        "label": _prealpha_label(label),
+        "format": _prealpha_label(fmt),
         "icon": icon,
         "url": resolved.get("url") or route_url,
         "available": ok,
         "size_bytes": resolved.get("size_bytes") or 0,
-        "filename": resolved.get("filename"),
+        "filename": fname,
+        "display_filename": _prealpha_display_filename(fname) if fname else None,
         "media_type": media,
         "open_in_new_tab": open_in_new_tab,
         "source": source,

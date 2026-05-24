@@ -92,7 +92,7 @@
         "priceCurrency": "USD"
       },
       "downloadUrl": "https://frogtalk.xyz/download/android",
-      "softwareVersion": "1.5.3",
+      "softwareVersion": "1.5.3-pre-alpha",
       "image": "https://frogtalk.xyz/static/icons/icon-512.png",
       "publisher": {
         "@type": "Organization",
@@ -103,7 +103,7 @@
 }
 </script>
 
-  <link rel="stylesheet" href="/static/css/home.css">
+  <link rel="stylesheet" href="/static/css/home.css?v=2">
 </head>
 <body>
 
@@ -133,7 +133,7 @@
 
 <!-- NAV (shared: static/partials/site-nav.html) -->
 <div id="ft-site-nav-mount"></div>
-<script src="/static/js/site-nav.js?v=4" defer></script>
+<script src="/static/js/site-nav.js?v=5" defer></script>
 
 <!-- HERO -->
 <section class="hero">
@@ -381,8 +381,8 @@
   <div class="section-sub section-sub--tight">Pre-alpha builds for testing — native Android, desktop, or browser. Not recommended for sensitive or production use.</div>
   <div data-ft-downloads-root></div>
 </section>
-<link rel="stylesheet" href="/static/css/downloads-picker.css?v=3">
-<script src="/static/js/downloads-picker.js?v=3" defer></script>
+<link rel="stylesheet" href="/static/css/downloads-picker.css?v=4">
+<script src="/static/js/downloads-picker.js?v=4" defer></script>
 
 <!-- FEATURES -->
 <section class="section" id="features">
@@ -487,7 +487,7 @@
     <div class="feature-card">
       <div class="feature-icon">🖥️</div>
       <h3>Web, Android &amp; Desktop</h3>
-      <p>PWA-enabled web app, native Android APK, Windows .exe, and Linux AppImage / .deb. Your account works everywhere.</p>
+      <p>Pre-alpha PWA web app, Android APK, Windows portable, and Linux AppImage / .deb. Your account works everywhere — builds are for testing only.</p>
     </div>
   </div>
 </section>
@@ -571,9 +571,9 @@
 <section class="section opensource-section" aria-labelledby="open-source-heading">
   <div class="section-title" id="open-source-heading">100% Open Source</div>
   <div class="section-sub">Audit the cryptography, run your own node, build a bot, or hack on the client. Every line of FrogTalk is on GitHub.</div>
-  <div class="opensource-grid" id="open-source">
+  <div class="opensource-grid">
     <div>
-      <h2>Built In The Open<br><span class="accent">Owned By Everyone</span></h2>
+      <h2 id="open-source">Built In The Open<br><span class="accent">Owned By Everyone</span></h2>
       <p>FrogTalk is licensed for self-hosting and inspection. The full server, federation layer, web client, Android app, desktop app, and the Tor / onion routing logic all live in one repository — no closed components, no dark services. Verify the build hash on your node against the one published from frogtalk.xyz before federating.</p>
       <div class="opensource-meta">
         <span class="pill green">⚠️ Pre-alpha</span>
@@ -656,7 +656,7 @@
 
 <!-- FOOTER (shared: static/partials/site-footer.html) -->
 <div id="ft-site-footer-mount"></div>
-<script src="/static/js/site-footer.js?v=7" defer></script>
+<script src="/static/js/site-footer.js?v=8" defer></script>
 
 
   <script src="/static/js/home-vibe-banner.js" defer></script>

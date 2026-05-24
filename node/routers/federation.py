@@ -1922,7 +1922,7 @@ def _local_web_build_info() -> dict:
                     break
                 h.update(chunk)
 
-    version = os.getenv("FROGTALK_WEB_BUILD_VERSION", "web-prod")
+    version = os.getenv("FROGTALK_WEB_BUILD_VERSION", "web-pre-alpha")
     build_hash = h.hexdigest()
     official = db.is_official_build("web", version, build_hash)
     return {

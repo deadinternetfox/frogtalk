@@ -67,7 +67,7 @@
 
   function optionLabel(p) {
     const fmt = p.format ? ' · ' + p.format : '';
-    const file = p.filename ? ' — ' + p.filename : '';
+    const file = (p.display_filename || p.filename) ? ' — ' + (p.display_filename || p.filename) : '';
     const size = p.available && p.size_bytes ? ' (' + formatBytes(p.size_bytes) + ')' : '';
     let badge = '';
     if (p.source === 'mirror') badge = ' · mirror';
@@ -184,7 +184,7 @@
           const src = SOURCE_LABEL[p.source] || '';
           if (canDownload(p) && p.size_bytes) {
             meta.innerHTML = rec + '<span><strong>' + formatBytes(p.size_bytes) + '</strong> · ' +
-              (p.filename ? p.filename : p.format) +
+              (p.display_filename || p.filename ? (p.display_filename || p.filename) : p.format) +
               (src ? ' · <em>' + src + '</em>' : '') + '</span>';
           } else if (canDownload(p)) {
             meta.innerHTML = rec + '<span>' + (src || p.format || 'Ready') + '</span>';

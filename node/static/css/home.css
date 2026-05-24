@@ -259,6 +259,8 @@
     grid-template-columns: 1.05fr 1fr;
     gap: 2.5rem;
     align-items: center;
+  }
+  .opensource-grid h2#open-source {
     scroll-margin-top: 5.5rem;
   }
   .opensource-grid h2 {
@@ -940,16 +942,15 @@
   }
   #vibe-banner .vb-sub a,
   #vibe-banner .vb-sub a.vb-link,
-  #vibe-banner .vb-sub a:link,
-  #vibe-banner .vb-sub a:visited {
-    color: #9fd9b8;
-    text-decoration: none;
+  #vibe-banner .vb-sub a:any-link {
+    color: #9fd9b8 !important;
+    text-decoration: none !important;
     border-bottom: 1px solid rgba(74, 222, 128, 0.35);
     transition: color 0.15s ease, border-color 0.15s ease;
   }
   #vibe-banner .vb-sub a:hover,
   #vibe-banner .vb-sub a:focus-visible {
-    color: #4ade80;
+    color: #4ade80 !important;
     border-bottom-color: rgba(74, 222, 128, 0.75);
     outline: none;
   }

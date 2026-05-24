@@ -9,7 +9,10 @@
 - [Home](https://frogtalk.xyz/): Landing page with feature overview and downloads.
 - [Web app](https://frogtalk.xyz/app): Full chat client (login required).
 - [Security](https://frogtalk.xyz/security): Disclosure policy, threat model, pre-alpha notice.
-- [Android download](https://frogtalk.xyz/download/android): Native Android APK (pre-alpha).
+- [Android download](https://frogtalk.xyz/download/android): Pre-alpha Android APK.
+- [iOS](https://frogtalk.xyz/ios): Pre-alpha iPhone / TestFlight page.
+- [Linux AppImage](https://frogtalk.xyz/download/linux): Pre-alpha desktop build.
+- [Windows portable](https://frogtalk.xyz/download/windows): Pre-alpha Windows .exe.
 - [Sitemap](https://frogtalk.xyz/sitemap.xml): Machine-readable site index.
 
 ## Documentation
@@ -28,7 +31,7 @@
 - **Bridges:** Discord & Telegram (public channels only).
 - **18+ labels:** Voluntary public-channel content warnings with session age gate.
 - **Music rooms:** Synced YouTube / Spotify / SoundCloud.
-- **Clients:** Web, Android, Linux desktop, Windows portable.
+- **Clients:** Pre-alpha builds for Web, Android, iOS, Linux AppImage, Windows portable, and .deb.
 
 ## Branches
 

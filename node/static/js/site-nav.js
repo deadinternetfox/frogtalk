@@ -11,7 +11,7 @@
   'use strict';
 
   const MOUNT_ID = 'ft-site-nav-mount';
-  const VER = '4';
+  const VER = '5';
 
   function assetUrl(path) {
     const base = path + '?v=' + VER;
@@ -80,7 +80,8 @@
     const run = () => {
       const el = document.getElementById(id);
       if (!el) return;
-      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      const block = id === 'open-source' ? 'center' : 'start';
+      el.scrollIntoView({ behavior: 'smooth', block });
     };
     run();
     requestAnimationFrame(run);

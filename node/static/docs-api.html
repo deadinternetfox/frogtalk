@@ -57,7 +57,7 @@
 <body>
   <!-- NAV (shared: static/partials/site-nav.html) -->
   <div id="ft-site-nav-mount"></div>
-  <script src="/static/js/site-nav.js?v=4" defer></script>
+  <script src="/static/js/site-nav.js?v=5" defer></script>
 
   <main class="wrap">
     <section class="hero">
@@ -668,8 +668,8 @@ GET    /api/federation/failover/status</code></pre>
           (<code>FROGTALK_AUTO_UPDATE_ENABLED=0</code>) — operators opt in explicitly.</p>
 <pre><code>POST /api/network/updates/publish
 {
-  "version": "1.5.4",
-  "package_url": "https://frogtalk.xyz/releases/frogtalk-1.5.4.tar.gz",
+  "version": "1.5.4-pre-alpha",
+  "package_url": "https://frogtalk.xyz/releases/frogtalk-1.5.4-pre-alpha.tar.gz",
   "package_sha256": "&lt;sha256&gt;",
   "build_hash": "&lt;web-build-hash&gt;",
   "signature": "&lt;ed25519-sig-over-canonical-manifest&gt;",
@@ -815,7 +815,7 @@ WebSocket: /ws/{room_name}?token=SESSION_TOKEN</code></pre>
 
 <!-- FOOTER (shared: static/partials/site-footer.html) -->
 <div id="ft-site-footer-mount"></div>
-<script src="/static/js/site-footer.js?v=7" defer></script>
+<script src="/static/js/site-footer.js?v=8" defer></script>
 
 </body>
 </html>
