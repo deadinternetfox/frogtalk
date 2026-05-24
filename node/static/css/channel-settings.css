@@ -773,6 +773,17 @@
     color-mix(in srgb, var(--accent-color) 10%, var(--bg-color)) 0%,
     color-mix(in srgb, var(--accent-color) 5%, var(--bg-color)) 100%) !important;
 }
+
+/* Never flash cached/prior-channel messages through the loading overlay */
+#messages-area.chat-switching .cw-chat-content,
+#messages-area.chat-switching > .msg,
+#messages-area.chat-switching > .msg-group,
+#messages-area.chat-switching > .msg-date-divider,
+#messages-area.chat-switching > .msg-system {
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
 .ch-transition-icon-wrap {
   display: flex;
   align-items: center;
@@ -1129,6 +1140,7 @@ body.cw-composer-locked #msg-input {
 #messages-area .cw-chat-loading,
 #messages-area .chat-transition-overlay {
   background:
+    color-mix(in srgb, var(--bg-color) 94%, var(--accent-color) 6%),
     radial-gradient(ellipse 72% 58% at 14% 32%, color-mix(in srgb, var(--accent-color) 12%, transparent), transparent 68%),
     radial-gradient(ellipse 58% 48% at 86% 68%, color-mix(in srgb, var(--accent-color) 8%, transparent), transparent 70%),
     radial-gradient(ellipse 40% 35% at 50% 50%, color-mix(in srgb, var(--accent-color) 4%, var(--surface-color)), transparent 72%),

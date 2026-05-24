@@ -74,8 +74,17 @@ const FT_LOADING_SHIELD_CSS = `
 #main #messages-area #ft-chat-transition .ch-loading-label {
   display: block !important;
 }
-#main #messages-area #ft-chat-transition .ch-spin {
+#main #messages-area.chat-switching #ft-chat-transition .ch-spin {
   display: block !important;
+}
+#main #messages-area.chat-switching .cw-chat-content,
+#main #messages-area.chat-switching > .msg,
+#main #messages-area.chat-switching > .msg-group,
+#main #messages-area.chat-switching > .msg-date-divider,
+#main #messages-area.chat-switching > .msg-system {
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
 }
 #main #messages-area.cw-chat-gated .cw-chat-content {
   visibility: hidden !important;
@@ -1928,15 +1937,9 @@ const Rooms = (() => {
     }
 
     if (chType !== 'voice' && msgArea) {
-      const cachedMsgs = Array.isArray(State.messages[name]) ? State.messages[name] : [];
-      const hasCached = type !== 'dm' && cachedMsgs.length > 0;
       const shell = msgArea.querySelector('#cw-chat-content');
       const hasRendered = !!(shell && shell.children.length);
-      if (hasCached && typeof Messages !== 'undefined' && Messages.loadHistory) {
-        try {
-          Messages.loadHistory(name, cachedMsgs.slice());
-        } catch {}
-      } else if (!hasRendered && !document.getElementById(_CHAT_TRANSITION_ID)) {
+      if (!hasRendered && !document.getElementById(_CHAT_TRANSITION_ID)) {
         showChatTransition(name, type, dmPeer, 'load', {
           room: roomData, channelType: chType, beginSwitch: false,
         });

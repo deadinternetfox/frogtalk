@@ -2739,6 +2739,29 @@ const Messages = (() => {
     return area.querySelector('#cw-chat-content') || area;
   }
 
+  function _switchPaneLocked() {
+    try {
+      if (typeof isSwitchOverlayVisible === 'function' && isSwitchOverlayVisible()) return true;
+    } catch {}
+    try { return !!State._roomSwitchInProgress; } catch { return false; }
+  }
+
+  function _finishSwitchAfterPaint(room) {
+    const finish = () => {
+      try {
+        if (typeof finishChannelSwitch === 'function') finishChannelSwitch(room, { finish: true });
+        else if (typeof clearChatTransition === 'function') clearChatTransition({ finish: true });
+      } catch {}
+    };
+    try {
+      if (typeof isSwitchOverlayVisible === 'function' && isSwitchOverlayVisible()) {
+        requestAnimationFrame(() => requestAnimationFrame(finish));
+        return;
+      }
+    } catch {}
+    finish();
+  }
+
   function loadHistory(room, msgs) {
     if (room !== State.currentRoom) return;
     try {
@@ -2759,10 +2782,7 @@ const Messages = (() => {
     // content as soon as anything arrives (see appendMessage below).
     if (!msgs || msgs.length === 0) {
       mount.innerHTML = _emptyStateHtml(room);
-      try {
-        if (typeof finishChannelSwitch === 'function') finishChannelSwitch(room, { finish: true });
-        else if (typeof clearChatTransition === 'function') clearChatTransition({ finish: true });
-      } catch {}
+      _finishSwitchAfterPaint(room);
       mount.scrollTop = mount.scrollHeight;
       return;
     }
@@ -2807,10 +2827,7 @@ const Messages = (() => {
     });
 
     mount.innerHTML = html;
-    try {
-      if (typeof finishChannelSwitch === 'function') finishChannelSwitch(room, { finish: true });
-      else if (typeof clearChatTransition === 'function') clearChatTransition({ finish: true });
-    } catch {}
+    _finishSwitchAfterPaint(room);
     mount.scrollTop = mount.scrollHeight;
     if (msgs.length) State.oldestMsgId = msgs[0].id;
     bindLongPress(area);
@@ -2911,7 +2928,7 @@ const Messages = (() => {
     }
 
     // During channel switch the overlay covers the pane — cache only, no DOM.
-    if (State._roomSwitchInProgress) {
+    if (_switchPaneLocked()) {
       if (!State.messages[room]) State.messages[room] = [];
       if (msg && msg.id) {
         const exists = State.messages[room].some((m) => m && m.id === msg.id);
