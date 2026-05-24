@@ -123,6 +123,7 @@ SYNC_UPDATE_FILES=(
   "node/static/js/social.js:node/static/js/social.js"
   "node/static/js/calls.js:node/static/js/calls.js"
   "node/static/js/dms.js:node/static/js/dms.js"
+  "node/static/js/friends.js:node/static/js/friends.js"
   "node/static/js/notifications.js:node/static/js/notifications.js"
   "node/static/js/messages.js:node/static/js/messages.js"
   "node/static/js/notifications.js:node/static/js/notifications.js"
