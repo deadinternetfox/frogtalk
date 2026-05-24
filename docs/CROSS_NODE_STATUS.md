@@ -198,4 +198,3 @@ Server Admin **Block Tor federation peers** toggle appears only on **hybrid** hu
 
 - [SECURITY_MODEL.md](SECURITY_MODEL.md) — crypto surfaces
 - [FEDERATED_CALLS.md](FEDERATED_CALLS.md) — call signalling
-- [internal/FEDERATION_SYNC_AUDIT_REPORT.md](internal/FEDERATION_SYNC_AUDIT_REPORT.md) — account sync scope

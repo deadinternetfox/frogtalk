@@ -78,6 +78,7 @@ and private channels (AES-GCM) before data reaches your disk.
 | 🤖 **Discord & Telegram Bridges** | Mirror rooms to/from Discord channels or Telegram chats |
 | 🔔 **Push Notifications** | Web push for mobile and desktop |
 | 🛡️ **Admin Dashboard** | Moderation tools, live server stats, user management |
+| 🔞 **18+ Content Warnings** | Optional moderator labels on public channels; session age gate before history (not message scanning) |
 | 🧩 **Bot API** | Full REST + WebSocket API for building bots and integrations |
 | 🧅 **Tor / Onion Routing** | Nodes can advertise a `.onion` address; federation traffic and client connections route through Tor when onion mode is enabled. Onion handoff links target `/app`, and clearnet address is never leaked for onion-only nodes |
 
@@ -407,8 +408,6 @@ frogtalk/
 │   │   ├── node_setup_wizard.sh  # guided self-host setup
 │   │   ├── node_update_check.sh  # safe update check / apply
 │   │   ├── deploy.sh             # rsync node/ to one host
-│   │   ├── deploy_nodes.sh       # maintainer SCP hotfix (needs deploy_fleet.local.sh)
-│   │   ├── deploy_board.sh       # maintainer board PHP hotfix (same fleet config)
 │   │   ├── build_server_release.sh
 │   │   └── migrations/           # one-shot historical migrations
 │   ├── tests/                    # pytest suite (sanitizers, proxy, security)
@@ -422,7 +421,6 @@ frogtalk/
 │   ├── NODE_INSTALL.md           # VPS install + federation (start here for ops)
 │   ├── SECURITY_MODEL.md         # encryption + threat model
 │   └── FEDERATED_CALLS.md        # cross-node WebRTC / TURN
-│   └── internal/                 # gitignored planning notes (not published)
 ├── README.md / SECURITY.md / CONTRIBUTING.md / CONTRIBUTORS.md / LICENSE
 └── .gitignore / .dockerignore / .fallowrc.json
 ```

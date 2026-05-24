@@ -5,7 +5,8 @@ Operator and security docs published with the repo (public markdown only — ope
 | Document | Audience |
 | -------- | -------- |
 | [NODE_INSTALL.md](NODE_INSTALL.md) | VPS install, nginx, federation join |
-| [SECURITY_MODEL.md](SECURITY_MODEL.md) | Encryption, federation trust, account sync |
+| [SECURITY_MODEL.md](SECURITY_MODEL.md) | Encryption, federation trust, account sync, content warnings |
 | [FEDERATED_CALLS.md](FEDERATED_CALLS.md) | Cross-node WebRTC / TURN |
+| [CROSS_NODE_STATUS.md](CROSS_NODE_STATUS.md) | Federation sync feature matrix |
 
-Live site mirrors much of this at [frogtalk.xyz/docs/node](https://frogtalk.xyz/docs/node) and [frogtalk.xyz/docs/api](https://frogtalk.xyz/docs/api).
+Live site: [docs/node](https://frogtalk.xyz/docs/node), [docs/api](https://frogtalk.xyz/docs/api), [security](https://frogtalk.xyz/security), [privacy](https://frogtalk.xyz/privacy).

@@ -29,7 +29,7 @@ Use this for issues you would rather not put in the web form (account takeover, 
 |--------|----------|
 | **Critical / high** | Account takeover, E2EE bypass, message tampering, server-side RCE, SQL injection, authentication bypass |
 | **Medium** | Stored or reflected XSS, CSRF on state-changing endpoints, privilege escalation, IDOR, sensitive data leaks |
-| **Lower** | Rate-limit bypass, DoS via unbounded inputs, non-sensitive info disclosure |
+| **Lower** | Rate-limit bypass, DoS via unbounded inputs, non-sensitive info disclosure, bypass of optional 18+ content-warning gates on labeled public channels |
 
 ## Out of scope
 

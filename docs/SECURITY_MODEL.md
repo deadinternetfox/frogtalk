@@ -315,6 +315,7 @@ Server-side controls (see also [frogtalk.xyz/security](https://frogtalk.xyz/secu
 | **Admin** | `admin_pin_gate` on admin routes; separate server-admin session |
 | **Bots** | Permission allowlist, key cap, room membership checks |
 | **WebRTC** | ICE / SDP bound to open call participants |
+| **Content warnings** | Optional 18+ labels on public channels; session ack before history/media/WS send; HTTP 451 when unconfirmed; federated directory sync |
 
 Operator setup: [node/deploy/README.md](../node/deploy/README.md),
 [node/README.md](../node/README.md).
@@ -323,6 +324,8 @@ Operator setup: [node/deploy/README.md](../node/deploy/README.md),
 
 ## Change history
 
+- **2026-05-23** — Public channel 18+ content warnings: moderator labels, session ack gate,
+  HTTP 451 enforcement, federation directory sync.
 - **2026-05-21** — FrogSocial federation: signed `social.*`, plaintext replication
   limited to `public`/`followers`, encrypted cross-node wall with targeted wraps,
   origin binding, no nickname-only user materialization on apply.

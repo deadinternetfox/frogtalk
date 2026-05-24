@@ -1938,12 +1938,6 @@ const Rooms = (() => {
 
   function _applyContentWarningPolicyForRoomType(roomType) {
     const isPrivate = roomType === 'private';
-    const tab = document.getElementById('ch-tab-safety');
-    if (tab) {
-      tab.style.opacity = isPrivate ? '0.45' : '';
-      tab.style.pointerEvents = isPrivate ? 'none' : '';
-      tab.title = isPrivate ? 'Content warnings apply to public channels only' : '';
-    }
     const note = document.getElementById('ch-cw-private-note');
     const wrap = document.getElementById('ch-cw-settings-wrap');
     if (note) note.style.display = isPrivate ? '' : 'none';
@@ -2410,11 +2404,8 @@ const Rooms = (() => {
       UI.showToast('Bridges are disabled in private channels', 'error');
       tab = 'perms';
     }
-    if (tab === 'safety' && _currentRoomData?.room?.type === 'private') {
-      UI.showToast('Content warnings apply to public channels only', 'error');
-      tab = 'general';
-    }
-    ['general', 'perms', 'directory', 'safety', 'invites', 'mods', 'bans', 'theme', 'bots', 'bridges'].forEach(t => {
+    if (tab === 'safety') tab = 'perms';
+    ['general', 'perms', 'directory', 'invites', 'mods', 'bans', 'theme', 'bots', 'bridges'].forEach(t => {
       const tabEl = document.getElementById(`ch-tab-${t}`);
       const panelEl = document.getElementById(`ch-panel-${t}`);
       if (tabEl) tabEl.classList.toggle('active', t === tab);

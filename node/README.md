@@ -64,9 +64,7 @@ node/
 │   ├── node_setup_wizard.sh
 │   ├── node_federation_join.sh
 │   ├── node_update_check.sh
-│   ├── deploy_nodes.sh          # maintainer SCP hotfix (deploy_fleet.local.sh)
 │   ├── deploy.sh                # rsync full node/ to one host (.env in scripts/)
-│   ├── deploy_board.sh          # maintainer board PHP hotfix
 │   ├── install_board_nginx.sh   # nginx + php-fpm for /board/ (wizard calls this)
 │   ├── configure_board_identity.sh
 │   └── migrations/
@@ -126,9 +124,7 @@ node/
 | `node_update_check.sh` | Git update check / `--apply` (commits preview, symlinks, pip, restart) |
 | `install_board_nginx.sh` | nginx + php-fpm routes for `/board/` (`install.sh board-nginx`) |
 | `configure_board_identity.sh` | Board title/subtitle from server name / env |
-| `deploy_nodes.sh` | Maintainer hot SCP (copy `deploy_fleet.local.example.sh` → `deploy_fleet.local.sh`) |
-| `deploy.sh` | Full rsync deploy to one server |
-| `deploy_board.sh` | Board PHP-only hotfix to fleet |
+| `deploy.sh` | Full rsync deploy to one server (see `node/scripts/.env`) |
 
 - **Idempotent** — safe to re-run; missing symlinks are created.
 - **Non-fatal skips** — edge cases are reported, not rolled back silently.

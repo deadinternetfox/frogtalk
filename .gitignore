@@ -115,6 +115,8 @@ node/scripts/deploy_fleet.local.sh
 node/scripts/pin_federation_peer_keys.sh
 node/scripts/sync_tor_mirror_from_main.sh
 node/scripts/reset_travel_nodes.sh
+node/scripts/deploy_nodes.sh
+node/scripts/deploy_board.sh
 
 # Internal operator / planning docs (not for public repo)
 docs/internal/

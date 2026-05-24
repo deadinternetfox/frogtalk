@@ -537,7 +537,7 @@ bash node/scripts/install.sh update-apply -y # pull, pip, restart
 bash node/scripts/install.sh federation -y     # refresh peers after major releases
 ```
 
-Maintainer hot SCP (`node/scripts/deploy_nodes.sh` + local `deploy_fleet.local.sh`) does **not** run DB migrations — prefer `update-apply` when `database.py` changes. Community operators use `update-apply`, not fleet deploy scripts.
+Use `bash node/scripts/install.sh update-apply` (or `node_update_check.sh --apply`) after pulling changes that touch `database.py`. Single-host rsync: `node/scripts/deploy.sh`. Fleet hot-deploy scripts are local-only (gitignored) — not part of the public repo.
 
 ---
 

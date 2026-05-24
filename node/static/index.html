@@ -9390,7 +9390,6 @@ window.ConnErr = (function(){
       <button class="settings-tab active" id="ch-tab-general" onclick="switchChannelTab('general')">General</button>
       <button class="settings-tab" id="ch-tab-perms" onclick="switchChannelTab('perms')">Permissions</button>
       <button class="settings-tab" id="ch-tab-directory" onclick="switchChannelTab('directory')">Directory</button>
-      <button class="settings-tab" id="ch-tab-safety" onclick="switchChannelTab('safety')">Safety</button>
       <button class="settings-tab" id="ch-tab-invites" onclick="switchChannelTab('invites')">Invites</button>
       <button class="settings-tab" id="ch-tab-mods" onclick="switchChannelTab('mods')">Moderators</button>
       <button class="settings-tab" id="ch-tab-bans" onclick="switchChannelTab('bans')">Bans</button>
@@ -9466,7 +9465,7 @@ window.ConnErr = (function(){
     
     <!-- Permissions tab -->
     <div id="ch-panel-perms" class="ch-settings-panel">
-      <p class="ch-tab-intro">Control who can access and manage this channel.</p>
+      <p class="ch-tab-intro">Control who can access and manage this channel, including mature-content labeling for public rooms.</p>
       
       <div id="ch-invite-only-private-note" class="modal-card ch-notice--private">
         <p class="ch-notice__body">
@@ -9491,6 +9490,28 @@ window.ConnErr = (function(){
             <p class="ch-check-desc">When enabled, members cannot forward messages from this channel to other rooms or DMs</p>
           </div>
         </label>
+      </div>
+
+      <label class="modal-label ch-label-spaced">Mature content (18+)</label>
+      <p class="ch-field-hint" style="margin-top:0;margin-bottom:10px">Label public channels so visitors confirm they are 18+ before viewing. Does not scan messages automatically.</p>
+      <div id="ch-cw-private-note" class="modal-card ch-notice--private" style="display:none">
+        <p class="ch-notice__body">Content warnings apply to <strong>public</strong> channels only.</p>
+      </div>
+      <div id="ch-cw-settings-wrap" class="modal-card cw-settings-card">
+        <label class="ch-check-row">
+          <input type="checkbox" id="ch-cw-enabled" class="ch-check-input" onchange="toggleChannelContentWarningFields()">
+          <div>
+            <div class="ch-check-title">🔞 18+ content warning</div>
+            <p class="ch-check-desc">Requires visitors to confirm they are 18+. Syncs to the directory and federation peers.</p>
+          </div>
+        </label>
+        <div id="ch-cw-flags" class="cw-flag-grid" style="display:none;margin-top:12px">
+          <label class="cw-flag-item"><input type="checkbox" id="ch-cw-nudity" class="ch-check-input" onchange="updateChannelContentWarningPreview()"><span>Nudity / sexual content</span></label>
+          <label class="cw-flag-item"><input type="checkbox" id="ch-cw-violence" class="ch-check-input" onchange="updateChannelContentWarningPreview()"><span>Violence</span></label>
+          <label class="cw-flag-item"><input type="checkbox" id="ch-cw-extremism" class="ch-check-input" onchange="updateChannelContentWarningPreview()"><span>Extremist ideology</span></label>
+          <label class="cw-flag-item"><input type="checkbox" id="ch-cw-mature" class="ch-check-input" onchange="updateChannelContentWarningPreview()"><span>Other mature themes</span></label>
+        </div>
+        <div id="ch-cw-preview" class="cw-preview" style="display:none" aria-live="polite"></div>
       </div>
     </div>
     
@@ -9530,30 +9551,6 @@ window.ConnErr = (function(){
       <label class="modal-label">Directory Description</label>
       <textarea class="modal-input" id="ch-dir-desc" rows="4" style="resize:vertical;font-size:13px" placeholder="Write a rich description for your channel listing…" maxlength="2000"></textarea>
       <div style="font-size:11px;color:#666;margin-top:2px">This description appears on your channel's directory card</div>
-    </div>
-
-    <!-- Safety tab (18+ content warning) -->
-    <div id="ch-panel-safety" class="ch-settings-panel">
-      <p class="ch-tab-intro">Label mature public channels so visitors confirm they are 18+ before viewing. Does not scan messages automatically.</p>
-      <div id="ch-cw-private-note" class="modal-card ch-notice--private" style="display:none">
-        <p class="ch-notice__body">Content warnings apply to <strong>public</strong> channels only.</p>
-      </div>
-      <div id="ch-cw-settings-wrap" class="modal-card cw-settings-card">
-        <label class="ch-check-row">
-          <input type="checkbox" id="ch-cw-enabled" class="ch-check-input" onchange="toggleChannelContentWarningFields()">
-          <div>
-            <div class="ch-check-title">🔞 18+ content warning</div>
-            <p class="ch-check-desc">Requires visitors to confirm they are 18+. Applies on this node and syncs to federation peers.</p>
-          </div>
-        </label>
-        <div id="ch-cw-flags" class="cw-flag-grid" style="display:none;margin-top:12px">
-          <label class="cw-flag-item"><input type="checkbox" id="ch-cw-nudity" class="ch-check-input" onchange="updateChannelContentWarningPreview()"><span>Nudity / sexual content</span></label>
-          <label class="cw-flag-item"><input type="checkbox" id="ch-cw-violence" class="ch-check-input" onchange="updateChannelContentWarningPreview()"><span>Violence</span></label>
-          <label class="cw-flag-item"><input type="checkbox" id="ch-cw-extremism" class="ch-check-input" onchange="updateChannelContentWarningPreview()"><span>Extremist ideology</span></label>
-          <label class="cw-flag-item"><input type="checkbox" id="ch-cw-mature" class="ch-check-input" onchange="updateChannelContentWarningPreview()"><span>Other mature themes</span></label>
-        </div>
-        <div id="ch-cw-preview" class="cw-preview" style="display:none" aria-live="polite"></div>
-      </div>
     </div>
 
     <!-- Invites tab -->

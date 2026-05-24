@@ -214,30 +214,20 @@ Restart if the script did not: `sudo systemctl restart frogtalk`.
 
 **FrogSocial replication:** only plaintext posts with `privacy` `public` or `followers` federate to peers. Friends-only audiences use encrypted wall posts and targeted federation events — see [API docs](https://frogtalk.xyz/docs/api) (Federation section).
 
-## Deploy scripts (maintainers)
+## Deploy scripts (operators)
 
 | Script | Use when |
 |--------|----------|
 | `node/scripts/deploy.sh` | Single host — full `rsync` of `node/` (reads `node/scripts/.env`: `SSH_HOST`, `REMOTE_DIR`, …) |
-| `node/scripts/deploy_fleet.local.sh` | **Local only (gitignored)** — your SSH fleet for hot deploy |
-| `node/scripts/deploy_nodes.sh` | **Local only (gitignored)** — SCP Python/static hotfix to `FLEET_HOSTS` |
-| `node/scripts/deploy_board.sh` | PHP board hotfix to hosts in `deploy_fleet.local.sh` (no default IPs in repo) |
+| `bash node/scripts/install.sh update-apply` | Pull git updates, pip deps, migrations, and restart (recommended for production) |
 
-**Fleet hot deploy** (repo root):
+Copy `node/scripts/deploy_fleet.local.example.sh` → `deploy_fleet.local.sh` locally if you maintain multiple nodes — that file is gitignored and never committed. Never commit IPs or passwords.
 
-```bash
-node/scripts/deploy_nodes.sh node/routers/federation.py node/static/js/calls.js
-```
+Normal operators use `bash node/scripts/install.sh setup` (wizard installs board nginx + identity).
 
-Paths under `node/` map to `/opt/frogtalk/node/` on the server. Bare `static/…` or `routers/…` args are rewritten to `node/…`. With no args, a curated client bundle is synced (includes `calls.js`, `ws.js`, core UI JS).
+Does **not** skip schema migrations when `database.py` changes — use `update-apply` or a full `deploy.sh` after pulling.
 
-Copy `node/scripts/deploy_fleet.local.example.sh` → `deploy_fleet.local.sh` and set `FLEET_HOSTS=( "your.vps:22" … )`. Never commit IPs or passwords.
-
-Normal operators use `bash node/scripts/install.sh setup` (wizard installs board nginx + identity) — not fleet deploy scripts.
-
-Does **not** replace `git pull` for schema migrations; use `node_update_check.sh --apply` or a full `deploy.sh` when `database.py` migrations change.
-
-**Docs on live nodes:** after editing `node/static/docs-node.html` or `docs-api.html`, deploy those paths the same way so `/docs/node` and `/docs/api` update.
+**Docs on live nodes:** after editing `node/static/docs-node.html`, `docs-api.html`, `security.html`, or `privacy.html`, deploy those paths so public pages update.
 
 ## Recommended production defaults
 

@@ -69,7 +69,7 @@
 <section class="privacy-hero">
   <h1>Privacy Policy</h1>
   <p>FrogTalk is built privacy-first. Your messages are encrypted before they leave your device, we run no analytics, and we sell nothing to anyone. This page explains exactly what that means in plain English.</p>
-  <div class="updated">Last updated: 22 May 2026</div>
+  <div class="updated">Last updated: 23 May 2026</div>
 </section>
 
 <!-- BODY -->
@@ -130,6 +130,7 @@
     <ul>
       <li><strong>Sender, recipient, room ID, and timestamp</strong> for every message. The <em>contents</em> of DMs are encrypted; the routing envelope is not.</li>
       <li><strong>Room and channel messages</strong> in private channels are end-to-end encrypted with per-room AES-256-GCM (AAD-bound to the room and key version, with automatic key rotation on ban or kick) — the server stores only ciphertext. Public channels are not E2EE: they are designed to be world-readable and stored encrypted-at-rest only. Bridges to Discord/Telegram are <strong>not available for private rooms</strong>; they only ever run on public channels, which are plaintext by design and clearly indicated in the channel header.</li>
+      <li><strong>18+ content-warning acknowledgements</strong> — if you enter a public channel labeled mature, we store a session-scoped flag that you confirmed you are 18 or older for that channel's current label set. We do not store your date of birth. The flag clears when you log out or when moderators change the warning categories.</li>
     </ul>
 
     <h3>Device & connection data</h3>
@@ -277,7 +278,7 @@
 
   <section class="policy" id="children">
     <h2>Children</h2>
-    <p>FrogTalk is not directed at children under 13 (or under 16 in the EU/EEA). We do not knowingly collect personal information from children below those ages. If you believe a child has created an account, please contact us and we will delete it.</p>
+    <p>FrogTalk is not directed at children under 13 (or under 16 in the EU/EEA). We do not knowingly collect personal information from children below those ages. Public channels may be voluntarily labeled 18+ by moderators; those gates ask users to self-certify their age but are not a substitute for parental supervision. If you believe a child has created an account, please contact us and we will delete it.</p>
   </section>
 
   <section class="policy" id="changes">
