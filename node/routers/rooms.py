@@ -1081,10 +1081,21 @@ async def get_content_warning_status(
     current_user: dict = Depends(get_current_user),
 ):
     name = (room_name or "").strip().lower()
-    if not db.user_can_access_room(
-        current_user["id"], name, is_admin=bool(current_user.get("is_admin")),
-    ):
-        return JSONResponse(status_code=403, content={"error": "Not a member of this room"})
+    room = db.get_room_by_name(name)
+    if not room:
+        return JSONResponse(status_code=404, content={"error": "Room not found"})
+    uid = int(current_user["id"])
+    is_admin = bool(current_user.get("is_admin"))
+    if not is_admin:
+        ban = db.get_active_room_ban(room["id"], uid)
+        if ban:
+            return JSONResponse(status_code=403, content={"error": "You are banned from this room"})
+        is_public_open = (
+            str(room.get("type") or "public").lower() == "public"
+            and not int(room.get("invite_only") or 0)
+        )
+        if not is_public_open and not db.user_can_access_room(uid, name, is_admin=False):
+            return JSONResponse(status_code=403, content={"error": "Not a member of this room"})
     enabled, flags = db.get_room_content_warning(name)
     token = session_token_from_request(request) or ""
     required, _ = cw_ack_is_required(name, token)

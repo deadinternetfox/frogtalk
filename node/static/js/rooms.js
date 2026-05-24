@@ -1220,13 +1220,18 @@ const Rooms = (() => {
     } catch {}
   }
 
-  async function switchToRoom(name, type = 'public', dmPeer = null, channelType = 'text') {    closeMobileSidebar();
-    const switchSeq = ++_switchSeq;
+  async function switchToRoom(name, type = 'public', dmPeer = null, channelType = 'text', options = {}) {
+    closeMobileSidebar();
+    const opts = options && typeof options === 'object' ? options : {};
     const prevRoom = State.currentRoom;
     const prevType = State.currentRoomType;
     const _roomDataEarly = State.rooms.find(r => r.name === name);
     const _chTypeEarly = (_roomDataEarly?.channel_type === 'voice') ? 'music' : (_roomDataEarly?.channel_type || channelType || 'text');
     if (State.currentRoom === name && State.currentRoomType === type) {
+      if (opts.softReload) {
+        try { WS?.resetHistoryCache?.(name); WS?.connect?.(name); } catch {}
+        return;
+      }
       const chNow = normalizeChannelType(_chTypeEarly);
       if (normalizeChannelType(State.currentChannelType) !== chNow) {
         try { applyChannelTypeUi(name, chNow); } catch {}
@@ -1243,6 +1248,21 @@ const Rooms = (() => {
         }
       }
       return;
+    }
+
+    const switchSeq = ++_switchSeq;
+
+    // Avoid flashing the previous channel while the 18+ gate / join resolves.
+    if (prevRoom !== name || prevType !== type) {
+      try {
+        const areaPre = document.getElementById('messages-area');
+        if (areaPre) {
+          areaPre.innerHTML =
+            '<div class="ch-loading-state">' +
+            '<div class="ch-spin" aria-hidden="true"></div>' +
+            '<div>Opening #' + String(name || '') + '…</div></div>';
+        }
+      } catch {}
     }
 
     // Leaving a CW channel view clears session ack so returning always re-prompts.
@@ -1730,6 +1750,7 @@ const Rooms = (() => {
   }
 
   async function joinRoom(name) {
+    try { State._explicitRoomNav = String(name || '').toLowerCase(); } catch {}
     const res = await fetch(`/api/rooms/${encodeURIComponent(name)}/join`, {
       method: 'POST', headers: { 'X-Session-Token': State.token }
     });
@@ -1740,11 +1761,16 @@ const Rooms = (() => {
       const chType = room?.channel_type || 'text';
       if (roomType === 'private') {
         const ok = await ensurePrivateRoomSecret(name);
-        if (!ok) return;
+        if (!ok) {
+          try { delete State._explicitRoomNav; } catch {}
+          return;
+        }
       }
       await switchToRoom(name, roomType, null, chType);
+      try { delete State._explicitRoomNav; } catch {}
       return;
     }
+    try { delete State._explicitRoomNav; } catch {}
     // Banned-from-channel: dedicated screen with reason + duration.
     try {
       const err = await res.json();
@@ -4391,6 +4417,7 @@ async function openChannelFromDiscovery(name, btnEl) {
     if (btnEl) { btnEl.disabled = false; btnEl.innerHTML = origHtml; }
   };
   try {
+    try { State._explicitRoomNav = String(name || '').toLowerCase(); } catch {}
     const joined = (State.rooms || []).some(r => r.name === name && r.joined);
     if (!joined) {
       const r = await fetch(`/api/rooms/${encodeURIComponent(name)}/join`, {
@@ -4419,6 +4446,8 @@ async function openChannelFromDiscovery(name, btnEl) {
   } catch {
     UI.showToast('Network error', 'error');
     restore();
+  } finally {
+    try { delete State._explicitRoomNav; } catch {}
   }
 }
 

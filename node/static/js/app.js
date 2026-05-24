@@ -2244,7 +2244,8 @@ const App = {
     try {
       const cur = State.currentRoom;
       if (cur && typeof Rooms !== 'undefined' && Rooms.switchToRoom) {
-        await Rooms.switchToRoom(cur, State.currentRoomType || 'public');
+        const chType = State.currentChannelType || 'text';
+        await Rooms.switchToRoom(cur, State.currentRoomType || 'public', null, chType, { softReload: true });
       }
     } catch (e) {
       console.warn('[App] room history reload after sync failed', e);
@@ -2429,6 +2430,7 @@ const App = {
 
   openFirstAvailableRoom() {
     try {
+      if (State && State._explicitRoomNav) return;
       const rooms = (typeof State !== 'undefined' && Array.isArray(State.rooms)) ? State.rooms : [];
       const joined = rooms.filter(r => r.joined);
       // Prefer the last channel the user had open — persisted by
