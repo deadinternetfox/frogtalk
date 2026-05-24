@@ -745,6 +745,7 @@
   filter: blur(0) saturate(1) brightness(1);
   transform: scale(1);
   opacity: 1;
+  transition: filter 0.45s ease, transform 0.45s ease, opacity 0.38s ease;
 }
 
 #messages-area.cw-chat-gated .cw-chat-loading,

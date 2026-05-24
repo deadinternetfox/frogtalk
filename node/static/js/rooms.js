@@ -1240,6 +1240,8 @@ const Rooms = (() => {
       '<div class="ch-spin" aria-hidden="true"></div>' +
       '<div class="ch-loading-label">' + _escTransition(label) + '</div></div>';
     area.appendChild(overlay);
+    try { window.FtCompose?.beginChannelSwitch?.(name); } catch {}
+    try { window.FtCompose?.refresh?.(); } catch {}
   }
 
   function _clearMessageContent() {
@@ -1256,17 +1258,21 @@ const Rooms = (() => {
     }
   }
 
-  function clearChatTransition() {
+  function clearChatTransition(opts) {
+    const options = opts && typeof opts === 'object' ? opts : {};
+    const finish = options.finish === true;
     const area = document.getElementById('messages-area');
     const overlay = document.getElementById(_CHAT_TRANSITION_ID);
     try { area?.classList.remove('chat-switching'); } catch {}
-    if (overlay) {
+    if (overlay && !overlay.classList.contains('ch-transition-dismiss')) {
       overlay.classList.add('ch-transition-dismiss');
       const done = () => {
         try { overlay.remove(); } catch {}
         try {
-          if (window.FtCompose?.finishChannelLoad) {
+          if (finish && window.FtCompose?.finishChannelLoad) {
             FtCompose.finishChannelLoad(State?.currentRoom);
+          } else {
+            window.FtCompose?.refresh?.();
           }
         } catch {}
       };
@@ -1274,9 +1280,12 @@ const Rooms = (() => {
       setTimeout(done, 480);
       return;
     }
+    try { overlay?.remove(); } catch {}
     try {
-      if (window.FtCompose?.finishChannelLoad) {
+      if (finish && window.FtCompose?.finishChannelLoad) {
         FtCompose.finishChannelLoad(State?.currentRoom);
+      } else {
+        window.FtCompose?.refresh?.();
       }
     } catch {}
   }
@@ -1294,7 +1303,8 @@ const Rooms = (() => {
     const wasViewing = !!(o.wasCurrentRoom || State.currentRoom === name);
 
     try { delete State._roomSwitchInProgress; } catch {}
-    clearChatTransition();
+    clearChatTransition({ finish: false });
+    try { window.FtCompose?.cancelChannelSwitch?.(); } catch {}
     if (window.ContentWarning?.unlockUi) {
       try { ContentWarning.unlockUi(); } catch {}
     }
@@ -1434,9 +1444,9 @@ const Rooms = (() => {
     if (type === 'private') {
       key = await _resolvePrivateRoomKey(name);
       if (key === undefined) {
-        clearChatTransition();
+        clearChatTransition({ finish: false });
         try { delete State._roomSwitchInProgress; } catch {}
-        try { window.FtCompose?.finishChannelLoad?.(name); } catch {}
+        try { window.FtCompose?.cancelChannelSwitch?.(); } catch {}
         return;
       }
     }
@@ -1665,7 +1675,7 @@ const Rooms = (() => {
           return;
         }
       }
-      clearChatTransition();
+      clearChatTransition({ finish: false });
     }
 
     // Persist last-opened channel only after CW ack (or immediately for private).
@@ -1702,7 +1712,14 @@ const Rooms = (() => {
       const shell = msgArea.querySelector('#cw-chat-content');
       const hasRendered = !!(shell && shell.children.length);
       if (hasCached && typeof Messages !== 'undefined' && Messages.loadHistory) {
-        try { Messages.loadHistory(name, State.messages[name].slice()); } catch {}
+        const cachedMsgs = State.messages[name].slice();
+        queueMicrotask(() => {
+          try {
+            if (State.currentRoom === name) {
+              Messages.loadHistory(name, cachedMsgs);
+            }
+          } catch {}
+        });
       } else if (!hasRendered) {
         showChatTransition(name, type, dmPeer, 'load', { room: roomData, channelType: chType });
       }

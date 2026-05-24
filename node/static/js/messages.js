@@ -2758,8 +2758,7 @@ const Messages = (() => {
     if (!msgs || msgs.length === 0) {
       mount.innerHTML = _emptyStateHtml(room);
       try { area.classList.remove('chat-switching'); } catch {}
-      try { if (typeof clearChatTransition === 'function') clearChatTransition(); } catch {}
-      try { window.FtCompose?.finishChannelLoad?.(room); } catch {}
+      try { if (typeof clearChatTransition === 'function') clearChatTransition({ finish: true }); } catch {}
       mount.scrollTop = mount.scrollHeight;
       return;
     }
@@ -2805,8 +2804,7 @@ const Messages = (() => {
 
     mount.innerHTML = html;
     try { area.classList.remove('chat-switching'); } catch {}
-    try { if (typeof clearChatTransition === 'function') clearChatTransition(); } catch {}
-    try { window.FtCompose?.finishChannelLoad?.(room); } catch {}
+    try { if (typeof clearChatTransition === 'function') clearChatTransition({ finish: true }); } catch {}
     mount.scrollTop = mount.scrollHeight;
     if (msgs.length) State.oldestMsgId = msgs[0].id;
     bindLongPress(area);

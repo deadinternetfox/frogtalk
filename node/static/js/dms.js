@@ -2684,7 +2684,7 @@ async function openDMChannel (id, nickname, avatar) {
     if (!unlocked) {
       DmLock.renderLockOverlay(nickname);
       try {
-        if (typeof clearChatTransition === 'function') clearChatTransition();
+        if (typeof clearChatTransition === 'function') clearChatTransition({ finish: true });
         delete State._roomSwitchInProgress;
       } catch {}
       _dmMessagesLoading = false;
@@ -3132,7 +3132,7 @@ function renderDMChat () {
   const area = document.getElementById('messages-area');
   if (!area || !_activeDM) return;
   try {
-    if (typeof clearChatTransition === 'function') clearChatTransition();
+    if (typeof clearChatTransition === 'function') clearChatTransition({ finish: true });
     delete State._roomSwitchInProgress;
   } catch {}
   if (!_dmMessages.length) {

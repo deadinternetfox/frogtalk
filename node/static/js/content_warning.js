@@ -53,9 +53,7 @@
     if (!room || !window.State) return;
     if (String(State.currentRoom || '').toLowerCase() !== room) return;
     if (State.currentRoomType === 'dm') return;
-    try {
-      if (typeof clearChatTransition === 'function') clearChatTransition();
-    } catch {}
+    try { window.FtCompose?.beginChannelSwitch?.(room); } catch {}
     try {
       if (typeof WS !== 'undefined' && WS.connect) {
         WS.resetHistoryCache?.(room);
@@ -188,19 +186,43 @@
     return area.querySelector('#' + CHAT_CONTENT_ID) || area;
   }
 
+  function _dismissGateOverlay() {
+    const overlay = _el(OVERLAY_ID);
+    if (!overlay) return Promise.resolve();
+    const area = _el('messages-area');
+    if (area) {
+      area.classList.add('cw-unlocking');
+      _setChatGated(false);
+    }
+    overlay.classList.add('cw-gate-dismiss');
+    return new Promise((resolve) => {
+      const done = () => {
+        try { overlay.remove(); } catch {}
+        try { area?.classList.remove('cw-unlocking', 'cw-chat-gated'); } catch {}
+        resolve();
+      };
+      overlay.addEventListener('animationend', done, { once: true });
+      setTimeout(done, 420);
+    });
+  }
+
   function _unlockUi(roomName) {
-    try { _el(OVERLAY_ID)?.remove(); } catch {}
-    _setChatGated(false);
-    _unlockComposer();
-    try {
-      if (typeof clearChatTransition === 'function') clearChatTransition();
-    } catch {}
+    return _dismissGateOverlay().then(() => {
+      _unlockComposer();
+      try {
+        if (typeof clearChatTransition === 'function') {
+          clearChatTransition({ finish: false });
+        }
+      } catch {}
+      try { window.FtCompose?.beginChannelSwitch?.(roomName); } catch {}
+      try { window.FtCompose?.refresh?.(); } catch {}
+    });
   }
 
   function _removeOverlay() {
-    try { _el(OVERLAY_ID)?.remove(); } catch {}
-    _setChatGated(false);
-    _unlockComposer();
+    void _dismissGateOverlay().then(() => {
+      _unlockComposer();
+    });
   }
 
   async function _fetchStatus(roomName) {
@@ -322,7 +344,7 @@
   function _showGate(roomName, meta) {
     return new Promise((resolve) => {
       try {
-        if (typeof clearChatTransition === 'function') clearChatTransition();
+        if (typeof clearChatTransition === 'function') clearChatTransition({ finish: false });
       } catch {}
 
       _lockComposer();
@@ -401,7 +423,7 @@
             }
             return;
           }
-          _unlockUi(roomName);
+          await _unlockUi(roomName);
           finish(true);
         } catch {
           if (enterBtn) {

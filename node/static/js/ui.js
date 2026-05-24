@@ -9108,6 +9108,16 @@ function _mentionColorWithAlpha(color, alpha, fallback) {
     }
   }
 
+  function cancelChannelSwitch() {
+    _chLoad.active = false;
+    _chLoad.room = '';
+    if (_loadSafetyTimer) {
+      clearTimeout(_loadSafetyTimer);
+      _loadSafetyTimer = null;
+    }
+    refresh();
+  }
+
   function beginChannelSwitch(room) {
     _chLoad.room = String(room || '').trim().toLowerCase();
     _chLoad.active = true;
@@ -9143,6 +9153,7 @@ function _mentionColorWithAlpha(color, alpha, fallback) {
     refresh,
     beginChannelSwitch,
     finishChannelLoad,
+    cancelChannelSwitch,
     isSendBlocked,
     isChannelLoading,
     channelLoadBlocked,
