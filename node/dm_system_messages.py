@@ -133,6 +133,65 @@ def insert_dm_system_notice(
         return None
 
 
+_DISAPPEAR_LABELS = {
+    0: "Off",
+    3600: "1 hour",
+    86400: "24 hours",
+    604800: "7 days",
+    2592000: "30 days",
+}
+
+
+def format_disappear_label(seconds: int) -> str:
+    sec = int(seconds or 0)
+    return _DISAPPEAR_LABELS.get(sec, f"{sec}s")
+
+
+def disappear_timer_content(
+    *,
+    actor_nick: str,
+    peer_nick: str,
+    seconds: int,
+    actor_is_self: bool = False,
+) -> str:
+    """In-chat notice when disappearing-message timer changes for both parties."""
+    actor = str(actor_nick or "someone").strip().lstrip("@") or "someone"
+    peer = str(peer_nick or "peer").strip().lstrip("@") or "peer"
+    label = format_disappear_label(seconds)
+    if actor_is_self:
+        subtitle = (
+            f"You set messages to auto-delete after **{label}** for both of you."
+            if seconds > 0
+            else "You turned off disappearing messages for both of you."
+        )
+    elif seconds <= 0:
+        subtitle = f"@{actor} turned off disappearing messages for both of you."
+    else:
+        subtitle = (
+            f"@{actor} set messages to auto-delete after **{label}** for both of you."
+        )
+    return dm_sys_content(
+        kind="disappear_timer",
+        title="Disappearing messages updated",
+        subtitle=subtitle.replace("**", ""),
+        icon="⏱️",
+    )
+
+
+def chat_wiped_content(*, actor_nick: str, peer_nick: str) -> str:
+    """In-chat notice when a bilateral conversation wipe completes."""
+    actor = str(actor_nick or "someone").strip().lstrip("@") or "someone"
+    return dm_sys_content(
+        kind="chat_wiped",
+        title="Conversation cleared",
+        subtitle=(
+            f"@{actor} deleted all messages for both of you. "
+            "Encryption sessions were refreshed — send a message to continue."
+        ),
+        icon="🧹",
+    )
+
+
 def crypto_sync_content(
     *,
     actor: str = "both",

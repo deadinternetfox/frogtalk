@@ -1897,6 +1897,10 @@ def _migrate():
             con.execute("ALTER TABLE dm_channels ADD COLUMN last_read_a INTEGER DEFAULT 0")
         if "last_read_b" not in dm_cols:
             con.execute("ALTER TABLE dm_channels ADD COLUMN last_read_b INTEGER DEFAULT 0")
+        if "wiped_at" not in dm_cols:
+            con.execute("ALTER TABLE dm_channels ADD COLUMN wiped_at TEXT DEFAULT ''")
+        if "last_wipe_id" not in dm_cols:
+            con.execute("ALTER TABLE dm_channels ADD COLUMN last_wipe_id TEXT DEFAULT ''")
         dm_msg_cols = {r["name"] for r in con.execute("PRAGMA table_info(dm_messages)").fetchall()}
         if "media_blur" not in dm_msg_cols:
             con.execute("ALTER TABLE dm_messages ADD COLUMN media_blur INTEGER DEFAULT 0")
@@ -5887,6 +5891,8 @@ def get_dm_channels_for_sync(user_id: int) -> List[Dict]:
                    COALESCE(dc.forwarding_disabled, 0) AS forwarding_disabled,
                    COALESCE(dc.last_read_a, 0) AS last_read_a,
                    COALESCE(dc.last_read_b, 0) AS last_read_b,
+                   COALESCE(dc.wiped_at, '') AS wiped_at,
+                   COALESCE(dc.last_wipe_id, '') AS last_wipe_id,
                    CASE WHEN dc.user_a=? THEN dc.user_b ELSE dc.user_a END AS other_id
             FROM dm_channels dc
             WHERE dc.user_a=? OR dc.user_b=?
@@ -6591,16 +6597,66 @@ def unhide_dm_channel_for_recipient(channel_id: int, sender_id: int) -> None:
 
 def wipe_dm_messages(channel_id: int, user_id: int) -> bool:
     """Delete all messages in a DM channel. Only channel members can do this."""
+    result = apply_dm_channel_wipe(channel_id, user_id, wipe_id="")
+    return bool(result.get("ok"))
+
+
+def apply_dm_channel_wipe(
+    channel_id: int,
+    actor_user_id: int,
+    *,
+    wipe_id: str = "",
+) -> dict:
+    """Bilateral wipe: delete messages, stamp wiped_at, idempotent on wipe_id."""
+    cid = int(channel_id or 0)
+    uid = int(actor_user_id or 0)
+    if cid <= 0 or uid <= 0:
+        return {"ok": False, "error": "bad_args"}
+    wid = str(wipe_id or "").strip()[:64]
     with _conn() as con:
         row = con.execute(
-            "SELECT id FROM dm_channels WHERE id=? AND (user_a=? OR user_b=?)",
-            (channel_id, user_id, user_id)
+            "SELECT id, user_a, user_b, COALESCE(last_wipe_id, '') AS last_wipe_id "
+            "FROM dm_channels WHERE id=? AND (user_a=? OR user_b=?)",
+            (cid, uid, uid),
         ).fetchone()
         if not row:
-            return False
-        con.execute("DELETE FROM dm_messages WHERE channel_id=?", (channel_id,))
+            return {"ok": False, "error": "forbidden"}
+        peer_id = int(row["user_b"]) if int(row["user_a"]) == uid else int(row["user_a"])
+        if wid and str(row["last_wipe_id"] or "") == wid:
+            return {
+                "ok": True,
+                "skipped": True,
+                "idempotent": True,
+                "channel_id": cid,
+                "peer_id": peer_id,
+                "actor_id": uid,
+            }
+        con.execute("DELETE FROM dm_messages WHERE channel_id=?", (cid,))
+        con.execute(
+            "UPDATE dm_channels SET wiped_at=datetime('now'), last_wipe_id=? WHERE id=?",
+            (wid, cid),
+        )
         con.commit()
-        return True
+    return {
+        "ok": True,
+        "skipped": False,
+        "idempotent": False,
+        "channel_id": cid,
+        "peer_id": peer_id,
+        "actor_id": uid,
+    }
+
+
+def get_dm_channel_wiped_at(channel_id: int) -> str:
+    cid = int(channel_id or 0)
+    if cid <= 0:
+        return ""
+    with _conn() as con:
+        row = con.execute(
+            "SELECT COALESCE(wiped_at, '') AS wiped_at FROM dm_channels WHERE id=?",
+            (cid,),
+        ).fetchone()
+    return str(row["wiped_at"] or "").strip() if row else ""
 
 
 # ---------------------------------------------------------------------------
@@ -6618,6 +6674,8 @@ def apply_sync_dm_channel_settings(
     forwarding_disabled: int | None = None,
     my_last_read: int | None = None,
     hidden: bool | None = None,
+    wiped_at: str | None = None,
+    last_wipe_id: str | None = None,
 ) -> bool:
     """Apply per-channel DM prefs from account sync (member-gated)."""
     cid = int(channel_id or 0)
@@ -6626,7 +6684,9 @@ def apply_sync_dm_channel_settings(
         return False
     with _conn() as con:
         row = con.execute(
-            "SELECT user_a, user_b FROM dm_channels WHERE id=? AND (user_a=? OR user_b=?)",
+            "SELECT user_a, user_b, COALESCE(wiped_at, '') AS wiped_at, "
+            "COALESCE(last_wipe_id, '') AS last_wipe_id FROM dm_channels "
+            "WHERE id=? AND (user_a=? OR user_b=?)",
             (cid, uid, uid),
         ).fetchone()
         if not row:
@@ -6659,6 +6719,21 @@ def apply_sync_dm_channel_settings(
                 con.execute("UPDATE dm_channels SET hidden_by_a=0 WHERE id=?", (cid,))
             else:
                 con.execute("UPDATE dm_channels SET hidden_by_b=0 WHERE id=?", (cid,))
+        remote_wipe = str(wiped_at or "").strip()[:64] if wiped_at is not None else ""
+        remote_wipe_id = str(last_wipe_id or "").strip()[:64] if last_wipe_id is not None else ""
+        local_wipe = str(row["wiped_at"] or "").strip()
+        local_wipe_id = str(row["last_wipe_id"] or "").strip()
+        should_wipe = False
+        if remote_wipe_id and remote_wipe_id != local_wipe_id:
+            should_wipe = True
+        elif remote_wipe and remote_wipe > local_wipe:
+            should_wipe = True
+        if should_wipe:
+            con.execute("DELETE FROM dm_messages WHERE channel_id=?", (cid,))
+            con.execute(
+                "UPDATE dm_channels SET wiped_at=?, last_wipe_id=? WHERE id=?",
+                (remote_wipe or datetime.utcnow().isoformat() + "Z", remote_wipe_id, cid),
+            )
         con.commit()
     return True
 

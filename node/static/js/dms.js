@@ -1213,6 +1213,7 @@ function _dmSysLogCardClass(kind, meta) {
   }
   if (k === 'history_import_failed' || k === 'sync_failed' || k === 'sync_attempted'
       || k === 'peer_unreachable' || k === 'decrypt_failed') return 'dm-sys-log-warn';
+  if (k === 'disappear_timer' || k === 'chat_wiped') return 'dm-sys-log-crypto';
   return 'dm-sys-log-crypto';
 }
 
@@ -2430,7 +2431,7 @@ async function wipeDMMessages () {
   if (!_activeDM) return;
   const ok = await UI.confirm({
     title: 'Wipe conversation',
-    message: 'Delete ALL messages in this conversation? This cannot be undone.',
+    message: 'Delete ALL messages in this conversation for both of you? Encryption will be refreshed. This cannot be undone.',
     confirmLabel: 'Delete all',
     danger: true,
   });
@@ -2439,8 +2440,14 @@ async function wipeDMMessages () {
     const r = await apiFetch(`/api/dms/${_activeDM.id}/messages`, 'DELETE');
     if (r.ok) {
       _dmMessages = [];
+      _dmHistoryCache.set(_activeDM.id, []);
       renderDMChat();
-      toast('All messages wiped', 'info');
+      renderDMChannels();
+      const peerId = Number(_activeDM.user_id) || 0;
+      if (peerId && window.Signal?.requestDmCryptoHeal) {
+        void window.Signal.requestDmCryptoHeal(peerId).catch(() => {});
+      }
+      toast('Conversation cleared for both of you', 'info');
     } else {
       const d = await r.json().catch(() => ({}));
       toast(d.error || 'Failed to wipe messages', 'error');
@@ -5380,6 +5387,35 @@ function handleWSDMDisappearUpdated(data) {
   }
 }
 window.handleWSDMDisappearUpdated = handleWSDMDisappearUpdated;
+
+function handleWSDMMessagesWiped(data) {
+  const chId = Number(data?.channel_id) || 0;
+  const peerUserId = Number(data?.peer_user_id) || 0;
+  const actorId = Number(data?.actor_id) || 0;
+  const myId = Number(STATE.user?.id) || 0;
+  if (!chId) return;
+
+  _dmHistoryCache.set(chId, []);
+  if (_activeDM?.id === chId) {
+    _dmMessages = [];
+    renderDMChat();
+  }
+  for (const ch of _dmChannels) {
+    if (ch.id === chId) {
+      ch.last_msg = null;
+      ch.last_msg_at = null;
+      ch.unread = 0;
+      break;
+    }
+  }
+  renderDMChannels();
+
+  const healPeerId = (myId && actorId === myId) ? peerUserId : (actorId || peerUserId);
+  if (healPeerId && window.Signal?.applyDmCryptoHeal) {
+    void window.Signal.applyDmCryptoHeal(healPeerId).catch(() => {});
+  }
+}
+window.handleWSDMMessagesWiped = handleWSDMMessagesWiped;
 
 async function loadDisappearTimer() {
   if (!_activeDM) return;

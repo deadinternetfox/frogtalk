@@ -15,7 +15,9 @@ import database as db
 from deps import get_current_user, client_ip
 from dm_system_messages import (
     channel_has_recent_dmsys,
+    chat_wiped_content,
     crypto_sync_content,
+    disappear_timer_content,
     insert_history_keys_notice,
 )
 from ws_manager import manager
@@ -40,6 +42,200 @@ ALLOWED_MEDIA = (
     'data:audio/wav', 'data:audio/x-wav', 'data:audio/flac',
 )
 ENCRYPTED_MEDIA_PREFIX = 'ftenc:'
+_DM_DISAPPEAR_ALLOWED = frozenset({0, 3600, 86400, 604800, 2592000})
+
+
+async def _dm_channel_members(channel_id: int) -> tuple[int, int] | None:
+    try:
+        with db._conn() as con:
+            ch = con.execute(
+                "SELECT user_a, user_b FROM dm_channels WHERE id=?",
+                (int(channel_id),),
+            ).fetchone()
+        if not ch:
+            return None
+        return int(ch["user_a"]), int(ch["user_b"])
+    except Exception:
+        return None
+
+
+def _dm_peer_id(channel_id: int, user_id: int) -> int | None:
+    members = None
+    try:
+        with db._conn() as con:
+            ch = con.execute(
+                "SELECT user_a, user_b FROM dm_channels WHERE id=?",
+                (int(channel_id),),
+            ).fetchone()
+        if ch:
+            ua, ub = int(ch["user_a"]), int(ch["user_b"])
+            if ua == int(user_id):
+                return ub
+            if ub == int(user_id):
+                return ua
+    except Exception:
+        pass
+    return None
+
+
+async def _broadcast_dm_line(
+    channel_id: int,
+    sender: dict,
+    content: str,
+    *,
+    peer_id: int | None = None,
+) -> int | None:
+    """Insert a DM row and push dm_message WS to both participants."""
+    cid = int(channel_id or 0)
+    sid = int(sender.get("id") or 0)
+    if cid <= 0 or sid <= 0 or not content:
+        return None
+    pid = int(peer_id or 0) or int(_dm_peer_id(cid, sid) or 0)
+    msg_id = await run_in_threadpool(db.send_dm_message, cid, sid, content)
+    if not msg_id:
+        return None
+    created_at = datetime.utcnow().isoformat() + "Z"
+    payload = {
+        "type": "dm_message",
+        "id": msg_id,
+        "channel_id": cid,
+        "sender_id": sid,
+        "sender_nick": sender.get("nickname") or "",
+        "sender_display_name": sender.get("display_name"),
+        "sender_is_admin": bool(sender.get("is_admin")),
+        "sender_avatar": sender.get("avatar") or "",
+        "content": content,
+        "media_type": None,
+        "media_name": None,
+        "has_media": False,
+        "media_blur": 0,
+        "view_once": 0,
+        "reply_to": None,
+        "edited": False,
+        "deleted": False,
+        "reactions": {},
+        "created_at": created_at,
+    }
+    for uid in (sid, pid):
+        if uid:
+            await manager.send_to_user(uid, payload)
+    return int(msg_id)
+
+
+async def _maybe_post_disappear_timer_notice(
+    channel_id: int,
+    actor: dict,
+    peer: dict,
+    seconds: int,
+) -> None:
+    cid = int(channel_id or 0)
+    if cid <= 0:
+        return
+    if await run_in_threadpool(channel_has_recent_dmsys, cid, "disappear_timer", 90.0):
+        return
+    content = disappear_timer_content(
+        actor_nick=str(actor.get("nickname") or ""),
+        peer_nick=str(peer.get("nickname") or ""),
+        seconds=int(seconds),
+        actor_is_self=False,
+    )
+    pid = int(peer.get("id") or 0) or int(_dm_peer_id(cid, int(actor.get("id") or 0)) or 0)
+    await _broadcast_dm_line(cid, actor, content, peer_id=pid)
+
+
+async def _maybe_post_disappear_timer_notice_federated(
+    channel_id: int,
+    actor: dict,
+    peer: dict,
+    seconds: int,
+) -> None:
+    """Mirror node: actor changed timer remotely."""
+    cid = int(channel_id or 0)
+    if cid <= 0:
+        return
+    if await run_in_threadpool(channel_has_recent_dmsys, cid, "disappear_timer", 90.0):
+        return
+    content = disappear_timer_content(
+        actor_nick=str(actor.get("nickname") or ""),
+        peer_nick=str(peer.get("nickname") or ""),
+        seconds=int(seconds),
+        actor_is_self=False,
+    )
+    pid = int(peer.get("id") or 0) or int(_dm_peer_id(cid, int(actor.get("id") or 0)) or 0)
+    await _broadcast_dm_line(cid, actor, content, peer_id=pid)
+
+
+async def _maybe_post_chat_wiped_notice(
+    channel_id: int,
+    actor: dict,
+    peer: dict,
+) -> None:
+    cid = int(channel_id or 0)
+    if cid <= 0:
+        return
+    if await run_in_threadpool(channel_has_recent_dmsys, cid, "chat_wiped", 120.0):
+        return
+    content = chat_wiped_content(
+        actor_nick=str(actor.get("nickname") or ""),
+        peer_nick=str(peer.get("nickname") or ""),
+    )
+    pid = int(peer.get("id") or 0) or int(_dm_peer_id(cid, int(actor.get("id") or 0)) or 0)
+    await _broadcast_dm_line(cid, actor, content, peer_id=pid)
+
+
+async def _notify_dm_disappear_updated(
+    channel_id: int,
+    seconds: int,
+    *,
+    actor: dict | None = None,
+    actor_nick: str = "",
+) -> None:
+    members = await _dm_channel_members(channel_id)
+    if not members:
+        return
+    ws_payload = {
+        "type": "dm_disappear_updated",
+        "channel_id": int(channel_id),
+        "seconds": int(seconds),
+        "actor_id": int((actor or {}).get("id") or 0),
+        "actor_nick": str(actor_nick or (actor or {}).get("nickname") or ""),
+    }
+    for uid in members:
+        if uid:
+            await manager.send_to_user(uid, ws_payload)
+
+
+async def _notify_dm_messages_wiped(
+    channel_id: int,
+    *,
+    wipe_id: str,
+    actor: dict,
+    peer_id: int,
+) -> None:
+    members = await _dm_channel_members(channel_id)
+    if not members:
+        return
+    ws_payload = {
+        "type": "dm_messages_wiped",
+        "channel_id": int(channel_id),
+        "wipe_id": str(wipe_id or "")[:64],
+        "actor_id": int(actor.get("id") or 0),
+        "actor_nick": str(actor.get("nickname") or ""),
+        "peer_user_id": int(peer_id or 0),
+    }
+    for uid in members:
+        if uid:
+            await manager.send_to_user(uid, ws_payload)
+
+
+async def _trigger_dm_crypto_heal(actor: dict, peer_id: int) -> None:
+    if peer_id <= 0:
+        return
+    try:
+        from routers.signal import deliver_dm_crypto_heal
+        await deliver_dm_crypto_heal(int(peer_id), actor)
+    except Exception:
+        _log.debug("dm crypto heal after wipe failed", exc_info=True)
 
 
 def _is_allowed_media_payload(payload: Optional[str]) -> bool:
@@ -602,16 +798,26 @@ async def get_disappear_timer(channel_id: int, current_user: dict = Depends(get_
 
 
 @router.post("/{channel_id}/disappear")
-async def set_disappear_timer(channel_id: int, body: DisappearTimerBody,
-                              current_user: dict = Depends(get_current_user)):
-    """Set the disappearing message timer for a DM channel."""
-    # Validate seconds (0, 1h, 24h, 7d, 30d)
-    allowed = {0, 3600, 86400, 604800, 2592000}
-    if body.seconds not in allowed:
+@limiter.limit("24/minute")
+async def set_disappear_timer(
+    request: Request,
+    channel_id: int,
+    body: DisappearTimerBody,
+    current_user: dict = Depends(get_current_user),
+):
+    """Set the disappearing message timer for a DM channel (both parties)."""
+    del request
+    if body.seconds not in _DM_DISAPPEAR_ALLOWED:
         return JSONResponse(status_code=400, content={
             "error": "Invalid timer value. Use 0 (off), 3600 (1h), 86400 (24h), 604800 (7d), or 2592000 (30d)"
         })
-    
+    if not db.is_dm_member(channel_id, current_user["id"]):
+        return JSONResponse(status_code=403, content={"error": "Not a member of this channel"})
+
+    current = db.get_dm_disappear_timer(channel_id)
+    if int(current) == int(body.seconds):
+        return {"ok": True, "seconds": body.seconds, "unchanged": True}
+
     ok = db.set_dm_disappear_timer(channel_id, current_user["id"], body.seconds)
     if not ok:
         return JSONResponse(status_code=403, content={"error": "Cannot set timer for this channel"})
@@ -621,32 +827,22 @@ async def set_disappear_timer(channel_id: int, body: DisappearTimerBody,
     except Exception:
         _log.debug("disappear cleanup failed", exc_info=True)
 
+    peer_id = _dm_peer_id(channel_id, current_user["id"])
+    peer = db.get_user_by_id(peer_id) or {} if peer_id else {}
+
+    await _notify_dm_disappear_updated(
+        channel_id, body.seconds, actor=current_user,
+    )
     try:
-        with db._conn() as con:
-            ch = con.execute(
-                "SELECT user_a, user_b FROM dm_channels WHERE id=?", (channel_id,)
-            ).fetchone()
-        if ch:
-            ws_payload = {
-                "type": "dm_disappear_updated",
-                "channel_id": channel_id,
-                "seconds": body.seconds,
-            }
-            for uid in (ch["user_a"], ch["user_b"]):
-                if uid:
-                    await manager.send_to_user(uid, ws_payload)
+        await _maybe_post_disappear_timer_notice(
+            channel_id, current_user, peer, body.seconds,
+        )
     except Exception:
-        pass
+        _log.debug("disappear notice failed", exc_info=True)
 
     try:
         from routers import federation as federation_mod
-        with db._conn() as con:
-            ch = con.execute(
-                "SELECT user_a, user_b FROM dm_channels WHERE id=?", (channel_id,)
-            ).fetchone()
-        if ch:
-            peer_id = ch["user_b"] if ch["user_a"] == current_user["id"] else ch["user_a"]
-            peer = db.get_user_by_id(peer_id) or {}
+        if peer_id:
             federation_mod.enqueue_dm_disappear_updated(
                 current_user,
                 peer,
@@ -873,9 +1069,57 @@ async def unhide_dm_channel(channel_id: int, current_user: dict = Depends(get_cu
 # ─── Wipe DM messages ──────────────────────────────────────────────────────────
 
 @router.delete("/{channel_id}/messages")
-async def wipe_dm_messages(channel_id: int, current_user: dict = Depends(get_current_user)):
-    """Wipe all messages in a DM channel (for both users)."""
-    ok = db.wipe_dm_messages(channel_id, current_user["id"])
-    if not ok:
+@limiter.limit("8/minute")
+async def wipe_dm_messages(
+    request: Request,
+    channel_id: int,
+    current_user: dict = Depends(get_current_user),
+):
+    """Wipe all messages in a DM channel for both users (all nodes)."""
+    del request
+    if not db.is_dm_member(channel_id, current_user["id"]):
         return JSONResponse(status_code=403, content={"error": "Not a member of this channel"})
-    return {"ok": True}
+
+    peer_id = _dm_peer_id(channel_id, current_user["id"])
+    if not peer_id:
+        return JSONResponse(status_code=403, content={"error": "Not a member of this channel"})
+
+    wipe_id = uuid.uuid4().hex
+    result = await run_in_threadpool(
+        db.apply_dm_channel_wipe,
+        int(channel_id),
+        int(current_user["id"]),
+        wipe_id=wipe_id,
+    )
+    if not result.get("ok"):
+        return JSONResponse(status_code=403, content={"error": "Cannot wipe this channel"})
+
+    peer = db.get_user_by_id(peer_id) or {}
+    idempotent = bool(result.get("idempotent"))
+
+    await _notify_dm_messages_wiped(
+        channel_id,
+        wipe_id=wipe_id,
+        actor=current_user,
+        peer_id=int(peer_id),
+    )
+    if not idempotent:
+        try:
+            await _maybe_post_chat_wiped_notice(channel_id, current_user, peer)
+        except Exception:
+            _log.debug("chat wiped notice failed", exc_info=True)
+
+    if not idempotent:
+        try:
+            from routers import federation as federation_mod
+            federation_mod.enqueue_dm_wipe_all(
+                current_user,
+                peer,
+                wipe_id=wipe_id,
+            )
+        except Exception:
+            _log.exception("federation: failed to enqueue DM wipe")
+
+        await _trigger_dm_crypto_heal(current_user, int(peer_id))
+
+    return {"ok": True, "wipe_id": wipe_id, "idempotent": idempotent}

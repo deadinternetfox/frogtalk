@@ -395,6 +395,8 @@ def _sanitize_sync_dm_channel_settings(raw: dict) -> dict:
         "forwarding_disabled": 1 if int(raw.get("forwarding_disabled") or 0) else 0,
         "my_last_read": max(0, min(2_147_483_647, int(raw.get("my_last_read") or 0))),
         "hidden": 1 if raw.get("hidden") in (True, 1, "1") else 0,
+        "wiped_at": str(raw.get("wiped_at") or "").strip()[:64],
+        "last_wipe_id": str(raw.get("last_wipe_id") or "").strip()[:64],
     }
     return out
 
@@ -2257,6 +2259,8 @@ def _export_travel_push_dm_peers(uid: int, source_server_id: str) -> list[dict]:
             "forwarding_disabled": ch.get("forwarding_disabled"),
             "my_last_read": my_read,
             "hidden": ch.get("hidden"),
+            "wiped_at": ch.get("wiped_at"),
+            "last_wipe_id": ch.get("last_wipe_id"),
         })
         dm_peers.append({**stub, **dm_settings})
         if len(dm_peers) >= _SYNC_TRAVEL_PUSH_DM_LIMIT:
@@ -3380,6 +3384,8 @@ def _build_sync_export_for_user(
             "forwarding_disabled": ch.get("forwarding_disabled"),
             "my_last_read": my_read,
             "hidden": ch.get("hidden"),
+            "wiped_at": ch.get("wiped_at"),
+            "last_wipe_id": ch.get("last_wipe_id"),
         })
         dm_peers.append({
             "nickname": nick,
@@ -3629,6 +3635,8 @@ def _build_sync_export_for_user(
         cid = int(ch.get("id") or 0)
         other_id = int(ch.get("other_id") or 0)
         if cid <= 0 or other_id <= 0:
+            continue
+        if str(ch.get("wiped_at") or "").strip():
             continue
         peer = db.get_user_by_id(other_id) or {}
         peer_gid = str(peer.get("global_user_id") or "").strip()
@@ -4206,7 +4214,10 @@ def _apply_sync_export_to_user(
             cid = int(db.get_or_create_dm(uid, peer_id) or 0)
             if cid > 0 and any(
                 k in item
-                for k in ("disappear_after", "forwarding_disabled", "my_last_read", "hidden")
+                for k in (
+                    "disappear_after", "forwarding_disabled", "my_last_read", "hidden",
+                    "wiped_at", "last_wipe_id",
+                )
             ):
                 dm_prefs = _sanitize_sync_dm_channel_settings(item)
                 try:
@@ -4217,6 +4228,8 @@ def _apply_sync_export_to_user(
                         forwarding_disabled=dm_prefs.get("forwarding_disabled"),
                         my_last_read=dm_prefs.get("my_last_read") or None,
                         hidden=bool(dm_prefs.get("hidden")) if "hidden" in item else None,
+                        wiped_at=dm_prefs.get("wiped_at") or None,
+                        last_wipe_id=dm_prefs.get("last_wipe_id") or None,
                     )
                 except Exception:
                     pass
@@ -4792,9 +4805,13 @@ def _apply_sync_export_to_user(
             cid = 0
         if cid <= 0:
             continue
+        wiped_at = str(db.get_dm_channel_wiped_at(cid) or "").strip()
         applied = 0
         for m in msgs[:_SYNC_EXPORT_DM_HISTORY_PER_CHANNEL]:
             if not isinstance(m, dict):
+                continue
+            msg_created = str(m.get("created_at") or "").strip()
+            if wiped_at and msg_created and msg_created <= wiped_at:
                 continue
             try:
                 origin_msg_id = int(m.get("id") or 0)

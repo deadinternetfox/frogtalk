@@ -649,6 +649,10 @@ const WS = (() => {
         if (typeof handleWSDMDisappearUpdated === 'function') handleWSDMDisappearUpdated(data);
         break;
       }
+      case 'dm_messages_wiped': {
+        if (typeof handleWSDMMessagesWiped === 'function') handleWSDMMessagesWiped(data);
+        break;
+      }
       case 'dm_send_warning': {
         try {
           if (typeof window.handleDMSendWarning === 'function') window.handleDMSendWarning(data);

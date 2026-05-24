@@ -264,15 +264,52 @@ def enqueue_dm_disappear_updated(
     targets = fed_dm.federation_mirror_targets(actor, peer)
     if not targets:
         return {"ok": False, "error": "no_dm_route"}
+    actor_gid = str(actor.get("global_user_id") or "").strip()
+    peer_gid = str(peer.get("global_user_id") or "").strip()
+    if not actor_gid or not peer_gid:
+        return {"ok": False, "error": "no_global_user_id"}
     return enqueue_server_event(
         "dm.disappear.updated",
         {
             "channel_id": int(channel_id or 0),
-            "sender_global_user_id": str(actor.get("global_user_id") or "").strip(),
-            "peer_global_user_id": str(peer.get("global_user_id") or "").strip(),
-            "sender_nickname": str(actor.get("nickname") or "").strip(),
+            "actor_global_user_id": actor_gid,
+            "peer_global_user_id": peer_gid,
+            "sender_global_user_id": actor_gid,
+            "actor_nickname": str(actor.get("nickname") or "").strip(),
             "peer_nickname": str(peer.get("nickname") or "").strip(),
+            "sender_nickname": str(actor.get("nickname") or "").strip(),
             "seconds": int(seconds or 0),
+        },
+        target_server_ids=targets,
+    )
+
+
+def enqueue_dm_wipe_all(
+    actor: dict,
+    peer: dict,
+    *,
+    wipe_id: str = "",
+) -> dict:
+    """Enqueue a signed ``dm.wipe.all`` for peer nodes."""
+    import federation_dms as fed_dm
+
+    targets = fed_dm.federation_mirror_targets(actor, peer)
+    if not targets:
+        return {"ok": False, "error": "no_dm_route"}
+    actor_gid = str(actor.get("global_user_id") or "").strip()
+    peer_gid = str(peer.get("global_user_id") or "").strip()
+    wid = str(wipe_id or "").strip()[:64]
+    if not actor_gid or not peer_gid or not wid:
+        return {"ok": False, "error": "bad_payload"}
+    return enqueue_server_event(
+        "dm.wipe.all",
+        {
+            "actor_global_user_id": actor_gid,
+            "peer_global_user_id": peer_gid,
+            "actor_nickname": str(actor.get("nickname") or "").strip(),
+            "peer_nickname": str(peer.get("nickname") or "").strip(),
+            "wipe_id": wid,
+            "requested_at": datetime.utcnow().isoformat() + "Z",
         },
         target_server_ids=targets,
     )
@@ -5736,9 +5773,11 @@ async def _handle_user_block_event(event_type: str, payload: dict) -> None:
 async def _handle_dm_disappear_updated(event: dict) -> None:
     """Apply a federated disappearing-message timer change."""
     payload = event.get("payload") or {}
-    sender_nick = _fed_nickname(payload.get("sender_nickname"))
+    actor_nick = _fed_nickname(
+        payload.get("actor_nickname") or payload.get("sender_nickname")
+    )
     peer_nick = _fed_nickname(payload.get("peer_nickname"))
-    if not sender_nick or not peer_nick:
+    if not actor_nick or not peer_nick:
         return
     try:
         seconds = int(payload.get("seconds") or 0)
@@ -5748,42 +5787,102 @@ async def _handle_dm_disappear_updated(event: dict) -> None:
     if seconds not in allowed:
         return
     origin = str(event.get("origin_server_id") or "").strip()
-    sender_gid = str(payload.get("sender_global_user_id") or "").strip()
+    actor_gid = str(
+        payload.get("actor_global_user_id") or payload.get("sender_global_user_id") or ""
+    ).strip()
     peer_gid = str(payload.get("peer_global_user_id") or "").strip()
-    if sender_gid and sender_nick:
-        db.upsert_federation_user_profile(sender_gid, sender_nick, origin_server_id=origin)
+    if not actor_gid or not peer_gid or actor_gid == peer_gid:
+        return
+    if actor_gid and actor_nick:
+        db.upsert_federation_user_profile(actor_gid, actor_nick, origin_server_id=origin)
     if peer_gid and peer_nick:
         db.upsert_federation_user_profile(peer_gid, peer_nick, origin_server_id=origin)
-    sender = _fed_resolve_user_for_dm(sender_nick, sender_gid or None, origin_server_id=origin)
+    actor = _fed_resolve_user_for_dm(actor_nick, actor_gid or None, origin_server_id=origin)
     peer = _fed_resolve_user_for_dm(peer_nick, peer_gid or None, origin_server_id=origin)
-    if not sender or not peer:
+    if not actor or not peer:
         _log.info(
             "federation: drop dm.disappear.updated — local user missing "
-            "(sender=%s peer=%s origin=%s)",
-            sender_nick,
+            "(actor=%s peer=%s origin=%s)",
+            actor_nick,
             peer_nick,
             origin,
         )
         return
-    channel_id = db.get_or_create_dm(sender["id"], peer["id"])
-    if not db.set_dm_disappear_timer(channel_id, sender["id"], seconds):
+    # Actor must be one of the two DM parties (never a third party).
+    actor_ids = {str(actor.get("global_user_id") or "").strip(), str(peer.get("global_user_id") or "").strip()}
+    if actor_gid not in actor_ids:
+        _log.info("federation: drop dm.disappear.updated — actor not in pair")
+        return
+    channel_id = db.get_or_create_dm(actor["id"], peer["id"])
+    if not db.set_dm_disappear_timer(channel_id, actor["id"], seconds):
         return
     try:
         db.cleanup_expired_dm_messages()
     except Exception:
         _log.debug("federation: disappear cleanup failed", exc_info=True)
-    ws_payload = {
-        "type": "dm_disappear_updated",
-        "channel_id": channel_id,
-        "seconds": seconds,
-    }
     try:
-        from ws_manager import manager
-        await manager.send_to_user(sender["id"], ws_payload)
-        if int(sender["id"]) != int(peer["id"]):
-            await manager.send_to_user(peer["id"], ws_payload)
+        from routers import dms as dms_mod
+        await dms_mod._notify_dm_disappear_updated(
+            channel_id, seconds, actor=actor,
+        )
+        await dms_mod._maybe_post_disappear_timer_notice_federated(
+            channel_id, actor, peer, seconds,
+        )
     except Exception:
-        pass
+        _log.debug("federation: disappear notice/ws failed", exc_info=True)
+
+
+async def _handle_dm_wipe_all(event: dict) -> None:
+    """Apply a federated bilateral DM wipe."""
+    payload = event.get("payload") or {}
+    actor_nick = _fed_nickname(payload.get("actor_nickname"))
+    peer_nick = _fed_nickname(payload.get("peer_nickname"))
+    wipe_id = str(payload.get("wipe_id") or "").strip()[:64]
+    if not actor_nick or not peer_nick or not wipe_id or not wipe_id.isalnum():
+        return
+    origin = str(event.get("origin_server_id") or "").strip()
+    actor_gid = str(payload.get("actor_global_user_id") or "").strip()
+    peer_gid = str(payload.get("peer_global_user_id") or "").strip()
+    if not actor_gid or not peer_gid or actor_gid == peer_gid:
+        return
+    if actor_gid and actor_nick:
+        db.upsert_federation_user_profile(actor_gid, actor_nick, origin_server_id=origin)
+    if peer_gid and peer_nick:
+        db.upsert_federation_user_profile(peer_gid, peer_nick, origin_server_id=origin)
+    actor = _fed_resolve_user_for_dm(actor_nick, actor_gid, origin_server_id=origin)
+    peer = _fed_resolve_user_for_dm(peer_nick, peer_gid, origin_server_id=origin)
+    if not actor or not peer:
+        _log.info(
+            "federation: drop dm.wipe.all — local user missing "
+            "(actor=%s peer=%s origin=%s)",
+            actor_nick,
+            peer_nick,
+            origin,
+        )
+        return
+    pair_gids = {str(actor.get("global_user_id") or "").strip(), str(peer.get("global_user_id") or "").strip()}
+    if actor_gid not in pair_gids:
+        _log.info("federation: drop dm.wipe.all — actor not in pair")
+        return
+    channel_id = db.get_or_create_dm(actor["id"], peer["id"])
+    result = db.apply_dm_channel_wipe(channel_id, actor["id"], wipe_id=wipe_id)
+    if not result.get("ok"):
+        return
+    peer_id = int(result.get("peer_id") or peer["id"])
+    idempotent = bool(result.get("idempotent"))
+    try:
+        from routers import dms as dms_mod
+        await dms_mod._notify_dm_messages_wiped(
+            channel_id,
+            wipe_id=wipe_id,
+            actor=actor,
+            peer_id=peer_id,
+        )
+        if not idempotent:
+            await dms_mod._maybe_post_chat_wiped_notice(channel_id, actor, peer)
+            await dms_mod._trigger_dm_crypto_heal(actor, peer_id)
+    except Exception:
+        _log.debug("federation: dm wipe side-effects failed", exc_info=True)
 
 
 async def _handle_dm_event(event: dict) -> None:
@@ -5791,6 +5890,9 @@ async def _handle_dm_event(event: dict) -> None:
     event_type = str(event.get("event_type") or "")
     if event_type == "dm.disappear.updated":
         await _handle_dm_disappear_updated(event)
+        return
+    if event_type == "dm.wipe.all":
+        await _handle_dm_wipe_all(event)
         return
     if event_type != "dm.message.created":
         return

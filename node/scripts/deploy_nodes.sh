@@ -112,6 +112,7 @@ SYNC_UPDATE_FILES=(
   "node/routers/auth.py:node/routers/auth.py"
   "node/routers/federation.py:node/routers/federation.py"
   "node/routers/dms.py:node/routers/dms.py"
+  "node/dm_system_messages.py:node/dm_system_messages.py"
   "node/routers/friends.py:node/routers/friends.py"
   "node/routers/social.py:node/routers/social.py"
   "node/routers/wall.py:node/routers/wall.py"
