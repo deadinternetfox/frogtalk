@@ -681,6 +681,10 @@ async def list_rooms(current_user: dict = Depends(get_current_user)):
         # requesting user is already a member or is a server admin.
         if r.get("type") == "private" and not r["joined"] and not is_admin:
             continue
+        fed = db.get_federation_channel_index_entry(r.get("name") or "")
+        if fed and not int(r.get("content_warning_enabled") or 0):
+            r["content_warning_enabled"] = int(fed.get("content_warning_enabled") or 0)
+            r["content_warning_flags"] = int(fed.get("content_warning_flags") or 0)
         visible.append(_room_with_content_warning(r) or r)
 
     # Remote-node sidebar: only channels the user is actually joined to on
@@ -1946,6 +1950,10 @@ async def join_room(
             content={"error": "You cannot join this channel directly. Ask for an invite link."}
         )
     db.join_room(current_user["id"], room["id"])
+    try:
+        db.sync_room_content_warning_from_index(name)
+    except Exception:
+        pass
     await _broadcast_room_member_joined(name, current_user)
     _enqueue_room_member_joined(current_user, name)
     _maybe_fed_directory_and_snapshot(name)

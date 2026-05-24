@@ -1086,15 +1086,46 @@ def content_warning_to_dict(enabled, flags) -> dict:
 
 def get_room_content_warning(room_name: str) -> tuple[bool, int]:
     room = get_room_by_name(room_name)
-    if not room:
+    if room and str(room.get("type") or "public").lower() != "public":
         return False, 0
-    if str(room.get("type") or "public").lower() != "public":
-        return False, 0
-    en = bool(int(room.get("content_warning_enabled") or 0))
-    fl = int(room.get("content_warning_flags") or 0) & CW_ALL
+    en = 0
+    fl = 0
+    if room:
+        en = bool(int(room.get("content_warning_enabled") or 0))
+        fl = int(room.get("content_warning_flags") or 0) & CW_ALL
+    if not en or not fl:
+        fed = get_federation_channel_index_entry(room_name)
+        if fed:
+            en = bool(int(fed.get("content_warning_enabled") or 0))
+            fl = int(fed.get("content_warning_flags") or 0) & CW_ALL
+            if en and fl and room:
+                try:
+                    set_room_content_warning(room_name, enabled=True, flags=fl)
+                except Exception:
+                    pass
     if not en or not fl:
         return False, 0
     return True, fl
+
+
+def sync_room_content_warning_from_index(room_name: str) -> None:
+    """Copy federation index CW flags onto a local room shell when missing."""
+    name = (room_name or "").strip().lower()
+    if not name:
+        return
+    room = get_room_by_name(name)
+    if not room or str(room.get("type") or "public").lower() != "public":
+        return
+    en, fl = get_room_content_warning(name)
+    if en and fl:
+        return
+    fed = get_federation_channel_index_entry(name)
+    if not fed:
+        return
+    fed_en = bool(int(fed.get("content_warning_enabled") or 0))
+    fed_fl = int(fed.get("content_warning_flags") or 0) & CW_ALL
+    if fed_en and fed_fl:
+        set_room_content_warning(name, enabled=True, flags=fed_fl)
 
 
 def set_room_content_warning(room_name: str, *, enabled: bool, flags: int) -> bool:

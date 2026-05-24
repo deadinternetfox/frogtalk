@@ -2251,8 +2251,11 @@ const App = {
     }
     try {
       const joined = (State.rooms || []).filter((r) => r.joined);
-      if (joined.length) await App.openFirstAvailableRoomWhenIdle();
-      else App.showEmptyOnboarding();
+      if (joined.length) {
+        if (!State.currentRoom) await App.openFirstAvailableRoomWhenIdle();
+      } else {
+        App.showEmptyOnboarding();
+      }
     } catch {}
     const joined = Number(payload?.rooms_joined || 0);
     const pruned = Number(payload?.rooms_pruned || 0);

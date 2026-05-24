@@ -36,6 +36,7 @@ function _cssUrl(raw) {
 }
 
 const Rooms = (() => {
+  let _switchSeq = 0;
   const _ROOM_NAME_RE = /^[a-z0-9_-]{1,32}$/;
   let _roomMentionClickBound = false;
   let _selectedRoomType = 'public';
@@ -1137,9 +1138,9 @@ const Rooms = (() => {
         ${isOwner ? '<span class="ch-owner-badge" title="You own this channel">Owner</span>' : ''}
         ${room.joined ? '<span class="ch-drag-handle" title="Drag to reorder" aria-label="Drag to reorder"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="9" cy="6" r="1.7"/><circle cx="15" cy="6" r="1.7"/><circle cx="9" cy="12" r="1.7"/><circle cx="15" cy="12" r="1.7"/><circle cx="9" cy="18" r="1.7"/><circle cx="15" cy="18" r="1.7"/></svg></span>' : ''}
       `;
-      el.onclick = () => {
-        if (!room.joined) { joinRoom(room.name); return; }
-        switchToRoom(room.name, room.type, null, channelType);
+      el.onclick = async () => {
+        if (!room.joined) { await joinRoom(room.name); return; }
+        await switchToRoom(room.name, room.type, null, channelType);
       };
       // Long-press (mobile) / right-click: show channel action sheet
       if (typeof bindLongPress === 'function') {
@@ -1220,6 +1221,7 @@ const Rooms = (() => {
   }
 
   async function switchToRoom(name, type = 'public', dmPeer = null, channelType = 'text') {    closeMobileSidebar();
+    const switchSeq = ++_switchSeq;
     const prevRoom = State.currentRoom;
     const prevType = State.currentRoomType;
     const _roomDataEarly = State.rooms.find(r => r.name === name);
@@ -1275,6 +1277,8 @@ const Rooms = (() => {
         }
       }
     }
+
+    if (switchSeq !== _switchSeq) return;
 
     // ── Smooth transition: clear DM UI state so no stale DM bleeds through
     if (typeof _activeDM !== 'undefined' && _activeDM) {
@@ -1738,7 +1742,7 @@ const Rooms = (() => {
         const ok = await ensurePrivateRoomSecret(name);
         if (!ok) return;
       }
-      switchToRoom(name, roomType, null, chType);
+      await switchToRoom(name, roomType, null, chType);
       return;
     }
     // Banned-from-channel: dedicated screen with reason + duration.
@@ -3381,6 +3385,11 @@ const Rooms = (() => {
     try { (State.rooms || []).forEach(apply); } catch {}
     try { renderRooms(); } catch {}
     try {
+      if (window.ContentWarning && typeof ContentWarning.patchMeta === 'function') {
+        ContentWarning.patchMeta(name, meta);
+      }
+    } catch {}
+    try {
       if (_currentSettingsRoom && String(_currentSettingsRoom).toLowerCase() === name) {
         _fillContentWarningForm('ch-cw', meta);
       }
@@ -4267,7 +4276,7 @@ function renderDirectoryCard(ch, compact) {
     </div>
     <div class="dir-card-join">
       ${alreadyJoined
-        ? `<button class="modal-btn" style="margin:0;padding:6px 16px;font-size:13px;background:#1a2a1a;color:#7fd97f;border:1px solid #2a4a2a;cursor:pointer" onclick="event.stopPropagation();Rooms.switchToRoom(${_jsStr(ch.name)}, 'public')">✓ Joined</button>`
+        ? `<button class="modal-btn" style="margin:0;padding:6px 16px;font-size:13px;background:#1a2a1a;color:#7fd97f;border:1px solid #2a4a2a;cursor:pointer" onclick="event.stopPropagation();openChannelFromDiscovery(${_jsStr(ch.name)}, this)">✓ Joined</button>`
         : `<button class="modal-btn primary" style="margin:0;padding:6px 16px;font-size:13px" onclick="event.stopPropagation();joinDirectoryChannel(${_jsStr(ch.name)})">Join</button>`}
     </div>
   </div>`;
@@ -4400,7 +4409,13 @@ async function openChannelFromDiscovery(name, btnEl) {
     try { document.getElementById('channel-profile-overlay')?.remove(); } catch {}
     try { document.getElementById('modal-directory')?.classList.add('hidden'); } catch {}
     try { if (window.Social && typeof Social.close === 'function') Social.close(); } catch {}
+    try {
+      localStorage.setItem('fc_last_room', JSON.stringify({
+        name, type: 'public', channelType: 'text', ts: Date.now(),
+      }));
+    } catch {}
     await Rooms.switchToRoom(name, 'public');
+    restore();
   } catch {
     UI.showToast('Network error', 'error');
     restore();

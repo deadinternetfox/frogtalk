@@ -12,6 +12,10 @@
     mature_themes: { label: 'Other mature themes', desc: 'May contain drugs, profanity, or other adult themes' },
   };
 
+  /** Rooms acked during the current in-app visit (cleared on prepareRoomEntry). */
+  const _visitAcked = new Set();
+  const _metaCache = new Map();
+
   function _el(id) { return document.getElementById(id); }
 
   function escapeHtml(s) {
@@ -26,6 +30,10 @@
     });
   }
 
+  function _cwEnabled(cw) {
+    return !!(cw && cw.enabled && Array.isArray(cw.flags) && cw.flags.length);
+  }
+
   function _roomMeta(roomName) {
     const name = String(roomName || '').trim().toLowerCase();
     if (!name || !window.State || !Array.isArray(State.rooms)) return null;
@@ -33,8 +41,45 @@
   }
 
   function isCwRoom(roomName) {
-    const cw = _roomMeta(roomName)?.content_warning;
-    return !!(cw && cw.enabled && Array.isArray(cw.flags) && cw.flags.length);
+    const name = String(roomName || '').trim().toLowerCase();
+  if (_metaCache.has(name)) return _cwEnabled(_metaCache.get(name));
+    return _cwEnabled(_roomMeta(name)?.content_warning);
+  }
+
+  async function _fetchRoomCwMeta(roomName) {
+    const name = String(roomName || '').trim().toLowerCase();
+    if (!name || !window.State || !State.token) return null;
+    if (_metaCache.has(name)) return _metaCache.get(name);
+    try {
+      const st = await fetch('/api/rooms/' + encodeURIComponent(name) + '/content-warning/status', {
+        headers: { 'X-Session-Token': State.token },
+      });
+      if (st.ok) {
+        const body = await st.json();
+        const cw = body?.content_warning || null;
+        if (cw) _metaCache.set(name, cw);
+        return cw;
+      }
+      const roomRes = await fetch('/api/rooms/' + encodeURIComponent(name), {
+        headers: { 'X-Session-Token': State.token },
+      });
+      if (roomRes.ok) {
+        const body = await roomRes.json();
+        const cw = body?.room?.content_warning || null;
+        if (cw) _metaCache.set(name, cw);
+        return cw;
+      }
+    } catch {}
+    return null;
+  }
+
+  async function resolveCwMeta(roomName) {
+    const name = String(roomName || '').trim().toLowerCase();
+    const local = _roomMeta(name)?.content_warning;
+    if (_cwEnabled(local)) return local;
+    const fetched = await _fetchRoomCwMeta(name);
+    if (_cwEnabled(fetched)) return fetched;
+    return local || fetched || { enabled: false, flags: [] };
   }
 
   function _removeOverlay() {
@@ -127,6 +172,7 @@
           }
           return;
         }
+        _visitAcked.add(String(roomName || '').trim().toLowerCase());
         _removeOverlay();
         resolve(true);
       } catch {
@@ -152,21 +198,11 @@
     return !!(window.State && State.token);
   }
 
-  async function _fetchStatus(roomName) {
-    const r = await fetch('/api/rooms/' + encodeURIComponent(roomName) + '/content-warning/status', {
-      headers: { 'X-Session-Token': State.token },
-    });
-    if (r.ok) return r.json();
-    try {
-      const body = await r.json();
-      if (body && typeof body === 'object') return { _httpStatus: r.status, ...body };
-    } catch {}
-    return { _httpStatus: r.status, required: false };
-  }
-
   async function forgetAck(roomName) {
     const name = String(roomName || '').trim().toLowerCase();
     if (!name || name.startsWith('dm:') || !window.State || !State.token) return;
+    _visitAcked.delete(name);
+    _metaCache.delete(name);
     try {
       await fetch('/api/rooms/' + encodeURIComponent(name) + '/content-warning/forget', {
         method: 'POST',
@@ -188,37 +224,41 @@
 
     return (async () => {
       const hasToken = await _waitForToken(options.tokenWaitMs || 5000);
+      const cwMeta = await resolveCwMeta(name);
+      const cwEnabled = _cwEnabled(cwMeta);
+
       if (!hasToken) {
-        return !isCwRoom(name);
+        return !cwEnabled;
+      }
+
+      if (_visitAcked.has(name)) {
+        return true;
+      }
+
+      if (cwEnabled) {
+        const alreadyInRoom = !!(window.State && State.currentRoom === name);
+        return await new Promise((resolve) => {
+          _showGate(name, cwMeta, resolve, alreadyInRoom);
+        });
       }
 
       let data = null;
       try {
-        data = await _fetchStatus(name);
-      } catch {
-        data = null;
+        const r = await fetch('/api/rooms/' + encodeURIComponent(name) + '/content-warning/status', {
+          headers: { 'X-Session-Token': State.token },
+        });
+        if (r.ok) data = await r.json();
+      } catch {}
+
+      if (data && data.required) {
+        const meta = data.content_warning || cwMeta;
+        const alreadyInRoom = !!(window.State && State.currentRoom === name);
+        return await new Promise((resolve) => {
+          _showGate(name, meta, resolve, alreadyInRoom);
+        });
       }
 
-      const localCw = _roomMeta(name)?.content_warning;
-      const cwMeta = (data && data.content_warning) || localCw || {};
-      const cwEnabled = !!(cwMeta && cwMeta.enabled && (cwMeta.flags || []).length);
-      let required = !!(data && data.required);
-
-      if (!required && cwEnabled && data && data.acknowledged === false) {
-        required = true;
-      }
-
-      // Fail-closed when status is unavailable but sidebar metadata marks 18+.
-      if (!required && isCwRoom(name) && (!data || data._httpStatus >= 400)) {
-        required = true;
-      }
-
-      if (!required) return true;
-
-      const alreadyInRoom = !!(window.State && State.currentRoom === name);
-      return await new Promise((resolve) => {
-        _showGate(name, cwMeta, resolve, alreadyInRoom);
-      });
+      return true;
     })();
   }
 
@@ -240,11 +280,14 @@
     const room = String((data && data.room) || '').trim().toLowerCase();
     if (!room) return;
     const cw = data.content_warning || {};
+    if (cw.enabled) _metaCache.set(room, cw);
     if (!cw.enabled) {
       _removeOverlay();
+      _metaCache.set(room, cw);
       return;
     }
     if (window.State && State.currentRoom === room) {
+      _visitAcked.delete(room);
       _lockRoomUntilAck(room);
       void gate(room).then((ok) => {
         if (ok && typeof WS !== 'undefined' && WS.connect) {
@@ -259,6 +302,7 @@
   function handleWsRequired(data) {
     const room = String((data && data.room) || '').trim().toLowerCase();
     if (!room || !window.State || State.currentRoom !== room) return;
+    _visitAcked.delete(room);
     _lockRoomUntilAck(room);
     void gate(room).then((ok) => {
       if (ok && typeof WS !== 'undefined' && WS.connect) {
@@ -276,11 +320,19 @@
     return '<span class="ch-cw-badge" title="' + tip + '">18+</span>';
   }
 
+  function patchMeta(roomName, cw) {
+    const name = String(roomName || '').trim().toLowerCase();
+    if (!name) return;
+    _metaCache.set(name, cw || { enabled: false, flags: [] });
+  }
+
   window.ContentWarning = {
     gate,
     forgetAck,
     prepareRoomEntry,
+    resolveCwMeta,
     isCwRoom,
+    patchMeta,
     formatFlags,
     handleWsUpdate,
     handleWsRequired,
