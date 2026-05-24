@@ -10001,9 +10001,8 @@ window.ConnErr = (function(){
 
     <div class="modal-actions" style="flex-direction:column;gap:8px;align-items:stretch;margin-top:10px">
       <button class="modal-btn primary" onclick="closeModal('modal-encrypt-verify')">Got it</button>
-      <button class="modal-btn" onclick="resetEncryptionKeys()"
-        style="font-size:12px;color:#b89a9a;background:rgba(255,80,80,.04);border:1px solid #5a2a2a"
-        title="Only use if encryption seems broken on this device">🔧 Reset keys on this device</button>
+      <button type="button" class="modal-btn secondary" data-ft-key-action="keys" id="enc-info-open-keymgr"
+        style="font-size:13px">🗝️ Open key manager</button>
     </div>
   </div>
 </div>
@@ -10334,7 +10333,7 @@ window.ConnErr = (function(){
         <div style="font-size:14px;font-weight:600;color:var(--accent-color)">🗝️ Encryption key manager</div>
         <p style="font-size:12px;color:var(--text-muted);line-height:1.55;margin:8px 0 0">
           View, export, and import end-to-end encryption for every DM and private group in <b>this browser only</b>.
-          Protected by your password and App PIN (if set). FrogTalk Nodes never receive your keys.
+          Protected by your App PIN (if set) and account password. FrogTalk Nodes never receive your keys.
         </p>
         <button type="button" class="modal-btn primary" id="ft-key-open-from-privacy" data-ft-key-action="keys">
           Open key manager
@@ -10799,7 +10798,7 @@ window.ConnErr = (function(){
       <span class="ft-key-manager-icon" aria-hidden="true">🔐</span>
       <div>
         <h2 class="modal-title" id="ft-key-gate-title" style="margin:0">Unlock key manager</h2>
-        <p class="ft-key-manager-sub">Enter your account password. If you use an App PIN, you will enter that first instead.</p>
+        <p class="ft-key-manager-sub">If you use an App PIN, enter that first. Then confirm with your account password.</p>
       </div>
     </div>
     <label class="modal-label" for="ft-key-gate-password">Account password</label>
@@ -10854,6 +10853,12 @@ window.ConnErr = (function(){
       </div>
     </div>
     <div id="ft-key-manager-error" class="auth-error ft-key-manager-error" style="display:none" role="alert"></div>
+    <div class="ft-key-manager-danger-zone" style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border-color,#2a2a2a)">
+      <p class="modal-label" style="margin-bottom:8px">Troubleshooting</p>
+      <button type="button" class="modal-btn" id="ft-key-reset-device"
+        style="width:100%;font-size:12px;color:#b89a9a;background:rgba(255,80,80,.04);border:1px solid #5a2a2a"
+        title="Only use if encryption seems broken on this device">🔧 Reset keys on this device</button>
+    </div>
     <div class="modal-actions ft-key-manager-actions">
       <button type="button" class="modal-btn secondary" id="ft-key-manager-close">Close</button>
     </div>

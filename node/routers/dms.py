@@ -683,7 +683,7 @@ async def post_crypto_sync_notice(
     other_id = int(ch["user_b"]) if int(ch["user_a"]) == int(current_user["id"]) else int(ch["user_a"])
     if peer_id != other_id:
         return JSONResponse(status_code=400, content={"error": "bad_peer"})
-    if await run_in_threadpool(channel_has_recent_dmsys, int(channel_id), "crypto_sync", 120.0):
+    if await run_in_threadpool(channel_has_recent_dmsys, int(channel_id), "crypto_sync", 600.0):
         return {"ok": True, "skipped": "recent_notice"}
 
     content = crypto_sync_content(current_user.get("nickname") or "")
@@ -717,21 +717,7 @@ async def post_crypto_sync_notice(
     }
     for uid in (int(current_user["id"]), other_id):
         await manager.send_to_user(uid, payload)
-    try:
-        from routers import federation as federation_mod
-
-        peer = db.get_user_by_id(other_id) or {}
-        await run_in_threadpool(
-            lambda: federation_mod.enqueue_dm_message_created(
-                current_user,
-                peer,
-                channel_id=int(channel_id),
-                content=content,
-                created_at=created_at,
-            ),
-        )
-    except Exception:
-        pass
+    # Node-local notice only — do not federate; avoids duplicate 🔐 lines on mirrors.
     return {
         "ok": True,
         "id": msg_id,

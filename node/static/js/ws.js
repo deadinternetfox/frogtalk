@@ -647,16 +647,21 @@ const WS = (() => {
         })();
         break;
       }
+      case 'dm_crypto_heal':
       case 'dm_crypto_resync': {
         (async () => {
           const fromId = Number(data.from_id) || 0;
           if (!fromId || !window.Signal) return;
           try {
-            if (typeof window.Signal.applyDmCryptoResync === 'function') {
-              await window.Signal.applyDmCryptoResync(fromId);
+            if (typeof window._dmMarkInboundResync === 'function') {
+              window._dmMarkInboundResync(fromId);
             }
+            const fn = (data.type === 'dm_crypto_heal' && window.Signal.applyDmCryptoHeal)
+              ? window.Signal.applyDmCryptoHeal
+              : window.Signal.applyDmCryptoResync;
+            if (typeof fn === 'function') await fn(fromId);
           } catch (e) {
-            console.warn('[ws] dm_crypto_resync failed', e);
+            console.warn('[ws] dm_crypto signal failed', e);
           }
         })();
         break;

@@ -7094,7 +7094,7 @@ function _renderEncDeviceFp(fp) {
     fpEl.textContent = fp;
     if (copyBtn) copyBtn.style.display = '';
   } else {
-    fpEl.innerHTML = '<span style="color:#b89a9a">Identity key not generated yet — send a DM to create one, or tap "Reset keys" below if encryption seems broken.</span>';
+    fpEl.innerHTML = '<span style="color:#b89a9a">Identity key not generated yet — send a DM to create one, or open the key manager to reset keys if encryption seems broken.</span>';
     if (copyBtn) copyBtn.style.display = 'none';
   }
 }

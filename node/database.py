@@ -6047,6 +6047,7 @@ def get_dm_messages(channel_id: int, user_id: int, limit: int = 50,
                        dm.deleted, dm.created_at, dm.media_blur, dm.view_once,
                        dm.forwarded_from,
                        COALESCE(dm.preview_suppressed, 0) AS preview_suppressed,
+                       COALESCE(dm.sync_origin_server_id, '') AS origin_server_id,
                        u.nickname AS sender_nick, u.avatar AS sender_avatar,
                        u.display_name AS sender_display_name,
                        u.is_admin AS sender_is_admin,
@@ -6066,6 +6067,7 @@ def get_dm_messages(channel_id: int, user_id: int, limit: int = 50,
                        dm.deleted, dm.created_at, dm.media_blur, dm.view_once,
                        dm.forwarded_from,
                        COALESCE(dm.preview_suppressed, 0) AS preview_suppressed,
+                       COALESCE(dm.sync_origin_server_id, '') AS origin_server_id,
                        u.nickname AS sender_nick, u.avatar AS sender_avatar,
                        u.display_name AS sender_display_name,
                        u.is_admin AS sender_is_admin,
@@ -6085,6 +6087,7 @@ def get_dm_messages(channel_id: int, user_id: int, limit: int = 50,
                        dm.deleted, dm.created_at, dm.media_blur, dm.view_once,
                        dm.forwarded_from,
                        COALESCE(dm.preview_suppressed, 0) AS preview_suppressed,
+                       COALESCE(dm.sync_origin_server_id, '') AS origin_server_id,
                        u.nickname AS sender_nick, u.avatar AS sender_avatar,
                        u.display_name AS sender_display_name,
                        u.is_admin AS sender_is_admin,
@@ -6171,6 +6174,47 @@ def save_synced_dm_message(
                     created_at,
                     src, omid,
                 ),
+            )
+            con.commit()
+        return True
+    except Exception:
+        return False
+
+
+def find_dm_message_by_federation_origin(source_server_id: str, origin_message_id: str) -> Optional[int]:
+    """Return local message id if this federated origin was already inserted."""
+    src = str(source_server_id or "").strip()
+    omid = str(origin_message_id or "").strip()
+    if not src or not omid:
+        return None
+    try:
+        with _conn() as con:
+            row = con.execute(
+                "SELECT id FROM dm_messages "
+                "WHERE sync_origin_server_id=? AND sync_origin_message_id=? LIMIT 1",
+                (src, omid),
+            ).fetchone()
+        return int(row["id"]) if row else None
+    except Exception:
+        return None
+
+
+def set_dm_message_federation_origin(
+    msg_id: int,
+    source_server_id: str,
+    origin_message_id: str,
+) -> bool:
+    mid = int(msg_id or 0)
+    src = str(source_server_id or "").strip()
+    omid = str(origin_message_id or "").strip()
+    if mid <= 0 or not src or not omid:
+        return False
+    try:
+        with _conn() as con:
+            con.execute(
+                "UPDATE dm_messages SET sync_origin_server_id=?, sync_origin_message_id=? "
+                "WHERE id=?",
+                (src, omid, mid),
             )
             con.commit()
         return True

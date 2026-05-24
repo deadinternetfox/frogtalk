@@ -145,8 +145,6 @@
         _toast('PIN required to open the key manager.', 'warning');
         return false;
       }
-      try { sessionStorage.setItem(_SS_AUTH_AT, String(Date.now())); } catch {}
-      return true;
     }
     const pw = await _promptPassword();
     if (!pw) return false;
@@ -522,12 +520,28 @@
   async function _afterImport() {
     try { window.__ftDctImported = true; } catch {}
     try {
+      if (window.Signal && typeof Signal.ensureMyBundleFresh === 'function') {
+        await Signal.ensureMyBundleFresh();
+      }
+    } catch {}
+    try {
+      if (window.Signal && typeof Signal.broadcastSelfCryptoResync === 'function') {
+        await Signal.broadcastSelfCryptoResync({ limit: 16 });
+      }
+    } catch {}
+    try {
       if (typeof window.__ftDmDecryptReset === 'function') window.__ftDmDecryptReset();
     } catch {}
     try {
-      if (typeof _redecryptStaleDMMessages === 'function' && typeof _activeDM !== 'undefined' && _activeDM) {
+      if (typeof _redecryptTravelDMMessages === 'function' && typeof _dmSkipHistoricalDecrypt === 'function'
+          && _dmSkipHistoricalDecrypt()) {
+        await _redecryptTravelDMMessages();
+      } else if (typeof _redecryptStaleDMMessages === 'function' && typeof _activeDM !== 'undefined' && _activeDM) {
         await _redecryptStaleDMMessages();
       }
+    } catch {}
+    try {
+      if (typeof _retryPendingDmDecrypts === 'function') await _retryPendingDmDecrypts();
     } catch {}
     try {
       if (typeof _refreshDmLockPlaceholders === 'function') await _refreshDmLockPlaceholders();
@@ -710,6 +724,26 @@
     };
   }
 
+  function _openFromTrigger(trigger) {
+    const ctx = _readTriggerContext(trigger);
+    const action = String(ctx.tab || 'import').toLowerCase();
+    const tab = action === 'export' ? 'export' : (action === 'keys' ? 'keys' : 'import');
+    if (typeof closeModal === 'function') {
+      closeModal('modal-disappear');
+      closeModal('modal-encrypt-verify');
+    }
+    return open(tab, ctx);
+  }
+
+  async function _resetDeviceKeys() {
+    if (typeof window.resetEncryptionKeys === 'function') {
+      close();
+      await window.resetEncryptionKeys();
+    } else {
+      _toast('Reset is not available — hard refresh the page.', 'error');
+    }
+  }
+
   function _bindGateModal() {
     _el('ft-key-gate-submit')?.addEventListener('click', () => {
       const modal = _el(GATE_MODAL_ID);
@@ -740,7 +774,12 @@
     _el('ft-key-import-confirm')?.addEventListener('click', () => { void runImportConfirm(); });
     _el('ft-key-import-back')?.addEventListener('click', () => _hideImportPreview());
     _el('ft-key-manager-close')?.addEventListener('click', () => close());
-    _el('ft-key-open-from-privacy')?.addEventListener('click', () => { void open('keys'); });
+    _el('ft-key-reset-device')?.addEventListener('click', () => { void _resetDeviceKeys(); });
+    _el('ft-key-open-from-privacy')?.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      void _openFromTrigger(e.currentTarget);
+    });
   }
 
   function _wireDelegatedClicks() {
@@ -750,9 +789,7 @@
       if (trigger.id === 'ft-key-open-from-privacy') return;
       e.preventDefault();
       e.stopPropagation();
-      const ctx = _readTriggerContext(trigger);
-      const action = String(ctx.tab || 'import').toLowerCase();
-      void open(action === 'export' ? 'export' : (action === 'keys' ? 'keys' : 'import'), ctx);
+      void _openFromTrigger(trigger);
     }, true);
   }
 

@@ -162,6 +162,7 @@ def enqueue_dm_message_created(
     media_blur: int = 0,
     view_once: int = 0,
     created_at: str | None = None,
+    source_message_id: str | None = None,
 ) -> dict:
     """Enqueue a signed ``dm.message.created`` for peer nodes.
 
@@ -196,6 +197,7 @@ def enqueue_dm_message_created(
             "media_blur": int(media_blur or 0),
             "view_once": int(view_once or 0),
             "created_at": ts,
+            "source_message_id": str(source_message_id or "").strip(),
         },
         target_server_ids=targets,
     )
@@ -2842,6 +2844,78 @@ async def federation_signal_nudge_publish(
         uid,
         {"type": "signal_publish_keys", "reason": "peer_dm"},
     )
+    return {"ok": True, "delivered": bool(delivered)}
+
+
+@router.post("/federation/signal/dm-resync/{global_user_id}")
+async def federation_signal_dm_resync(
+    global_user_id: str,
+    request: Request,
+    x_federation_token: str | None = Header(default=None),
+):
+    """Deliver dm_crypto_resync to a federated user connected on this node."""
+    if not _fed_token_ok(x_federation_token):
+        return JSONResponse(status_code=401, content={"error": "Invalid federation auth"})
+    gid = str(global_user_id or "").strip()
+    if not gid:
+        return JSONResponse(status_code=400, content={"error": "bad_global_user_id"})
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    with db._conn() as con:
+        row = con.execute(
+            "SELECT id FROM users WHERE global_user_id=? LIMIT 1",
+            (gid,),
+        ).fetchone()
+    if not row:
+        return JSONResponse(status_code=404, content={"error": "user_not_found"})
+    uid = int(row["id"])
+    from ws_manager import manager
+
+    payload = {
+        "type": "dm_crypto_resync",
+        "from_id": int(body.get("from_id") or 0),
+        "from_nickname": str(body.get("from_nickname") or ""),
+        "from_global_user_id": str(body.get("from_global_user_id") or "").strip(),
+    }
+    delivered = await manager.send_to_user(uid, payload)
+    return {"ok": True, "delivered": bool(delivered)}
+
+
+@router.post("/federation/signal/dm-heal/{global_user_id}")
+async def federation_signal_dm_heal(
+    global_user_id: str,
+    request: Request,
+    x_federation_token: str | None = Header(default=None),
+):
+    """Deliver dm_crypto_heal to a federated user connected on this node."""
+    if not _fed_token_ok(x_federation_token):
+        return JSONResponse(status_code=401, content={"error": "Invalid federation auth"})
+    gid = str(global_user_id or "").strip()
+    if not gid:
+        return JSONResponse(status_code=400, content={"error": "bad_global_user_id"})
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    with db._conn() as con:
+        row = con.execute(
+            "SELECT id FROM users WHERE global_user_id=? LIMIT 1",
+            (gid,),
+        ).fetchone()
+    if not row:
+        return JSONResponse(status_code=404, content={"error": "user_not_found"})
+    uid = int(row["id"])
+    from ws_manager import manager
+
+    payload = {
+        "type": "dm_crypto_heal",
+        "from_id": int(body.get("from_id") or 0),
+        "from_nickname": str(body.get("from_nickname") or ""),
+        "from_global_user_id": str(body.get("from_global_user_id") or "").strip(),
+    }
+    delivered = await manager.send_to_user(uid, payload)
     return {"ok": True, "delivered": bool(delivered)}
 
 
@@ -5497,6 +5571,12 @@ async def _handle_dm_event(event: dict) -> None:
     media_blur = 1 if int(payload.get("media_blur") or 0) else 0
     view_once = 1 if int(payload.get("view_once") or 0) else 0
 
+    source_msg_id = str(payload.get("source_message_id") or "").strip()
+    if origin and source_msg_id:
+        existing_id = db.find_dm_message_by_federation_origin(origin, source_msg_id)
+        if existing_id:
+            return
+
     channel_id = db.get_or_create_dm(sender["id"], peer["id"])
     msg_id = db.send_dm_message(
         channel_id,
@@ -5509,6 +5589,12 @@ async def _handle_dm_event(event: dict) -> None:
         media_blur=media_blur,
         view_once=view_once,
     )
+    if origin and msg_id:
+        db.set_dm_message_federation_origin(
+            msg_id,
+            origin,
+            source_msg_id or str(msg_id),
+        )
 
     dm_broadcast = {
         "type": "dm_message",

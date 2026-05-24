@@ -2282,6 +2282,13 @@ const App = {
       if (typeof loadDMChannels === 'function') await loadDMChannels();
     } catch {}
     try {
+      if (typeof _activeDM !== 'undefined' && _activeDM?.id && typeof loadDMMessages === 'function') {
+        await loadDMMessages(0);
+      }
+    } catch (e) {
+      console.warn('[App] active DM reload after sync failed', e);
+    }
+    try {
       if (window.DMs && typeof DMs.afterFederationSyncHistoryNotices === 'function') {
         await DMs.afterFederationSyncHistoryNotices({
           syncError: String(payload?.error || '').trim(),

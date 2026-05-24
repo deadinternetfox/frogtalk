@@ -402,19 +402,16 @@ async def websocket_endpoint(
                     global_call_id = str(crow["global_call_id"] or "").strip()
             except Exception:
                 pass
-            if global_call_id:
-                try:
-                    caller_row = db.get_user_by_id(int(pending_offer.get("caller_id") or 0)) or {}
-                    caller_gid = str(caller_row.get("global_user_id") or "").strip()
-                    if caller_gid:
-                        peer_home = db.resolve_global_user_home_server_id(caller_gid) or ""
-                except Exception:
-                    pass
+            caller_row = db.get_user_by_id(int(pending_offer.get("caller_id") or 0)) or {}
+            caller_gid = str(caller_row.get("global_user_id") or "").strip()
+            if caller_gid:
+                peer_home = db.resolve_global_user_home_server_id(caller_gid) or ""
             await manager.send_personal(websocket, {
                 "type": "call_offer",
                 "from_id": int(pending_offer.get("caller_id") or 0),
                 "from_nickname": pending_offer.get("from_nickname") or "",
                 "from_avatar": pending_offer.get("from_avatar") or "",
+                "from_global_user_id": caller_gid,
                 "call_type": pending_offer.get("call_type") or "voice",
                 "call_id": int(pending_offer.get("call_id") or 0),
                 "global_call_id": global_call_id,
@@ -1066,6 +1063,7 @@ async def websocket_endpoint(
                             media_blur=int(data.get("media_blur") or 0),
                             view_once=int(data.get("view_once") or 0),
                             created_at=payload["created_at"],
+                            source_message_id=str(msg_id),
                         )
                         if isinstance(dm_enq, dict) and not dm_enq.get("ok"):
                             err_code = str(dm_enq.get("error") or "federation_enqueue_failed")
@@ -1330,6 +1328,7 @@ async def websocket_endpoint(
                     "from_id": user["id"],
                     "from_nickname": user["nickname"],
                     "from_avatar": user.get("avatar"),
+                    "from_global_user_id": str(user.get("global_user_id") or "").strip(),
                     "call_type": call_type,
                     "call_id": call_id_db,
                     "sdp": data.get("sdp"),
@@ -1464,6 +1463,7 @@ async def websocket_endpoint(
                     "type": "call_answer",
                     "from_id": user["id"],
                     "from_nickname": user["nickname"],
+                    "from_global_user_id": str(user.get("global_user_id") or "").strip(),
                     "call_id": call_id,
                     "sdp": data.get("sdp"),
                     # Track E: callee's signed DTLS fingerprint envelope.

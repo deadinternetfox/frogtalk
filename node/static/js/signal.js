@@ -481,18 +481,18 @@
   async function _ensureSessionWith(peerUserId, opts = {}) {
     const peerHome = String(opts.peerHomeServerId || '').trim();
     const addr = _addr(peerUserId);
-    const existing = await _store.loadSession(addr.toString());
+    let existing = await _store.loadSession(addr.toString());
+    if (opts.forceRefresh && existing) {
+      await _clearPeerSession(peerUserId);
+      existing = null;
+    }
     if (existing) {
-      // Drift check: if the peer has rotated their identity since we
-      // built this session (typical cause: peer wiped their device or
-      // the server lost their data), reusing the session emits a
-      // `t:'msg'` envelope that the peer can no longer decrypt. Detect
-      // by comparing the server's current identity_pub against the one
-      // we stored when we first trusted this peer. Mismatch ⇒ blow the
-      // session away and fall through to fresh X3DH (which emits a
-      // `t:'pre'` envelope that auto-resets the peer's side).
+      // Drift check: peer identity rotation vs our stored session.
       try {
-        const serverB64 = await _fetchPeerIdentityPub(peerUserId, { peerHomeServerId: peerHome });
+        const serverB64 = await _fetchPeerIdentityPub(peerUserId, {
+          peerHomeServerId: peerHome,
+          noCache: !!opts.forceRefresh,
+        });
         if (serverB64 && typeof _store.loadStoredIdentity === 'function') {
           const localBuf = await _store.loadStoredIdentity(addr.toString());
           const serverBytes = _identityB64ToBytes(serverB64);
@@ -561,31 +561,55 @@
 
   // ── Encrypt / decrypt ────────────────────────────────────────────────
 
+  function _recoverableCryptoErr(e) {
+    const em = String((e && e.message) || e || '');
+    return em.includes('Bad MAC') || em.includes('UntrustedIdentity')
+      || em.includes('Message key not found') || em.includes('No record for device')
+      || em.includes('Identity key changed') || em.includes('session');
+  }
+
   async function encryptDM(peerUserId, plaintext, opts = {}) {
     if (!_libsignal || !_store) throw new Error('Signal not initialised');
     const t0 = Date.now();
     _signalDebug('encryptDM start', peerUserId);
-    await _withTimeout(
-      _ensureSessionWith(peerUserId, opts),
-      18000,
-      'signal_session_timeout',
-    );
-    _signalDebug('encryptDM session ready', peerUserId, (Date.now() - t0) + 'ms');
-    const addr = _addr(peerUserId);
-    const cipher = new _libsignal.SessionCipher(_store, addr);
-    const ptBytes = new TextEncoder().encode(String(plaintext));
-    const ct = await cipher.encrypt(ptBytes.buffer);
-    // ct.type is 3 (PREKEY) on first message, 1 (WHISPER) thereafter.
-    const tag = (ct.type === TYPE_PREKEY) ? 'pre' : 'msg';
-    const out = {
-      v: ENVELOPE_VERSION,
-      t: tag,
-      // ct.body is a binary STRING (libsignal API quirk); convert via
-      // charCode to Uint8Array.
-      b: _binaryStringToB64(ct.body),
-    };
-    _signalDebug('encryptDM done', peerUserId, tag, (Date.now() - t0) + 'ms');
-    return out;
+    let lastErr = null;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        if ((opts.forcePreKey || opts.forceRefresh) && attempt === 0) {
+          await invalidatePeerCrypto(peerUserId);
+        }
+        await _withTimeout(
+          _ensureSessionWith(peerUserId, {
+            ...opts,
+            forceRefresh: !!(opts.forceRefresh || opts.forcePreKey || attempt > 0),
+          }),
+          18000,
+          'signal_session_timeout',
+        );
+        _signalDebug('encryptDM session ready', peerUserId, (Date.now() - t0) + 'ms');
+        const addr = _addr(peerUserId);
+        const cipher = new _libsignal.SessionCipher(_store, addr);
+        const ptBytes = new TextEncoder().encode(String(plaintext));
+        const ct = await cipher.encrypt(ptBytes.buffer);
+        const tag = (ct.type === TYPE_PREKEY) ? 'pre' : 'msg';
+        const out = {
+          v: ENVELOPE_VERSION,
+          t: tag,
+          b: _binaryStringToB64(ct.body),
+        };
+        _signalDebug('encryptDM done', peerUserId, tag, (Date.now() - t0) + 'ms');
+        return out;
+      } catch (e) {
+        lastErr = e;
+        if (attempt === 0 && _recoverableCryptoErr(e)) {
+          _peerIdentCache.delete(String(peerUserId));
+          await _clearPeerSession(peerUserId);
+          continue;
+        }
+        throw e;
+      }
+    }
+    throw lastErr || new Error('encrypt_failed');
   }
 
   function _binaryStringToB64(s) {
@@ -607,6 +631,17 @@
         await _store.removeIdentity(addr.toString());
       }
     } catch {}
+  }
+
+  /** Drop cached peer bundle/identity + local session (travel-node key rotation). */
+  async function invalidatePeerCrypto(peerUserId) {
+    const pid = Number(peerUserId) || 0;
+    if (!pid || !_store) return;
+    const key = String(pid);
+    _peerIdentCache.delete(key);
+    _idkCache.delete(key);
+    _bundleBackoffUntil.delete(pid);
+    await _clearPeerSession(pid);
   }
 
   async function decryptDM(peerUserId, envelope) {
@@ -697,19 +732,107 @@
   }
 
   async function applyDmCryptoResync(fromUserId) {
+    return applyDmCryptoHeal(fromUserId);
+  }
+
+  async function applyDmCryptoHeal(fromUserId) {
     const pid = Number(fromUserId) || 0;
     if (!pid || !_store) return;
-    _peerIdentCache.delete(String(pid));
-    await _clearPeerSession(pid);
+    try {
+      if (typeof window._dmMarkInboundResync === 'function') {
+        window._dmMarkInboundResync(pid);
+      }
+    } catch {}
+    await invalidatePeerCrypto(pid);
     try {
       await ensureMyBundleFresh();
     } catch (e) {
-      console.warn('[Signal] ensureMyBundleFresh on inbound resync failed', e);
+      console.warn('[Signal] ensureMyBundleFresh on inbound heal failed', e);
     }
     try {
       if (typeof window.__ftDmDecryptReset === 'function') window.__ftDmDecryptReset();
     } catch {}
-    try { window.dispatchEvent(new CustomEvent('ft:crypto-ready')); } catch {}
+    try {
+      if (typeof window._dmClearChannelDecryptBlocks === 'function') {
+        window._dmClearChannelDecryptBlocks();
+      }
+    } catch {}
+    try {
+      if (typeof window._retryPendingDmDecrypts === 'function') {
+        await window._retryPendingDmDecrypts();
+      }
+    } catch {}
+    try {
+      if (typeof renderDMChat === 'function' && typeof _activeDM !== 'undefined' && _activeDM?.id) {
+        renderDMChat();
+      }
+    } catch {}
+  }
+
+  async function requestDmCryptoHeal(peerUserId) {
+    const pid = Number(peerUserId) || 0;
+    if (!pid || !_store) return { ok: false };
+    await invalidatePeerCrypto(pid);
+    try {
+      await ensureMyBundleFresh();
+    } catch (e) {
+      console.warn('[Signal] ensureMyBundleFresh during heal failed', e);
+    }
+    const apiFetch = window.apiFetch || ((u, m, b) => fetch(u, {
+      method: m || 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: b ? JSON.stringify(b) : undefined,
+    }));
+    try {
+      const res = await _withTimeout(
+        apiFetch('/api/signal/dm-crypto-heal', 'POST', { peer_user_id: pid }),
+        12000,
+        'dm_crypto_heal_timeout',
+      );
+      if (!res.ok) return { ok: false };
+      const data = await res.json().catch(() => ({}));
+      return { ok: true, delivered: !!data.delivered };
+    } catch (e) {
+      console.warn('[Signal] dm-crypto-heal failed', e);
+      return { ok: false };
+    }
+  }
+
+  /** Notify DM peers to drop stale sessions after we rotate/publish fresh keys. */
+  async function broadcastSelfCryptoResync(opts = {}) {
+    if (!_store) return { ok: false, sent: 0 };
+    try {
+      await ensureMyBundleFresh();
+    } catch (e) {
+      console.warn('[Signal] ensureMyBundleFresh during broadcast failed', e);
+    }
+    const peers = new Set();
+    const addPid = (v) => {
+      const n = Number(v) || 0;
+      if (n > 0) peers.add(n);
+    };
+    if (opts.peerUserId) addPid(opts.peerUserId);
+    try {
+      if (typeof _activeDM !== 'undefined' && _activeDM?.user_id) addPid(_activeDM.user_id);
+    } catch {}
+    try {
+      if (typeof _dmChannels !== 'undefined' && Array.isArray(_dmChannels)) {
+        for (const ch of _dmChannels) {
+          addPid(ch.other_id || ch.with_user_id || ch.user_id);
+        }
+      }
+    } catch {}
+    const limit = Math.max(1, Math.min(Number(opts.limit) || 16, 32));
+    let sent = 0;
+    for (const pid of peers) {
+      if (sent >= limit) break;
+      try {
+        const out = await requestDmCryptoResync(pid);
+        if (out?.ok) sent += 1;
+      } catch {}
+    }
+    return { ok: sent > 0, sent };
   }
 
   /** Refresh cached peer identity from the server without tearing down sessions.
@@ -786,6 +909,8 @@
       fingerprint_sha256: String(payload.fingerprint_sha256).toLowerCase(),
       ts: Number(payload.ts) || Date.now(),
     };
+    const peerGid = String(payload.peer_global_user_id || '').trim();
+    if (peerGid) canon.peer_global_user_id = peerGid;
     const message = JSON.stringify(canon, Object.keys(canon).sort());
     const idKey = await _store.getIdentityKeyPair();
     const msgBuf = new TextEncoder().encode(message).buffer;
@@ -830,7 +955,15 @@
         Number(payload.call_id) !== Number(opts.expectedCallId)) {
       return { ok: false, reason: 'call_id_mismatch' };
     }
-    if (opts && opts.expectedPeerUserId !== undefined &&
+  // Cross-node calls use different local user ids per node; bind to GID
+  // when the envelope carries peer_global_user_id.
+    const envPeerGid = String(payload.peer_global_user_id || '').trim();
+    const expectedPeerGid = String((opts && opts.expectedPeerGlobalUserId) || '').trim();
+    if (envPeerGid && expectedPeerGid) {
+      if (envPeerGid !== expectedPeerGid) {
+        return { ok: false, reason: 'peer_mismatch' };
+      }
+    } else if (opts && opts.expectedPeerUserId !== undefined &&
         Number(payload.peer_user_id) !== Number(opts.expectedPeerUserId)) {
       return { ok: false, reason: 'peer_mismatch' };
     }
@@ -872,9 +1005,8 @@
       if (hit && (now - hit.ts) < _IDK_TTL_MS) return hit.b64;
     }
     try {
-      const bundle = await _fetchPeerBundle(key);
-      if (!bundle || !bundle.identity_pub) return null;
-      const b64 = String(bundle.identity_pub);
+      const b64 = await _fetchPeerIdentityPub(peerUserId, { noCache });
+      if (!b64) return null;
       _idkCache.set(key, { b64, ts: now });
       return b64;
     } catch {
@@ -1005,8 +1137,12 @@
     resetSessionWith,
     requestDmCryptoResync,
     applyDmCryptoResync,
+    requestDmCryptoHeal,
+    applyDmCryptoHeal,
+    broadcastSelfCryptoResync,
     isPeerBundleBackedOff,
     refreshPeerForDecrypt,
+    invalidatePeerCrypto,
     peerKeysDiagnostics,
     warmPeerBundleForSend,
     // Eager session pre-warm (e.g. on DM open). Builds an outbound
@@ -1051,6 +1187,11 @@
       _identityRotateLogged.clear();
       if (uid) await init(uid);
       await ensureMyBundleFresh();
+      try {
+        await broadcastSelfCryptoResync({ limit: 16 });
+      } catch (e) {
+        console.warn('[Signal] broadcastSelfCryptoResync after reset failed', e);
+      }
       try {
         if (typeof window.__ftDmDecryptReset === 'function') window.__ftDmDecryptReset();
       } catch {}

@@ -375,19 +375,38 @@ function _extractDtlsFp(sdp) {
   } catch { return ''; }
 }
 
-async function _signCallFp(callId, peerUserId, sdp) {
+async function _signCallFp(callId, peerUserId, sdp, peerGlobalUserId) {
   try {
     if (!window.Signal || !Signal.isReady?.()) return '';
-    if (!peerUserId) return '';
-    // Initial call_offer uses call_id=0 as a sentinel — still sign the SDP.
+    if (!peerUserId && !peerGlobalUserId) return '';
     if (callId === undefined || callId === null || callId === '') return '';
     const fp = _extractDtlsFp(sdp);
     if (!fp) return '';
-    return await Signal.signCallFingerprint({
+    let gid = String(peerGlobalUserId || '').trim();
+    if (!gid && peerUserId) {
+      try {
+        const ch = (typeof _dmChannels !== 'undefined' && Array.isArray(_dmChannels))
+          ? _dmChannels.find(c => Number(c.with_user_id || c.other_id || 0) === Number(peerUserId))
+          : null;
+        gid = String(ch?.other_global_user_id || ch?.global_user_id || ch?.peer_global_user_id || '').trim();
+      } catch {}
+    }
+    if (!gid && _callPeerNick && typeof apiFetch === 'function') {
+      try {
+        const rp = await apiFetch('/api/users/profile/' + encodeURIComponent(_callPeerNick));
+        if (rp.ok) {
+          const u = await rp.json();
+          gid = String(u.global_user_id || '').trim();
+        }
+      } catch {}
+    }
+    const payload = {
       call_id: callId,
-      peer_user_id: peerUserId,
+      peer_user_id: peerUserId || 0,
       fingerprint_sha256: fp,
-    });
+    };
+    if (gid) payload.peer_global_user_id = gid;
+    return await Signal.signCallFingerprint(payload);
   } catch (e) {
     console.warn('[calls] _signCallFp failed', e);
     return '';
@@ -414,10 +433,13 @@ async function _verifyCallFp(envelope, callId, fromId, sdp, opts) {
   }
   const buildVopts = () => {
     const vopts = {
-      expectedPeerUserId: Number(myId),
       expectedFingerprint: fp,
       expectedIdentityPub,
     };
+    const myGid = String((typeof State !== 'undefined' && State.user?.global_user_id) || '').trim();
+    if (myGid) vopts.expectedPeerGlobalUserId = myGid;
+    // Same-node calls still bind local ids when no GID envelope is present.
+    if (myId) vopts.expectedPeerUserId = Number(myId);
     // bindCallId=false on the initial inbound offer because the caller
     // doesn't know the server-assigned call_id at sign time.
     if (!(opts && opts.bindCallId === false)) {
@@ -430,6 +452,9 @@ async function _verifyCallFp(envelope, callId, fromId, sdp, opts) {
     if (res && res.ok) return { ok: true };
     if (res && res.reason === 'identity_mismatch') {
       try {
+        if (typeof Signal.invalidatePeerCrypto === 'function') {
+          await Signal.invalidatePeerCrypto(fromId);
+        }
         const freshIdentity = await Signal.getPeerIdentityKey(fromId, { noCache: true });
         if (freshIdentity && freshIdentity !== expectedIdentityPub) {
           expectedIdentityPub = freshIdentity;
@@ -437,6 +462,19 @@ async function _verifyCallFp(envelope, callId, fromId, sdp, opts) {
           if (res && res.ok) return { ok: true };
         }
       } catch {}
+    }
+    if (res && res.reason === 'peer_mismatch') {
+      const myGid = String((typeof State !== 'undefined' && State.user?.global_user_id) || '').trim();
+      let envPeerGid = '';
+      try {
+        const raw = JSON.parse(atob(String(envelope || '')));
+        const payload = JSON.parse(String(raw.p || '{}'));
+        envPeerGid = String(payload.peer_global_user_id || '').trim();
+      } catch {}
+      if (myGid && !envPeerGid) {
+        console.warn('[calls][track-E] peer_mismatch without GID — proceeding unverified');
+        return { ok: 'unverified', reason: 'peer_id_unbound' };
+      }
     }
     return { ok: false, reason: (res && res.reason) || 'unknown' };
   } catch {
@@ -649,7 +687,7 @@ async function startCall (type, nick, uid) {
     // passthrough preserves the envelope verbatim and the callee's
     // verifier downgrades to "unverified" if it can't bind a call_id.
     // (A future tweak: re-sign on call_created with the real id.)
-    const fp_sig = await _signCallFp(0, _callPeerUID || 0, offer.sdp);
+    const fp_sig = await _signCallFp(0, _callPeerUID || 0, offer.sdp, _callPeerGid);
 
     _maybeWarnIdentityRotation(_callPeerUID);
 
@@ -705,7 +743,12 @@ async function handleCallOffer (data) {
         await _pc.setRemoteDescription({ type: 'offer', sdp: data.sdp });
         const ans = await _pc.createAnswer();
         await _pc.setLocalDescription(ans);
-        const renegFp = await _signCallFp(data.call_id || _callId || 0, _callPeerUID || data.from_id || 0, ans.sdp);
+        const renegFp = await _signCallFp(
+          data.call_id || _callId || 0,
+          _callPeerUID || data.from_id || 0,
+          ans.sdp,
+          _callPeerGid || data.from_global_user_id || '',
+        );
         _sendCallSignal({
           type: 'call_answer',
           ..._callPeerRoutingFields(),
@@ -735,6 +778,7 @@ async function handleCallOffer (data) {
   _callType     = data.call_type || 'voice';
   _callPeerNick = data.from_nickname;
   _callPeerUID  = data.from_id || _callPeerUID;
+  _callPeerGid  = String(data.from_global_user_id || data.peer_global_user_id || _callPeerGid || '').trim();
   _callPeerAvatar = data.from_avatar || null;
   _callId       = data.call_id || null;
   _callGlobalId = data.global_call_id || _callGlobalId;
@@ -864,7 +908,7 @@ async function acceptCall () {
     await _bestEffortRefreshSignalBundle();
     const answerCallId = offer.call_id || _callId || 0;
     const peerUid = _callPeerUID || offer.from_id || 0;
-    const fp_sig = await _signCallFp(answerCallId, peerUid, answer.sdp);
+    const fp_sig = await _signCallFp(answerCallId, peerUid, answer.sdp, _callPeerGid);
 
     _sendCallAnswerReliable({
       type: 'call_answer',
@@ -1049,7 +1093,7 @@ function _armConnectingHardCap () {
         _pc.restartIce();
         const offer = await _pc.createOffer({ iceRestart: true });
         await _pc.setLocalDescription(offer);
-        const restartFp = await _signCallFp(_callId || 0, _callPeerUID || 0, offer.sdp);
+        const restartFp = await _signCallFp(_callId || 0, _callPeerUID || 0, offer.sdp, _callPeerGid);
         _sendCallSignal({
           type: 'call_offer',
           ..._callPeerRoutingFields(),
@@ -1441,7 +1485,7 @@ async function _renegotiate () {
     await _bestEffortRefreshSignalBundle();
     const offer = await _pc.createOffer();
     await _pc.setLocalDescription(offer);
-    const fp_sig = await _signCallFp(_callId || 0, _callPeerUID || 0, offer.sdp);
+    const fp_sig = await _signCallFp(_callId || 0, _callPeerUID || 0, offer.sdp, _callPeerGid);
     _sendCallSignal({
       type: 'call_offer',
       ..._callPeerRoutingFields(),

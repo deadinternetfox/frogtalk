@@ -175,20 +175,30 @@ def _peer_home_and_gid(peer_user_id: int) -> tuple[str, str]:
 def _peer_signal_bundle_source_server(peer_user_id: int) -> str:
     """Federation server_id that should serve this peer's active prekey bundle.
 
-    Node-local first: if the peer published keys on *this* node, never proxy
-  to another server (avoids stale ``signal_keys_server_id`` pins from federated
-    DMs causing same-node timeouts).
+    When ``signal_keys_server_id`` points at another node, always proxy there
+    even if this mirror still has stale identity rows from an earlier visit.
+    Only serve locally when keys are pinned here or no remote pin exists.
     """
     local_sid = _local_server_id()
     uid = int(peer_user_id or 0)
     if uid <= 0 or not local_sid:
         return ""
-    if db.signal_has_published_bundle(uid):
-        return ""
     keys_sid = db.get_user_signal_keys_server_id(uid)
+    if not keys_sid:
+        gid = str((db.get_user_by_id(uid) or {}).get("global_user_id") or "").strip()
+        if gid:
+            keys_sid = db.get_signal_keys_server_for_gid(gid)
+    account_home = db.get_user_account_home_server_id(uid)
+    # Stale travel-node mirror: OTPKs published here while the account is
+    # homed elsewhere — encrypt/decrypt must use canonical home keys so the
+    # peer reading on frogtalk.xyz can unlock messages.
+    if account_home and account_home != local_sid:
+        if keys_sid == local_sid or (not keys_sid and db.signal_has_published_bundle(uid)):
+            return account_home
     if keys_sid and keys_sid != local_sid:
         return keys_sid
-    account_home = db.get_user_account_home_server_id(uid)
+    if db.signal_has_published_bundle(uid):
+        return ""
     if account_home and account_home != local_sid:
         return account_home
     gid = str((db.get_user_by_id(uid) or {}).get("global_user_id") or "").strip()
@@ -509,6 +519,9 @@ _NUDGE_KEYS_AT: dict[str, float] = {}
 _NUDGE_KEYS_LOCK = threading.Lock()
 _NUDGE_KEYS_COOLDOWN_SEC = 45.0
 _NUDGE_KEYS_RETRY_WAIT_SEC = 2.5
+_RESYNC_AT: dict[str, float] = {}
+_RESYNC_LOCK = threading.Lock()
+_RESYNC_COOLDOWN_SEC = 30.0
 
 
 def _peer_keys_server_id_for_uid(uid: int) -> str:
@@ -579,6 +592,89 @@ async def nudge_peer_keys_publish(peer_user_id: int) -> bool:
 
         return bool(await manager.send_to_user(uid, payload))
     return await run_in_threadpool(_nudge_peer_keys_publish_remote_sync, gid, keys_sid)
+
+
+def _nudge_dm_crypto_signal_remote_sync(gid: str, payload: dict, target_sid: str, path_suffix: str) -> bool:
+    from routers.auth import resolve_server_base_url
+    from routers.federation import _fetch_url_bytes
+
+    base = resolve_server_base_url(target_sid)
+    tok = (os.getenv("FROGTALK_FEDERATION_TOKEN") or "").strip()
+    if not base or not tok or not gid:
+        return False
+    gid_q = urllib.parse.quote(gid, safe="")
+    url = f"{base}/api/federation/signal/{path_suffix}/{gid_q}"
+    try:
+        raw = _fetch_url_bytes(
+            url,
+            timeout_s=4.0,
+            method="POST",
+            headers={
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+                "User-Agent": "FrogTalk-SignalFederation/1.0",
+                "x-federation-token": tok,
+            },
+            data=json.dumps(payload or {}).encode("utf-8"),
+        )
+        data = json.loads(raw.decode("utf-8", errors="replace") or "{}")
+        return bool((data or {}).get("delivered"))
+    except Exception:
+        return False
+
+
+def _nudge_dm_crypto_resync_remote_sync(gid: str, payload: dict, target_sid: str) -> bool:
+    return _nudge_dm_crypto_signal_remote_sync(gid, payload, target_sid, "dm-resync")
+
+
+async def _deliver_dm_crypto_peer_signal(peer_id: int, from_user: dict, signal_type: str) -> bool:
+    """Deliver dm_crypto_resync / dm_crypto_heal to peer WS locally or via federation."""
+    uid = int(peer_id or 0)
+    if uid <= 0:
+        return False
+    signal_type = str(signal_type or "").strip()
+    if signal_type not in ("dm_crypto_resync", "dm_crypto_heal"):
+        return False
+    payload = {
+        "type": signal_type,
+        "from_id": int(from_user.get("id") or 0),
+        "from_nickname": str(from_user.get("nickname") or ""),
+        "from_global_user_id": str(from_user.get("global_user_id") or "").strip(),
+    }
+    from ws_manager import manager
+
+    if bool(await manager.send_to_user(uid, payload)):
+        return True
+    peer = db.get_user_by_id(uid) or {}
+    gid = str(peer.get("global_user_id") or "").strip()
+    if not gid:
+        return False
+    now = time.monotonic()
+    with _RESYNC_LOCK:
+        if now - float(_RESYNC_AT.get(gid) or 0.0) < _RESYNC_COOLDOWN_SEC:
+            return False
+        _RESYNC_AT[gid] = now
+    local_sid = _local_server_id()
+    keys_sid = _peer_keys_server_id_for_uid(uid)
+    targets = list(db.resolve_federation_push_targets_for_recipient_gids([gid]))
+    if keys_sid and keys_sid != local_sid and keys_sid not in targets:
+        targets.append(keys_sid)
+    path_suffix = "dm-heal" if signal_type == "dm_crypto_heal" else "dm-resync"
+    for sid in targets:
+        ok = await run_in_threadpool(
+            _nudge_dm_crypto_signal_remote_sync, gid, payload, sid, path_suffix,
+        )
+        if ok:
+            return True
+    return False
+
+
+async def deliver_dm_crypto_resync(peer_id: int, from_user: dict) -> bool:
+    return await _deliver_dm_crypto_peer_signal(peer_id, from_user, "dm_crypto_resync")
+
+
+async def deliver_dm_crypto_heal(peer_id: int, from_user: dict) -> bool:
+    return await _deliver_dm_crypto_peer_signal(peer_id, from_user, "dm_crypto_heal")
 
 
 async def _fetch_peer_bundle_payload(uid: int) -> dict:
@@ -681,17 +777,28 @@ async def dm_resync_request(
         raise HTTPException(status_code=400, detail="bad_peer")
     if not await run_in_threadpool(db.dm_channel_exists, me_id, peer_id):
         raise HTTPException(status_code=403, detail="no_dm_channel")
-    from ws_manager import manager
 
-    delivered = await manager.send_to_user(
-        peer_id,
-        {
-            "type": "dm_crypto_resync",
-            "from_id": me_id,
-            "from_nickname": str(user.get("nickname") or ""),
-            "from_global_user_id": str(user.get("global_user_id") or "").strip(),
-        },
-    )
+    delivered = await deliver_dm_crypto_resync(peer_id, user)
+    return {"ok": True, "delivered": bool(delivered)}
+
+
+@router.post("/dm-crypto-heal")
+@limiter.limit("12/minute")
+async def dm_crypto_heal(
+    request: Request,
+    body: DmResyncRequest,
+    user: dict = Depends(get_current_user),
+):
+    """Bilateral DM crypto reset: wipe stale sessions and force fresh prekeys."""
+    del request
+    peer_id = int(body.peer_user_id)
+    me_id = int(user["id"])
+    if peer_id == me_id:
+        raise HTTPException(status_code=400, detail="bad_peer")
+    if not await run_in_threadpool(db.dm_channel_exists, me_id, peer_id):
+        raise HTTPException(status_code=403, detail="no_dm_channel")
+
+    delivered = await deliver_dm_crypto_heal(peer_id, user)
     return {"ok": True, "delivered": bool(delivered)}
 
 
