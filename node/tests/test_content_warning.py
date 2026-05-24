@@ -69,6 +69,28 @@ class ContentWarningTests(unittest.TestCase):
         )
         self.assertEqual(cr.status_code, 400, cr.text)
         self.assertIn("category", cr.json().get("error", "").lower())
+        self.assertIsNone(self.db.get_room_by_name("cw-pub-b"))
+
+    def test_creator_auto_ack_on_create(self):
+        owner = self._session("cw_owner_f")
+        self._create_public_room(
+            owner,
+            "cw-pub-f",
+            cw={"enabled": True, "flags": ["nudity"]},
+        )
+        st = self.client.get(
+            "/api/rooms/cw-pub-f/content-warning/status",
+            headers=self._hdr(owner),
+        )
+        self.assertEqual(st.status_code, 200, st.text)
+        body = st.json()
+        self.assertFalse(body["required"])
+        self.assertTrue(body["acknowledged"])
+        hist = self.client.get(
+            "/api/messages/cw-pub-f?limit=20",
+            headers=self._hdr(owner),
+        )
+        self.assertEqual(hist.status_code, 200, hist.text)
 
     def test_private_room_rejects_content_warning(self):
         owner = self._session("cw_owner_c")

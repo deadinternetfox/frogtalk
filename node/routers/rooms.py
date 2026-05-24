@@ -614,9 +614,7 @@ async def _broadcast_content_warning_updated(room_name: str) -> None:
         pass
 
 
-def _apply_content_warning_setting(
-    room_name: str,
-    *,
+def _validate_content_warning_input(
     room_type: str,
     cw_input: ContentWarningInput | None,
 ) -> JSONResponse | None:
@@ -627,14 +625,39 @@ def _apply_content_warning_setting(
             "error": "Content warnings apply to public channels only",
         })
     flags = db.parse_content_warning_flags(cw_input.flags)
-    enabled = bool(cw_input.enabled)
-    if enabled and not flags:
+    if bool(cw_input.enabled) and not flags:
         return JSONResponse(status_code=400, content={
             "error": "Select at least one content warning category",
         })
+    return None
+
+
+def _apply_content_warning_setting(
+    room_name: str,
+    *,
+    room_type: str,
+    cw_input: ContentWarningInput | None,
+) -> JSONResponse | None:
+    if cw_input is None:
+        return None
+    err = _validate_content_warning_input(room_type, cw_input)
+    if err:
+        return err
+    flags = db.parse_content_warning_flags(cw_input.flags)
+    enabled = bool(cw_input.enabled)
     if not db.set_room_content_warning(room_name, enabled=enabled, flags=flags):
         return JSONResponse(status_code=400, content={"error": "Failed to update content warning"})
     return None
+
+
+def _auto_ack_content_warning(request: Request, room_name: str) -> None:
+    """Editors who enable/update CW are not locked out of their own channel."""
+    token = session_token_from_request(request) or ""
+    if not token:
+        return
+    enabled, flags = db.get_room_content_warning(room_name)
+    if enabled:
+        cw_ack_mark(token, room_name, flags)
 
 
 @router.get("")
@@ -747,6 +770,9 @@ async def create_room(request: Request, body: CreateRoomRequest,
 
     clean_desc = _sanitize_room_text(body.description, max_len=256)
     clean_hint = _sanitize_room_text(body.room_key_hint, max_len=512, multiline=True) or None
+    cw_pre = _validate_content_warning_input(body.type, body.content_warning)
+    if cw_pre:
+        return cw_pre
     room_id = db.create_room(
         name=body.name,
         description=clean_desc,
@@ -784,6 +810,8 @@ async def create_room(request: Request, body: CreateRoomRequest,
     )
     if cw_err:
         return cw_err
+    if body.content_warning is not None:
+        _auto_ack_content_warning(request, body.name)
     if body.content_warning and body.type == "public":
         try:
             from routers import federation as federation_mod
@@ -844,7 +872,7 @@ async def get_room(room_name: str, current_user: dict = Depends(get_current_user
 
 
 @router.patch("/{room_name}")
-async def update_room(room_name: str, body: UpdateRoomRequest,
+async def update_room(request: Request, room_name: str, body: UpdateRoomRequest,
                       current_user: dict = Depends(get_current_user)):
     """Update room settings. Only owner, mods, or admin can update."""
     if not db.can_moderate_room(room_name, current_user["id"], bool(current_user.get("is_admin"))):
@@ -1037,6 +1065,7 @@ async def update_room(room_name: str, body: UpdateRoomRequest,
         )
         if cw_err:
             return cw_err
+        _auto_ack_content_warning(request, effective_name)
         try:
             from routers import federation as federation_mod
             federation_mod.enqueue_channel_directory_updated(effective_name)

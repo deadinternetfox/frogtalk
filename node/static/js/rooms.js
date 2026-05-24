@@ -1115,6 +1115,9 @@ const Rooms = (() => {
       const showDelete = canEdit && (!protectedRooms.includes(room.name) || isAdmin);
       const channelType = (room.channel_type === 'voice') ? 'music' : (room.channel_type || 'text');
       const isInviteOnly = room.type === 'private';
+      const cwBadge = (window.ContentWarning && typeof ContentWarning.badgeHtml === 'function')
+        ? ContentWarning.badgeHtml(room.content_warning)
+        : '';
       const isMyMod = !isOwner && Array.isArray(State.currentRoomMods) && State.currentRoomMods.includes(State.user.nickname)
         && State.currentRoom === room.name;
 
@@ -1128,6 +1131,7 @@ const Rooms = (() => {
           ${roomIconHtml(room.icon, room.type, 'ch-icon', channelType)}
         </button>
         <span class="ch-name">${UI.escHtml(room.name)}</span>
+        ${cwBadge}
         ${isInviteOnly ? '<span class="ch-badge" title="Private channel">🔒</span>' : ''}
         ${(typeof Mute !== 'undefined' && Mute.isRoomMuted(room.name)) ? '<span class="ch-muted-ind" title="Muted">🔕</span>' : ''}
         ${isOwner ? '<span class="ch-owner-badge" title="You own this channel">Owner</span>' : ''}
@@ -1245,7 +1249,10 @@ const Rooms = (() => {
     if (type !== 'dm' && type !== 'private') {
       if (window.ContentWarning && typeof ContentWarning.gate === 'function') {
         const cwOk = await ContentWarning.gate(name);
-        if (!cwOk) return;
+        if (!cwOk) {
+          try { UI.showToast(`You must confirm you are 18+ to enter #${name}`, 'info'); } catch {}
+          return;
+        }
       }
     }
 
@@ -1606,6 +1613,7 @@ const Rooms = (() => {
     const icon = document.getElementById('new-room-icon-input').value.trim();
     const inviteOnly = _selectedRoomType === 'private' ? 1 : 0;
     if (!name) return;
+    if (_selectedRoomType === 'public' && !_validateContentWarningForm('new-room-cw')) return;
     let roomKeyHint = null;
     if (_selectedRoomType === 'private') {
       const enteredSecret = (document.getElementById('new-room-secret')?.value || '').trim();
@@ -1917,6 +1925,15 @@ const Rooms = (() => {
         previewEl.textContent = 'Select at least one category when 18+ warning is enabled.';
       }
     }
+  }
+
+  function _validateContentWarningForm(prefix) {
+    const body = _readContentWarningForm(prefix);
+    if (body.enabled && !body.flags.length) {
+      UI.showToast('Select at least one content warning category', 'error');
+      return false;
+    }
+    return true;
   }
 
   function _applyContentWarningPolicyForRoomType(roomType) {
@@ -2702,6 +2719,7 @@ const Rooms = (() => {
       UI.showToast('Channel name is required', 'error');
       return;
     }
+    if (_currentRoomData?.room?.type === 'public' && !_validateContentWarningForm('ch-cw')) return;
 
     // Immediate UI feedback: disable Save button and show spinner label.
     const saveBtn = document.getElementById('ch-settings-save-btn');

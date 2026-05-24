@@ -45,7 +45,7 @@
       'This channel is marked for mature audiences.</p></div>';
   }
 
-  function _showGate(roomName, meta, resolve) {
+  function _showGate(roomName, meta, resolve, showDeclinedOnBack) {
     _removeOverlay();
     const flags = (meta && meta.flags) || [];
     const items = formatFlags(flags);
@@ -77,7 +77,7 @@
 
     const onBack = () => {
       _removeOverlay();
-      showDeclinedScreen(roomName);
+      if (showDeclinedOnBack) showDeclinedScreen(roomName);
       resolve(false);
     };
     const onEnter = async () => {
@@ -139,7 +139,8 @@
             resolve(true);
             return;
           }
-          _showGate(name, data.content_warning || {}, resolve);
+          const alreadyInRoom = !!(window.State && State.currentRoom === name);
+          _showGate(name, data.content_warning || {}, resolve, alreadyInRoom);
         })
         .catch(() => resolve(true));
     });
@@ -157,9 +158,6 @@
       void gate(room).then((ok) => {
         if (ok && typeof WS !== 'undefined' && WS.connect) {
           try { WS.connect(room); } catch {}
-        }
-        if (ok && typeof Messages !== 'undefined' && Messages.loadHistory && State.messages[room]) {
-          try { Messages.loadHistory(room, State.messages[room].slice()); } catch {}
         }
       });
     }
