@@ -2748,6 +2748,10 @@ const Messages = (() => {
 
   function _finishSwitchAfterPaint(room) {
     const finish = () => {
+      if (room !== State.currentRoom) return;
+      try {
+        if (typeof isSwitchOverlayForRoom === 'function' && !isSwitchOverlayForRoom(room)) return;
+      } catch {}
       try {
         if (typeof finishChannelSwitch === 'function') finishChannelSwitch(room, { finish: true });
         else if (typeof clearChatTransition === 'function') clearChatTransition({ finish: true });
