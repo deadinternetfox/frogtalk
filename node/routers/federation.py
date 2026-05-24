@@ -175,13 +175,27 @@ def enqueue_dm_message_created(
     """
     import federation_dms as fed_dm
 
-    targets = fed_dm.dm_message_federation_targets(sender, peer)
-    local_sid = str((db.get_or_create_local_server_identity() or {}).get("server_id") or "").strip()
-    remote_targets = [t for t in (targets or []) if t and t != local_sid]
-    if not remote_targets:
-        if not fed_dm.should_federate_dm(sender, peer):
-            return {"ok": True, "skipped": "peer_online_local"}
-        return {"ok": False, "error": "no_dm_route"}
+    targets = fed_dm.dm_message_federation_remote_targets(sender, peer)
+    local_sid = fed_dm._local_server_id()
+    travel_send = fed_dm.user_session_on_travel_node(sender)
+    if not targets:
+        if travel_send or fed_dm.should_federate_dm(sender, peer):
+            import federation_calls as fc
+
+            targets = [
+                sid for sid in fc._clearnet_federation_peer_ids()
+                if sid and sid != local_sid
+            ]
+        if not targets:
+            if not fed_dm.should_federate_dm(sender, peer):
+                return {"ok": True, "skipped": "peer_online_local"}
+            return {"ok": False, "error": "no_dm_route"}
+    elif travel_send:
+        # Travel-node sends must always reach account-home mirrors (e.g. Frog@AU → testy@home).
+        for sid in fed_dm._user_required_mirror_servers(peer):
+            if sid and sid != local_sid and sid not in targets:
+                targets.append(sid)
+        targets = sorted(set(targets))
     ts = created_at or (datetime.utcnow().isoformat() + "Z")
     return enqueue_server_event(
         "dm.message.created",
@@ -201,7 +215,7 @@ def enqueue_dm_message_created(
             "created_at": ts,
             "source_message_id": str(source_message_id or "").strip(),
         },
-        target_server_ids=remote_targets,
+        target_server_ids=targets,
     )
 
 
@@ -257,6 +271,7 @@ def enqueue_user_profile_updated(user: dict, *, extra: dict | None = None) -> di
         "presence": str(user.get("presence") or "online"),
         "mood": str(user.get("mood") or ""),
         "identity_pubkey": str(user.get("identity_pubkey") or ""),
+        "last_seen": str(user.get("last_seen") or "").strip(),
     }
     if extra:
         for k, v in extra.items():
@@ -382,6 +397,32 @@ def touch_room_presence(user: dict, room_name: str) -> None:
     emit_room_presence(user, room_name, p, force=False)
 
 
+_LAST_SEEN_FED_AT: dict[int, float] = {}
+_LAST_SEEN_FED_INTERVAL_SEC = 90.0
+
+
+def emit_user_last_seen(user: dict) -> dict:
+    """Throttled federation fan-out of ``users.last_seen`` for cross-node DM headers."""
+    if not isinstance(user, dict):
+        return {"ok": False, "error": "no_user"}
+    uid = int(user.get("id") or 0)
+    gid = str(user.get("global_user_id") or "").strip()
+    if uid <= 0 or not gid:
+        return {"ok": False, "skipped": True}
+    now = time.time()
+    if now - _LAST_SEEN_FED_AT.get(uid, 0.0) < _LAST_SEEN_FED_INTERVAL_SEC:
+        return {"ok": True, "skipped": "throttled"}
+    _LAST_SEEN_FED_AT[uid] = now
+    try:
+        row = db.get_user_by_id(uid) or user
+    except Exception:
+        row = user
+    seen = str((row or {}).get("last_seen") or "").strip()
+    if not seen:
+        return {"ok": True, "skipped": "empty"}
+    return enqueue_user_profile_updated(row, extra={"last_seen": seen})
+
+
 def emit_user_connection(user: dict, *, online: bool) -> dict:
     """Publish which node this user is actively connected to (WS session)."""
     if not isinstance(user, dict):
@@ -402,15 +443,28 @@ def emit_user_connection(user: dict, *, online: bool) -> dict:
         db.upsert_federation_user_connection(gid, local_sid, updated_at=now)
     else:
         db.clear_federation_user_connection(gid, local_sid)
-    return enqueue_server_event(
+    out = enqueue_server_event(
         "user.connection.updated",
         {
             "global_user_id": gid,
             "online": bool(online),
             "connected_server_id": local_sid if online else "",
             "updated_at": now,
+            "last_seen": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
         },
     )
+    if online:
+        try:
+            emit_user_last_seen(user)
+        except Exception:
+            pass
+    else:
+        try:
+            db.update_last_seen(uid)
+            emit_user_last_seen({**user, "id": uid})
+        except Exception:
+            pass
+    return out
 
 
 _MUSIC_QUEUE_SNAPSHOT_MAX = 15
@@ -5269,8 +5323,19 @@ async def _handle_user_event(event: dict) -> None:
             ts = int(time.time())
         if payload.get("online"):
             db.upsert_federation_user_connection(gid, origin_sid, updated_at=ts)
+            seen = str(payload.get("last_seen") or "").strip()
+            if not seen:
+                try:
+                    seen = db._unix_to_last_seen_str(ts)
+                except Exception:
+                    seen = ""
+            if seen:
+                db.apply_last_seen_if_newer(global_user_id=gid, last_seen=seen)
         else:
             db.clear_federation_user_connection(gid, origin_sid)
+            seen = str(payload.get("last_seen") or "").strip()
+            if seen:
+                db.apply_last_seen_if_newer(global_user_id=gid, last_seen=seen)
         return
 
     if event_type not in ("user.profile.updated", "user.created", "user.deleted"):
@@ -5313,6 +5378,7 @@ async def _handle_user_event(event: dict) -> None:
     if "custom_style" in payload or "custom_css" in payload:
         raw_style = str(payload.get("custom_style") or payload.get("custom_css") or "")[:10240]
         custom_style_in = _sanitize_inline_style(raw_style)
+    status_msg_in = _fed_clip(payload.get("status_msg"), _FED_STATUS_MAX)
     db.upsert_federation_user_profile(
         global_user_id=gid,
         nickname=nick_in,
@@ -5326,7 +5392,11 @@ async def _handle_user_event(event: dict) -> None:
         presence=str(payload.get("presence") or "offline")[:32],
         custom_style=custom_style_in,
         banner=banner_in,
+        last_seen=_fed_clip(payload.get("last_seen"), 64),
     )
+    seen_in = str(payload.get("last_seen") or "").strip()
+    if seen_in:
+        db.apply_last_seen_if_newer(global_user_id=gid, last_seen=seen_in)
 
     # Only mirror profile fields into the local `users` table when the
     # event's global_user_id matches an EXISTING local user. We deliberately
@@ -5364,6 +5434,8 @@ async def _handle_user_event(event: dict) -> None:
             }
             if status_msg_in:
                 broadcast["status_msg"] = status_msg_in
+            if seen_in:
+                broadcast["last_seen"] = seen_in
             await manager.broadcast_all(broadcast)
         except Exception:
             pass
@@ -5384,7 +5456,6 @@ async def _handle_user_event(event: dict) -> None:
     # device sends an empty status (e.g. between a music-takeover
     # restore and the next manual edit) would otherwise propagate the
     # blank to every reflecting peer.
-    status_msg_in = _fed_clip(payload.get("status_msg"), _FED_STATUS_MAX)
     mood_in = _fed_clip(payload.get("mood"), 100)
     avatar_in = _fed_clip(payload.get("avatar"), _FED_AVATAR_MAX)
     bio_in = _fed_clip(payload.get("bio"), _FED_BIO_MAX)
@@ -5457,6 +5528,8 @@ async def _handle_user_event(event: dict) -> None:
         # the live WS patch used to wipe UI state on other devices.
         if status_msg_in:
             broadcast["status_msg"] = status_msg_in
+        if seen_in:
+            broadcast["last_seen"] = seen_in
         if not payload.get("banner_omitted"):
             banner_ws = _fed_clip(payload.get("banner"), _FED_BANNER_MAX)
             if banner_ws:
@@ -5658,29 +5731,34 @@ async def _handle_dm_event(event: dict) -> None:
     view_once = 1 if int(payload.get("view_once") or 0) else 0
 
     source_msg_id = str(payload.get("source_message_id") or "").strip()
+    channel_id = db.get_or_create_dm(sender["id"], peer["id"])
+    existing_id = None
     if origin and source_msg_id:
         existing_id = db.find_dm_message_by_federation_origin(origin, source_msg_id)
-        if existing_id:
-            return
 
-    channel_id = db.get_or_create_dm(sender["id"], peer["id"])
-    msg_id = db.send_dm_message(
-        channel_id,
-        sender["id"],
-        content,
-        media_data,
-        media_type,
-        media_name,
-        reply_to,
-        media_blur=media_blur,
-        view_once=view_once,
-    )
-    if origin and msg_id:
-        db.set_dm_message_federation_origin(
-            msg_id,
-            origin,
-            source_msg_id or str(msg_id),
+    if existing_id:
+        msg_id = int(existing_id)
+    else:
+        msg_id = db.send_dm_message(
+            channel_id,
+            sender["id"],
+            content,
+            media_data,
+            media_type,
+            media_name,
+            reply_to,
+            media_blur=media_blur,
+            view_once=view_once,
         )
+        if origin and msg_id:
+            db.set_dm_message_federation_origin(
+                msg_id,
+                origin,
+                source_msg_id or str(msg_id),
+            )
+
+    if not msg_id:
+        return
 
     dm_broadcast = {
         "type": "dm_message",
@@ -5688,6 +5766,7 @@ async def _handle_dm_event(event: dict) -> None:
         "channel_id": channel_id,
         "federated": True,
         "origin_server_id": origin,
+        "sender_keys_server_id": origin or None,
         "sender_global_user_id": sender_gid or None,
         "sender_id": sender["id"],
         "sender_nick": sender["nickname"],
@@ -5714,6 +5793,8 @@ async def _handle_dm_event(event: dict) -> None:
             await manager.send_to_user(sender["id"], dm_broadcast)
     except Exception:
         pass
+    if existing_id:
+        return
     try:
         from routers.push import send_push
         # PRIVACY: never include plaintext content in the push body. E2E

@@ -337,7 +337,7 @@
     return Date.now() < (_bundleBackoffUntil.get(pid) || 0);
   }
 
-  async function _fetchPeerBundle(peerUserId) {
+  async function _fetchPeerBundle(peerUserId, opts = {}) {
     const pid = Number(peerUserId) || 0;
     if (!pid) throw new Error('bad_peer');
     const backoffUntil = _bundleBackoffUntil.get(pid) || 0;
@@ -348,10 +348,12 @@
       return _bundleInflight.get(pid);
     }
     const t0 = Date.now();
-    _signalDebug('fetchPeerBundle start', pid);
+    const keysServer = String(opts.keysServerId || opts.originServerId || opts.peerHomeServerId || '').trim();
+    _signalDebug('fetchPeerBundle start', pid, keysServer || 'auto');
     const work = (async () => {
       const apiFetch = window.apiFetch || ((u) => fetch(u, { credentials: 'include' }));
-      const path = `/api/signal/bundle/${encodeURIComponent(pid)}`;
+      const qs = keysServer ? ('?keys_server=' + encodeURIComponent(keysServer)) : '';
+      const path = `/api/signal/bundle/${encodeURIComponent(pid)}${qs}`;
       let lastErr = null;
       for (let attempt = 0; attempt < 2; attempt++) {
         const timeoutMs = attempt < 1 ? 9000 : 14000;
@@ -398,6 +400,13 @@
     try {
       const diag = await peerKeysDiagnostics(pid);
       _signalDebug('warmPeerBundleForSend', pid, diag);
+      if (diag?.bundle_is_remote && diag?.bundle_source_server) {
+        try {
+          await _fetchPeerBundle(pid, { keysServerId: diag.bundle_source_server });
+        } catch (e) {
+          _signalDebug('warmPeerBundleForSend remote fetch fail', pid, e);
+        }
+      }
       return diag;
     } catch (e) {
       _signalDebug('warmPeerBundleForSend fail', pid, e);
@@ -423,7 +432,7 @@
   const _PEER_IDENT_TTL_MS = 60 * 1000; // 60s — short enough to catch a
                                         // recent peer reset, long
                                         // enough not to spam the API.
-  async function _fetchPeerIdentityPub(peerUserId, { noCache = false, peerHomeServerId = '' } = {}) {
+  async function _fetchPeerIdentityPub(peerUserId, { noCache = false, peerHomeServerId = '', keysServerId = '' } = {}) {
     // Identity drift check uses /api/signal/identity/{id}; the server proxies
     // to the peer's home node when keys are not stored locally.
     const key = String(peerUserId);
@@ -433,7 +442,9 @@
       if (hit && (now - hit.ts) < _PEER_IDENT_TTL_MS) return hit.b64;
     }
     const apiFetch = window.apiFetch || ((u) => fetch(u, { credentials: 'include' }));
-    const path = `/api/signal/identity/${encodeURIComponent(peerUserId)}`;
+    const ks = String(keysServerId || peerHomeServerId || '').trim();
+    const qs = ks ? ('?keys_server=' + encodeURIComponent(ks)) : '';
+    const path = `/api/signal/identity/${encodeURIComponent(peerUserId)}${qs}`;
     try {
       const res = await _withTimeout(apiFetch(path), 8000, 'peer_identity_timeout');
       if (!res.ok) return null;
@@ -441,9 +452,8 @@
       const b64 = data && typeof data.identity_pub === 'string' ? data.identity_pub : null;
       const keysSid = data && typeof data.keys_server_id === 'string' ? data.keys_server_id : '';
       if (b64) {
-        _peerIdentCache.set(key, { b64, ts: now, keysServerId: keysSid });
+        _peerIdentCache.set(key, { b64, ts: now, keysServerId: ks });
       }
-      void peerHomeServerId;
       return b64;
     } catch {
       return null;
@@ -509,6 +519,7 @@
 
   async function _ensureSessionWith(peerUserId, opts = {}) {
     const peerHome = String(opts.peerHomeServerId || '').trim();
+    const keysServer = String(opts.keysServerId || opts.originServerId || peerHome || '').trim();
     const addr = _addr(peerUserId);
     let existing = await _store.loadSession(addr.toString());
     if (opts.forceRefresh && existing) {
@@ -520,6 +531,7 @@
       try {
         const serverB64 = await _fetchPeerIdentityPub(peerUserId, {
           peerHomeServerId: peerHome,
+          keysServerId: keysServer,
           noCache: !!opts.forceRefresh,
         });
         if (serverB64 && typeof _store.loadStoredIdentity === 'function') {
@@ -564,7 +576,7 @@
     }
     // No session yet \u2014 fetch a bundle and run X3DH.
     const bundle = await _withTimeout(
-      _fetchPeerBundle(peerUserId),
+      _fetchPeerBundle(peerUserId, { keysServerId: keysServer, peerHomeServerId: peerHome }),
       15000,
       'peer_bundle_timeout',
     );
@@ -685,6 +697,7 @@
     try {
       const serverB64 = await _fetchPeerIdentityPub(pid, {
         peerHomeServerId: opts.peerHomeServerId,
+        keysServerId: opts.keysServerId || opts.originServerId || opts.peerHomeServerId || '',
         noCache: true,
       });
       if (!serverB64 || typeof _store.loadStoredIdentity !== 'function') return false;
@@ -917,12 +930,15 @@
   Clearing the session here breaks inbound t:'pre' decrypt (Bad MAC) after a
   single failed whisper — the prekey handshake state lives in the session store.
   */
-  async function refreshPeerForDecrypt(peerUserId) {
+  async function refreshPeerForDecrypt(peerUserId, opts = {}) {
     const pid = Number(peerUserId) || 0;
     if (!pid || !_store) return;
     _peerIdentCache.delete(String(pid));
     try {
-      await _fetchPeerIdentityPub(pid, { noCache: true });
+      await _fetchPeerIdentityPub(pid, {
+        noCache: true,
+        keysServerId: opts.keysServerId || opts.originServerId || opts.peerHomeServerId || '',
+      });
     } catch {}
   }
 

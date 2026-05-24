@@ -463,10 +463,22 @@ class SignalBundleRoutingTests(unittest.TestCase):
             self.assertEqual(sig_mod._peer_signal_bundle_source_server(42), "srv_travel")
             self.assertTrue(sig_mod._peer_signal_bundle_is_remote(42))
 
-    def test_bundle_source_prefers_account_home_over_stale_local_travel(self):
+    def test_bundle_source_uses_local_when_keys_pinned_on_travel(self):
         from routers import signal as sig_mod
 
         with mock.patch.object(sig_mod.db, "get_user_signal_keys_server_id", return_value="srv_au"), \
+             mock.patch.object(sig_mod.db, "get_signal_keys_server_for_gid", return_value=""), \
+             mock.patch.object(sig_mod.db, "get_user_account_home_server_id", return_value="srv_home"), \
+             mock.patch.object(sig_mod.db, "signal_has_published_bundle", return_value=True), \
+             mock.patch.object(sig_mod.db, "get_user_by_id", return_value={"global_user_id": "g1"}), \
+             mock.patch.object(sig_mod, "_local_server_id", return_value="srv_au"):
+            self.assertEqual(sig_mod._peer_signal_bundle_source_server(42), "")
+            self.assertFalse(sig_mod._peer_signal_bundle_is_remote(42))
+
+    def test_bundle_source_prefers_account_home_over_stale_unpinned_travel(self):
+        from routers import signal as sig_mod
+
+        with mock.patch.object(sig_mod.db, "get_user_signal_keys_server_id", return_value=""), \
              mock.patch.object(sig_mod.db, "get_signal_keys_server_for_gid", return_value=""), \
              mock.patch.object(sig_mod.db, "get_user_account_home_server_id", return_value="srv_home"), \
              mock.patch.object(sig_mod.db, "signal_has_published_bundle", return_value=True), \

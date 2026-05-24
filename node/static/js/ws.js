@@ -468,6 +468,13 @@ const WS = (() => {
             Users.updatePresence(data.user_id, data.nickname, nextPresence, statusPatch, data.global_user_id);
           }
         }
+        if (data.last_seen !== undefined || data.presence !== undefined) {
+          try {
+            if (typeof DMs !== 'undefined' && DMs.updatePeerPresence) {
+              DMs.updatePeerPresence(data);
+            }
+          } catch {}
+        }
         // Sync display_name change to member list caches
         if (data.display_name !== undefined) {
           if (sameUser(State.user)) {

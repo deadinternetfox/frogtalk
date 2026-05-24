@@ -360,6 +360,12 @@ async def websocket_endpoint(
                 emit_user_connection(user, online=True)
             except Exception:
                 pass
+            try:
+                from routers.federation import emit_local_user_presence, emit_user_last_seen
+                emit_local_user_presence(int(user["id"]), "online")
+                emit_user_last_seen(user)
+            except Exception:
+                pass
     db.update_last_seen(user["id"])
 
     # Drain any ICE candidates that the other side trickled while this user
@@ -614,6 +620,11 @@ async def websocket_endpoint(
 
             try:
                 db.update_last_seen(user["id"])
+            except Exception:
+                pass
+            try:
+                from routers.federation import emit_user_last_seen
+                emit_user_last_seen(user)
             except Exception:
                 pass
             msg_type = data.get("type")
@@ -2002,8 +2013,11 @@ async def websocket_endpoint(
         result = manager.disconnect(websocket)
         try:
             if not manager.is_user_online(user["id"]):
-                from routers.federation import emit_user_connection
+                from routers.federation import emit_user_connection, emit_local_user_presence, emit_user_last_seen
                 emit_user_connection(user, online=False)
+                emit_local_user_presence(int(user["id"]), "offline")
+                db.update_last_seen(user["id"])
+                emit_user_last_seen(user)
         except Exception:
             pass
         try:

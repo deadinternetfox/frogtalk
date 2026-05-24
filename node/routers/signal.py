@@ -184,24 +184,32 @@ def _peer_signal_bundle_source_server(peer_user_id: int) -> str:
     if uid <= 0 or not local_sid:
         return ""
     keys_sid = db.get_user_signal_keys_server_id(uid)
-    if not keys_sid:
-        gid = str((db.get_user_by_id(uid) or {}).get("global_user_id") or "").strip()
-        if gid:
-            keys_sid = db.get_signal_keys_server_for_gid(gid)
+    gid = str((db.get_user_by_id(uid) or {}).get("global_user_id") or "").strip()
+    if not keys_sid and gid:
+        keys_sid = db.get_signal_keys_server_for_gid(gid)
     account_home = db.get_user_account_home_server_id(uid)
-    # Stale travel-node mirror: OTPKs published here while the account is
-    # homed elsewhere — encrypt/decrypt must use canonical home keys so the
-    # peer reading on frogtalk.xyz can unlock messages.
-    if account_home and account_home != local_sid:
-        if keys_sid == local_sid or (not keys_sid and db.signal_has_published_bundle(uid)):
-            return account_home
+    # Federation pin to another node always wins.
     if keys_sid and keys_sid != local_sid:
         return keys_sid
+    # Active keys published on this node (travel session) — use local bundle.
+    if keys_sid == local_sid and db.signal_has_published_bundle(uid):
+        return ""
+    # Traveler online elsewhere — prefer that node's bundle over stale local rows.
+    if gid and not keys_sid:
+        try:
+            for conn_sid in db.get_federation_user_connection_servers(gid):
+                if conn_sid and conn_sid != local_sid:
+                    return conn_sid
+        except Exception:
+            pass
+    # Stale travel mirror: local OTPKs but no pin — fall back to account home.
+    if account_home and account_home != local_sid:
+        if not keys_sid and db.signal_has_published_bundle(uid):
+            return account_home
     if db.signal_has_published_bundle(uid):
         return ""
     if account_home and account_home != local_sid:
         return account_home
-    gid = str((db.get_user_by_id(uid) or {}).get("global_user_id") or "").strip()
     if gid:
         origin = db.get_federation_profile_origin(gid)
         if origin and origin != local_sid:
@@ -711,7 +719,10 @@ async def _notify_dm_peers_key_rotation(user: dict, limit: int = 16) -> None:
             pass
 
 
-async def _fetch_peer_bundle_payload(uid: int) -> dict:
+async def _fetch_peer_bundle_payload(uid: int, *, keys_server: str = "") -> dict:
+    force_sid = str(keys_server or "").strip()
+    if force_sid:
+        return await run_in_threadpool(fetch_peer_bundle_from_server_sync, uid, force_sid)
     if await run_in_threadpool(_peer_signal_bundle_is_remote, uid):
         return await run_in_threadpool(fetch_peer_bundle_from_home_sync, uid)
     bundle = await run_in_threadpool(db.signal_fetch_bundle, uid)
@@ -743,15 +754,17 @@ async def fetch_bundle(
     request: Request,
     user_id: int,
     user: dict = Depends(get_current_user),
+    keys_server: str = "",
 ):
     """Return one prekey bundle for `user_id` and atomically consume one OTPK."""
     del user
     uid = int(user_id)
     if uid <= 0:
         raise HTTPException(status_code=400, detail="bad_user_id")
+    force_sid = str(keys_server or "").strip()
 
     try:
-        return await _fetch_peer_bundle_payload(uid)
+        return await _fetch_peer_bundle_payload(uid, keys_server=force_sid)
     except ValueError as e:
         code = str(e).split(":", 1)[0]
         if not _nudge_bundle_retryable(code):
@@ -760,7 +773,7 @@ async def fetch_bundle(
     await nudge_peer_keys_publish(uid)
     await asyncio.sleep(_NUDGE_KEYS_RETRY_WAIT_SEC)
     try:
-        return await _fetch_peer_bundle_payload(uid)
+        return await _fetch_peer_bundle_payload(uid, keys_server=force_sid)
     except ValueError as e:
         raise _bundle_http_error(e) from e
 
@@ -771,17 +784,28 @@ async def fetch_identity(
     request: Request,
     user_id: int,
     user: dict = Depends(get_current_user),
+    keys_server: str = "",
 ):
     """Return only `identity_pub` for `user_id` (does not consume OTPK).
 
     Senders use this to detect peer-identity drift before encrypting
     against a stale local Signal session. Cheap to call.
     """
+    del user
     if user_id <= 0:
         raise HTTPException(status_code=400, detail="bad_user_id")
     uid = int(user_id)
+    force_sid = str(keys_server or "").strip()
     ident_b64 = None
-    if await run_in_threadpool(_peer_signal_bundle_is_remote, uid):
+    if force_sid:
+        try:
+            bundle = await run_in_threadpool(
+                fetch_peer_bundle_from_server_sync, uid, force_sid,
+            )
+            ident_b64 = bundle.get("identity_pub") if isinstance(bundle, dict) else None
+        except Exception:
+            ident_b64 = None
+    if not ident_b64 and await run_in_threadpool(_peer_signal_bundle_is_remote, uid):
         ident_b64 = await run_in_threadpool(fetch_peer_identity_from_home_sync, uid)
     if not ident_b64:
         ident = await run_in_threadpool(db.signal_get_identity_pub, uid)

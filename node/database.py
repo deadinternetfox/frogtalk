@@ -2961,6 +2961,7 @@ def _migrate():
             ("presence", "ALTER TABLE federation_user_profiles ADD COLUMN presence TEXT DEFAULT 'offline'"),
             ("custom_style", "ALTER TABLE federation_user_profiles ADD COLUMN custom_style TEXT DEFAULT ''"),
             ("banner", "ALTER TABLE federation_user_profiles ADD COLUMN banner TEXT DEFAULT ''"),
+            ("last_seen", "ALTER TABLE federation_user_profiles ADD COLUMN last_seen TEXT DEFAULT ''"),
         ):
             if fed_profile_cols and _col not in fed_profile_cols:
                 try:
@@ -4528,6 +4529,12 @@ def enrich_user_profile_from_federation(profile: Optional[Dict]) -> Optional[Dic
         fp = str(fed.get("presence") or "").strip().lower()
         if fp and fp != "offline":
             profile["presence"] = fp
+    fed_seen = str(fed.get("last_seen") or "").strip()
+    if fed_seen:
+        profile["last_seen"] = _max_last_seen_str(profile.get("last_seen"), fed_seen)
+    conn_seen = get_federation_user_activity_last_seen(gid)
+    if conn_seen:
+        profile["last_seen"] = _max_last_seen_str(profile.get("last_seen"), conn_seen)
     return profile
 
 
@@ -5997,24 +6004,160 @@ def get_dm_peer_read(channel_id: int, user_id: int) -> int:
         return row["lrb"] if user_id == row["user_a"] else row["lra"]
 
 
+def _last_seen_ts_value(raw) -> float:
+    """Parse users.last_seen / federation last_seen to epoch seconds (UTC)."""
+    s = str(raw or "").strip()
+    if not s:
+        return 0.0
+    try:
+        if s.isdigit():
+            return float(s)
+    except Exception:
+        pass
+    try:
+        norm = s.replace(" ", "T")
+        if not norm.endswith("Z") and "+" not in norm:
+            norm += "Z"
+        return datetime.fromisoformat(norm.replace("Z", "+00:00")).timestamp()
+    except Exception:
+        return 0.0
+
+
+def _max_last_seen_str(*values) -> str:
+    best = ""
+    best_ts = 0.0
+    for raw in values:
+        s = str(raw or "").strip()
+        if not s:
+            continue
+        ts = _last_seen_ts_value(s)
+        if ts >= best_ts:
+            best_ts = ts
+            best = s
+    return best
+
+
+def _unix_to_last_seen_str(ts: int) -> str:
+    try:
+        return datetime.utcfromtimestamp(int(ts)).strftime("%Y-%m-%d %H:%M:%S")
+    except Exception:
+        return ""
+
+
+def get_federation_user_activity_last_seen(global_user_id: str) -> str:
+    """Best-effort activity time from cross-node WS connection heartbeats."""
+    gid = str(global_user_id or "").strip()
+    if not gid:
+        return ""
+    try:
+        with _conn() as con:
+            row = con.execute(
+                "SELECT MAX(updated_at) AS ts FROM federation_user_connection WHERE global_user_id=?",
+                (gid,),
+            ).fetchone()
+        ts = int(row["ts"] or 0) if row else 0
+        return _unix_to_last_seen_str(ts) if ts > 0 else ""
+    except Exception:
+        return ""
+
+
+def get_effective_last_seen(user_id: int, global_user_id: str = "") -> str:
+    """Newest last_seen across local row, federated profile, and live connections."""
+    uid = int(user_id or 0)
+    gid = str(global_user_id or "").strip()
+    local_seen = ""
+    if uid > 0:
+        try:
+            with _conn() as con:
+                row = con.execute(
+                    "SELECT last_seen, global_user_id FROM users WHERE id=?",
+                    (uid,),
+                ).fetchone()
+            if row:
+                local_seen = str(row["last_seen"] or "").strip()
+                if not gid:
+                    gid = str(row["global_user_id"] or "").strip()
+        except Exception:
+            pass
+    if gid:
+        fed = get_federation_user_profile_row(gid) or {}
+        fed_seen = str(fed.get("last_seen") or "").strip()
+        conn_seen = get_federation_user_activity_last_seen(gid)
+        return _max_last_seen_str(local_seen, fed_seen, conn_seen)
+    return local_seen
+
+
+def apply_last_seen_if_newer(*, user_id: int = 0, global_user_id: str = "", last_seen: str = "") -> bool:
+    """Merge a federated last_seen into local users + federation profile rows."""
+    seen = str(last_seen or "").strip()
+    gid = str(global_user_id or "").strip()
+    uid = int(user_id or 0)
+    if not seen:
+        return False
+    changed = False
+    if gid:
+        try:
+            with _conn() as con:
+                row = con.execute(
+                    "SELECT last_seen FROM federation_user_profiles WHERE global_user_id=?",
+                    (gid,),
+                ).fetchone()
+                cur = str(row["last_seen"] or "").strip() if row else ""
+                merged = _max_last_seen_str(cur, seen)
+                if merged and merged != cur:
+                    con.execute(
+                        "UPDATE federation_user_profiles SET last_seen=? WHERE global_user_id=?",
+                        (merged, gid),
+                    )
+                    changed = True
+                con.commit()
+        except Exception:
+            pass
+    if uid <= 0 and gid:
+        try:
+            with _conn() as con:
+                row = con.execute(
+                    "SELECT id FROM users WHERE global_user_id=? LIMIT 1",
+                    (gid,),
+                ).fetchone()
+            uid = int(row["id"]) if row else 0
+        except Exception:
+            uid = 0
+    if uid > 0:
+        try:
+            with _conn() as con:
+                row = con.execute("SELECT last_seen FROM users WHERE id=?", (uid,)).fetchone()
+                cur = str(row["last_seen"] or "").strip() if row else ""
+                merged = _max_last_seen_str(cur, seen)
+                if merged and merged != cur:
+                    con.execute("UPDATE users SET last_seen=? WHERE id=?", (merged, uid))
+                    con.commit()
+                    changed = True
+        except Exception:
+            pass
+    return changed
+
+
 def get_privacy_last_seen(user_id: int, viewer_id: int) -> Optional[str]:
     """Return viewer-allowed last_seen string, or None if hidden."""
     with _conn() as con:
         row = con.execute(
-            "SELECT last_seen, COALESCE(show_last_seen,'everyone') AS p FROM users WHERE id=?",
-            (user_id,)
+            "SELECT last_seen, global_user_id, COALESCE(show_last_seen,'everyone') AS p FROM users WHERE id=?",
+            (user_id,),
         ).fetchone()
     if not row:
         return None
+    gid = str(row["global_user_id"] or "").strip()
+    effective = get_effective_last_seen(user_id, gid)
     if user_id == viewer_id:
-        return row["last_seen"]
+        return effective or row["last_seen"]
     p = row["p"]
     if p == "nobody":
         return None
     if p == "friends":
         if not are_friends(user_id, viewer_id):
             return None
-    return row["last_seen"]
+    return effective or row["last_seen"]
 
 
 def get_privacy_read_receipts(user_id: int) -> bool:
@@ -13399,7 +13542,7 @@ def get_federation_user_profile_row(global_user_id: str) -> dict:
             row = con.execute(
                 """
                 SELECT global_user_id, nickname, display_name, avatar, bio, origin_server_id,
-                       status_msg, mood, presence, custom_style, banner, updated_at
+                       status_msg, mood, presence, custom_style, banner, updated_at, last_seen
                 FROM federation_user_profiles WHERE global_user_id=? LIMIT 1
                 """,
                 (gid,),
@@ -13476,6 +13619,7 @@ def upsert_federation_user_profile(
     presence: str = "",
     custom_style: str = "",
     banner: str = "",
+    last_seen: str = "",
 ) -> bool:
     gid = (global_user_id or "").strip()
     nick = (nickname or "").strip()
@@ -13502,12 +13646,13 @@ def upsert_federation_user_profile(
         pres = (presence or "offline").strip().lower()
         if pres not in ("online", "away", "dnd", "invisible", "offline"):
             pres = "offline"
+        seen = str(last_seen or "").strip()
         con.execute(
             """
             INSERT INTO federation_user_profiles
             (global_user_id, nickname, display_name, avatar, bio, identity_pubkey, origin_server_id,
-             status_msg, mood, presence, custom_style, banner, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+             status_msg, mood, presence, custom_style, banner, last_seen, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
             ON CONFLICT(global_user_id) DO UPDATE SET
                 nickname=excluded.nickname,
                 display_name=excluded.display_name,
@@ -13520,12 +13665,18 @@ def upsert_federation_user_profile(
                 presence=excluded.presence,
                 custom_style=excluded.custom_style,
                 banner=excluded.banner,
+                last_seen=CASE
+                    WHEN excluded.last_seen IS NULL OR excluded.last_seen = '' THEN federation_user_profiles.last_seen
+                    WHEN federation_user_profiles.last_seen IS NULL OR federation_user_profiles.last_seen = '' THEN excluded.last_seen
+                    WHEN excluded.last_seen > federation_user_profiles.last_seen THEN excluded.last_seen
+                    ELSE federation_user_profiles.last_seen
+                END,
                 updated_at=datetime('now')
             """,
             (
                 gid, nick, display_name or "", avatar or "", bio or "", identity_pubkey or "",
                 origin_server_id or "", (status_msg or "")[:200], (mood or "")[:200], pres,
-                (custom_style or "")[:12000], (banner or "")[:500_000],
+                (custom_style or "")[:12000], (banner or "")[:500_000], seen,
             ),
         )
         con.commit()

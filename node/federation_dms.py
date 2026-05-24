@@ -98,6 +98,80 @@ def dm_message_federation_targets(*users: dict | None) -> list[str]:
     return sorted(targets)
 
 
+def _user_required_mirror_servers(user: dict | None) -> list[str]:
+    """Home + live-connection servers that must receive DM copies for ``user``."""
+    local_sid = _local_server_id()
+    targets: set[str] = set()
+    u = dict(user or {})
+    gid = str(u.get("global_user_id") or "").strip()
+    uid = int(u.get("id") or 0)
+    if gid:
+        for sid in db.resolve_federation_push_targets_for_recipient_gids([gid]):
+            if sid:
+                targets.add(sid)
+        home = str(db.resolve_global_user_home_server_id(gid) or "").strip()
+        if home:
+            targets.add(home)
+        try:
+            origin = str(db.get_federation_profile_origin(gid) or "").strip()
+        except Exception:
+            origin = ""
+        if origin:
+            targets.add(origin)
+    if uid > 0:
+        try:
+            acct = str(db.get_user_account_home_server_id(uid) or "").strip()
+        except Exception:
+            acct = ""
+        if acct:
+            targets.add(acct)
+    if local_sid:
+        targets.discard(local_sid)
+    return sorted(targets)
+
+
+def user_session_on_travel_node(user: dict | None) -> bool:
+    """True when this account's home server is not the node we're running on."""
+    local_sid = _local_server_id()
+    if not local_sid:
+        return False
+    u = dict(user or {})
+    uid = int(u.get("id") or 0)
+    if uid > 0:
+        try:
+            acct = str(db.get_user_account_home_server_id(uid) or "").strip()
+        except Exception:
+            acct = ""
+        if acct and acct != local_sid:
+            return True
+    gid = str(u.get("global_user_id") or "").strip()
+    if gid:
+        home = str(db.resolve_global_user_home_server_id(gid) or "").strip()
+        if home and home != local_sid:
+            return True
+    return False
+
+
+def dm_message_federation_remote_targets(*users: dict | None) -> list[str]:
+    """Remote server_ids for ``dm.message.created`` (never the local node)."""
+    local_sid = _local_server_id()
+    targets: set[str] = set()
+    for user in users:
+        if not user:
+            continue
+        for sid in _user_required_mirror_servers(user):
+            if sid and sid != local_sid:
+                targets.add(sid)
+    for sid in dm_message_federation_targets(*users):
+        if sid and sid != local_sid:
+            targets.add(sid)
+    if not targets:
+        for sid in fc._clearnet_federation_peer_ids():
+            if sid and sid != local_sid:
+                targets.add(sid)
+    return sorted(targets)
+
+
 def federation_mirror_targets(*users: dict | None) -> list[str]:
     """Server ids that should receive DM channel metadata (disappear timer, etc.)."""
     local_sid = _local_server_id()
@@ -112,13 +186,7 @@ def federation_mirror_targets(*users: dict | None) -> list[str]:
 
 
 def _party_homed_elsewhere(user: dict | None) -> bool:
-    ident = db.get_or_create_local_server_identity() or {}
-    local_sid = str(ident.get("server_id") or "").strip()
-    gid = str((user or {}).get("global_user_id") or "").strip()
-    if not gid or not local_sid:
-        return False
-    home = db.resolve_global_user_home_server_id(gid)
-    return bool(home and home != local_sid)
+    return user_session_on_travel_node(user)
 
 
 def should_federate_dm(sender: dict | None, peer: dict | None) -> bool:

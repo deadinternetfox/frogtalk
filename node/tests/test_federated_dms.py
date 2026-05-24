@@ -3,6 +3,7 @@ import unittest
 from unittest import mock
 
 import federation_dms as fd
+import database as db
 
 
 class FederatedDMsTests(unittest.TestCase):
@@ -112,6 +113,36 @@ class FederatedDMsTests(unittest.TestCase):
     def test_dm_targets_fallback_clearnet_when_offline(self, _ident, _push, _remote, _local, _clearnet):
         peer = {"global_user_id": "00000000-0000-4000-8000-000000000002"}
         self.assertEqual(fd.dm_message_target_servers(peer), ["srv_au"])
+
+    @mock.patch("federation_dms.fc._clearnet_federation_peer_ids", return_value=["srv_home", "srv_eu"])
+    @mock.patch("federation_dms.db.get_federation_profile_origin", return_value="")
+    @mock.patch("federation_dms.db.resolve_global_user_home_server_id", return_value="srv_home")
+    @mock.patch("federation_dms.db.resolve_federation_push_targets_for_recipient_gids", return_value=[])
+    @mock.patch("federation_dms.db.get_user_account_home_server_id", return_value="srv_home")
+    @mock.patch("federation_dms.db.get_or_create_local_server_identity", return_value={"server_id": "srv_au"})
+    def test_remote_targets_travel_sender_reaches_peer_home(
+        self, _ident, _acct, _push, _home, _origin, _clearnet,
+    ):
+        """Frog@AU → testy@home must enqueue to srv_home even if AU thinks peer is local."""
+        sender = {"id": 1, "global_user_id": "00000000-0000-4000-8000-000000000001"}
+        peer = {"id": 2, "global_user_id": "00000000-0000-4000-8000-000000000002"}
+        remote = fd.dm_message_federation_remote_targets(sender, peer)
+        self.assertIn("srv_home", remote)
+        self.assertNotIn("srv_au", remote)
+        self.assertTrue(fd.user_session_on_travel_node(sender))
+
+    def test_effective_last_seen_prefers_newest(self):
+        gid = "00000000-0000-4000-8000-000000009901"
+        with mock.patch.object(db, "get_federation_user_profile_row", return_value={
+            "last_seen": "2026-05-24 10:00:00",
+        }), mock.patch.object(db, "get_federation_user_activity_last_seen", return_value=""), \
+             mock.patch.object(db, "_conn") as mock_conn:
+            mock_conn.return_value.__enter__.return_value.execute.return_value.fetchone.return_value = {
+                "last_seen": "2026-05-23 10:00:00",
+                "global_user_id": gid,
+            }
+            out = db.get_effective_last_seen(7, gid)
+        self.assertEqual(out, "2026-05-24 10:00:00")
 
 
 if __name__ == "__main__":
