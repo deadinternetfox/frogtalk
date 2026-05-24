@@ -1365,9 +1365,12 @@ const Rooms = (() => {
     if (window.ContentWarning && typeof ContentWarning.ensureChatShell === 'function') {
       try { ContentWarning.ensureChatShell(area); } catch {}
     }
-    try { area.querySelector('#' + _CHAT_TRANSITION_ID)?.remove(); } catch {}
+    const prevOverlay = area.querySelector('#' + _CHAT_TRANSITION_ID);
     try {
-      area.querySelectorAll('.chat-transition-overlay').forEach((el) => el.remove());
+      area.querySelectorAll('.chat-transition-overlay').forEach((el) => {
+        if (el.id === _CHAT_TRANSITION_ID) return;
+        el.remove();
+      });
     } catch {}
     try {
       area.querySelectorAll('.ch-loading-state, .ch-loading-card').forEach((el) => {
@@ -1410,7 +1413,11 @@ const Rooms = (() => {
       iconBlock +
       '<div class="ch-spin" aria-hidden="true"></div>' +
       '<div class="ch-loading-label">' + _escTransition(label) + '</div></div>';
-    area.appendChild(overlay);
+    if (prevOverlay && prevOverlay.parentNode) {
+      prevOverlay.replaceWith(overlay);
+    } else {
+      area.appendChild(overlay);
+    }
     if (opts.beginSwitch !== false && switchKey) {
       try { window.FtCompose?.beginChannelSwitch?.(switchKey); } catch {}
     }
@@ -1490,7 +1497,11 @@ const Rooms = (() => {
       recoverChannelSwitch(r);
       return;
     }
-    clearChatTransition({ finish: options.finish !== false, force: options.force === true });
+    clearChatTransition({
+      finish: options.finish !== false,
+      force: options.force === true,
+      contentReady: options.contentReady === true,
+    });
     try {
       if (!r || State._roomSwitchInProgress === r) delete State._roomSwitchInProgress;
     } catch {}
@@ -1501,12 +1512,11 @@ const Rooms = (() => {
     const options = opts && typeof opts === 'object' ? opts : {};
     const finish = options.finish === true;
     const force = options.force === true;
+    const contentReady = options.contentReady === true;
     const area = document.getElementById('messages-area');
     const overlay = document.getElementById(_CHAT_TRANSITION_ID);
 
-    const finalize = () => {
-      try { document.getElementById(_CHAT_TRANSITION_ID)?.remove(); } catch {}
-      try { area?.classList.remove('chat-switching'); } catch {}
+    const finalizeCompose = () => {
       _scrubStaleSwitchChrome(area);
       if (finish) {
         try {
@@ -1521,6 +1531,20 @@ const Rooms = (() => {
           window.FtCompose?.refresh?.();
         }
       } catch {}
+    };
+
+    // Content painted under the shell — reveal chat and cut overlay instantly (no fade gap).
+    if (finish && contentReady) {
+      try { area?.classList.remove('chat-switching'); } catch {}
+      try { overlay?.remove(); } catch {}
+      finalizeCompose();
+      return;
+    }
+
+    const finalize = () => {
+      try { document.getElementById(_CHAT_TRANSITION_ID)?.remove(); } catch {}
+      try { area?.classList.remove('chat-switching'); } catch {}
+      finalizeCompose();
     };
 
     if (!overlay) {

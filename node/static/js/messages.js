@@ -2747,26 +2747,17 @@ const Messages = (() => {
   }
 
   function _finishSwitchAfterPaint(room) {
-    const finish = () => {
-      if (room !== State.currentRoom) return;
-      try {
-        if (typeof isSwitchOverlayForRoom === 'function' && !isSwitchOverlayForRoom(room)) return;
-      } catch {}
-      try {
-        if (typeof finishChannelSwitch === 'function') {
-          finishChannelSwitch(room, { finish: true, contentReady: true });
-        } else if (typeof clearChatTransition === 'function') {
-          clearChatTransition({ finish: true });
-        }
-      } catch {}
-    };
+    if (room !== State.currentRoom) return;
     try {
-      if (typeof isSwitchOverlayVisible === 'function' && isSwitchOverlayVisible()) {
-        requestAnimationFrame(() => requestAnimationFrame(finish));
-        return;
+      if (typeof isSwitchOverlayForRoom === 'function' && !isSwitchOverlayForRoom(room)) return;
+    } catch {}
+    try {
+      if (typeof finishChannelSwitch === 'function') {
+        finishChannelSwitch(room, { finish: true, contentReady: true });
+      } else if (typeof clearChatTransition === 'function') {
+        clearChatTransition({ finish: true, contentReady: true });
       }
     } catch {}
-    finish();
   }
 
   function loadHistory(room, msgs, opts) {
@@ -2836,6 +2827,9 @@ const Messages = (() => {
     });
 
     mount.innerHTML = html;
+    if (!html && !options.deferFinish) {
+      mount.innerHTML = _emptyStateHtml(room);
+    }
     if (!options.deferFinish) {
       _finishSwitchAfterPaint(room);
     }
