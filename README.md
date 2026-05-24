@@ -14,19 +14,21 @@
 
 <p>
 A censorship-free, federated, end-to-end encrypted chat platform.<br>
-Self-host your own node and join the swamp — or run it completely standalone.<br>
-No company in the middle. Messages stay private. Built in the open.
+Self-host your own node and join the mesh — or use the public instance at frogtalk.xyz.<br>
+<strong>Pre-alpha:</strong> expect bugs, breaking changes, and incomplete hardening. Not production-ready.
 </p>
 
+[![Pre-alpha](https://img.shields.io/badge/status-pre--alpha-orange)](https://frogtalk.xyz/security)
 [![Release](https://img.shields.io/github/v/release/deadinternetfox/frogtalk?display_name=release&sort=semver&color=4caf50)](https://github.com/deadinternetfox/frogtalk/releases)
 [![License](https://img.shields.io/github/license/deadinternetfox/frogtalk?color=4caf50)](LICENSE)
 [![Docker](https://img.shields.io/badge/ghcr.io-frogtalk-4caf50?logo=docker&logoColor=white)](https://github.com/deadinternetfox/frogtalk/pkgs/container/frogtalk)
 [![Stars](https://img.shields.io/github/stars/deadinternetfox/frogtalk?label=stars&style=flat&color=4caf50)](https://github.com/deadinternetfox/frogtalk/stargazers)
 
 [🌐 frogtalk.xyz](https://frogtalk.xyz) ·
-[📥 Downloads](https://github.com/deadinternetfox/frogtalk/releases/latest) ·
+[📥 Downloads](https://frogtalk.xyz/#downloads) ·
 [📚 Node Docs](https://frogtalk.xyz/docs/node) ·
-[🔌 API Docs](https://frogtalk.xyz/docs/api)
+[🔌 API Docs](https://frogtalk.xyz/docs/api) ·
+[🛡️ Security](https://frogtalk.xyz/security)
 
 </div>
 
@@ -39,8 +41,17 @@ vanilla JS in the browser, optional Frog Channel imageboard, Discord/Telegram br
 and **Ed25519-signed federation** between independent operators. Clients encrypt DMs (Signal Protocol)
 and private channels (AES-GCM) before data reaches your disk.
 
-- **Use someone else's node:** [frogtalk.xyz/app](https://frogtalk.xyz/app)
+- **Use the public instance:** [frogtalk.xyz/app](https://frogtalk.xyz/app) — **pre-alpha**, no uptime or data guarantees
 - **Run your own:** install under `/opt/frogtalk`, complete the **CLI setup wizard**, join the mesh — **[full VPS guide](docs/NODE_INSTALL.md)** · **[web guide](https://frogtalk.xyz/docs/node)**
+
+### Branches
+
+| Branch | Use |
+|--------|-----|
+| **`dev`** | Day-to-day development. May be unstable. |
+| **`master`** | Pre-alpha production line deployed to frogtalk.xyz. Untested code — use at your own risk. |
+
+Feature PRs target **`dev`**; tested changes promote to **`master`**. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ---
 
@@ -85,6 +96,8 @@ and private channels (AES-GCM) before data reaches your disk.
 ---
 
 ## Download
+
+> **Pre-alpha builds** — for testing only. Expect crashes, breaking API changes, and incomplete security review. Do not rely on these for sensitive communications until we leave pre-alpha.
 
 | Platform | Latest | Notes |
 |----------|--------|-------|
@@ -450,7 +463,7 @@ Researchers who responsibly disclose are credited in the security advisory and o
 
 ### Contributing (quick start)
 
-1. Fork the repo and branch from `main`.
+1. Fork the repo and branch from **`dev`** (or `master` if `dev` is not available yet).
 2. Run `node --check node/static/js/<file>.js` for any JS you touched.
 3. Run `python3 -m py_compile node/<file>.py` for any Python you touched.
 4. Open a PR with the template filled in. For security fixes, include a PoC.

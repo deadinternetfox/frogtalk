@@ -25,6 +25,7 @@
     <section class="hero">
       <h1>Run a FrogTalk Node</h1>
       <p class="sub">Self-host a federated chat node on a fresh Linux VPS — CLI setup wizard, nginx, systemd, and sync with the public mesh anchored at <a href="https://frogtalk.xyz">frogtalk.xyz</a>.</p>
+      <p class="hint hero-meta"><strong>Pre-alpha:</strong> expect breaking changes between releases. Pin a git tag or verify SHA-256 from the release feed before production use.</p>
       <nav class="toc" aria-label="On this page">
         <a href="#quick">Quick install</a>
         <a href="#prereq">Prerequisites</a>
@@ -38,8 +39,15 @@
         <a href="#trouble">Troubleshooting</a>
         <a href="#tor">Tor / onion</a>
         <a href="#updates">Updates</a>
+        <a href="#features">App features</a>
       </nav>
       <p class="hint hero-meta">Full guide (GitHub): <a href="https://github.com/deadinternetfox/frogtalk/blob/master/docs/NODE_INSTALL.md" rel="noopener noreferrer">docs/NODE_INSTALL.md</a> · Typical path: <code>/opt/frogtalk</code></p>
+    </section>
+
+    <section class="warn-box">
+      <strong>Pre-alpha:</strong> FrogTalk is experimental. We do not guarantee uptime, data safety, or API stability.
+      Use <code>master</code> for deploys you intend to run; track <code>dev</code> for bleeding-edge changes.
+      See <a href="/security">security &amp; disclosure</a> before exposing a node to the public internet.
     </section>
 
     <section class="warn-box">
@@ -258,6 +266,24 @@ FROGTALK_TOR_SOCKS_PROXY=socks5h://127.0.0.1:9050</code></pre>
 bash node/scripts/install.sh update-apply -y
 bash node/scripts/install.sh federation -y --public-url "$PUBLIC_URL"</code></pre>
       <p class="hint">Set <code>FROGTALK_RELEASE_SIGNERS</code> before <code>FROGTALK_AUTO_UPDATE_ENABLED=1</code>.</p>
+    </section>
+
+    <section class="step" id="features">
+      <h2>What your node serves (recent app features)</h2>
+      <p class="hint">The web client at <code>$PUBLIC_URL/app</code> includes more than classic chat — operators should know what users will see after federation sync.</p>
+      <table>
+        <tr><th>Area</th><th>Summary</th></tr>
+        <tr><td>Encryption</td><td>Signal Protocol DMs; AES-256-GCM private channels with AAD binding and key rotation on ban/kick</td></tr>
+        <tr><td>Frog Social</td><td>Posts, Reels, stories, reactions, friend wall</td></tr>
+        <tr><td>Frog Channel</td><td>PHP imageboard at <code>/board/</code> — threads, greentext, mod tools</td></tr>
+        <tr><td>Bridges</td><td>Discord &amp; Telegram two-way sync (public channels only; blocked for E2EE private rooms)</td></tr>
+        <tr><td>Music rooms</td><td>Synced YouTube / Spotify / SoundCloud listening</td></tr>
+        <tr><td>Calls</td><td>WebRTC voice/video; cross-node DM calls with <code>FROGTALK_FEDERATION_CALLS_ENABLED=1</code> + TURN</td></tr>
+        <tr><td>Account sync</td><td>Travelers re-sync signed exports from home (channels, DMs prefs, friends, themes, FrogSocial)</td></tr>
+        <tr><td>18+ labels</td><td>Voluntary public-channel content warnings with session age gate (not automated scanning)</td></tr>
+        <tr><td>Federation UI</td><td>Release feed SHA-256 checks, trust badges, onion handoffs to <code>/app</code></td></tr>
+      </table>
+      <p class="hint">API reference: <a href="/docs/api">frogtalk.xyz/docs/api</a> · Encryption detail: <a href="https://github.com/deadinternetfox/frogtalk/blob/master/docs/SECURITY_MODEL.md" rel="noopener noreferrer">docs/SECURITY_MODEL.md</a></p>
     </section>
 
     <section class="step">

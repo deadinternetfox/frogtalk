@@ -1,12 +1,12 @@
 # Security Policy
 
-FrogTalk is **open source**. We welcome responsible disclosure from anyone who finds a flaw — anonymous reports are fine, and fixes often ship the same day for critical issues.
+FrogTalk is **open source** and currently in **pre-alpha**. We welcome responsible disclosure, but we **cannot guarantee** uptime, data durability, or that every build has been professionally audited. Use at your own risk — especially on the public instance at [frogtalk.xyz](https://frogtalk.xyz).
 
-Full details, threat model, and the public report form live at **https://frogtalk.xyz/security**.
+Full details, threat model, and the public report form: **https://frogtalk.xyz/security**
 
 ## Supported versions
 
-We ship continuously from `main`. Only the latest deployed build on [frogtalk.xyz](https://frogtalk.xyz) and self-hosted nodes that have pulled recent updates are supported. There are no long-term release branches.
+**Pre-alpha:** we ship continuously from **`master`** (production) and develop on **`dev`**. Only the latest deploy on frogtalk.xyz and nodes that have pulled recent updates are supported. There are no long-term release branches or SLA.
 
 ## How to report a vulnerability
 

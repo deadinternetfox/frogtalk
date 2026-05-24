@@ -1,5 +1,7 @@
 # FrogTalk node — VPS install guide
 
+> **Pre-alpha:** FrogTalk is experimental. Expect breaking changes and no uptime SLA. Deploy from `master`; track `dev` for bleeding-edge work. Read [frogtalk.xyz/security](https://frogtalk.xyz/security) before exposing a node to the public internet.
+
 This guide walks through running a **FrogTalk federation node** on a clean Linux VPS: clone the repo, run the **CLI setup wizard**, join the public mesh, put **nginx** in front, and verify sync with the official directory.
 
 - **Public reference node:** [https://frogtalk.xyz](https://frogtalk.xyz)

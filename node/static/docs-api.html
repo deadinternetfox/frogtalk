@@ -177,6 +177,7 @@ DELETE /api/rooms/{room_name}/pins/{msg_id}
 POST   /api/rooms/{room_name}/join
 GET    /api/rooms/{room_name}/content-warning/status
 POST   /api/rooms/{room_name}/content-warning/ack
+POST   /api/rooms/{room_name}/content-warning/forget
 GET    /api/rooms/{room_name}/members
 GET    /api/rooms/{room_name}/voice-participants
 POST   /api/rooms/{room_name}/leave
@@ -222,9 +223,13 @@ DELETE /api/dms/{channel_id}/messages</code></pre>
           <code>{"enabled": true, "flags": ["nudity","violence","extremism","mature_themes"]}</code>),
           <code>channel_theme</code> (sanitized JSON), banner,
           and about. Joined-room settings replicate on account sync. Public channels flagged 18+
-          require a session age confirmation (<code>POST …/content-warning/ack</code>) before history,
-          media, or WebSocket sends; unconfirmed clients receive HTTP <strong>451</strong> with
-          <code>content_warning_required</code>. DM
+          require a session age confirmation (<code>POST …/content-warning/ack</code> with
+          <code>{"confirm": true}</code>) before history, media, or WebSocket sends. Ack persists
+          for the session until logout, explicit leave (<code>POST …/leave</code> or
+          <code>POST …/content-warning/forget</code>), or moderator flag changes. Unconfirmed
+          clients receive HTTP <strong>451</strong> with <code>content_warning_required</code>.
+          Labels sync via federation and account export (<code>content_warning_enabled</code> /
+          <code>content_warning_flags</code> on joined public rooms). DM
           <code>POST …/forwarding</code> body: <code>{"disabled": true}</code> — synced per peer via
           <code>dm_peers[]</code> in export.</p>
         </article>

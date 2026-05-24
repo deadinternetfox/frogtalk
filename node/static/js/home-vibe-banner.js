@@ -1,4 +1,4 @@
-/* FrogTalk — home vibe banner */
+/* FrogTalk — home site notice banner */
 (function () {
   try {
     var KEY = 'frogtalk_vibe_banner_dismissed_v3';

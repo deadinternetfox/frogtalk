@@ -4665,7 +4665,7 @@ async function loadOlderMessages() {
     });
     if (res.status === 451) {
       if (window.ContentWarning && typeof ContentWarning.gate === 'function') {
-        const ok = await ContentWarning.gate(room);
+        const ok = await ContentWarning.gate(room, { knownCw: (State.rooms || []).find(r => r.name === room)?.content_warning });
         State.isLoadingHistory = false;
         if (ok) return loadOlderMessages();
       }

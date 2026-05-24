@@ -132,12 +132,21 @@
     .hero::before, .hero::after, .hero-orb { animation: none !important; }
   }
   .hero > * { position: relative; z-index: 1; }
+  .hero-badges {
+    display: flex; flex-wrap: wrap; gap: .5rem; justify-content: center;
+    margin-bottom: 1.5rem;
+  }
   .hero-badge {
     display: inline-flex; align-items: center; gap: .5rem;
     background: rgba(74,222,128,.1); border: 1px solid rgba(74,222,128,.3);
     color: var(--green); padding: .3rem .9rem; border-radius: 999px;
     font-size: .8rem; font-weight: 600; letter-spacing: .05em;
-    margin-bottom: 1.5rem;
+    margin-bottom: 0;
+  }
+  .hero-badge--prealpha {
+    background: rgba(251, 191, 36, .12);
+    border-color: rgba(251, 191, 36, .45);
+    color: #fbbf24;
   }
   .hero h1 {
     font-size: clamp(2.5rem, 7vw, 5rem);
@@ -928,6 +937,13 @@
     font-size: .78rem;
     margin-top: .15rem;
   }
+  #vibe-banner .vb-sub a {
+    color: #7dd3a8;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+  #vibe-banner .vb-sub a:hover { color: #4ade80; }
+  #vibe-banner .vb-prealpha { color: #c4a574; }
   #vibe-banner .vb-flow {
     display: inline-flex;
     align-items: center;

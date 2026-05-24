@@ -49,6 +49,20 @@
   color: var(--text, #e6edf3);
 }
 
+.ft-dl-prealpha {
+  margin: 0 0 1rem;
+  padding: .75rem 1rem;
+  border-radius: 10px;
+  border: 1px solid rgba(251, 191, 36, .35);
+  background: rgba(251, 191, 36, .08);
+  color: #d4a574;
+  font-size: 0.88rem;
+  line-height: 1.5;
+  max-width: 52ch;
+}
+.ft-dl-prealpha a { color: #fbbf24; }
+.ft-dl-prealpha a:hover { color: #fde68a; }
+
 .ft-dl-head p {
   margin: 0 0 1.75rem;
   color: var(--text-muted, #7d8590);

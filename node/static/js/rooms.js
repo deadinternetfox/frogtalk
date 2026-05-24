@@ -1203,9 +1203,14 @@ const Rooms = (() => {
   }
 
   /** Full-area loading overlay — blocks stale messages bleeding through during switch. */
-  function showChatTransition(name, type, dmPeer, phase) {
+  function showChatTransition(name, type, dmPeer, phase, roomOpts) {
     const area = document.getElementById('messages-area');
     if (!area) return;
+    const opts = roomOpts && typeof roomOpts === 'object' ? roomOpts : {};
+    const room = opts.room || (State.rooms || []).find((r) => r.name === name) || null;
+    if (room?.channel_theme && typeof applyChannelThemeOverride === 'function') {
+      try { applyChannelThemeOverride(JSON.parse(room.channel_theme)); } catch {}
+    }
     if (window.ContentWarning && typeof ContentWarning.ensureChatShell === 'function') {
       try { ContentWarning.ensureChatShell(area); } catch {}
     }
@@ -1216,6 +1221,10 @@ const Rooms = (() => {
     try { area.querySelector('.cw-chat-loading')?.remove(); } catch {}
     const content = area.querySelector('#cw-chat-content');
     if (content) content.innerHTML = '';
+    const chType = normalizeChannelType(room?.channel_type || opts.channelType || 'text');
+    const iconBlock = (type !== 'dm')
+      ? '<div class="ch-transition-icon-wrap">' + roomIconHtml(room?.icon, type, 'ch-transition-icon', chType) + '</div>'
+      : '<div class="ch-transition-icon-wrap"><span class="ch-transition-icon">💬</span></div>';
     const overlay = document.createElement('div');
     overlay.id = _CHAT_TRANSITION_ID;
     overlay.className = 'cw-chat-loading chat-transition-overlay';
@@ -1224,9 +1233,24 @@ const Rooms = (() => {
     overlay.setAttribute('aria-busy', 'true');
     overlay.innerHTML =
       '<div class="ch-loading-card ch-loading-state" id="ch-loading-state">' +
+      iconBlock +
       '<div class="ch-spin" aria-hidden="true"></div>' +
       '<div class="ch-loading-label">' + _escTransition(label) + '</div></div>';
     area.appendChild(overlay);
+  }
+
+  function _clearMessageContent() {
+    const area = document.getElementById('messages-area');
+    if (!area) return;
+    const shell = area.querySelector('#cw-chat-content');
+    if (shell) { shell.innerHTML = ''; return; }
+    const keepIds = new Set([_CHAT_TRANSITION_ID, 'ft-content-warning-gate']);
+    for (const ch of [...area.children]) {
+      if (keepIds.has(ch.id)) continue;
+      if (ch.classList.contains('chat-transition-overlay')) continue;
+      if (ch.classList.contains('cw-gate-inline')) continue;
+      ch.remove();
+    }
   }
 
   function clearChatTransition() {
@@ -1357,17 +1381,6 @@ const Rooms = (() => {
         // Re-clicking the current channel must still refresh the music panel
         // (e.g. user played a FrogSocial track while staying on this channel).
         try { Music?.mount?.(name, chNow); } catch {}
-        // Re-check CW gate (e.g. settings changed, ack expired, or federation sync reload).
-        if (type !== 'dm' && type !== 'private' && window.ContentWarning?.gate) {
-          const cwOk = await ContentWarning.gate(name, {
-            knownCw: opts.knownCw,
-            forceRecheck: true,
-          });
-          if (!cwOk) {
-            ++_switchSeq;
-            await _handleCwDecline(name, { prevRoom: null, prevType: null, wasCurrentRoom: true });
-          }
-        }
       }
       return;
     }
@@ -1379,18 +1392,11 @@ const Rooms = (() => {
     // Freeze stale WS traffic and paint a full-area overlay while the gate resolves.
     try { WS?.disconnect?.(); } catch {}
     if (prevRoom !== name || prevType !== type) {
-      showChatTransition(name, type, dmPeer, 'open');
+      showChatTransition(name, type, dmPeer, 'open', { room: _roomDataEarly, channelType: _chTypeEarly });
       try {
         const previewIcon = _roomDataEarly?.icon || null;
         setRoomHeader(name, type, previewIcon, dmPeer, _chTypeEarly);
       } catch {}
-    }
-
-    // Leaving a CW channel view clears session ack so returning always re-prompts.
-    if (prevRoom && prevRoom !== name && prevType !== 'dm' && prevType !== 'private') {
-      if (window.ContentWarning?.forgetAck) {
-        try { await ContentWarning.forgetAck(prevRoom); } catch {}
-      }
     }
 
     try {
@@ -1407,12 +1413,6 @@ const Rooms = (() => {
         clearChatTransition();
         try { delete State._roomSwitchInProgress; } catch {}
         return;
-      }
-    }
-
-    if (type !== 'dm' && type !== 'private') {
-      if (window.ContentWarning?.prepareRoomEntry) {
-        try { await ContentWarning.prepareRoomEntry(name); } catch {}
       }
     }
 
@@ -1618,20 +1618,15 @@ const Rooms = (() => {
     if (roomData?.channel_theme) {
       try { applyChannelThemeOverride(JSON.parse(roomData.channel_theme)); } catch {}
     }
-    try {
-      if (State._roomSwitchInProgress === String(name || '').toLowerCase()) {
-        delete State._roomSwitchInProgress;
-      }
-    } catch {}
-    // Clear messages and reply state
-    const msgArea = document.getElementById('messages-area');
-    if (msgArea) msgArea.innerHTML = '';
+    // Clear messages and reply state (keep transition / gate overlays)
+    _clearMessageContent();
     // Hide any lingering "jump to latest" pip from the previous channel.
     try { document.getElementById('jump-to-latest-pip')?.classList.remove('visible'); } catch {}
     if (typeof Messages !== 'undefined' && Messages.clearReply) Messages.clearReply();
     if (type !== 'dm' && typeof clearReplyToDM === 'function') clearReplyToDM();
 
-    // CW gate before WS/history so content cannot flash and WS cannot re-trigger the gate.
+    // CW gate before WS/history — server session ack persists until logout or leave.
+    const msgArea = document.getElementById('messages-area');
     if (type !== 'dm' && type !== 'private') {
       if (window.ContentWarning?.gate) {
         const cwOk = await ContentWarning.gate(name, {
@@ -1644,9 +1639,6 @@ const Rooms = (() => {
           await _handleCwDecline(name, { prevRoom, prevType, leaveChannel: opts.leaveOnCwDecline !== false });
           return;
         }
-      }
-      if (window.ContentWarning?.markVisitAcked) {
-        try { ContentWarning.markVisitAcked(name); } catch {}
       }
       clearChatTransition();
     }
@@ -1687,7 +1679,7 @@ const Rooms = (() => {
       if (hasCached && typeof Messages !== 'undefined' && Messages.loadHistory) {
         try { Messages.loadHistory(name, State.messages[name].slice()); } catch {}
       } else if (!hasRendered) {
-        showChatTransition(name, type, dmPeer, 'load');
+        showChatTransition(name, type, dmPeer, 'load', { room: roomData, channelType: chType });
       }
     }
     

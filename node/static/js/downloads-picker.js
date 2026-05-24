@@ -114,8 +114,10 @@
             '<div class="ft-dl-card-glow" aria-hidden="true"></div>' +
             '<div class="ft-dl-card-inner">' +
               '<div class="ft-dl-head">' +
-                '<span class="ft-dl-kicker">Download</span>' +
+                '<span class="ft-dl-kicker">Download · Pre-alpha</span>' +
                 '<h2>Get FrogTalk for your device</h2>' +
+                '<p class="ft-dl-prealpha"><strong>Pre-alpha builds</strong> — for testing only. Expect crashes, breaking changes, and incomplete security review. ' +
+                'Not recommended for sensitive communications. See <a href="/security">security &amp; disclosure</a>.</p>' +
                 '<p>We serve builds from this node when present. Missing desktop or APK files fall back to the ' +
                 '<strong>GitHub build mirror</strong> so you can still install.</p>' +
               '</div>' +

@@ -1,44 +1,43 @@
 # FrogTalk
 
-> FrogTalk is a privacy-first, end-to-end encrypted chat, calling, and social platform. It combines Signal-style E2E messaging with Discord-style channels plus a lightweight social feed with Reels and stories. Open-source, no ads, no tracking, no data sale.
+> FrogTalk is a privacy-first, federated chat, calling, and social platform in **pre-alpha**. E2E encrypted DMs (Signal Protocol), Discord-style channels, Frog Social (posts, Reels, stories), Frog Channel imageboard, music rooms, and Discord/Telegram bridges. Open-source — no ads, no tracking.
 
-FrogTalk runs on the web, Android, and desktop (Linux AppImage). It supports direct messages, group channels, voice and video calls, voice messages, stories, Reels, a public social feed ("Frog Social"), shared music listening, and live two-way bridges to Discord and Telegram. The same account works across all clients.
+**Status:** Pre-alpha. No uptime or data guarantees. Use at your own risk.
 
 ## Core links
 
-- [Home](https://frogtalk.xyz/): Landing page with feature overview.
-- [Web app](https://frogtalk.xyz/app): The full chat client (login required).
-- [Android download](https://frogtalk.xyz/download/android): Native Android client.
-- [Desktop AppImage](https://frogtalk.xyz/static/FrogTalk-1.4.1.AppImage): Linux desktop build.
+- [Home](https://frogtalk.xyz/): Landing page with feature overview and downloads.
+- [Web app](https://frogtalk.xyz/app): Full chat client (login required).
+- [Security](https://frogtalk.xyz/security): Disclosure policy, threat model, pre-alpha notice.
+- [Android download](https://frogtalk.xyz/download/android): Native Android APK (pre-alpha).
 - [Sitemap](https://frogtalk.xyz/sitemap.xml): Machine-readable site index.
-- [robots.txt](https://frogtalk.xyz/robots.txt): Crawler policy.
 
 ## Documentation
 
-- [REST API docs](https://frogtalk.xyz/docs/api): Public HTTP API for bots, integrations, and self-hosted bridges.
-- [Federation / node docs](https://frogtalk.xyz/docs/node): Running a FrogTalk node and federating with the network.
+- [REST API](https://frogtalk.xyz/docs/api): Bots, integrations, federation endpoints.
+- [Run a node](https://frogtalk.xyz/docs/node): VPS install, federation, HTTPS, account sync, calls.
 
 ## Features
 
-- **End-to-end encrypted DMs**: Messages between users are encrypted on-device.
-- **Voice & video calls**: 1-to-1 and group calls in browser and on Android.
-- **Channels & directory**: Public and private rooms with a searchable directory.
-- **Frog Social**: Public posts, Reels, stories, reactions, replies, polls.
-- **Media channels**: Synchronized watch-together / listen-together sessions (YouTube, Spotify, SoundCloud).
-- **Discord & Telegram bridges**: Two-way message bridging with both networks.
-- **Disappearing messages**: Per-chat expiry timers.
-- **Cross-platform**: Web, Android, Linux desktop. Same account everywhere.
+- **E2E DMs:** Signal Protocol (X3DH + Double Ratchet), client-side only.
+- **Private channels:** Per-room AES-256-GCM with key rotation on ban/kick.
+- **Federation:** Ed25519-signed mesh; cross-node account sync for travelers.
+- **Calls:** WebRTC voice/video; federated DM calls with TURN.
+- **Frog Social:** Posts, Reels, stories, reactions.
+- **Frog Channel:** Anonymous imageboard at `/board/`.
+- **Bridges:** Discord & Telegram (public channels only).
+- **18+ labels:** Voluntary public-channel content warnings with session age gate.
+- **Music rooms:** Synced YouTube / Spotify / SoundCloud.
+- **Clients:** Web, Android, Linux desktop, Windows portable.
+
+## Branches
+
+- `dev` — active development (may be unstable).
+- `master` — pre-alpha production line deployed to frogtalk.xyz.
 
 ## Privacy
 
-- E2E encryption for direct messages.
-- No advertising, no third-party trackers, no data sale.
-- Minimal account requirements (no phone number).
-- Open-source codebase.
-
-## Brand
-
-- Name: FrogTalk
-- Domain: frogtalk.xyz
-- Mascot/theme: green frog
-- One-line: "Secure encrypted chat, calls, and social — privacy by default."
+- E2E encryption for DMs and private channels.
+- No advertising or third-party trackers.
+- Minimal signup (no phone number required).
+- MIT-licensed source on GitHub.

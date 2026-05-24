@@ -1062,6 +1062,7 @@ const App = {
       const data = await res.json();
       if (!data?.token || !data?.user_id) return false;
       State.token = data.token;
+      try { window.ContentWarning?.resetSession?.(); } catch {}
       State.user = {
         id: data.user_id,
         nickname: data.nickname,

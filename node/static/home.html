@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="description" content="FrogTalk — Encrypted chat, voice & video calls, social posts, Reels &amp; stories, Frog Channel imageboard threads, shared music listening, and live Discord/Telegram bridges. Privacy-first, zero ads.">
+<meta name="description" content="FrogTalk — Pre-alpha encrypted chat, voice &amp; video calls, social posts, Reels, Frog Channel imageboard, federated nodes, and Discord/Telegram bridges. Privacy-first, zero ads.">
 <meta name="theme-color" content="#4caf50">
 <meta name="author" content="FrogTalk">
 <meta name="keywords" content="encrypted chat, secure messaging, voice calls, video calls, social feed, reels, stories, imageboard, frog channel, anonymous board, music sharing, discord bridge, telegram bridge, privacy, E2E encryption">
@@ -106,7 +106,7 @@
 </head>
 <body>
 
-<!-- Site banner (dismissible): styles in home.css, logic in home-vibe-banner.js -->
+<!-- Site notice (dismissible): styles in home.css, logic in home-vibe-banner.js -->
 
 <div id="vibe-banner" role="status" aria-live="polite" hidden>
   <div class="vb-inner">
@@ -116,7 +116,8 @@
         <strong>Censorship-free, private by design</strong> — end-to-end encrypted DMs and open-source code you can audit.
       </div>
       <div class="vb-sub">
-        Report security issues or read the encryption model on our security page.
+        Report security issues or read the encryption model on our <a href="/security">security page</a>.
+        <span class="vb-prealpha"> · Pre-alpha — no uptime or data guarantees.</span>
       </div>
     </div>
     <div class="vb-actions">
@@ -140,9 +141,12 @@
     <div class="hero-orb o2"></div>
     <div class="hero-orb o3"></div>
   </div>
-  <div class="hero-badge">🔒 E2E Encrypted · 🌐 Social · 🎞️ Reels · 🖼️ Frog Channel · 🌉 Bridges</div>
-  <h1>Chat, Post,<br>Vibe Together</h1>
-  <p>FrogTalk is one app for everything — encrypted DMs, voice &amp; video calls, social posts, vertical Reels, stories, Frog Channel imageboard threads, shared music, and live Discord/Telegram bridges. No tracking, ever.</p>
+  <div class="hero-badges">
+    <span class="hero-badge hero-badge--prealpha">⚠️ Pre-alpha</span>
+    <span class="hero-badge">🔒 E2E Encrypted · 🌐 Federated · 🎞️ Reels · 🖼️ Frog Channel · 🌉 Bridges</span>
+  </div>
+  <h1>Private Chat.<br>Built in the Open.</h1>
+  <p>FrogTalk is one app for encrypted DMs, voice &amp; video calls, social posts, Reels, stories, Frog Channel imageboard threads, shared music, and live Discord/Telegram bridges — federated across independent nodes. No ads, no tracking. <strong>Pre-alpha:</strong> expect rough edges; we cannot guarantee uptime or data safety yet.</p>
   <div class="hero-cta">
     <a href="/app" class="btn btn-primary btn-lg">🐸 Join the Pond</a>
     <a href="#downloads" class="btn btn-ghost btn-lg">Download app ↓</a>
@@ -373,11 +377,11 @@
 <!-- DOWNLOADS -->
 <section class="section ft-downloads-section" id="downloads" aria-labelledby="downloads-heading">
   <div class="section-title" id="downloads-heading">Download FrogTalk</div>
-  <div class="section-sub section-sub--tight">Native Android, desktop builds, or open in the browser — pick what fits your device.</div>
+  <div class="section-sub section-sub--tight">Pre-alpha builds for testing — native Android, desktop, or browser. Not recommended for sensitive or production use.</div>
   <div data-ft-downloads-root></div>
 </section>
-<link rel="stylesheet" href="/static/css/downloads-picker.css?v=2">
-<script src="/static/js/downloads-picker.js?v=2" defer></script>
+<link rel="stylesheet" href="/static/css/downloads-picker.css?v=3">
+<script src="/static/js/downloads-picker.js?v=3" defer></script>
 
 <!-- FEATURES -->
 <section class="section" id="features">
@@ -412,12 +416,27 @@
     <div class="feature-card">
       <div class="feature-icon">🎬</div>
       <h3>Watch &amp; Listen Together</h3>
-      <p>Dedicated media channel with a persistent "Now Playing" bar. Watch YouTube, queue Spotify &amp; SoundCloud, react, and vibe together.</p>
+      <p>Dedicated media channel with a persistent "Now Playing" bar. Watch YouTube, queue Spotify &amp; SoundCloud, and listen together in sync.</p>
     </div>
     <div class="feature-card">
       <div class="feature-icon">🔁</div>
       <h3>Discord &amp; Telegram Bridges</h3>
       <p>Link a FrogTalk channel to Discord or Telegram. Messages, photos, videos, voice notes and stickers sync both ways in real time.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">🧳</div>
+      <h3>Cross-Node Account Sync</h3>
+      <p>Visit another node and re-sync from home — channel settings, DM prefs, friends, profile themes, client prefs, and FrogSocial posts import with Ed25519-signed exports.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">📞</div>
+      <h3>Federated DM Calls</h3>
+      <p>Voice and video calls ring across federation when travelers are connected to your node — home-server signaling with optional TURN for NAT traversal.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">🔞</div>
+      <h3>18+ Channel Labels</h3>
+      <p>Moderators mark public channels with voluntary content categories. Visitors confirm age before history loads — session-scoped, not automated scanning.</p>
     </div>
     <div class="feature-card">
       <div class="feature-icon">📞</div>
@@ -556,6 +575,7 @@
       <h2>Built In The Open<br><span class="accent">Owned By Everyone</span></h2>
       <p>FrogTalk is licensed for self-hosting and inspection. The full server, federation layer, web client, Android app, desktop app, and the Tor / onion routing logic all live in one repository — no closed components, no dark services. Verify the build hash on your node against the one published from frogtalk.xyz before federating.</p>
       <div class="opensource-meta">
+        <span class="pill green">⚠️ Pre-alpha</span>
         <span class="pill green">🟢 Active development</span>
         <span class="pill">🐍 FastAPI + SQLite</span>
         <span class="pill">🤖 Android (Kotlin)</span>
@@ -618,7 +638,7 @@
     <div class="step">
       <div class="step-num">3</div>
       <div class="step-content">
-        <h3>Chat, Call, Vibe</h3>
+        <h3>Chat, Call, Connect</h3>
         <p>Send encrypted DMs and voice notes, hop in voice or video calls, watch &amp; listen together, or bridge a channel to Discord / Telegram — all in one app.</p>
       </div>
     </div>
@@ -629,7 +649,7 @@
 <section class="cta-banner">
   <div class="cta-frog">🐸</div>
   <h2>Ready to Hop In?</h2>
-  <p>Join FrogTalk today. Free forever, private always.</p>
+  <p>Try FrogTalk in the browser or download a pre-alpha build. Free to use — not production-ready yet.</p>
   <a href="/app" class="btn btn-primary btn-lg">Create Your Account →</a>
 </section>
 

@@ -3,6 +3,6 @@ contact_links:
   - name: 🔐 Report a security vulnerability
     url: https://frogtalk.xyz/security
     about: Please use the disclosure form (or security@frogtalk.xyz) instead of a public issue. Anonymous submissions accepted.
-  - name: 📖 Read the deslop process
+  - name: 📖 Contributing guide
     url: https://github.com/deadinternetfox/frogtalk/blob/master/CONTRIBUTING.md
-    about: How we ship — Idea → AI slop → Deslop → Ship. What "deslopped" means and how to get involved.
+    about: Branch workflow (dev → master), PR expectations, and review checklist. FrogTalk is pre-alpha.

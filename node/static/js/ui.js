@@ -2313,6 +2313,7 @@ async function doAuth() {
       return;
     }
     State.token = data.token;
+    try { window.ContentWarning?.resetSession?.(); } catch {}
     State.user = {
       id: data.user_id,
       nickname: data.nickname,
@@ -9751,6 +9752,7 @@ async function doRecover() {
     }
     // Recovery succeeded — log the user in with the freshly-minted session.
     State.token = data.token;
+    try { window.ContentWarning?.resetSession?.(); } catch {}
     State.user  = { id: 0, nickname: data.nickname };
     State.save();
     closeModal('modal-recover-account');

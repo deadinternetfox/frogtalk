@@ -38,7 +38,8 @@
 
 <section class="hero">
   <h1>Security &amp; Vulnerability Disclosure</h1>
-  <p>FrogTalk is <strong class="text-accent">open source</strong>. If something looks off, broken, or exploitable — tell us. If you can write the fix, even better: send a PR. Community projects are only as safe as the community that audits them.</p>
+  <p>FrogTalk is <strong class="text-accent">open source</strong> and in <strong class="text-accent">pre-alpha</strong>. We welcome responsible disclosure, but we <strong>cannot guarantee</strong> uptime, data durability, or that every build has been professionally audited. If something looks off, broken, or exploitable — tell us.</p>
+  <div class="badge badge-warn">⚠️ Pre-alpha · No SLA · Use at your own risk</div>
   <div class="badge">Community-secured · MIT-licensed · No bug bounty (yet) — full credit instead</div>
 </section>
 
@@ -46,6 +47,12 @@
 
   <section class="block" id="philosophy">
     <h2>What FrogTalk is</h2>
+    <div class="callout warn">
+      <strong>Pre-alpha notice:</strong> FrogTalk is experimental software. Features change quickly,
+      backups and uptime are not guaranteed, and not every code path has been reviewed for security.
+      Do not rely on it for high-stakes or life-critical communications until we leave pre-alpha.
+      Production deploys use the <code>master</code> branch; active development happens on <code>dev</code>.
+    </div>
     <p>
       FrogTalk is a <strong>censorship-free chat platform where messages can stay private</strong>.
       No company sits in the middle; anyone can run a node; DMs are end-to-end encrypted so the
@@ -182,7 +189,7 @@
     </div>
     <ul>
       <li><strong>Repo:</strong> <a href="https://github.com/deadinternetfox/frogtalk" target="_blank" rel="noopener">github.com/deadinternetfox/frogtalk</a></li>
-      <li><strong>Branch from <code>main</code></strong>, keep PRs small and focused, write a clear commit message.</li>
+      <li><strong>Branch from <code>dev</code></strong> (or <code>master</code> for production hotfixes), keep PRs small and focused, write a clear commit message.</li>
       <li><strong>Touched JS?</strong> Run <code>node --check static/js/&lt;file&gt;.js</code> before pushing — silent parse errors break every onclick on the page.</li>
       <li><strong>Touched Python?</strong> Run <code>python -m py_compile</code> on the changed files; the FastAPI app imports the whole tree at startup.</li>
       <li><strong>Security fixes:</strong> include a PoC in the PR description (or link to the bug-report ID you filed here) so the reviewer can verify the patch closes the hole.</li>

@@ -1,44 +1,35 @@
 ---
-name: 🐛 Bug report
-about: Something is broken or behaves wrong
-title: "[bug] "
-labels: ["bug", "triage"]
+name: Bug report
+about: Something is broken or behaves unexpectedly
+title: ''
+labels: ['bug']
+assignees: ''
 ---
 
-<!--
-  Thanks for reporting. FrogTalk is largely vibe-coded; bug reports are
-  how we figure out what needs deslopping next.
+## Summary
 
-  Security vulnerabilities? Please use https://frogtalk.xyz/security or
-  email security@frogtalk.xyz instead of this template — do not post PoCs
-  for unfixed vulnerabilities here.
--->
+<!-- What went wrong? One or two sentences. -->
 
-### What happened?
-
-<!-- One or two sentences. What did you expect, what did you see? -->
-
-### Steps to reproduce
+## Steps to reproduce
 
 1.
 2.
 3.
 
-### Where in the code (if you know)
+## Expected vs actual
 
-<!-- A file path or GitHub permalink is gold. Skip if you don't know. -->
+**Expected:**
 
-### Environment
+**Actual:**
 
-- FrogTalk version / commit:
-- Client: web / Android / iOS / desktop / API
-- Browser + OS (if web):
-- Server you're connected to:
+## Environment
 
-### Screenshots / logs
+- Client: web / Android / desktop / other
+- Node URL (if not frogtalk.xyz):
+- Browser or app version (if known):
 
-<!-- Drag-drop welcome. Redact session tokens, other users' messages, etc. -->
+## Notes
 
-### Anything else
+<!-- Screenshots, console errors, relevant file paths. No session tokens or recovery keys. -->
 
-<!-- Workarounds you tried, things you ruled out, related issues. -->
+**Reminder:** FrogTalk is pre-alpha. Crashes and rough edges are expected — thanks for reporting them.

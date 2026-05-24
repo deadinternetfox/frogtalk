@@ -84,10 +84,17 @@
   }
   .hero p { color: var(--text-muted); max-width: 720px; margin: 0 auto; font-size: 1.05rem; }
   .badge {
-    display: inline-block; margin-top: 1.25rem; padding: .35rem .85rem;
+    display: inline-block; margin-top: 1.25rem; margin-right: .5rem;
+    padding: .35rem .85rem;
     background: var(--bg2); border: 1px solid var(--border);
     border-radius: 999px; font-size: .82rem; color: var(--text-muted);
   }
+  .badge-warn {
+    background: rgba(251, 191, 36, .1);
+    border-color: rgba(251, 191, 36, .4);
+    color: #fbbf24;
+  }
+  .hero .badge { margin-top: 1rem; }
 
   .wrap { max-width: 880px; margin: 0 auto; padding: 3rem 1.5rem 4rem; }
 
