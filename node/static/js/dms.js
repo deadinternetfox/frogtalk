@@ -2625,11 +2625,12 @@ async function openDMChannel (id, nickname, avatar) {
   _dmMessages  = Array.isArray(_cached) ? _cached.map(m => ({ ...m })) : [];
   clearReplyToDM();
 
-  // If we have recent cached history for this DM, render instantly and refresh
-  // in the background to avoid blank-screen flash when switching threads.
+  // If we have recent cached history for this DM, paint it under the loading
+  // overlay and keep the full-pane spinner until the fetch completes.
   if (_dmMessages.length) {
     renderDMChat();
     scrollChatBottom();
+    _dmEnsureLoadingOverlay('Loading conversation…');
     if (!_dmSkipHistoricalDecrypt()) void _redecryptStaleDMMessages();
     else void _redecryptTravelDMMessages();
   }
@@ -2788,8 +2789,9 @@ async function openDMChannel (id, nickname, avatar) {
     if (_canSkipInitialFetch) {
       _dmMessagesLoading = false;
       _dmMessagesReady = true;
+      _updateDmComposeState();
+      _dmFinishLoadUi();
     }
-    _updateDmComposeState();
   }
   if (_activeDM?.user_id) {
     if (!_dmSkipHistoricalDecrypt()) void _redecryptStaleDMMessages();
@@ -2965,13 +2967,20 @@ function _dmUpdateTransitionLabel(text) {
 }
 
 function _dmEnsureLoadingOverlay(label) {
-  if (!_activeDM || (_dmMessages && _dmMessages.length)) return;
+  if (!_activeDM || !_dmMessagesLoading) return;
   if (_dmHasTransitionOverlay()) {
     if (label) _dmUpdateTransitionLabel(label);
   } else {
     _dmShowChatTransition('load');
     if (label) _dmUpdateTransitionLabel(label);
   }
+}
+
+function _dmFinishLoadUi() {
+  try {
+    if (typeof clearChatTransition === 'function') clearChatTransition({ finish: true });
+  } catch {}
+  try { delete State._roomSwitchInProgress; } catch {}
 }
 
 function _dmClearTransitionForError() {
@@ -2994,6 +3003,12 @@ async function loadDMMessages (pageOffset = 0, options = {}) {
       _dmMessagesLoading = false;
       if (loadSuccess) _dmMessagesReady = true;
       _updateDmComposeState();
+      if (loadSuccess) {
+        _dmFinishLoadUi();
+        if (!_dmMessages.length) {
+          try { renderDMChat(); } catch {}
+        }
+      }
     }
   };
   if (pageOffset === 0 && !isDelta) {
@@ -3004,11 +3019,7 @@ async function loadDMMessages (pageOffset = 0, options = {}) {
   try {
   if (pageOffset === 0 && !isDelta) {
     const area = document.getElementById('messages-area');
-    // Preserve already-rendered content (cache or prior load) and only show a
-    // full spinner when there is nothing to display yet.
-    if (area && (!_dmMessages || !_dmMessages.length)) {
-      _dmEnsureLoadingOverlay('Loading conversation…');
-    }
+    if (area) _dmEnsureLoadingOverlay('Loading conversation…');
   }
   const url = isDelta
     ? `/api/dms/${_reqRoomId}/messages?limit=${DM_PER_PAGE}&after=${afterId}`
@@ -3028,8 +3039,7 @@ async function loadDMMessages (pageOffset = 0, options = {}) {
     // show the hard retry panel.
     if (pageOffset === 0 && uiRetry < 2) {
       const area = document.getElementById('messages-area');
-      const hasVisible = !!(_dmMessages && _dmMessages.length);
-      if (area && !hasVisible) _dmEnsureLoadingOverlay('Reconnecting…');
+      if (area) _dmEnsureLoadingOverlay('Reconnecting…');
       await _sleep(500);
       if (!_isReqCurrent()) return;
       return loadDMMessages(pageOffset, { ...options, uiRetry: uiRetry + 1 });
@@ -3079,8 +3089,7 @@ async function loadDMMessages (pageOffset = 0, options = {}) {
     // Soft-retry once on transient server errors before showing error UI.
     if (pageOffset === 0 && uiRetry < 2 && r && r.status >= 500) {
       const area = document.getElementById('messages-area');
-      const hasVisible = !!(_dmMessages && _dmMessages.length);
-      if (area && !hasVisible) _dmEnsureLoadingOverlay('Reconnecting…');
+      if (area) _dmEnsureLoadingOverlay('Reconnecting…');
       await _sleep(500);
       if (!_isReqCurrent()) return;
       return loadDMMessages(pageOffset, { ...options, uiRetry: uiRetry + 1 });
@@ -3176,16 +3185,23 @@ async function loadDMMessages (pageOffset = 0, options = {}) {
 function renderDMChat () {
   const area = document.getElementById('messages-area');
   if (!area || !_activeDM) return;
-  try {
-    if (typeof clearChatTransition === 'function') clearChatTransition({ finish: true });
-    delete State._roomSwitchInProgress;
-  } catch {}
+  const stillLoading = _dmComposeBlocked();
+  if (!stillLoading) {
+    _dmFinishLoadUi();
+  } else {
+    _dmEnsureLoadingOverlay('Loading conversation…');
+  }
+  if (window.ContentWarning && typeof ContentWarning.ensureChatShell === 'function') {
+    try { ContentWarning.ensureChatShell(area); } catch {}
+  }
+  const mount = area.querySelector('#cw-chat-content') || area;
   if (!_dmMessages.length) {
+    if (stillLoading) return;
     const onTravel = !!(window.App && typeof App.isAtHomeNode === 'function' && !App.isAtHomeNode());
     const travelNote = onTravel
       ? `<div style="font-size:12px;color:#7ba88f;max-width:340px;margin:14px auto 0;line-height:1.5">On a travel node, new messages use fresh encryption in this browser. Older chat history from your home node is not decrypted here — that is expected.</div>`
       : '';
-    area.innerHTML = `<div style="text-align:center;color:#555;padding:48px 16px">
+    mount.innerHTML = `<div style="text-align:center;color:#555;padding:48px 16px">
       <div style="display:flex;justify-content:center;margin-bottom:10px">${fmtAv(_activeDM.avatar, _activeDM.nickname, 64)}</div>
       <div style="font-size:18px;font-weight:700;margin:8px 0">This is the beginning of your DM with ${esc(_activeDM.nickname)}</div>
       <div style="font-size:13px;color:#444">Messages are end-to-end encrypted 🔒</div>
@@ -3194,8 +3210,8 @@ function renderDMChat () {
     return;
   }
   _dmMessages = _dmDedupeMessagesById(_dmMessages.map(m => _normalizeDMMessage(m)));
-  area.innerHTML = _dmMessages.map(m => renderDMMessage(m)).join('');
-  if (window.Messages && Messages.hydrateStickers) Messages.hydrateStickers(area);
+  mount.innerHTML = _dmMessages.map(m => renderDMMessage(m)).join('');
+  if (window.Messages && Messages.hydrateStickers) Messages.hydrateStickers(mount);
   // One-shot dialog per DM session if any message body is still cipher-shaped
   // after every decrypt path AND has no plaintext cached locally. Cache
   // hits self-heal in _formatContent/_dmRenderContent, so those don't
