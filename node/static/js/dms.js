@@ -2554,6 +2554,7 @@ async function openDMChannel (id, nickname, avatar) {
 
   try { WS?.disconnect?.(); } catch {}
   try { State._roomSwitchInProgress = `dm:${id}`; } catch {}
+  try { if (typeof clearChannelThemeOverride === 'function') clearChannelThemeOverride(); } catch {}
 
   // Smooth transition: if we're coming from a public channel, clear its state
   if (State.currentRoomType && State.currentRoomType !== 'dm') {
@@ -2579,7 +2580,7 @@ async function openDMChannel (id, nickname, avatar) {
   const area0 = document.getElementById('messages-area');
   if (area0) {
     if (typeof showChatTransition === 'function') {
-      showChatTransition('', 'dm', nickname, 'open');
+      showChatTransition('', 'dm', nickname, 'open', { dmAvatar: avatar, switchKey: `dm:${id}` });
     } else if (typeof inlineSpinner === 'function') {
       area0.innerHTML = inlineSpinner('Opening conversation with ' + (nickname || '…') + '…');
     } else {
@@ -2939,6 +2940,46 @@ function openDMsPanel () {
 }
 
 /* ── Load messages ─────────────────────────────────────────────────────────── */
+function _dmHasTransitionOverlay() {
+  return !!document.getElementById('ft-chat-transition');
+}
+
+function _dmShowChatTransition(phase) {
+  if (!_activeDM) return;
+  const nick = _activeDM.nickname || '';
+  if (typeof showChatTransition !== 'function') return;
+  showChatTransition('', 'dm', nick, phase || 'load', {
+    dmAvatar: _activeDM.avatar || null,
+    switchKey: `dm:${_activeDM.id}`,
+    beginSwitch: !_dmHasTransitionOverlay(),
+  });
+}
+
+function _dmUpdateTransitionLabel(text) {
+  const label = document.querySelector('#ft-chat-transition .ch-loading-label');
+  if (label) {
+    label.textContent = text;
+    return;
+  }
+  _dmShowChatTransition('load');
+}
+
+function _dmEnsureLoadingOverlay(label) {
+  if (!_activeDM || (_dmMessages && _dmMessages.length)) return;
+  if (_dmHasTransitionOverlay()) {
+    if (label) _dmUpdateTransitionLabel(label);
+  } else {
+    _dmShowChatTransition('load');
+    if (label) _dmUpdateTransitionLabel(label);
+  }
+}
+
+function _dmClearTransitionForError() {
+  try {
+    if (typeof clearChatTransition === 'function') clearChatTransition({ finish: false });
+  } catch {}
+}
+
 async function loadDMMessages (pageOffset = 0, options = {}) {
   if (!_activeDM) return;
   const afterId = Number(options?.afterId || 0);
@@ -2966,7 +3007,7 @@ async function loadDMMessages (pageOffset = 0, options = {}) {
     // Preserve already-rendered content (cache or prior load) and only show a
     // full spinner when there is nothing to display yet.
     if (area && (!_dmMessages || !_dmMessages.length)) {
-      area.innerHTML = inlineSpinner('Loading conversation…');
+      _dmEnsureLoadingOverlay('Loading conversation…');
     }
   }
   const url = isDelta
@@ -2988,7 +3029,7 @@ async function loadDMMessages (pageOffset = 0, options = {}) {
     if (pageOffset === 0 && uiRetry < 2) {
       const area = document.getElementById('messages-area');
       const hasVisible = !!(_dmMessages && _dmMessages.length);
-      if (area && !hasVisible) area.innerHTML = inlineSpinner('Reconnecting…');
+      if (area && !hasVisible) _dmEnsureLoadingOverlay('Reconnecting…');
       await _sleep(500);
       if (!_isReqCurrent()) return;
       return loadDMMessages(pageOffset, { ...options, uiRetry: uiRetry + 1 });
@@ -2997,12 +3038,14 @@ async function loadDMMessages (pageOffset = 0, options = {}) {
     if (pageOffset === 0) {
       const area = document.getElementById('messages-area');
       const hasVisible = !!(_dmMessages && _dmMessages.length);
-      if (area && !hasVisible) area.innerHTML = `<div style="text-align:center;color:#888;padding:32px">
+      if (area && !hasVisible) {
+        _dmClearTransitionForError();
+        area.innerHTML = `<div style="text-align:center;color:#888;padding:32px">
         <div style="font-size:36px;margin-bottom:8px">⚠️</div>
         <div>Couldn't load messages — check your connection.</div>
         <button class="modal-btn" style="margin-top:12px" onclick="loadDMMessages(0)">Retry</button>
       </div>`;
-      else if (hasVisible && typeof toast === 'function') {
+      } else if (hasVisible && typeof toast === 'function') {
         toast('Connection hiccup. Showing cached messages.', 'info', 2200);
       }
     }
@@ -3037,7 +3080,7 @@ async function loadDMMessages (pageOffset = 0, options = {}) {
     if (pageOffset === 0 && uiRetry < 2 && r && r.status >= 500) {
       const area = document.getElementById('messages-area');
       const hasVisible = !!(_dmMessages && _dmMessages.length);
-      if (area && !hasVisible) area.innerHTML = inlineSpinner('Reconnecting…');
+      if (area && !hasVisible) _dmEnsureLoadingOverlay('Reconnecting…');
       await _sleep(500);
       if (!_isReqCurrent()) return;
       return loadDMMessages(pageOffset, { ...options, uiRetry: uiRetry + 1 });
@@ -3045,12 +3088,14 @@ async function loadDMMessages (pageOffset = 0, options = {}) {
     if (pageOffset === 0) {
       const area = document.getElementById('messages-area');
       const hasVisible = !!(_dmMessages && _dmMessages.length);
-      if (area && !hasVisible) area.innerHTML = `<div style="text-align:center;color:#888;padding:32px">
+      if (area && !hasVisible) {
+        _dmClearTransitionForError();
+        area.innerHTML = `<div style="text-align:center;color:#888;padding:32px">
         <div style="font-size:36px;margin-bottom:8px">⚠️</div>
         <div>Couldn't load messages (server error).</div>
         <button class="modal-btn" style="margin-top:12px" onclick="loadDMMessages(0)">Retry</button>
       </div>`;
-      else if (hasVisible && typeof toast === 'function') {
+      } else if (hasVisible && typeof toast === 'function') {
         toast('Server slow right now. Keeping current messages.', 'info', 2200);
       }
     }

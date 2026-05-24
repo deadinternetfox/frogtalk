@@ -35,6 +35,63 @@ function _cssUrl(raw) {
   return s.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
 }
 
+/** Re-append after channel custom CSS so loading overlay stays visible. */
+const FT_LOADING_SHIELD_CSS = `
+#main #messages-area.chat-switching {
+  display: block !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  filter: none !important;
+  transform: none !important;
+  pointer-events: auto !important;
+}
+#main #messages-area.chat-switching #ft-chat-transition,
+#main #messages-area.chat-switching .cw-chat-loading.chat-transition-overlay {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  position: absolute !important;
+  inset: 0 !important;
+  z-index: 28 !important;
+  filter: none !important;
+  transform: none !important;
+  min-height: 100% !important;
+  pointer-events: none !important;
+}
+#main #messages-area #ft-chat-transition .ch-loading-card {
+  display: flex !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+}
+#main #messages-area #ft-chat-transition .ch-loading-label,
+#main #messages-area #ft-chat-transition .ch-spin,
+#main #messages-area #ft-chat-transition .ch-transition-icon-wrap {
+  visibility: visible !important;
+  opacity: 1 !important;
+}
+#main #messages-area #ft-chat-transition .ch-loading-label {
+  display: block !important;
+}
+#main #messages-area #ft-chat-transition .ch-spin {
+  display: block !important;
+}
+`;
+
+function ensureLoadingShieldStyle() {
+  let el = document.getElementById('ft-loading-shield');
+  if (!el) {
+    el = document.createElement('style');
+    el.id = 'ft-loading-shield';
+    el.textContent = FT_LOADING_SHIELD_CSS;
+    document.head.appendChild(el);
+  } else {
+    document.head.appendChild(el);
+  }
+}
+try { if (typeof window !== 'undefined') window.ensureLoadingShieldStyle = ensureLoadingShieldStyle; } catch {}
+
 const Rooms = (() => {
   let _switchSeq = 0;
   const _CHAT_TRANSITION_ID = 'ft-chat-transition';
@@ -1202,32 +1259,77 @@ const Rooms = (() => {
     return phase === 'load' ? `Loading #${nm}…` : `Opening #${nm}…`;
   }
 
+  function _chatTransitionSwitchKey(name, type, opts) {
+    if (opts?.switchKey) return String(opts.switchKey);
+    if (type === 'dm') return '';
+    return String(name || '').trim().toLowerCase();
+  }
+
+  function _patchChatTransitionOverlay(overlay, label) {
+    overlay.setAttribute('aria-busy', 'true');
+    const labelEl = overlay.querySelector('.ch-loading-label');
+    if (labelEl) labelEl.textContent = label;
+  }
+
   /** Full-area loading overlay — blocks stale messages bleeding through during switch. */
   function showChatTransition(name, type, dmPeer, phase, roomOpts) {
     const area = document.getElementById('messages-area');
     if (!area) return;
     const opts = roomOpts && typeof roomOpts === 'object' ? roomOpts : {};
+    const phaseNorm = phase || 'open';
+    const switchKey = _chatTransitionSwitchKey(name, type, opts);
     const room = opts.room || (State.rooms || []).find((r) => r.name === name) || null;
-    if (room?.channel_theme && typeof applyChannelThemeOverride === 'function') {
+    const label = _chatTransitionLabel(name, type, dmPeer, phaseNorm);
+    area.classList.add('chat-switching');
+    area.scrollTop = 0;
+    ensureLoadingShieldStyle();
+
+    const existing = document.getElementById(_CHAT_TRANSITION_ID);
+    if (existing && switchKey && existing.dataset.ftSwitchKey === switchKey) {
+      existing.dataset.ftPhase = phaseNorm;
+      _patchChatTransitionOverlay(existing, label);
+      try { window.FtCompose?.refresh?.(); } catch {}
+      return;
+    }
+
+    if (type === 'dm') {
+      if (typeof clearChannelThemeOverride === 'function') clearChannelThemeOverride();
+    } else if (room?.channel_theme && typeof applyChannelThemeOverride === 'function') {
       try { applyChannelThemeOverride(JSON.parse(room.channel_theme)); } catch {}
+      ensureLoadingShieldStyle();
     }
     if (window.ContentWarning && typeof ContentWarning.ensureChatShell === 'function') {
       try { ContentWarning.ensureChatShell(area); } catch {}
     }
-    const label = _chatTransitionLabel(name, type, dmPeer, phase || 'open');
-    area.classList.add('chat-switching');
-    area.scrollTop = 0;
     try { area.querySelector('#' + _CHAT_TRANSITION_ID)?.remove(); } catch {}
-    try { area.querySelector('.cw-chat-loading')?.remove(); } catch {}
+    try {
+      area.querySelectorAll('.cw-chat-loading').forEach((el) => {
+        if (el.id !== _CHAT_TRANSITION_ID) el.remove();
+      });
+    } catch {}
     const content = area.querySelector('#cw-chat-content');
     if (content) content.innerHTML = '';
     const chType = normalizeChannelType(room?.channel_type || opts.channelType || 'text');
-    const iconBlock = (type !== 'dm')
-      ? '<div class="ch-transition-icon-wrap">' + roomIconHtml(room?.icon, type, 'ch-transition-icon', chType) + '</div>'
-      : '<div class="ch-transition-icon-wrap"><span class="ch-transition-icon">💬</span></div>';
+    let iconBlock;
+    if (type === 'dm') {
+      const nick = String(dmPeer || '').replace(/^@/, '');
+      if (typeof UI !== 'undefined' && UI.avatarEl) {
+        iconBlock = '<div class="ch-transition-icon-wrap ch-transition-dm-icon">'
+          + UI.avatarEl(opts.dmAvatar || null, nick, 56) + '</div>';
+      } else {
+        const av = opts.dmAvatar ? _escTransition(String(opts.dmAvatar)) : '💬';
+        iconBlock = '<div class="ch-transition-icon-wrap ch-transition-dm-icon">'
+          + '<span class="ch-transition-icon">' + av + '</span></div>';
+      }
+    } else {
+      iconBlock = '<div class="ch-transition-icon-wrap">'
+        + roomIconHtml(room?.icon, type, 'ch-transition-icon', chType) + '</div>';
+    }
     const overlay = document.createElement('div');
     overlay.id = _CHAT_TRANSITION_ID;
     overlay.className = 'cw-chat-loading chat-transition-overlay';
+    overlay.dataset.ftSwitchKey = switchKey;
+    overlay.dataset.ftPhase = phaseNorm;
     overlay.setAttribute('role', 'status');
     overlay.setAttribute('aria-live', 'polite');
     overlay.setAttribute('aria-busy', 'true');
@@ -1240,7 +1342,9 @@ const Rooms = (() => {
       '<div class="ch-spin" aria-hidden="true"></div>' +
       '<div class="ch-loading-label">' + _escTransition(label) + '</div></div>';
     area.appendChild(overlay);
-    try { window.FtCompose?.beginChannelSwitch?.(name); } catch {}
+    if (opts.beginSwitch !== false && switchKey) {
+      try { window.FtCompose?.beginChannelSwitch?.(switchKey); } catch {}
+    }
     try { window.FtCompose?.refresh?.(); } catch {}
   }
 
@@ -1420,7 +1524,6 @@ const Rooms = (() => {
 
     const switchToken = ++_switchSeq;
     try { State._roomSwitchInProgress = String(name || '').toLowerCase(); } catch {}
-    try { window.FtCompose?.beginChannelSwitch?.(name); } catch {}
     try {
 
     // Freeze stale WS traffic and paint a full-area overlay while the gate resolves.
@@ -1675,7 +1778,13 @@ const Rooms = (() => {
           return;
         }
       }
-      clearChatTransition({ finish: false });
+      if (document.getElementById(_CHAT_TRANSITION_ID)) {
+        showChatTransition(name, type, dmPeer, 'load', {
+          room: roomData, channelType: chType, beginSwitch: false,
+        });
+      } else {
+        clearChatTransition({ finish: false });
+      }
     }
 
     // Persist last-opened channel only after CW ack (or immediately for private).
@@ -1721,7 +1830,9 @@ const Rooms = (() => {
           } catch {}
         });
       } else if (!hasRendered) {
-        showChatTransition(name, type, dmPeer, 'load', { room: roomData, channelType: chType });
+        showChatTransition(name, type, dmPeer, 'load', {
+          room: roomData, channelType: chType, beginSwitch: false,
+        });
       }
     }
     
@@ -5278,6 +5389,7 @@ function applyChannelThemeOverride(t) {
     _channelThemeStyleEl.textContent = css;
     document.head.appendChild(_channelThemeStyleEl);
   }
+  try { ensureLoadingShieldStyle(); } catch {}
   try { Messages.refreshSystemEmbedGuard?.(); } catch {}
 }
 
