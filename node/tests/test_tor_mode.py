@@ -242,6 +242,71 @@ class TorModeTests(unittest.TestCase):
             pol = __import__("database").get_federation_policy_settings()
         self.assertFalse(pol["redact_clearnet_ips"])
 
+    @mock.patch("routers.federation._hybrid_node_enabled", return_value=True)
+    @mock.patch("routers.federation._tor_mode_enabled", return_value=False)
+    def test_resolve_server_base_url_hybrid_uses_onion_for_tor_mirror(self, _tor, _hybrid):
+        tor_row = {
+            "server_id": federation._TOR_MIRROR_SERVER_ID,
+            "base_url": "",
+            "onion_url": federation._TOR_MIRROR_ONION_URL,
+            "transport_preference": "onion",
+            "enabled": 1,
+        }
+        with mock.patch("database.get_federation_server_row", return_value=tor_row):
+            url = auth.resolve_server_base_url(federation._TOR_MIRROR_SERVER_ID)
+        self.assertEqual(url, federation._TOR_MIRROR_ONION_URL.rstrip("/"))
+
+    @mock.patch("federation_calls.db.list_federation_servers", return_value=[
+        {
+            "server_id": federation._TOR_MIRROR_SERVER_ID,
+            "base_url": "",
+            "onion_url": federation._TOR_MIRROR_ONION_URL,
+            "transport_preference": "onion",
+            "enabled": 1,
+        },
+        {
+            "server_id": "srv_clearnet",
+            "base_url": "https://au.example.com",
+            "onion_url": "",
+            "enabled": 1,
+        },
+    ])
+    @mock.patch("federation_calls.db.get_or_create_local_server_identity", return_value={"server_id": "srv_main"})
+    @mock.patch("federation_calls.federation_peer_is_local_alias", return_value=False)
+    @mock.patch("routers.federation._hybrid_node_enabled", return_value=True)
+    @mock.patch("routers.federation._tor_mode_enabled", return_value=False)
+    def test_hybrid_federation_peer_ids_include_tor_mirror(
+        self, _tor, _hybrid, _alias, _local, _peers,
+    ):
+        import federation_calls as fc
+
+        ids = set(fc._clearnet_federation_peer_ids())
+        self.assertIn(federation._TOR_MIRROR_SERVER_ID, ids)
+        self.assertIn("srv_clearnet", ids)
+
+    @mock.patch("federation_calls.db.list_federation_servers", return_value=[
+        {
+            "server_id": federation._TOR_MIRROR_SERVER_ID,
+            "base_url": "",
+            "onion_url": federation._TOR_MIRROR_ONION_URL,
+            "transport_preference": "onion",
+            "enabled": 1,
+        },
+    ])
+    @mock.patch("federation_calls.db.get_or_create_local_server_identity", return_value={"server_id": "srv_main"})
+    @mock.patch("federation_calls.federation_peer_is_local_alias", return_value=False)
+    @mock.patch("routers.federation._hybrid_node_enabled", return_value=False)
+    @mock.patch("routers.federation._tor_mode_enabled", return_value=False)
+    def test_clearnet_only_federation_peer_ids_skip_tor_mirror(
+        self, _tor, _hybrid, _alias, _local, _peers,
+    ):
+        import federation_calls as fc
+
+        self.assertNotIn(
+            federation._TOR_MIRROR_SERVER_ID,
+            fc._clearnet_federation_peer_ids(),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

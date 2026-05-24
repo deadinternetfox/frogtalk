@@ -9325,6 +9325,22 @@ window.ConnErr = (function(){
         <input class="modal-input" id="new-room-tags" placeholder="indie, chill, daily" maxlength="200">
       </div>
     </div>
+    <div id="new-room-cw-section" class="modal-card cw-settings-card">
+      <label class="ch-check-row" style="margin-bottom:10px">
+        <input type="checkbox" id="new-room-cw-enabled" class="ch-check-input" onchange="toggleNewRoomContentWarningFields()">
+        <div>
+          <div class="ch-check-title">🔞 18+ content warning</div>
+          <p class="ch-check-desc">Visitors must confirm they are 18+ before viewing. Syncs across federation.</p>
+        </div>
+      </label>
+      <div id="new-room-cw-flags" class="cw-flag-grid" style="display:none">
+        <label class="cw-flag-item"><input type="checkbox" id="new-room-cw-nudity" class="ch-check-input" onchange="updateNewRoomContentWarningPreview()"><span>Nudity / sexual content</span></label>
+        <label class="cw-flag-item"><input type="checkbox" id="new-room-cw-violence" class="ch-check-input" onchange="updateNewRoomContentWarningPreview()"><span>Violence</span></label>
+        <label class="cw-flag-item"><input type="checkbox" id="new-room-cw-extremism" class="ch-check-input" onchange="updateNewRoomContentWarningPreview()"><span>Extremist ideology</span></label>
+        <label class="cw-flag-item"><input type="checkbox" id="new-room-cw-mature" class="ch-check-input" onchange="updateNewRoomContentWarningPreview()"><span>Other mature themes</span></label>
+      </div>
+      <div id="new-room-cw-preview" class="cw-preview" style="display:none" aria-live="polite"></div>
+    </div>
     <div class="modal-actions">
       <button class="modal-btn secondary" onclick="closeModal('modal-create-room')">Cancel</button>
       <button class="modal-btn primary" onclick="createRoom()">Create</button>
@@ -9374,6 +9390,7 @@ window.ConnErr = (function(){
       <button class="settings-tab active" id="ch-tab-general" onclick="switchChannelTab('general')">General</button>
       <button class="settings-tab" id="ch-tab-perms" onclick="switchChannelTab('perms')">Permissions</button>
       <button class="settings-tab" id="ch-tab-directory" onclick="switchChannelTab('directory')">Directory</button>
+      <button class="settings-tab" id="ch-tab-safety" onclick="switchChannelTab('safety')">Safety</button>
       <button class="settings-tab" id="ch-tab-invites" onclick="switchChannelTab('invites')">Invites</button>
       <button class="settings-tab" id="ch-tab-mods" onclick="switchChannelTab('mods')">Moderators</button>
       <button class="settings-tab" id="ch-tab-bans" onclick="switchChannelTab('bans')">Bans</button>
@@ -9513,6 +9530,30 @@ window.ConnErr = (function(){
       <label class="modal-label">Directory Description</label>
       <textarea class="modal-input" id="ch-dir-desc" rows="4" style="resize:vertical;font-size:13px" placeholder="Write a rich description for your channel listing…" maxlength="2000"></textarea>
       <div style="font-size:11px;color:#666;margin-top:2px">This description appears on your channel's directory card</div>
+    </div>
+
+    <!-- Safety tab (18+ content warning) -->
+    <div id="ch-panel-safety" class="ch-settings-panel">
+      <p class="ch-tab-intro">Label mature public channels so visitors confirm they are 18+ before viewing. Does not scan messages automatically.</p>
+      <div id="ch-cw-private-note" class="modal-card ch-notice--private" style="display:none">
+        <p class="ch-notice__body">Content warnings apply to <strong>public</strong> channels only.</p>
+      </div>
+      <div id="ch-cw-settings-wrap" class="modal-card cw-settings-card">
+        <label class="ch-check-row">
+          <input type="checkbox" id="ch-cw-enabled" class="ch-check-input" onchange="toggleChannelContentWarningFields()">
+          <div>
+            <div class="ch-check-title">🔞 18+ content warning</div>
+            <p class="ch-check-desc">Requires visitors to confirm they are 18+. Applies on this node and syncs to federation peers.</p>
+          </div>
+        </label>
+        <div id="ch-cw-flags" class="cw-flag-grid" style="display:none;margin-top:12px">
+          <label class="cw-flag-item"><input type="checkbox" id="ch-cw-nudity" class="ch-check-input" onchange="updateChannelContentWarningPreview()"><span>Nudity / sexual content</span></label>
+          <label class="cw-flag-item"><input type="checkbox" id="ch-cw-violence" class="ch-check-input" onchange="updateChannelContentWarningPreview()"><span>Violence</span></label>
+          <label class="cw-flag-item"><input type="checkbox" id="ch-cw-extremism" class="ch-check-input" onchange="updateChannelContentWarningPreview()"><span>Extremist ideology</span></label>
+          <label class="cw-flag-item"><input type="checkbox" id="ch-cw-mature" class="ch-check-input" onchange="updateChannelContentWarningPreview()"><span>Other mature themes</span></label>
+        </div>
+        <div id="ch-cw-preview" class="cw-preview" style="display:none" aria-live="polite"></div>
+      </div>
     </div>
 
     <!-- Invites tab -->
@@ -11919,10 +11960,11 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoa
 <script src="/static/js/state.js?v=203"></script>
 <script src="/static/js/mute.js?v=191"></script>
 <script src="/static/js/notifications.js?v=435"></script>
-<script src="/static/js/ws.js?v=260"></script>
+<script src="/static/js/ws.js?v=263"></script>
 <script src="/static/js/cropper.js?v=191"></script>
 <script src="/static/js/ui.js?v=__APP_ASSET_VERSION__"></script>
-<script src="/static/js/dm_lock.js?v=1"></script>
+<script src="/static/js/dm_lock.js?v=2"></script>
+<script src="/static/js/content_warning.js?v=2"></script>
 <script src="/static/js/dm_key_manager.js?v=6"></script>
   <script src="/static/js/rooms.js?v=__APP_ASSET_VERSION__"></script>
 <script src="/static/js/sticker-fx.js?v=2"></script>
@@ -11932,7 +11974,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoa
 <script src="/static/js/users.js?v=202"></script>
 <script src="/static/js/emoji.js?v=193"></script>
 <script src="/static/js/friends.js?v=423"></script>
-<script src="/static/js/dms.js?v=503"></script>
+<script src="/static/js/dms.js?v=504"></script>
 <script src="/static/js/calls.js?v=246"></script>
 <script src="/static/js/media.js?v=423"></script>
 <script src="/static/js/gifs.js?v=205"></script>
@@ -11941,7 +11983,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoa
 <!-- cache bump: social share button + story/profile list UX fixes -->
 <script src="/static/js/social.js?v=__APP_ASSET_VERSION__"></script>
 <!-- Privacy PIN lock (auto-lock on idle, admin gate, autologin gate) -->
-<script src="/static/js/pin.js?v=12"></script>
+<script src="/static/js/pin.js?v=13"></script>
 <!-- Context-aware screenshot blocker: only engages in DMs / private rooms / disappearing threads -->
 <script src="/static/js/screenshot_guard.js?v=2"></script>
 <!-- Track F: linked devices (QR pairing) -->

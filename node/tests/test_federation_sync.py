@@ -54,6 +54,30 @@ class FederationSyncTests(unittest.TestCase):
         # UI never displays a deleted channel.
         self.assertIsNone(db.get_federation_channel_index_entry("public-au"))
 
+    def test_directory_index_content_warning_persisted(self):
+        db = self.db
+        ok = db.upsert_federation_channel_index(
+            room_name="cw-fed-channel",
+            home_server_id="srv_eu",
+            description="18+ gaming lounge",
+            member_count=3,
+            category="gaming",
+            visibility="public",
+            content_warning_enabled=1,
+            content_warning_flags=db.CW_NUDITY | db.CW_VIOLENCE,
+        )
+        self.assertTrue(ok)
+        row = db.get_federation_channel_index_entry("cw-fed-channel")
+        self.assertIsNotNone(row)
+        self.assertEqual(int(row["content_warning_enabled"]), 1)
+        self.assertEqual(int(row["content_warning_flags"]), db.CW_NUDITY | db.CW_VIOLENCE)
+        cw = db.content_warning_to_dict(
+            row["content_warning_enabled"],
+            row["content_warning_flags"],
+        )
+        self.assertTrue(cw["enabled"])
+        self.assertEqual(set(cw["flags"]), {"nudity", "violence"})
+
     def test_directory_index_list_excludes_tombstoned(self):
         db = self.db
         db.upsert_federation_channel_index(

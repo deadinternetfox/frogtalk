@@ -34,6 +34,7 @@ from deps import (
     pin_mark_unlocked,
     pin_clear_for_token,
     dm_lock_clear_for_token,
+    cw_ack_clear_for_token,
     admin_pin_mark_unlocked,
     admin_pin_clear_for_token,
     admin_area_access_status,
@@ -1270,22 +1271,23 @@ def _resolve_server_id_for_base(base_url: str) -> str:
 
 
 def resolve_server_base_url(server_id: str) -> str:
-    """Directory lookup: federation server_id → normalized base URL."""
+    """Directory lookup: federation server_id → normalized push/fetch URL."""
     sid = str(server_id or "").strip()
     if not sid:
         return ""
-    tor = os.getenv("FROGTALK_TOR_MODE", "").strip().lower() in ("1", "true", "yes")
     try:
-        for row in db.list_federation_servers(official_only=False):
-            if str(row.get("server_id") or "").strip() != sid:
-                continue
-            if tor:
-                onion = _norm_base(str(row.get("onion_url") or ""))
-                if onion:
-                    return onion
-            base = _norm_base(str(row.get("base_url") or ""))
-            if base:
-                return base
+        row = db.get_federation_server_row(sid)
+        if not row:
+            for candidate in db.list_federation_servers(official_only=False):
+                if str(candidate.get("server_id") or "").strip() == sid:
+                    row = candidate
+                    break
+        if row:
+            from routers import federation as fed
+
+            target = fed._select_peer_push_target(row) or fed._select_peer_target(row)
+            if target:
+                return _norm_base(target)
     except Exception:
         pass
     return ""
@@ -3351,6 +3353,7 @@ def _build_sync_export_for_user(
             owner_nick = ""
             owner_gid = ""
         vanity = str(room.get("vanity") or "").strip().lower()[:32]
+        count_row = db.get_room_by_name(name) or room
         room_payload = {
             "name": name,
             "type": rtype,
@@ -3360,11 +3363,15 @@ def _build_sync_export_for_user(
             "category": str(room.get("category") or "")[:32],
             "tags": str(room.get("tags") or "[]")[:2000],
             "icon": _sanitize_sync_room_icon(room.get("icon")),
-            "member_count": int(room.get("member_count") or 0),
+            "member_count": int((count_row or {}).get("member_count") or 0),
             "owner_nickname": owner_nick,
             "owner_global_user_id": owner_gid,
             "vanity": vanity,
         }
+        if rtype == "public":
+            cw_row = db.get_room_by_name(name) or room
+            room_payload["content_warning_enabled"] = int(cw_row.get("content_warning_enabled") or 0)
+            room_payload["content_warning_flags"] = int(cw_row.get("content_warning_flags") or 0) & db.CW_ALL
         sync_theme = _sanitize_sync_channel_theme(room.get("channel_theme"), rtype)
         if sync_theme:
             room_payload["channel_theme"] = sync_theme
@@ -5582,6 +5589,8 @@ def _parse_sync_channel_raw(raw) -> dict | None:
             r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "",
             str(raw.get("room_key_hint") or ""),
         )[:512]
+        content_warning_enabled = 1 if int(raw.get("content_warning_enabled") or 0) else 0
+        content_warning_flags = int(raw.get("content_warning_flags") or 0) & db.CW_ALL
     else:
         name = str(raw or "").strip().lower()
         room_type = "public"
@@ -5598,6 +5607,8 @@ def _parse_sync_channel_raw(raw) -> dict | None:
         forwarding_disabled = 0
         dj_only_queue = 0
         room_key_hint = ""
+        content_warning_enabled = 0
+        content_warning_flags = 0
     if not _ROOM_NAME_RE.match(name):
         return None
     if room_type not in ("public", "private"):
@@ -5623,6 +5634,9 @@ def _parse_sync_channel_raw(raw) -> dict | None:
     out["who_can_invite"] = who_inv
     out["forwarding_disabled"] = forwarding_disabled
     out["dj_only_queue"] = dj_only_queue
+    if room_type == "public":
+        out["content_warning_enabled"] = content_warning_enabled
+        out["content_warning_flags"] = content_warning_flags
     if room_key_hint:
         out["room_key_hint"] = room_key_hint
     return out
@@ -5695,6 +5709,17 @@ def _materialize_federated_channel(raw, *, owner_user_id: int | None = None) -> 
             patch["who_can_invite"] = parsed["who_can_invite"]
         if "forwarding_disabled" in parsed:
             patch["forwarding_disabled"] = parsed["forwarding_disabled"]
+        if str(parsed.get("type") or "public").lower() == "public" and (
+            "content_warning_enabled" in parsed or "content_warning_flags" in parsed
+        ):
+            try:
+                db.set_room_content_warning(
+                    name,
+                    enabled=bool(int(parsed.get("content_warning_enabled") or 0)),
+                    flags=int(parsed.get("content_warning_flags") or 0),
+                )
+            except Exception:
+                pass
         ctype = str(parsed.get("channel_type") or "").strip().lower()
         if ctype in ("text", "music", "voice"):
             cur_ct = str((room or {}).get("channel_type") or "text").strip().lower()
@@ -5765,6 +5790,15 @@ def materialize_directory_federated_channel(room_name: str) -> tuple[dict | None
             directory_description=str(fed.get("directory_description") or "")[:1200],
             tags=tags_raw if isinstance(tags_raw, str) else "[]",
         )
+    except Exception:
+        pass
+    try:
+        cw_en = bool(int(fed.get("content_warning_enabled") or 0))
+        cw_fl = int(fed.get("content_warning_flags") or 0)
+        if cw_en and cw_fl:
+            db.set_room_content_warning(name, enabled=True, flags=cw_fl)
+        elif not cw_en:
+            db.set_room_content_warning(name, enabled=False, flags=0)
     except Exception:
         pass
     return db.get_room_by_name(name) or room, None
@@ -7883,6 +7917,7 @@ async def logout(
             pin_clear_for_token(token)
             admin_pin_clear_for_token(token)
             dm_lock_clear_for_token(token)
+            cw_ack_clear_for_token(token)
         except Exception:
             pass
     try:

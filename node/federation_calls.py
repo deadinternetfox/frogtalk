@@ -353,7 +353,14 @@ def federation_peer_is_local_alias(server: dict, local: dict | None = None) -> b
 
 
 def _clearnet_federation_peer_ids() -> list[str]:
-    """Enabled peers with a clearnet base URL, excluding this node and onion-only rows."""
+    """Enabled peers reachable for federation fan-out (DM/call/signal relay).
+
+    Plain clearnet nodes skip onion-only rows. Hybrid hubs and Tor nodes
+    include them so traffic can cross the Tor/clearnet boundary via SOCKS.
+    """
+    from routers.federation import _can_reach_onion_federation_peers
+
+    include_onion = _can_reach_onion_federation_peers()
     ident = db.get_or_create_local_server_identity() or {}
     local_sid = str(ident.get("server_id") or "").strip()
     out: list[str] = []
@@ -364,9 +371,14 @@ def _clearnet_federation_peer_ids() -> list[str]:
             sid = str(row.get("server_id") or "").strip()
             if not sid or sid == local_sid:
                 continue
-            if _peer_is_onion_only(row):
-                continue
             if federation_peer_is_local_alias(row, ident):
+                continue
+            if _peer_is_onion_only(row):
+                if not include_onion:
+                    continue
+                if not str(row.get("onion_url") or "").strip():
+                    continue
+                out.append(sid)
                 continue
             if not str(row.get("base_url") or "").strip():
                 continue
@@ -411,7 +423,7 @@ def call_signal_target_servers(
     if targets:
         return sorted(targets)
     # Same federation id on multiple physical nodes, or unknown home: reach every
-    # other clearnet-capable peer (never onion-only rows).
+    # other federation peer this node can push to (hybrid/Tor include onion-only).
     return _clearnet_federation_peer_ids()
 
 

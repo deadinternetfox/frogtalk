@@ -16,7 +16,14 @@ from slowapi import Limiter
 from typing import Optional
 
 import database as db
-from deps import get_current_user, client_ip
+from deps import (
+    get_current_user,
+    client_ip,
+    session_token_from_request,
+    cw_ack_mark,
+    cw_ack_is_required,
+    cw_http_detail,
+)
 from ws_manager import voice_manager, manager
 
 router = APIRouter(prefix="/rooms", tags=["rooms"])
@@ -28,6 +35,68 @@ _ROOM_SAFE_HTTP_RE = re.compile(r"^https?://", re.IGNORECASE)
 _ROOM_STYLE_UNSAFE_CHARS_RE = re.compile(r"[)\\\s'\"<>]")
 _ROOM_BIDI_INVIS_RE = re.compile(r"[\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]")
 _ROOM_CTRL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
+
+async def _broadcast_room_member_joined(room_name: str, user: dict) -> None:
+    try:
+        await manager.broadcast_room(room_name, {
+            "type": "member_joined",
+            "room": room_name,
+            "user_id": int((user or {}).get("id") or 0),
+            "nickname": (user or {}).get("nickname"),
+            "avatar": (user or {}).get("avatar"),
+        })
+    except Exception:
+        pass
+
+
+async def _broadcast_room_member_left(room_name: str, user: dict) -> None:
+    try:
+        await manager.broadcast_room(room_name, {
+            "type": "member_left",
+            "room": room_name,
+            "user_id": int((user or {}).get("id") or 0),
+            "nickname": (user or {}).get("nickname"),
+        })
+    except Exception:
+        pass
+
+
+def _enqueue_room_member_joined(user: dict, room_name: str) -> None:
+    try:
+        from routers import federation as federation_mod
+        db.insert_federation_outbox_event({
+            "event_id": f"evt_{int(time.time() * 1000):016x}_{uuid.uuid4().hex[:8]}",
+            "event_type": "room.member.joined",
+            "payload": federation_mod.room_member_event_payload(user, room_name),
+        })
+    except Exception:
+        pass
+
+
+def _enqueue_room_member_left(user: dict, room_name: str) -> None:
+    try:
+        from routers import federation as federation_mod
+        db.insert_federation_outbox_event({
+            "event_id": f"evt_{int(time.time() * 1000):016x}_{uuid.uuid4().hex[:8]}",
+            "event_type": "room.member.left",
+            "payload": federation_mod.room_member_event_payload(user, room_name),
+        })
+    except Exception:
+        pass
+
+
+def _maybe_fed_directory_and_snapshot(room_name: str) -> None:
+    """Refresh federated directory row + member roster after local membership change."""
+    try:
+        room = db.get_room_by_name(room_name)
+        if not room or str(room.get("type") or "public").lower() != "public":
+            return
+        from routers import federation as federation_mod
+        federation_mod.enqueue_channel_directory_updated(room_name)
+        federation_mod.maybe_emit_room_members_snapshot(room_name)
+    except Exception:
+        pass
 
 
 async def request_private_room_rekey(room: dict, joiner: dict) -> None:
@@ -392,6 +461,11 @@ def _sanitize_channel_theme(raw: Optional[str], room_type: str = "public") -> Op
     return json.dumps(clean, separators=(",", ":"))
 
 
+class ContentWarningInput(BaseModel):
+    enabled: bool = False
+    flags: list[str] = Field(default_factory=list, max_length=4)
+
+
 class CreateRoomRequest(BaseModel):
     name: str = Field(max_length=64)
     description: str = Field(default="", max_length=2_000)
@@ -403,6 +477,7 @@ class CreateRoomRequest(BaseModel):
     icon: Optional[str] = Field(default=None, max_length=5_000_000)
     channel_type: str = Field(default="text", max_length=16)  # text, music, or voice (legacy)
     invite_only: int = 0  # 0 or 1
+    content_warning: Optional[ContentWarningInput] = None
 
 
 class DeleteRoomRequest(BaseModel):
@@ -503,6 +578,65 @@ def _sanitize_room_text(value: Optional[str], *, max_len: int, multiline: bool =
     return clean[:max_len]
 
 
+def _room_with_content_warning(room: dict | None) -> dict | None:
+    return db.attach_content_warning(room)
+
+
+def _content_warning_block(request: Request, room_name: str) -> JSONResponse | None:
+    token = session_token_from_request(request) or ""
+    required, flags = cw_ack_is_required(room_name, token)
+    if required:
+        return JSONResponse(status_code=451, content=cw_http_detail(flags))
+    return None
+
+
+async def _broadcast_content_warning_updated(room_name: str) -> None:
+    name = str(room_name or "").strip().lower()
+    if not name:
+        return
+    enabled, flags = db.get_room_content_warning(name)
+    cw = db.content_warning_to_dict(enabled, flags)
+    try:
+        await manager.broadcast_room(name, {
+            "type": "content_warning_updated",
+            "room": name,
+            "content_warning": cw,
+        })
+    except Exception:
+        pass
+    try:
+        await manager.broadcast_all({
+            "type": "content_warning_updated",
+            "room": name,
+            "content_warning": cw,
+        })
+    except Exception:
+        pass
+
+
+def _apply_content_warning_setting(
+    room_name: str,
+    *,
+    room_type: str,
+    cw_input: ContentWarningInput | None,
+) -> JSONResponse | None:
+    if cw_input is None:
+        return None
+    if str(room_type or "public").lower() != "public":
+        return JSONResponse(status_code=400, content={
+            "error": "Content warnings apply to public channels only",
+        })
+    flags = db.parse_content_warning_flags(cw_input.flags)
+    enabled = bool(cw_input.enabled)
+    if enabled and not flags:
+        return JSONResponse(status_code=400, content={
+            "error": "Select at least one content warning category",
+        })
+    if not db.set_room_content_warning(room_name, enabled=enabled, flags=flags):
+        return JSONResponse(status_code=400, content={"error": "Failed to update content warning"})
+    return None
+
+
 @router.get("")
 async def list_rooms(current_user: dict = Depends(get_current_user)):
     uid = int(current_user["id"])
@@ -531,7 +665,7 @@ async def list_rooms(current_user: dict = Depends(get_current_user)):
         # requesting user is already a member or is a server admin.
         if r.get("type") == "private" and not r["joined"] and not is_admin:
             continue
-        visible.append(r)
+        visible.append(_room_with_content_warning(r) or r)
 
     # Remote-node sidebar: only channels the user is actually joined to on
     # their home node (Discover / directory is a separate surface).
@@ -639,22 +773,23 @@ async def create_room(request: Request, body: CreateRoomRequest,
         db.add_room_to_sync_allowlist(int(current_user["id"]), body.name)
     except Exception:
         pass
-    try:
-        db.insert_federation_outbox_event({
-            "event_id": f"evt_{int(time.time() * 1000):016x}_{uuid.uuid4().hex[:8]}",
-            "event_type": "room.member.joined",
-            "payload": {
-                "room_name": body.name,
-                "nickname": current_user["nickname"],
-            },
-        })
-    except Exception:
-        pass
+    _enqueue_room_member_joined(current_user, body.name)
     try:
         from routers.auth import schedule_travel_room_shell_to_home
         schedule_travel_room_shell_to_home(int(current_user["id"]), body.name)
     except Exception:
         pass
+    cw_err = _apply_content_warning_setting(
+        body.name, room_type=body.type, cw_input=body.content_warning,
+    )
+    if cw_err:
+        return cw_err
+    if body.content_warning and body.type == "public":
+        try:
+            from routers import federation as federation_mod
+            federation_mod.enqueue_channel_directory_updated(body.name)
+        except Exception:
+            pass
     return {"ok": True, "id": room_id, "name": body.name}
 
 
@@ -680,6 +815,7 @@ class UpdateRoomRequest(BaseModel):
     banner: Optional[str] = Field(default=None, max_length=10_000_000)  # data URL or image URL
     about: Optional[str] = Field(default=None, max_length=20_000)  # rich channel about text
     forwarding_disabled: Optional[int] = None  # 0 or 1
+    content_warning: Optional[ContentWarningInput] = None
 
 
 @router.get("/{room_name}")
@@ -698,7 +834,7 @@ async def get_room(room_name: str, current_user: dict = Depends(get_current_user
     can_edit = db.can_moderate_room(room_name, current_user["id"], bool(current_user.get("is_admin")))
     
     out = {
-        "room": room,
+        "room": _room_with_content_warning(room),
         "moderators": mods,
         "can_edit": can_edit,
     }
@@ -778,22 +914,41 @@ async def update_room(room_name: str, body: UpdateRoomRequest,
     if body.name and body.name != room_name:
         renamed_to = body.name
 
-    ok = db.update_room_settings(
-        room_name,
-        name=body.name,
-        description=clean_desc,
-        icon=icon,
-        slowmode=body.slowmode,
-        channel_type=body.channel_type,
-        channel_theme=sanitized_theme,
-        invite_only=body.invite_only,
-        who_can_invite=effective_who_can_invite if body.who_can_invite is not None else None,
-        banner=banner,
-        about=clean_about,
-        forwarding_disabled=body.forwarding_disabled,
+    has_settings_update = any(
+        v is not None
+        for v in (
+            body.name,
+            body.description,
+            body.icon,
+            body.slowmode,
+            body.channel_type,
+            body.channel_theme,
+            body.invite_only,
+            body.who_can_invite,
+            body.banner,
+            body.about,
+            body.forwarding_disabled,
+        )
     )
-    if not ok:
-        return JSONResponse(status_code=409, content={"error": "Update failed (name conflict?)"})
+    if has_settings_update:
+        ok = db.update_room_settings(
+            room_name,
+            name=body.name,
+            description=clean_desc,
+            icon=icon,
+            slowmode=body.slowmode,
+            channel_type=body.channel_type,
+            channel_theme=sanitized_theme,
+            invite_only=body.invite_only,
+            who_can_invite=effective_who_can_invite if body.who_can_invite is not None else None,
+            banner=banner,
+            about=clean_about,
+            forwarding_disabled=body.forwarding_disabled,
+        )
+        if not ok:
+            return JSONResponse(status_code=409, content={"error": "Update failed (name conflict?)"})
+    elif body.content_warning is None:
+        return JSONResponse(status_code=400, content={"error": "No settings to update"})
 
     effective_name = renamed_to or room_name
     actor_nick = (current_user.get("nickname") or "").strip()
@@ -824,6 +979,13 @@ async def update_room(room_name: str, body: UpdateRoomRequest,
         fed_any = True
     if fed_any:
         _emit_federation_room_event("room.settings.updated", fed_settings)
+        try:
+            room_row = db.get_room_by_name(effective_name) or _existing_room or {}
+            if str(room_row.get("type") or "public").lower() == "public":
+                from routers import federation as federation_mod
+                federation_mod.enqueue_channel_directory_updated(effective_name)
+        except Exception:
+            pass
 
     if body.channel_type is not None and _existing_room:
         prev_ct = (_existing_room.get("channel_type") or "text")
@@ -867,7 +1029,71 @@ async def update_room(room_name: str, body: UpdateRoomRequest,
     except Exception:
         pass
 
+    if body.content_warning is not None:
+        cw_err = _apply_content_warning_setting(
+            effective_name,
+            room_type=_room_type,
+            cw_input=body.content_warning,
+        )
+        if cw_err:
+            return cw_err
+        try:
+            from routers import federation as federation_mod
+            federation_mod.enqueue_channel_directory_updated(effective_name)
+        except Exception:
+            pass
+        await _broadcast_content_warning_updated(effective_name)
+
     return {"ok": True, "renamed_to": renamed_to} if renamed_to else {"ok": True}
+
+
+class ContentWarningAckBody(BaseModel):
+    confirm: bool = True
+
+
+@router.get("/{room_name}/content-warning/status")
+async def get_content_warning_status(
+    room_name: str,
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+):
+    name = (room_name or "").strip().lower()
+    if not db.user_can_access_room(
+        current_user["id"], name, is_admin=bool(current_user.get("is_admin")),
+    ):
+        return JSONResponse(status_code=403, content={"error": "Not a member of this room"})
+    enabled, flags = db.get_room_content_warning(name)
+    token = session_token_from_request(request) or ""
+    required, _ = cw_ack_is_required(name, token)
+    acknowledged = enabled and not required
+    return {
+        "required": required,
+        "acknowledged": acknowledged,
+        "content_warning": db.content_warning_to_dict(enabled, flags),
+    }
+
+
+@router.post("/{room_name}/content-warning/ack")
+@limiter.limit("30/minute")
+async def ack_content_warning(
+    request: Request,
+    room_name: str,
+    body: ContentWarningAckBody,
+    current_user: dict = Depends(get_current_user),
+):
+    name = (room_name or "").strip().lower()
+    if not body.confirm:
+        return JSONResponse(status_code=400, content={"error": "Confirmation required"})
+    if not db.user_can_access_room(
+        current_user["id"], name, is_admin=bool(current_user.get("is_admin")),
+    ):
+        return JSONResponse(status_code=403, content={"error": "Not a member of this room"})
+    enabled, flags = db.get_room_content_warning(name)
+    if not enabled:
+        return {"ok": True, "required": False}
+    token = session_token_from_request(request) or ""
+    cw_ack_mark(token, name, flags)
+    return {"ok": True, "required": False, "content_warning": db.content_warning_to_dict(True, flags)}
 
 
 # ─── Channel theme background image upload ───────────────────────────────────
@@ -1684,43 +1910,9 @@ async def join_room(
             content={"error": "You cannot join this channel directly. Ask for an invite link."}
         )
     db.join_room(current_user["id"], room["id"])
-    # Notify everyone currently subscribed to this room over WS so their
-    # member sidebar picks up the new joiner without a page reload. The
-    # old behaviour relied on the joiner eventually opening a WS to the
-    # room (which fires online_users), but if they joined via Discover
-    # without entering the room, existing members never saw them.
-    try:
-        from ws_manager import manager
-        await manager.broadcast_room(name, {
-            "type": "member_joined",
-            "room": name,
-            "user_id": current_user["id"],
-            "nickname": current_user["nickname"],
-            "avatar": current_user.get("avatar"),
-        })
-    except Exception:
-        pass
-    try:
-        db.insert_federation_outbox_event({
-            "event_id": f"evt_{int(time.time() * 1000):016x}_{uuid.uuid4().hex[:8]}",
-            "event_type": "room.member.joined",
-            "payload": {
-                "room_name": name,
-                "nickname": current_user["nickname"],
-            },
-        })
-    except Exception:
-        pass
-    # Emit a (throttled) full member snapshot so peer nodes hydrate their
-    # federated roster index immediately instead of waiting for every
-    # incremental event. Only fires when this node is authoritative for
-    # the room (public + we host the owner).
-    try:
-        if str(room.get("type") or "public").lower() == "public":
-            from routers import federation as federation_mod
-            federation_mod.maybe_emit_room_members_snapshot(name)
-    except Exception:
-        pass
+    await _broadcast_room_member_joined(name, current_user)
+    _enqueue_room_member_joined(current_user, name)
+    _maybe_fed_directory_and_snapshot(name)
     # Private-room key handoff. The freshly-joined user has no current
     # room secret (either it's their first join or they were just
     # unbanned after a rotation). Ask the owner/a moderator to rotate
@@ -2010,27 +2202,13 @@ async def leave_room(room_name: str, current_user: dict = Depends(get_current_us
         return JSONResponse(status_code=404, content={"error": "Room not found"})
     was_owner = room.get("owner_id") == current_user["id"]
     db.leave_room(current_user["id"], room["id"])
+    await _broadcast_room_member_left(room_name, current_user)
+    _enqueue_room_member_left(current_user, room_name)
+    _maybe_fed_directory_and_snapshot(room_name)
     try:
         from routers.auth import user_at_account_home
         if not user_at_account_home(int(current_user["id"])):
             db.remove_room_from_sync_allowlist(int(current_user["id"]), room_name)
-    except Exception:
-        pass
-    try:
-        db.insert_federation_outbox_event({
-            "event_id": f"evt_{int(time.time() * 1000):016x}_{uuid.uuid4().hex[:8]}",
-            "event_type": "room.member.left",
-            "payload": {
-                "room_name": room_name,
-                "nickname": current_user["nickname"],
-            },
-        })
-    except Exception:
-        pass
-    try:
-        if str(room.get("type") or "public").lower() == "public":
-            from routers import federation as federation_mod
-            federation_mod.maybe_emit_room_members_snapshot(room_name)
     except Exception:
         pass
     # Determine what happened so the client can react accordingly

@@ -83,6 +83,10 @@ def _sanitize_public_channel_row(row: dict) -> dict:
     """Sanitize media URLs before they reach browsers + carry federation flags."""
     out = dict(row)
     out["icon"] = _safe_directory_icon(out.get("icon"))
+    out["content_warning"] = db.content_warning_to_dict(
+        out.get("content_warning_enabled"),
+        out.get("content_warning_flags"),
+    )
     owner_avatar = out.get("owner_avatar")
     if owner_avatar:
         try:
@@ -258,6 +262,11 @@ async def update_channel_visibility(
     dir_desc = _sanitize_room_text(body.directory_description, max_len=1200, multiline=True)
 
     if db.set_room_public(name, 1 if body.is_public else 0, clean_cat, dir_desc, tags_json):
+        try:
+            from routers import federation as federation_mod
+            federation_mod.enqueue_channel_directory_updated(name)
+        except Exception:
+            pass
         return {"ok": True, "is_public": body.is_public, "category": clean_cat}
     return JSONResponse(status_code=500, content={"error": "Failed to update"})
 
@@ -561,6 +570,11 @@ async def update_channel_listing(
     dir_desc = _sanitize_room_text(body.directory_description, max_len=1200, multiline=True)
     is_public = 1 if room.get("is_public") else 0
     if db.set_room_public(name, is_public, clean_cat, dir_desc, tags_json):
+        try:
+            from routers import federation as federation_mod
+            federation_mod.enqueue_channel_directory_updated(name)
+        except Exception:
+            pass
         return {"ok": True}
     return JSONResponse(status_code=500, content={"error": "Failed to update"})
 

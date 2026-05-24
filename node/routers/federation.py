@@ -729,6 +729,95 @@ _members_snapshot_last_sent: dict[str, float] = {}
 _MEMBERS_SNAPSHOT_THROTTLE_SEC = 60
 
 
+def _local_server_id() -> str:
+    try:
+        return str((db.get_or_create_local_server_identity() or {}).get("server_id") or "").strip()
+    except Exception:
+        return ""
+
+
+def _room_is_federated_mirror(room: dict | None) -> bool:
+    """True for directory mirror shells owned by the federation system user."""
+    if not room:
+        return False
+    try:
+        fed_uid = int(db.get_or_create_federation_system_user())
+        return int(room.get("owner_id") or 0) == fed_uid
+    except Exception:
+        return False
+
+
+def _room_snapshot_authoritative(room: dict | None) -> bool:
+    """True when this node may emit authoritative roster/directory events."""
+    if not room:
+        return False
+    local_sid = _local_server_id()
+    home = str(room.get("home_server_id") or "").strip()
+    if home:
+        return bool(local_sid) and home == local_sid
+    return not _room_is_federated_mirror(room)
+
+
+def room_member_event_payload(user: dict, room_name: str) -> dict:
+    """Signed federation payload for room.member.joined / room.member.left."""
+    gid = str((user or {}).get("global_user_id") or "").strip()
+    nick = str((user or {}).get("nickname") or "").strip()
+    home = ""
+    try:
+        if gid:
+            home = str(db.resolve_global_user_home_server_id(gid) or "").strip()
+    except Exception:
+        home = ""
+    return {
+        "room_name": str(room_name or "").strip().lower(),
+        "nickname": nick[:64],
+        "global_user_id": gid[:64],
+        "home_server_id": home[:64],
+    }
+
+
+def enqueue_channel_directory_updated(room_name: str) -> dict:
+    """Push directory metadata to peers (signed ``channel.directory.updated``)."""
+    name = str(room_name or "").strip().lower()
+    if not name:
+        return {"ok": False, "error": "no_room"}
+    room = db.get_room_by_name(name)
+    if not room:
+        return {"ok": False, "error": "no_room"}
+    if str(room.get("type") or "public").lower() != "public":
+        return {"ok": False, "error": "not_public"}
+    if not _room_snapshot_authoritative(room):
+        return {"ok": False, "error": "not_authoritative"}
+    local_sid = _local_server_id()
+    if not local_sid:
+        return {"ok": False, "error": "no_server_id"}
+    owner = db.get_user_by_id(int(room.get("owner_id") or 0)) or {}
+    member_count = int(room.get("member_count") or 0)
+    listed = bool(int(room.get("is_public") or 0))
+    return enqueue_server_event(
+        "channel.directory.updated",
+        {
+            "room_name": name,
+            "home_server_id": local_sid,
+            "is_public": listed,
+            "listed": listed,
+            "description": str(room.get("description") or "")[:512],
+            "directory_description": str(room.get("directory_description") or "")[:1200],
+            "icon": str(room.get("icon") or "")[:512] if room.get("icon") else "",
+            "category": str(room.get("category") or "")[:32],
+            "tags_json": str(room.get("tags") or "[]")[:2000],
+            "channel_type": str(room.get("channel_type") or "text")[:16],
+            "member_count": member_count,
+            "owner_nickname": str(owner.get("nickname") or "")[:64],
+            "owner_global_user_id": str(owner.get("global_user_id") or "")[:64],
+            "home_base_url": str((db.get_or_create_local_server_identity() or {}).get("public_url") or "")[:256],
+            "tombstone": not listed,
+            "content_warning_enabled": int(room.get("content_warning_enabled") or 0),
+            "content_warning_flags": int(room.get("content_warning_flags") or 0) & db.CW_ALL,
+        },
+    )
+
+
 def maybe_emit_room_members_snapshot(room_name: str) -> dict:
     """Emit a fresh `room.members.snapshot` if we haven't done so recently.
 
@@ -750,6 +839,8 @@ def maybe_emit_room_members_snapshot(room_name: str) -> dict:
         return {"ok": False, "error": "lookup_failed"}
     if not room:
         return {"ok": False, "error": "no_room"}
+    if not _room_snapshot_authoritative(room):
+        return {"ok": False, "error": "not_authoritative"}
     # Private channels never emit a snapshot — the membership is
     # confidential and other peers have no need-to-know.
     if str(room.get("type") or "public").lower() == "private":
@@ -1657,10 +1748,15 @@ def _public_server_view_for_client(server: dict) -> dict:
     return public
 
 
+def _can_reach_onion_federation_peers() -> bool:
+    """True when this node may push federation inbox traffic to .onion peers."""
+    return _tor_mode_enabled() or _hybrid_node_enabled()
+
+
 def _select_peer_push_target(server: dict) -> str:
     """Outbound federation push URL — prefer clearnet inbox over Tor."""
     base = _normalize_base_url(str((server or {}).get("base_url") or ""))
-    if base:
+    if base and not (_can_reach_onion_federation_peers() and _server_advertises_onion_only(server)):
         return base
     return _select_peer_target(server)
 
@@ -3363,6 +3459,9 @@ def _insert_inbox_events_sync(events: list[dict]) -> tuple[int, int]:
         # Members snapshot purges remote roster rows when origin matches
         # the room home; a forged origin must not be able to wipe rosters.
         "room.members.snapshot",
+        "room.member.joined",
+        "room.member.left",
+        "channel.directory.updated",
     }
     now = datetime.now(tz=timezone.utc)
     # Tightened from ±1h to ±5min after audit: an attacker who captures a
@@ -4284,7 +4383,10 @@ def _outbox_collect_targets_sync() -> tuple[str, dict[str, str], list[dict]]:
             continue
         if block_http and peer_uses_http_only_clearnet(srv):
             continue
-        if not _tor_mode_enabled() and _server_advertises_onion_only(srv):
+        if (
+            not _can_reach_onion_federation_peers()
+            and _server_advertises_onion_only(srv)
+        ):
             continue
         peer_sid = str(srv.get("server_id") or "").strip()
         if not peer_sid or peer_sid == local_server_id:
@@ -5016,6 +5118,93 @@ async def _handle_room_event(event: dict) -> None:
             pass
         return
 
+    if event_type == "channel.directory.updated":
+        room_name = _fed_room_name(payload.get("room_name"))
+        if not room_name:
+            return
+        room_name = room_name.lower()
+        origin_sid = str(event.get("origin_server_id") or "").strip()
+        payload_home = str(payload.get("home_server_id") or origin_sid).strip()
+        if not origin_sid or origin_sid != payload_home:
+            _log.info(
+                "federation: drop channel.directory.updated — origin/home mismatch room=%s",
+                room_name,
+            )
+            return
+        room_row = db.get_room_by_name(room_name)
+        if room_row:
+            room_home = str(room_row.get("home_server_id") or "").strip()
+            if room_home and room_home != origin_sid:
+                _log.info(
+                    "federation: drop channel.directory.updated — wrong home room=%s",
+                    room_name,
+                )
+                return
+        fci = db.get_federation_channel_index_entry(room_name)
+        if fci:
+            existing_home = str(fci.get("home_server_id") or "").strip()
+            if existing_home and existing_home != origin_sid:
+                _log.info(
+                    "federation: drop channel.directory.updated — index home conflict room=%s",
+                    room_name,
+                )
+                return
+        listed = bool(payload.get("listed")) if "listed" in payload else bool(payload.get("is_public"))
+        tombstone = bool(payload.get("tombstone")) or not listed
+        if tombstone:
+            db.tombstone_federation_channel_index(room_name, origin_sid)
+        else:
+            tags_raw = payload.get("tags_json")
+            if tags_raw is None:
+                tags_raw = payload.get("tags")
+            if isinstance(tags_raw, list):
+                tags_raw = json.dumps(tags_raw)[:2000]
+            db.upsert_federation_channel_index(
+                room_name,
+                origin_sid,
+                description=_fed_clip(payload.get("description"), 512),
+                directory_description=_fed_clip(payload.get("directory_description"), 1200),
+                icon=_fed_clip(payload.get("icon"), _FED_AVATAR_MAX) or None,
+                category=_fed_clip(payload.get("category"), 32),
+                tags_json=str(tags_raw or "[]")[:2000],
+                channel_type=str(payload.get("channel_type") or "text")[:16],
+                member_count=max(0, int(payload.get("member_count") or 0)),
+                owner_nickname=_fed_nickname(payload.get("owner_nickname")) or "",
+                owner_global_user_id=str(payload.get("owner_global_user_id") or "")[:64],
+                home_base_url=str(payload.get("home_base_url") or "")[:256],
+                content_warning_enabled=int(payload.get("content_warning_enabled") or 0),
+                content_warning_flags=int(payload.get("content_warning_flags") or 0),
+            )
+            cw_en = bool(int(payload.get("content_warning_enabled") or 0))
+            cw_fl = int(payload.get("content_warning_flags") or 0) & db.CW_ALL
+            if room_row:
+                try:
+                    db.set_room_content_warning(room_name, enabled=cw_en, flags=cw_fl)
+                except Exception:
+                    pass
+        try:
+            from ws_manager import manager
+            cw = db.content_warning_to_dict(
+                int(payload.get("content_warning_enabled") or 0),
+                int(payload.get("content_warning_flags") or 0),
+            )
+            await manager.broadcast_all({
+                "type": "channel_directory_updated",
+                "room": room_name,
+                "member_count": max(0, int(payload.get("member_count") or 0)),
+                "listed": not tombstone,
+                "content_warning": cw,
+            })
+            if cw.get("enabled"):
+                await manager.broadcast_all({
+                    "type": "content_warning_updated",
+                    "room": room_name,
+                    "content_warning": cw,
+                })
+        except Exception:
+            pass
+        return
+
     if event_type == "room.members.snapshot":
         room_name = _fed_room_name(payload.get("room_name"))
         if not room_name:
@@ -5059,6 +5248,23 @@ async def _handle_room_event(event: dict) -> None:
             room_name, clean,
             sourced_from_home=sourced_from_home,
         )
+        member_count = max(0, int(payload.get("member_count") or 0))
+        if member_count <= 0 and clean:
+            member_count = len(clean)
+        if origin_sid and member_count >= 0:
+            try:
+                with db._conn() as con:
+                    con.execute(
+                        """
+                        UPDATE federation_channel_index
+                           SET member_count=?, last_seen_at=datetime('now')
+                         WHERE room_name=? AND home_server_id=? AND tombstoned=0
+                        """,
+                        (member_count, room_name, origin_sid),
+                    )
+                    con.commit()
+            except Exception:
+                pass
         # If we now know about the room's home, pin it so future snapshots
         # from other peers are downgraded to upsert-only.
         if origin_sid and room_row and not room_home:
@@ -5142,36 +5348,61 @@ async def _handle_room_event(event: dict) -> None:
     if not nickname:
         return
 
-    user = _ensure_local_user_by_nickname(nickname)
+    gid = str(payload.get("global_user_id") or "").strip()
+    user = db.find_user_by_global_id(gid) if gid else None
+    if not user:
+        user = _ensure_local_user_by_nickname(nickname)
     if not user:
         return
 
+    is_mirror = _room_is_federated_mirror(room)
+
     if event_type == "room.member.joined":
-        db.join_room(user["id"], room["id"])
-        # Also keep the federated index in sync so other surfaces (room
-        # profile, member sidebar on remote-only nodes) can show this user
-        # without waiting for a snapshot.
-        gid = str(user.get("global_user_id") or "").strip()
+        if not is_mirror:
+            db.join_room(user["id"], room["id"])
+        gid = str(user.get("global_user_id") or gid or "").strip()
         if gid:
             db.upsert_federation_room_member(
                 room["name"], gid, user.get("nickname") or nickname,
                 display_name=user.get("display_name") or "",
                 avatar=user.get("avatar") or "",
-                home_server_id=str(event.get("origin_server_id") or "").strip(),
+                home_server_id=str(payload.get("home_server_id") or event.get("origin_server_id") or "").strip(),
                 role="owner" if int(user.get("id") or 0) == int(room.get("owner_id") or 0) else "member",
             )
+        try:
+            from ws_manager import manager
+            await manager.broadcast_room(room["name"], {
+                "type": "member_joined",
+                "room": room["name"],
+                "user_id": int(user.get("id") or 0),
+                "nickname": user.get("nickname") or nickname,
+                "avatar": user.get("avatar"),
+            })
+        except Exception:
+            pass
     elif event_type == "room.member.left":
-        with db._conn() as con:
-            con.execute("DELETE FROM room_members WHERE room_id=? AND user_id=?", (room["id"], user["id"]))
-            con.commit()
-        gid = str(user.get("global_user_id") or "").strip()
+        if not is_mirror:
+            with db._conn() as con:
+                con.execute("DELETE FROM room_members WHERE room_id=? AND user_id=?", (room["id"], user["id"]))
+                con.commit()
+        gid = str(user.get("global_user_id") or gid or "").strip()
         if gid:
             db.tombstone_federation_room_member(room["name"], gid)
         try:
             home_sid = db.resolve_global_user_home_server_id(gid) if gid else ""
-            local_sid = str((db.get_or_create_local_server_identity() or {}).get("server_id") or "").strip()
+            local_sid = _local_server_id()
             if gid and home_sid and local_sid and home_sid != local_sid:
                 db.remove_room_from_sync_allowlist(int(user["id"]), str(room.get("name") or ""))
+        except Exception:
+            pass
+        try:
+            from ws_manager import manager
+            await manager.broadcast_room(room["name"], {
+                "type": "member_left",
+                "room": room["name"],
+                "user_id": int(user.get("id") or 0),
+                "nickname": user.get("nickname") or nickname,
+            })
         except Exception:
             pass
     elif event_type == "room.member.banned":

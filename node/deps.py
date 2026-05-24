@@ -573,3 +573,81 @@ def dm_lock_http_detail(user: dict) -> dict:
         "has_pin": bool(int((user or {}).get("has_pin") or 0)),
         "error": "DM lock required",
     }
+
+
+# ── Public channel content-warning ack (session-scoped) ───────────────────
+_cw_ack_lock = threading.Lock()
+# token_key -> { room_name: { acknowledged_at, flags_snapshot } }
+_cw_ack_state: dict[str, dict[str, dict]] = {}
+_CW_ACK_STATE_MAX = 4096
+
+
+def cw_ack_mark(token: str, room_name: str, flags_snapshot: int) -> None:
+    """Record that this session acknowledged the 18+ gate for ``room_name``."""
+    k = _pin_key(token)
+    name = str(room_name or "").strip().lower()
+    if not k or not name:
+        return
+    now = time.time()
+    with _cw_ack_lock:
+        per = _cw_ack_state.setdefault(k, {})
+        per[name] = {
+            "acknowledged_at": now,
+            "flags_snapshot": int(flags_snapshot or 0),
+        }
+        if len(_cw_ack_state) > _CW_ACK_STATE_MAX:
+            stale = sorted(
+                _cw_ack_state.items(),
+                key=lambda kv: max((v.get("acknowledged_at") or 0) for v in kv[1].values()) if kv[1] else 0,
+            )
+            for ks, _ in stale[: _CW_ACK_STATE_MAX // 2]:
+                _cw_ack_state.pop(ks, None)
+
+
+def cw_ack_clear_room(token: str, room_name: str) -> None:
+    k = _pin_key(token)
+    name = str(room_name or "").strip().lower()
+    if not k or not name:
+        return
+    with _cw_ack_lock:
+        per = _cw_ack_state.get(k)
+        if per:
+            per.pop(name, None)
+
+
+def cw_ack_clear_for_token(token: str) -> None:
+    k = _pin_key(token)
+    if not k:
+        return
+    with _cw_ack_lock:
+        _cw_ack_state.pop(k, None)
+
+
+def cw_ack_is_required(room_name: str, token: str) -> tuple[bool, int]:
+    """Return ``(required, current_flags)`` for the content-warning gate."""
+    import database as db
+
+    name = str(room_name or "").strip().lower()
+    if not name:
+        return False, 0
+    enabled, flags = db.get_room_content_warning(name)
+    if not enabled:
+        return False, 0
+    k = _pin_key(token)
+    if not k:
+        return True, flags
+    with _cw_ack_lock:
+        st = (_cw_ack_state.get(k) or {}).get(name)
+        if st and int(st.get("flags_snapshot") or -1) == flags:
+            return False, flags
+    return True, flags
+
+
+def cw_http_detail(flags: int) -> dict:
+    import database as db
+
+    return {
+        "content_warning_required": True,
+        "content_warning": db.content_warning_to_dict(True, flags),
+        "error": "Age confirmation required",
+    }

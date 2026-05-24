@@ -40,6 +40,17 @@ class DmPinLockTests(unittest.TestCase):
         dm_lock_clear_channel(tok, cid)
         self.assertTrue(dm_lock_session_is_locked(cid, ua, tok))
 
+    def test_verify_user_pin_returns_dict(self):
+        """Unlock endpoint must treat verify_user_pin as a dict, not a tuple."""
+        suffix = uuid.uuid4().hex[:8]
+        ua = int(db.create_user(f"dm_lock_e_{suffix}", "secret12"))
+        db.set_user_pin(ua, "secret12", "2468")
+        bad = db.verify_user_pin(ua, "9999")
+        self.assertIsInstance(bad, dict)
+        self.assertNotIn("ok", bad)
+        good = db.verify_user_pin(ua, "2468")
+        self.assertEqual(good.get("ok"), True)
+
 
 if __name__ == "__main__":
     unittest.main()

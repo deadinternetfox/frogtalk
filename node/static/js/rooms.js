@@ -1242,8 +1242,16 @@ const Rooms = (() => {
       if (key === undefined) return;
     }
 
+    if (type !== 'dm' && type !== 'private') {
+      if (window.ContentWarning && typeof ContentWarning.gate === 'function') {
+        const cwOk = await ContentWarning.gate(name);
+        if (!cwOk) return;
+      }
+    }
+
     // ── Smooth transition: clear DM UI state so no stale DM bleeds through
     if (typeof _activeDM !== 'undefined' && _activeDM) {
+      if (window.DmLock && _activeDM.id) void DmLock.lockChannelView(_activeDM.id);
       try { _activeDM = null; } catch {}
       if (typeof renderDMChannels === 'function') {
         try { renderDMChannels(); } catch {}
@@ -1565,6 +1573,7 @@ const Rooms = (() => {
     document.getElementById('chtype-music').classList.remove('selected');
     const dirSec = document.getElementById('new-room-directory-section');
     if (dirSec) dirSec.style.display = '';
+    _resetContentWarningForm('new-room-cw');
     setRoomIconPreview('new-room-icon-preview', '', 'public', 'text');
     openModal('modal-create-room');
     setTimeout(() => document.getElementById('new-room-name').focus(), 100);
@@ -1580,6 +1589,8 @@ const Rooms = (() => {
     if (dirSec) dirSec.style.display = (type === 'public') ? '' : 'none';
     const secretSec = document.getElementById('new-room-secret-section');
     if (secretSec) secretSec.style.display = (type === 'private') ? '' : 'none';
+    const cwSec = document.getElementById('new-room-cw-section');
+    if (cwSec) cwSec.style.display = (type === 'public') ? '' : 'none';
   }
 
   function selectChannelType(type) {
@@ -1617,7 +1628,11 @@ const Rooms = (() => {
     const res = await fetch('/api/rooms', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Session-Token': State.token },
-      body: JSON.stringify({ name, description: desc, type: _selectedRoomType, room_key_hint: roomKeyHint, icon, channel_type: _selectedChannelType, invite_only: inviteOnly })
+      body: JSON.stringify({
+        name, description: desc, type: _selectedRoomType, room_key_hint: roomKeyHint, icon,
+        channel_type: _selectedChannelType, invite_only: inviteOnly,
+        content_warning: _selectedRoomType === 'public' ? _readContentWarningForm('new-room-cw') : undefined,
+      })
     });
     const data = await res.json();
     if (!res.ok) {
@@ -1853,6 +1868,69 @@ const Rooms = (() => {
     if (titleIcon) {
       titleIcon.textContent = isImageIcon(iconVal) ? '🖼️' : (iconVal || defaultIconForType(roomType, type));
     }
+  }
+
+  function _readContentWarningForm(prefix) {
+    const enabled = !!document.getElementById(`${prefix}-enabled`)?.checked;
+    const flags = [];
+    if (document.getElementById(`${prefix}-nudity`)?.checked) flags.push('nudity');
+    if (document.getElementById(`${prefix}-violence`)?.checked) flags.push('violence');
+    if (document.getElementById(`${prefix}-extremism`)?.checked) flags.push('extremism');
+    if (document.getElementById(`${prefix}-mature`)?.checked) flags.push('mature_themes');
+    return { enabled, flags };
+  }
+
+  function _fillContentWarningForm(prefix, cw) {
+    const meta = cw || {};
+    const flags = Array.isArray(meta.flags) ? meta.flags : [];
+    const enEl = document.getElementById(`${prefix}-enabled`);
+    if (enEl) enEl.checked = !!meta.enabled;
+    const map = { nudity: `${prefix}-nudity`, violence: `${prefix}-violence`, extremism: `${prefix}-extremism`, mature_themes: `${prefix}-mature` };
+    Object.keys(map).forEach((k) => {
+      const el = document.getElementById(map[k]);
+      if (el) el.checked = flags.includes(k);
+    });
+    _syncContentWarningFields(prefix);
+  }
+
+  function _resetContentWarningForm(prefix) {
+    _fillContentWarningForm(prefix, { enabled: false, flags: [] });
+  }
+
+  function _syncContentWarningFields(prefix) {
+    const enabled = !!document.getElementById(`${prefix}-enabled`)?.checked;
+    const flagsEl = document.getElementById(`${prefix}-flags`);
+    const previewEl = document.getElementById(`${prefix}-preview`);
+    if (flagsEl) flagsEl.style.display = enabled ? '' : 'none';
+    if (!enabled) {
+      if (previewEl) previewEl.style.display = 'none';
+      return;
+    }
+    const body = _readContentWarningForm(prefix);
+    if (previewEl && window.ContentWarning && typeof ContentWarning.formatFlags === 'function') {
+      const labels = ContentWarning.formatFlags(body.flags).map((f) => f.label).filter(Boolean);
+      if (labels.length) {
+        previewEl.style.display = '';
+        previewEl.innerHTML = 'Visitors will see: <strong>' + labels.map((l) => esc(l)).join(', ') + '</strong>';
+      } else {
+        previewEl.style.display = '';
+        previewEl.textContent = 'Select at least one category when 18+ warning is enabled.';
+      }
+    }
+  }
+
+  function _applyContentWarningPolicyForRoomType(roomType) {
+    const isPrivate = roomType === 'private';
+    const tab = document.getElementById('ch-tab-safety');
+    if (tab) {
+      tab.style.opacity = isPrivate ? '0.45' : '';
+      tab.style.pointerEvents = isPrivate ? 'none' : '';
+      tab.title = isPrivate ? 'Content warnings apply to public channels only' : '';
+    }
+    const note = document.getElementById('ch-cw-private-note');
+    const wrap = document.getElementById('ch-cw-settings-wrap');
+    if (note) note.style.display = isPrivate ? '' : 'none';
+    if (wrap) wrap.style.display = isPrivate ? 'none' : '';
   }
 
   function _applyDirectoryPolicyForRoomType(roomType) {
@@ -2205,6 +2283,8 @@ const Rooms = (() => {
     const dirDescEl = document.getElementById('ch-dir-desc');
     if (dirDescEl) dirDescEl.value = data.room.directory_description || '';
     _applyDirectoryPolicyForRoomType(data.room.type);
+    _fillContentWarningForm('ch-cw', data.room.content_warning);
+    _applyContentWarningPolicyForRoomType(data.room.type);
     
     // Render moderators
     renderModerators(data.moderators);
@@ -2313,7 +2393,11 @@ const Rooms = (() => {
       UI.showToast('Bridges are disabled in private channels', 'error');
       tab = 'perms';
     }
-    ['general', 'perms', 'directory', 'invites', 'mods', 'bans', 'theme', 'bots', 'bridges'].forEach(t => {
+    if (tab === 'safety' && _currentRoomData?.room?.type === 'private') {
+      UI.showToast('Content warnings apply to public channels only', 'error');
+      tab = 'general';
+    }
+    ['general', 'perms', 'directory', 'safety', 'invites', 'mods', 'bans', 'theme', 'bots', 'bridges'].forEach(t => {
       const tabEl = document.getElementById(`ch-tab-${t}`);
       const panelEl = document.getElementById(`ch-panel-${t}`);
       if (tabEl) tabEl.classList.toggle('active', t === tab);
@@ -2651,6 +2735,9 @@ const Rooms = (() => {
           return v;
         })(),
         forwarding_disabled: document.getElementById('ch-forwarding-disabled')?.checked ? 1 : 0,
+        content_warning: (_currentRoomData?.room?.type === 'public')
+          ? _readContentWarningForm('ch-cw')
+          : undefined,
         channel_theme: JSON.stringify((() => {
           // Private channels are server-rejected if `bgImage` or `css`
           // is non-empty (per `_sanitize_channel_theme`) — strip them
@@ -3227,6 +3314,39 @@ const Rooms = (() => {
 
   _bindRoomMentionClicks();
 
+  /** Keep sidebar + directory member counts in sync with federation WS events. */
+  function patchMemberCount(roomName, absoluteCount, delta) {
+    const name = String(roomName || '').toLowerCase();
+    if (!name) return;
+    const apply = (r) => {
+      if (!r || String(r.name || '').toLowerCase() !== name) return;
+      if (absoluteCount != null && absoluteCount !== undefined && !Number.isNaN(Number(absoluteCount))) {
+        r.member_count = Math.max(0, Number(absoluteCount));
+      } else if (delta) {
+        r.member_count = Math.max(0, Number(r.member_count || 0) + Number(delta));
+      }
+    };
+    try { (State.rooms || []).forEach(apply); } catch {}
+    try { renderRooms(); } catch {}
+  }
+
+  function patchContentWarning(roomName, cw) {
+    const name = String(roomName || '').toLowerCase();
+    if (!name) return;
+    const meta = cw || { enabled: false, flags: [] };
+    const apply = (r) => {
+      if (!r || String(r.name || '').toLowerCase() !== name) return;
+      r.content_warning = meta;
+    };
+    try { (State.rooms || []).forEach(apply); } catch {}
+    try { renderRooms(); } catch {}
+    try {
+      if (_currentSettingsRoom && String(_currentSettingsRoom).toLowerCase() === name) {
+        _fillContentWarningForm('ch-cw', meta);
+      }
+    } catch {}
+  }
+
   /** After federation sync: private channels mirror locally but secrets are never exported. */
   function warnPrivateRoomsMissingSecrets() {
     try {
@@ -3280,6 +3400,9 @@ const Rooms = (() => {
     syncActiveRoomHeader,
     onRoomSettingsUpdated,
     warnPrivateRoomsMissingSecrets,
+    patchMemberCount,
+    patchContentWarning,
+    syncContentWarningFields: _syncContentWarningFields,
   };
 })();
 
@@ -3295,6 +3418,10 @@ function deleteChannelFromSettings() { Rooms.deleteChannelFromSettings(); }
 function selectRoomType(type) { Rooms.selectRoomType(type); }
 function selectChannelType(type) { Rooms.selectChannelType(type); }
 function selectSettingsChannelType(type) { Rooms.selectSettingsChannelType(type); }
+function toggleNewRoomContentWarningFields() { Rooms.syncContentWarningFields('new-room-cw'); }
+function toggleChannelContentWarningFields() { Rooms.syncContentWarningFields('ch-cw'); }
+function updateNewRoomContentWarningPreview() { Rooms.syncContentWarningFields('new-room-cw'); }
+function updateChannelContentWarningPreview() { Rooms.syncContentWarningFields('ch-cw'); }
 function toggleSecretVisibility(inputId, buttonId) {
   if (window.Rooms && typeof Rooms.toggleSecretVisibility === 'function') {
     return Rooms.toggleSecretVisibility(inputId, buttonId);
@@ -4065,6 +4192,9 @@ function renderDirectoryCard(ch, compact) {
   const fedBadge = isFed
     ? `<span class="dir-card-fed-badge" title="Federated channel${homeNode ? ' on ' + esc(homeNode) : ''}" style="display:inline-flex;align-items:center;gap:3px;font-size:11px;color:#7fd6a2;background:rgba(127,214,162,.08);border:1px solid rgba(127,214,162,.25);padding:1px 6px;border-radius:6px;margin-left:6px">🌐${homeNode ? ' ' + esc(homeNode) : ''}</span>`
     : '';
+  const cwBadge = (window.ContentWarning && typeof ContentWarning.badgeHtml === 'function')
+    ? ContentWarning.badgeHtml(ch.content_warning)
+    : '';
   const remoteHint = remoteOnly
     ? `<div class="dir-card-remote-hint" style="font-size:11px;color:#8da59b;margin-top:4px">Channel lives on another node — joining will fetch history.</div>`
     : '';
@@ -4072,7 +4202,7 @@ function renderDirectoryCard(ch, compact) {
   if (compact) {
     return `<div class="dir-card-compact" onclick="viewChannelProfile(${_jsStr(ch.name)})">
       <div class="dir-card-icon">${iconHtml}</div>
-      <div class="dir-card-name">${esc(ch.name)}${fedBadge}</div>
+      <div class="dir-card-name">${esc(ch.name)}${cwBadge}${fedBadge}</div>
       <div class="dir-card-meta">${ch.member_count || 0} members</div>
       ${ch.category ? `<div class="dir-card-cat">${catIcons[ch.category]||''} ${esc(ch.category)}</div>` : ''}
     </div>`;
@@ -4086,7 +4216,7 @@ function renderDirectoryCard(ch, compact) {
     </div>
     <div class="dir-card-body">
       <div class="dir-card-top">
-        <span class="dir-card-title">${esc(ch.name)}</span>${fedBadge}
+        <span class="dir-card-title">${esc(ch.name)}</span>${cwBadge}${fedBadge}
         ${ch.category ? `<span class="dir-card-badge">${catIcons[ch.category]||''} ${esc(ch.category)}</span>` : ''}
         <span class="dir-card-members">👥 ${ch.member_count || 0}</span>
       </div>
@@ -4630,6 +4760,9 @@ async function saveChannelListing(channelName) {
 }
 
 function selectServer(s) {
+  if (s !== 'dms' && typeof _activeDM !== 'undefined' && _activeDM?.id && window.DmLock) {
+    void DmLock.lockChannelView(_activeDM.id);
+  }
   // Minimal server switching — future expansion point
   document.querySelectorAll('.server-icon').forEach(el => el.classList.remove('active'));
   const icons = { main: 0, dms: 1 };

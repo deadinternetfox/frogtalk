@@ -1,15 +1,16 @@
 /**
  * dm_lock.js — Per-DM PIN / password lock (client gate + settings helpers).
+ * PIN users get the full-screen App PIN keypad (pin.js). Password is fallback only.
  */
 (function () {
   'use strict';
 
-  const MODAL_ID = 'modal-dm-lock-gate';
+  const PW_MODAL_ID = 'modal-dm-lock-password';
   let _pendingResolve = null;
 
   function _el(id) { return document.getElementById(id); }
 
-  async function _pinConfigured() {
+  async function _hasAppPin() {
     if (!window.Pin) return false;
     try { await Pin.refreshFromServer(); } catch {}
     const cfg = Pin.config ? Pin.config() : {};
@@ -22,21 +23,43 @@
     return list.find(c => Number(c.id) === id) || {};
   }
 
+  function _markSessionUnlocked(channelId) {
+    const ch = _channelMeta(channelId);
+    ch.dm_locked = false;
+    ch._dmSessionUnlocked = true;
+    if (typeof _activeDM !== 'undefined' && _activeDM && _activeDM.id === channelId) {
+      _activeDM.dm_locked = false;
+      _activeDM._dmSessionUnlocked = true;
+    }
+  }
+
+  function _markSessionLocked(channelId) {
+    const ch = _channelMeta(channelId);
+    if (!ch.my_pin_lock) return;
+    ch.dm_locked = true;
+    ch._dmSessionUnlocked = false;
+    if (typeof _activeDM !== 'undefined' && _activeDM && _activeDM.id === channelId) {
+      _activeDM.dm_locked = true;
+      _activeDM._dmSessionUnlocked = false;
+    }
+  }
+
   function isLockEnabled(channelId) {
     const ch = _channelMeta(channelId);
     return !!(ch.my_pin_lock || ch.pin_lock_enabled);
   }
 
   function isServerLocked(channelId) {
-    return !!_channelMeta(channelId).dm_locked;
+    const ch = _channelMeta(channelId);
+    if (ch._dmSessionUnlocked && !ch.dm_locked) return false;
+    return !!ch.dm_locked || !!ch.my_pin_lock;
   }
 
   async function lockChannelView(channelId) {
     const id = Number(channelId) || 0;
-    if (!id) return;
+    if (!id || !isLockEnabled(id)) return;
     try { await apiFetch('/api/dms/' + id + '/lock', 'POST', {}); } catch {}
-    const ch = _channelMeta(id);
-    if (ch.my_pin_lock) ch.dm_locked = true;
+    _markSessionLocked(id);
   }
 
   function escapeHtml(s) {
@@ -66,77 +89,66 @@
     }
   }
 
-  function _ensureModal() {
-    let modal = _el(MODAL_ID);
+  function _ensurePasswordModal() {
+    let modal = _el(PW_MODAL_ID);
     if (modal) return modal;
     modal = document.createElement('div');
     modal.className = 'modal-overlay hidden';
-    modal.id = MODAL_ID;
+    modal.id = PW_MODAL_ID;
     modal.setAttribute('data-dismiss-on-backdrop', 'false');
     modal.innerHTML =
       '<div class="modal" style="max-width:340px" role="dialog" aria-modal="true">' +
-      '<div class="modal-title" id="dm-lock-gate-title">\uD83D\uDD12 Unlock chat</div>' +
-      '<p id="dm-lock-gate-sub" style="font-size:13px;color:#888;margin:-4px 0 14px;line-height:1.45"></p>' +
-      '<div id="dm-lock-pin-wrap" class="hidden"><label class="modal-label" for="dm-lock-pin-input">App PIN</label>' +
-      '<input type="password" inputmode="numeric" id="dm-lock-pin-input" class="modal-input" maxlength="8" autocomplete="off" placeholder="4-8 digits"></div>' +
-      '<div id="dm-lock-pw-wrap" class="hidden"><label class="modal-label" for="dm-lock-pw-input">Account password</label>' +
+      '<div class="modal-title" id="dm-lock-pw-title">\uD83D\uDD12 Unlock chat</div>' +
+      '<p id="dm-lock-pw-sub" style="font-size:13px;color:#888;margin:-4px 0 14px;line-height:1.45"></p>' +
+      '<p style="font-size:12px;color:#888;margin:-6px 0 12px;line-height:1.45">No App PIN on this account — enter your account password.</p>' +
+      '<label class="modal-label" for="dm-lock-pw-input">Account password</label>' +
       '<input type="password" id="dm-lock-pw-input" class="modal-input" autocomplete="current-password" maxlength="128" placeholder="Your FrogTalk password">' +
-      '<p id="dm-lock-pin-hint" style="font-size:12px;color:#888;margin:10px 0 0;line-height:1.4">' +
-      '<button type="button" id="dm-lock-set-pin-link" style="background:none;border:none;color:var(--accent-color,#4caf50);cursor:pointer;padding:0;font-size:12px">Set an App PIN</button> for faster unlock.</p></div>' +
-      '<div id="dm-lock-gate-error" class="auth-error" style="display:none;margin-top:10px" role="alert"></div>' +
+      '<p style="font-size:12px;color:#888;margin:10px 0 0;line-height:1.45">' +
+      '<button type="button" id="dm-lock-set-pin-link" style="background:none;border:none;color:var(--accent-color,#4caf50);cursor:pointer;padding:0;font-size:12px">Set an App PIN</button> for faster unlock next time.</p>' +
+      '<div id="dm-lock-pw-error" class="auth-error" style="display:none;margin-top:10px" role="alert"></div>' +
       '<div class="modal-actions" style="margin-top:14px">' +
-      '<button type="button" class="modal-btn secondary" id="dm-lock-gate-cancel">Cancel</button>' +
-      '<button type="button" class="modal-btn primary" id="dm-lock-gate-submit">Unlock</button></div></div>';
+      '<button type="button" class="modal-btn secondary" id="dm-lock-pw-cancel">Cancel</button>' +
+      '<button type="button" class="modal-btn primary" id="dm-lock-pw-submit">Unlock</button></div></div>';
     document.body.appendChild(modal);
-    _el('dm-lock-gate-cancel').addEventListener('click', () => _finish(false));
+    _el('dm-lock-pw-cancel').addEventListener('click', () => _finishPassword(false));
     _el('dm-lock-set-pin-link').addEventListener('click', () => {
-      try { closeModal(MODAL_ID); } catch { modal.classList.add('hidden'); }
+      try { closeModal(PW_MODAL_ID); } catch { modal.classList.add('hidden'); }
       try { Pin.openSettings(); } catch {}
-      _finish(false);
+      _finishPassword(false);
     });
-    _el('dm-lock-gate-submit').addEventListener('click', () => { void _submitUnlock(); });
+    _el('dm-lock-pw-submit').addEventListener('click', () => { void _submitPasswordUnlock(); });
     return modal;
   }
 
-  function _finish(ok) {
-    const modal = _el(MODAL_ID);
-    try { closeModal(MODAL_ID); } catch { if (modal) modal.classList.add('hidden'); }
+  function _finishPassword(ok) {
+    const modal = _el(PW_MODAL_ID);
+    try { closeModal(PW_MODAL_ID); } catch { if (modal) modal.classList.add('hidden'); }
     const resolve = _pendingResolve;
     _pendingResolve = null;
     if (resolve) resolve(!!ok);
   }
 
-  async function _submitUnlock() {
-    const modal = _el(MODAL_ID);
+  async function _submitPasswordUnlock() {
+    const modal = _el(PW_MODAL_ID);
     const channelId = Number((modal && modal._ftChannelId) || (typeof _activeDM !== 'undefined' && _activeDM && _activeDM.id)) || 0;
-    const errEl = _el('dm-lock-gate-error');
-    const btn = _el('dm-lock-gate-submit');
-    if (!channelId) { _finish(false); return; }
-    const hasPin = await _pinConfigured();
-    const body = {};
-    if (hasPin) {
-      body.pin = String((_el('dm-lock-pin-input') && _el('dm-lock-pin-input').value) || '').trim();
-      if (!body.pin) {
-        if (errEl) { errEl.textContent = 'Enter your App PIN.'; errEl.style.display = ''; }
-        return;
-      }
-    } else {
-      body.password = String((_el('dm-lock-pw-input') && _el('dm-lock-pw-input').value) || '');
-      if (!body.password) {
-        if (errEl) { errEl.textContent = 'Enter your account password.'; errEl.style.display = ''; }
-        return;
-      }
+    const errEl = _el('dm-lock-pw-error');
+    const btn = _el('dm-lock-pw-submit');
+    if (!channelId) { _finishPassword(false); return; }
+    const password = String((_el('dm-lock-pw-input') && _el('dm-lock-pw-input').value) || '');
+    if (!password) {
+      if (errEl) { errEl.textContent = 'Enter your account password.'; errEl.style.display = ''; }
+      return;
     }
     if (btn) btn.disabled = true;
     try {
-      const res = await apiFetch('/api/dms/' + channelId + '/unlock', 'POST', body);
+      const res = await apiFetch('/api/dms/' + channelId + '/unlock', 'POST', { password });
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));
         if (errEl) { errEl.textContent = j.error || 'Unlock failed'; errEl.style.display = ''; }
         return;
       }
-      _channelMeta(channelId).dm_locked = false;
-      _finish(true);
+      _markSessionUnlocked(channelId);
+      _finishPassword(true);
     } catch {
       if (errEl) { errEl.textContent = 'Network error — try again.'; errEl.style.display = ''; }
     } finally {
@@ -144,28 +156,36 @@
     }
   }
 
+  async function _gatePassword(channelId, nickname) {
+    return new Promise((resolve) => {
+      _pendingResolve = resolve;
+      const modal = _ensurePasswordModal();
+      modal._ftChannelId = Number(channelId) || 0;
+      const sub = _el('dm-lock-pw-sub');
+      if (sub) sub.textContent = 'This conversation with @' + (nickname || _channelMeta(channelId).nickname || 'chat') + ' is locked.';
+      const errEl = _el('dm-lock-pw-error');
+      const inp = _el('dm-lock-pw-input');
+      if (errEl) { errEl.textContent = ''; errEl.style.display = 'none'; }
+      if (inp) inp.value = '';
+      try { openModal(PW_MODAL_ID); } catch { modal.classList.remove('hidden'); }
+      setTimeout(() => { if (inp) inp.focus(); }, 40);
+    });
+  }
+
   async function gate(channelId, nickname) {
     const id = Number(channelId) || 0;
     if (!id) return true;
     const ch = _channelMeta(id);
     if (!ch.my_pin_lock && !ch.pin_lock_enabled) return true;
-    if (!ch.dm_locked) return true;
-    return new Promise((resolve) => {
-      _pendingResolve = resolve;
-      const modal = _ensureModal();
-      modal._ftChannelId = id;
-      const sub = _el('dm-lock-gate-sub');
-      if (sub) sub.textContent = 'This conversation with @' + (nickname || ch.nickname || 'chat') + ' is locked.';
-      const errEl = _el('dm-lock-gate-error');
-      if (errEl) { errEl.textContent = ''; errEl.style.display = 'none'; }
-      void _pinConfigured().then((hasPin) => {
-        _el('dm-lock-pin-wrap').classList.toggle('hidden', !hasPin);
-        _el('dm-lock-pw-wrap').classList.toggle('hidden', !!hasPin);
-        const hint = _el('dm-lock-pin-hint');
-        if (hint) hint.style.display = hasPin ? 'none' : '';
-        try { openModal(MODAL_ID); } catch { modal.classList.remove('hidden'); }
-      });
-    });
+    if (ch._dmSessionUnlocked && !ch.dm_locked) return true;
+
+    const hasPin = await _hasAppPin();
+    if (hasPin && window.Pin && typeof Pin.gateDmUnlock === 'function') {
+      const ok = await Pin.gateDmUnlock(id, nickname || ch.nickname);
+      if (ok) _markSessionUnlocked(id);
+      return ok;
+    }
+    return _gatePassword(id, nickname);
   }
 
   async function loadPrefs(channelId) {
@@ -186,7 +206,13 @@
     const ch = _channelMeta(channelId);
     ch.my_pin_lock = !!enabled;
     ch.my_pin_lock_timeout = Number(timeoutSec) || 0;
-    ch.dm_locked = !!enabled;
+    if (enabled) {
+      ch.dm_locked = true;
+      ch._dmSessionUnlocked = false;
+    } else {
+      ch.dm_locked = false;
+      ch._dmSessionUnlocked = false;
+    }
     return res.json();
   }
 
@@ -200,7 +226,13 @@
     if (!ch) return;
     ch.my_pin_lock = !!Number(data.pin_lock_enabled);
     ch.my_pin_lock_timeout = Number(data.pin_lock_timeout_sec) || 0;
-    ch.dm_locked = ch.my_pin_lock;
+    if (ch.my_pin_lock) {
+      ch.dm_locked = true;
+      ch._dmSessionUnlocked = false;
+    } else {
+      ch.dm_locked = false;
+      ch._dmSessionUnlocked = false;
+    }
     if (typeof renderDMChannels === 'function') renderDMChannels();
     if (typeof _activeDM !== 'undefined' && _activeDM && _activeDM.id === chId && ch.dm_locked) {
       if (typeof _dmMessages !== 'undefined') _dmMessages = [];

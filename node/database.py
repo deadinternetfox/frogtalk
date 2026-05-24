@@ -1041,6 +1041,96 @@ def set_username(user_id: int, new_username: str, old_username: str) -> None:
 # Room helpers
 # ---------------------------------------------------------------------------
 
+# Content warning (18+) bitmask flags — public channels only
+CW_NUDITY = 1
+CW_VIOLENCE = 2
+CW_EXTREMISM = 4
+CW_MATURE = 8
+CW_ALL = CW_NUDITY | CW_VIOLENCE | CW_EXTREMISM | CW_MATURE
+
+_CW_FLAG_BY_NAME = {
+    "nudity": CW_NUDITY,
+    "violence": CW_VIOLENCE,
+    "extremism": CW_EXTREMISM,
+    "mature_themes": CW_MATURE,
+}
+_CW_NAME_BY_BIT = {v: k for k, v in _CW_FLAG_BY_NAME.items()}
+
+
+def parse_content_warning_flags(raw) -> int:
+    """Normalize a bitmask int or list of flag names to a valid subset of CW_ALL."""
+    if isinstance(raw, (list, tuple, set)):
+        out = 0
+        for item in raw:
+            key = str(item or "").strip().lower()
+            if key in _CW_FLAG_BY_NAME:
+                out |= _CW_FLAG_BY_NAME[key]
+        return out & CW_ALL
+    try:
+        return int(raw or 0) & CW_ALL
+    except (TypeError, ValueError):
+        return 0
+
+
+def content_warning_to_dict(enabled, flags) -> dict:
+    en = bool(int(enabled or 0))
+    fl = int(flags or 0) & CW_ALL
+    if not en or not fl:
+        return {"enabled": False, "flags": []}
+    names: List[str] = []
+    for bit in (CW_NUDITY, CW_VIOLENCE, CW_EXTREMISM, CW_MATURE):
+        if fl & bit:
+            names.append(_CW_NAME_BY_BIT[bit])
+    return {"enabled": True, "flags": names}
+
+
+def get_room_content_warning(room_name: str) -> tuple[bool, int]:
+    room = get_room_by_name(room_name)
+    if not room:
+        return False, 0
+    if str(room.get("type") or "public").lower() != "public":
+        return False, 0
+    en = bool(int(room.get("content_warning_enabled") or 0))
+    fl = int(room.get("content_warning_flags") or 0) & CW_ALL
+    if not en or not fl:
+        return False, 0
+    return True, fl
+
+
+def set_room_content_warning(room_name: str, *, enabled: bool, flags: int) -> bool:
+    name = (room_name or "").strip().lower()
+    if not name:
+        return False
+    room = get_room_by_name(name)
+    if not room:
+        return False
+    if str(room.get("type") or "public").lower() != "public":
+        return False
+    fl = int(flags or 0) & CW_ALL
+    en = 1 if enabled and fl else 0
+    if enabled and not fl:
+        return False
+    final_flags = fl if en else 0
+    with _conn() as con:
+        cur = con.execute(
+            "UPDATE rooms SET content_warning_enabled=?, content_warning_flags=? WHERE id=?",
+            (en, final_flags, int(room["id"])),
+        )
+        con.commit()
+        return cur.rowcount > 0
+
+
+def attach_content_warning(room: Optional[Dict]) -> Optional[Dict]:
+    if not room:
+        return room
+    out = dict(room)
+    out["content_warning"] = content_warning_to_dict(
+        out.get("content_warning_enabled"),
+        out.get("content_warning_flags"),
+    )
+    return out
+
+
 def list_rooms() -> List[Dict]:
     with _conn() as con:
         rows = con.execute("""
@@ -1049,6 +1139,10 @@ def list_rooms() -> List[Dict]:
                    r.is_public, r.category, r.tags, r.dj_only_queue,
                    COALESCE(r.forwarding_disabled, 0) AS forwarding_disabled,
                    COALESCE(r.room_key_version, 1) AS room_key_version,
+                   COALESCE(r.home_server_id, '') AS home_server_id,
+                   COALESCE(r.content_warning_enabled, 0) AS content_warning_enabled,
+                   COALESCE(r.content_warning_flags, 0) AS content_warning_flags,
+                   (SELECT COUNT(*) FROM room_members WHERE room_id=r.id) AS member_count,
                    u.nickname AS owner_nickname
             FROM rooms r LEFT JOIN users u ON r.owner_id = u.id
             ORDER BY r.id
@@ -2657,6 +2751,10 @@ def _migrate():
         # channels is enforced case-insensitively via a partial index below.
         if "vanity" not in room_cols:
             con.execute("ALTER TABLE rooms ADD COLUMN vanity TEXT")
+        if "content_warning_enabled" not in room_cols:
+            con.execute("ALTER TABLE rooms ADD COLUMN content_warning_enabled INTEGER DEFAULT 0")
+        if "content_warning_flags" not in room_cols:
+            con.execute("ALTER TABLE rooms ADD COLUMN content_warning_flags INTEGER DEFAULT 0")
         con.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_rooms_vanity_lower "
             "ON rooms(LOWER(vanity)) WHERE vanity IS NOT NULL"
@@ -2988,6 +3086,10 @@ def _migrate():
         fci_cols = {r["name"] for r in con.execute("PRAGMA table_info(federation_channel_index)").fetchall()}
         if fci_cols and "channel_theme" not in fci_cols:
             con.execute("ALTER TABLE federation_channel_index ADD COLUMN channel_theme TEXT DEFAULT ''")
+        if fci_cols and "content_warning_enabled" not in fci_cols:
+            con.execute("ALTER TABLE federation_channel_index ADD COLUMN content_warning_enabled INTEGER DEFAULT 0")
+        if fci_cols and "content_warning_flags" not in fci_cols:
+            con.execute("ALTER TABLE federation_channel_index ADD COLUMN content_warning_flags INTEGER DEFAULT 0")
 
         # ── Denormalized engagement counters on wall_posts ──
         # The /feed, /explore and /reels endpoints used to evaluate three
@@ -7715,6 +7817,8 @@ def get_room_by_name(room_name: str) -> Optional[Dict]:
                    (SELECT COUNT(*) FROM room_members WHERE room_id=r.id) AS member_count,
                    r.banner, r.about, r.dj_only_queue, r.forwarding_disabled,
                    r.vanity,
+                   COALESCE(r.content_warning_enabled, 0) AS content_warning_enabled,
+                   COALESCE(r.content_warning_flags, 0) AS content_warning_flags,
                    u.nickname AS owner_nickname
             FROM rooms r LEFT JOIN users u ON r.owner_id = u.id
             WHERE r.name = ?
@@ -9596,6 +9700,8 @@ def get_public_channels(category: str = None, search: str = None,
                    u.nickname as owner_name, u.avatar as owner_avatar,
                    COALESCE(r.home_server_id, fci.home_server_id, '') AS home_server_id,
                    COALESCE(fci.home_base_url, '') AS home_base_url,
+                   COALESCE(r.content_warning_enabled, fci.content_warning_enabled, 0) AS content_warning_enabled,
+                   COALESCE(r.content_warning_flags, fci.content_warning_flags, 0) AS content_warning_flags,
                    CASE
                      WHEN r.home_server_id IS NOT NULL AND r.home_server_id != '' THEN 1
                      WHEN fci.room_name IS NOT NULL THEN 1
@@ -9657,6 +9763,8 @@ def get_public_channels(category: str = None, search: str = None,
                 "home_base_url": row.get("home_base_url") or "",
                 "is_federated": 1,
                 "remote_only": True,
+                "content_warning_enabled": int(row.get("content_warning_enabled") or 0),
+                "content_warning_flags": int(row.get("content_warning_flags") or 0),
             })
     return local_rows + fed_rows
 
@@ -14414,6 +14522,8 @@ def upsert_federation_channel_index(
     owner_nickname: str = "",
     owner_global_user_id: str = "",
     home_base_url: str = "",
+    content_warning_enabled: int = 0,
+    content_warning_flags: int = 0,
 ) -> bool:
     """Upsert a row into the federated channel directory cache.
 
@@ -14437,8 +14547,9 @@ def upsert_federation_channel_index(
                     room_name, home_server_id, display_name, description, directory_description,
                     icon, category, tags_json, channel_type, channel_theme, visibility,
                     member_count, owner_nickname, owner_global_user_id, home_base_url,
+                    content_warning_enabled, content_warning_flags,
                     last_seen_at, last_synced_at, tombstoned
-                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'),datetime('now'),0)
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'),datetime('now'),0)
                 ON CONFLICT(room_name, home_server_id) DO UPDATE SET
                     display_name=excluded.display_name,
                     description=excluded.description,
@@ -14453,6 +14564,8 @@ def upsert_federation_channel_index(
                     owner_nickname=excluded.owner_nickname,
                     owner_global_user_id=excluded.owner_global_user_id,
                     home_base_url=excluded.home_base_url,
+                    content_warning_enabled=excluded.content_warning_enabled,
+                    content_warning_flags=excluded.content_warning_flags,
                     last_synced_at=datetime('now'),
                     last_seen_at=datetime('now'),
                     tombstoned=0
@@ -14466,6 +14579,8 @@ def upsert_federation_channel_index(
                     max(0, int(member_count or 0)),
                     owner_nickname[:64], owner_global_user_id[:64],
                     home_base_url[:256],
+                    1 if int(content_warning_enabled or 0) else 0,
+                    int(content_warning_flags or 0) & CW_ALL,
                 ),
             )
             con.commit()
@@ -14554,7 +14669,9 @@ def list_federation_channel_index(
                        fci.directory_description, fci.icon, fci.category, fci.tags_json AS tags,
                        fci.channel_type, fci.visibility,
                        fci.member_count, fci.owner_nickname, fci.owner_global_user_id,
-                       fci.home_server_id, fci.home_base_url, fci.last_seen_at
+                       fci.home_server_id, fci.home_base_url, fci.last_seen_at,
+                       COALESCE(fci.content_warning_enabled, 0) AS content_warning_enabled,
+                       COALESCE(fci.content_warning_flags, 0) AS content_warning_flags
                 FROM federation_channel_index fci
                 LEFT JOIN rooms r ON r.name = fci.room_name AND COALESCE(r.is_public, 0) = 1
                 WHERE fci.tombstoned = 0

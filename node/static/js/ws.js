@@ -377,6 +377,63 @@ const WS = (() => {
           try { Users.loadChannelMembers(data.room); } catch {}
         }
         try { window.refreshMentionUsers && window.refreshMentionUsers(); } catch {}
+        try {
+          if (window.Rooms && typeof Rooms.patchMemberCount === 'function') {
+            Rooms.patchMemberCount(data.room, null, 1);
+          }
+        } catch {}
+        break;
+      }
+      case 'member_left': {
+        if (_wsRoomMatches(data.room) && typeof Users !== 'undefined') {
+          try { Users.removeMember(data.user_id, data.nickname); } catch {}
+        }
+        try { window.refreshMentionUsers && window.refreshMentionUsers(); } catch {}
+        try {
+          if (window.Rooms && typeof Rooms.patchMemberCount === 'function') {
+            Rooms.patchMemberCount(data.room, null, -1);
+          }
+        } catch {}
+        break;
+      }
+      case 'channel_directory_updated': {
+        try {
+          if (window.Rooms && typeof Rooms.patchMemberCount === 'function') {
+            Rooms.patchMemberCount(data.room, data.member_count, 0);
+          }
+        } catch {}
+        try {
+          if (data.content_warning && window.Rooms && typeof Rooms.patchContentWarning === 'function') {
+            Rooms.patchContentWarning(data.room, data.content_warning);
+          }
+        } catch {}
+        try {
+          const dirModal = document.getElementById('modal-directory');
+          if (dirModal && !dirModal.classList.contains('hidden') && typeof searchDirectory === 'function') {
+            void searchDirectory();
+          }
+        } catch {}
+        break;
+      }
+      case 'content_warning_updated': {
+        try {
+          if (window.Rooms && typeof Rooms.patchContentWarning === 'function') {
+            Rooms.patchContentWarning(data.room, data.content_warning);
+          }
+        } catch {}
+        try {
+          if (window.ContentWarning && typeof ContentWarning.handleWsUpdate === 'function') {
+            ContentWarning.handleWsUpdate(data);
+          }
+        } catch {}
+        break;
+      }
+      case 'content_warning_required': {
+        try {
+          if (window.ContentWarning && typeof ContentWarning.handleWsRequired === 'function') {
+            ContentWarning.handleWsRequired(data);
+          }
+        } catch {}
         break;
       }
       case 'room_presence': {

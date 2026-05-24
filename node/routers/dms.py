@@ -1204,14 +1204,19 @@ async def unlock_dm_channel(
         pin = str(body.pin or "").strip()
         if not pin:
             return JSONResponse(status_code=400, content={"error": "PIN required"})
-        ok, reason, remaining = await run_in_threadpool(
+        result = await run_in_threadpool(
             db.verify_user_pin, current_user["id"], pin,
         )
-        if not ok:
-            code = 423 if remaining else 401
+        if not result.get("ok"):
+            lock_sec = int(result.get("lock_seconds") or result.get("pin_lock_remaining_sec") or 0)
+            code = 423 if lock_sec else 401
             return JSONResponse(
                 status_code=code,
-                content={"error": reason or "Incorrect PIN", "pin_lock_remaining_sec": remaining},
+                content={
+                    "error": result.get("error") or "Incorrect PIN",
+                    "pin_lock_remaining_sec": lock_sec,
+                    "remaining_attempts": result.get("remaining_attempts"),
+                },
             )
     else:
         pw = str(body.password or "")

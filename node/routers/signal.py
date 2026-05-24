@@ -147,9 +147,8 @@ def _peer_home_candidates(peer_user_id: int, gid: str, local_sid: str) -> list[s
 
 
 def _peer_home_and_gid(peer_user_id: int) -> tuple[str, str]:
-    """Return (clearnet-reachable home_server_id, global_user_id) for Signal fetch."""
+    """Return (home_server_id, global_user_id) for remote Signal bundle fetch."""
     from routers.auth import resolve_server_base_url
-    from routers.federation import _select_peer_push_target, _server_advertises_onion_only
 
     uid = int(peer_user_id or 0)
     if uid <= 0:
@@ -157,15 +156,6 @@ def _peer_home_and_gid(peer_user_id: int) -> tuple[str, str]:
     peer = db.get_user_by_id(uid) or {}
     gid = str(peer.get("global_user_id") or "").strip()
     local_sid = _local_server_id()
-    for sid in _peer_home_candidates(uid, gid, local_sid):
-        row = db.get_federation_server_row(sid)
-        if not row:
-            continue
-        if _server_advertises_onion_only(row):
-            continue
-        if _select_peer_push_target(row) and resolve_server_base_url(sid):
-            return sid, gid
-    # Last resort: any configured base (may be slow/unreachable).
     for sid in _peer_home_candidates(uid, gid, local_sid):
         if resolve_server_base_url(sid):
             return sid, gid

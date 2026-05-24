@@ -664,3 +664,148 @@
   margin-bottom: 12px;
   line-height: 1.45;
 }
+
+/* ── 18+ content warning (create modal + Safety tab + gate) ── */
+.cw-settings-card {
+  margin-top: 12px;
+  padding: 12px 14px;
+  background: rgba(180, 120, 60, 0.06);
+  border: 1px solid rgba(200, 140, 80, 0.22);
+  border-radius: 10px;
+}
+
+.cw-flag-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cw-flag-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 13px;
+  color: #c8b8a8;
+  cursor: pointer;
+  line-height: 1.4;
+}
+
+.cw-flag-item span {
+  flex: 1;
+}
+
+.cw-preview {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px dashed rgba(200, 140, 80, 0.35);
+  font-size: 12px;
+  color: #b8a090;
+  line-height: 1.45;
+}
+
+.cw-preview strong {
+  color: #e8c4a8;
+}
+
+.cw-gate-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 12000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(8, 6, 4, 0.92);
+  backdrop-filter: blur(6px);
+}
+
+.cw-gate-card {
+  width: min(420px, 100%);
+  padding: 28px 24px 22px;
+  border-radius: 14px;
+  background: linear-gradient(165deg, #1a1410 0%, #12100e 100%);
+  border: 1px solid rgba(200, 140, 80, 0.35);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55);
+  text-align: center;
+}
+
+.cw-gate-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 52px;
+  margin: 0 auto 14px;
+  border-radius: 12px;
+  font-size: 18px;
+  font-weight: 800;
+  color: #f0d4b0;
+  background: rgba(180, 100, 40, 0.2);
+  border: 1px solid rgba(220, 160, 90, 0.45);
+}
+
+.cw-gate-title {
+  margin: 0 0 8px;
+  font-size: 20px;
+  font-weight: 700;
+  color: #f0e6dc;
+}
+
+.cw-gate-lead,
+.cw-gate-confirm {
+  font-size: 13px;
+  color: #a89888;
+  line-height: 1.5;
+  margin: 0 0 12px;
+}
+
+.cw-gate-flags {
+  list-style: none;
+  margin: 0 0 16px;
+  padding: 0;
+  text-align: left;
+}
+
+.cw-gate-flags li {
+  padding: 8px 10px;
+  margin-bottom: 6px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  font-size: 12px;
+  color: #b8a898;
+}
+
+.cw-gate-flags li strong {
+  display: block;
+  color: #e8c8a8;
+  font-size: 13px;
+  margin-bottom: 2px;
+}
+
+.cw-gate-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.cw-gate-actions .modal-btn {
+  flex: 1;
+  margin: 0;
+}
+
+.dir-cw-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: #f0d4b0;
+  background: rgba(180, 100, 40, 0.25);
+  border: 1px solid rgba(220, 160, 90, 0.4);
+  border-radius: 4px;
+  vertical-align: middle;
+}

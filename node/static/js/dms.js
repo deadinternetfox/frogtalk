@@ -2672,7 +2672,7 @@ async function openDMChannel (id, nickname, avatar) {
   const _openId = id;
   await _ensureActiveDMPeerUserId();
 
-  if (window.DmLock && (existing.my_pin_lock || existing.dm_locked)) {
+  if (window.DmLock && existing.my_pin_lock) {
     const unlocked = await DmLock.gate(id, nickname);
     if (!unlocked) {
       DmLock.renderLockOverlay(nickname);
@@ -5525,7 +5525,7 @@ function showDisappearSettings() {
             <input type="checkbox" id="dm-pin-lock-enabled" style="width:18px;height:18px;margin-top:2px;accent-color:var(--accent-color,#4caf50);cursor:pointer">
             <div>
               <div style="font-weight:600;font-size:14px;color:var(--text-color,#e0e0e0)">Require PIN or password to open</div>
-              <div style="font-size:12px;color:var(--text-muted,#888)">Only you — locks this thread on your devices</div>
+              <div style="font-size:12px;color:var(--text-muted,#888)">Only you — unlock with your App PIN, or your account password if no PIN is set</div>
             </div>
           </label>
           <label style="display:block;font-size:12px;color:var(--text-muted,#888);margin-bottom:6px">Re-lock after</label>
@@ -5538,8 +5538,9 @@ function showDisappearSettings() {
             <option value="-1">Until I leave the app</option>
           </select>
           <p id="dm-pin-lock-hint" style="font-size:12px;color:var(--text-muted,#888);margin:10px 0 0;line-height:1.45;display:none">
-            <button type="button" id="dm-pin-lock-set-pin" style="background:none;border:none;color:var(--accent-color,#4caf50);cursor:pointer;padding:0;font-size:12px">Set an App PIN</button>
-            in Privacy settings for faster unlock.
+            No App PIN yet — unlock will ask for your account password.
+            <button type="button" id="dm-pin-lock-set-pin" style="background:none;border:none;color:var(--accent-color,#4caf50);cursor:pointer;padding:0;font-size:12px;margin-left:4px">Set an App PIN</button>
+            for the full-screen keypad.
           </p>
         </div>
         <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border-color,#2a2a2a)">
@@ -5623,7 +5624,13 @@ async function saveDisappearTimer() {
     _dmDisappearTimer = seconds;
     _activeDM.my_pin_lock = lockEnabled;
     _activeDM.my_pin_lock_timeout = lockTimeout;
-    _activeDM.dm_locked = lockEnabled;
+    if (lockEnabled) {
+      _activeDM.dm_locked = true;
+      _activeDM._dmSessionUnlocked = false;
+    } else {
+      _activeDM.dm_locked = false;
+      _activeDM._dmSessionUnlocked = false;
+    }
     _purgeExpiredDMMessages();
     updateDisappearIndicator();
     if (typeof renderDMChannels === 'function') renderDMChannels();

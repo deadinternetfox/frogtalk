@@ -4635,6 +4635,15 @@ async function loadOlderMessages() {
     const res = await fetch(`/api/messages/${encodeURIComponent(room)}?limit=50&before_id=${State.oldestMsgId}`, {
       headers: { 'X-Session-Token': State.token }
     });
+    if (res.status === 451) {
+      if (window.ContentWarning && typeof ContentWarning.gate === 'function') {
+        const ok = await ContentWarning.gate(room);
+        State.isLoadingHistory = false;
+        if (ok) return loadOlderMessages();
+      }
+      return;
+    }
+    if (!res.ok) return;
     const data = await res.json();
     const msgs = data.messages || [];
     if (!msgs.length) return;

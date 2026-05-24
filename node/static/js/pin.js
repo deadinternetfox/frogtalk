@@ -10,6 +10,7 @@
  *   Pin.gateAutoLogin()        — Promise<boolean>: must succeed to launch app
  *   Pin.gateAdmin()            — Promise<boolean>: must succeed to open admin
  *   Pin.gateKeyManager()       — Promise<boolean>: must succeed to open key manager
+ *   Pin.gateDmUnlock(id, nick) — Promise<boolean>: full-screen PIN for locked DMs
  *   Pin.lockNow()              — show lock screen immediately
  *   Pin.isLocked()             — true while lock screen is active
  *
@@ -243,6 +244,10 @@
   // was raised by admin entry (vs. a normal boot/idle gate) also stamps
   // the admin-fresh timestamp. Reset after every drain.
   let _adminGatePending = false;
+  // DM thread unlock uses the same full-screen keypad but verifies via
+  // /api/dms/{id}/unlock instead of /api/auth/pin/verify.
+  let _dmUnlockMode = null;      // { channelId, nickname }
+  let _dmUnlockResolve = null;
   let _pinBuffer = '';
   function _renderDots () {
     const wrap = $('lock-pin-dots');
@@ -275,8 +280,9 @@
       _submitLockPin();
       e.preventDefault();
     } else if (e.key === 'Escape') {
-      // Trap Escape — there's no "cancel" out of the lock screen. The
-      // only way out is the correct PIN or signing out.
+      if (_dmUnlockMode) {
+        _cancelDmGate();
+      }
       e.preventDefault();
     }
   }
@@ -290,21 +296,23 @@
     _setText('lock-error', '');
     const btn = $('lock-submit');
     if (btn) btn.disabled = true;
+    const forDm = !!(_dmUnlockMode && _dmUnlockMode.channelId);
     try {
-      const res = await _api('/api/auth/pin/verify', 'POST', {
-        pin,
-        admin_gate: !!_adminGatePending,
-      });
+      const res = forDm
+        ? await _api('/api/dms/' + _dmUnlockMode.channelId + '/unlock', 'POST', { pin })
+        : await _api('/api/auth/pin/verify', 'POST', {
+          pin,
+          admin_gate: !!_adminGatePending,
+        });
       const j = await res.json().catch(() => ({}));
       if (res.ok && j.ok) {
         _pinBuffer = '';
         _renderDots();
+        if (forDm) {
+          _finishDmUnlock(true);
+          return;
+        }
         _markUnlocked();
-        // If the lock was raised for an admin gate, stamp the admin-fresh
-        // timestamp too so the same PIN entry both unlocks the app and
-        // admits the user into the admin overlay (without granting a
-        // free pass to any later admin re-entry — that needs its own
-        // 30 s grace check below).
         if (_adminGatePending) {
           try { sessionStorage.setItem(_SS_ADMIN_UNLOCKED_AT, String(Date.now())); } catch {}
         }
@@ -312,7 +320,6 @@
         _hideLockScreen();
         try { window.dispatchEvent(new CustomEvent('ft:pin-unlocked')); } catch {}
         if (_unlockResolvers.length) {
-          // Drain — every parked caller proceeds with this single unlock.
           const pending = _unlockResolvers.splice(0, _unlockResolvers.length);
           for (const r of pending) { try { r(true); } catch {} }
         }
@@ -320,12 +327,10 @@
       }
       _pinBuffer = '';
       _renderDots();
-      // 10.5: re-shuffle the keypad after every wrong attempt so an
-      // attacker who recorded the screen for the first guess can't reuse
-      // the position-to-digit mapping for the next guess.
       try { _renderNumpadKeys($('lock-numpad')); } catch {}
-      if (j.lock_seconds && j.lock_seconds > 0) {
-        _startLockoutCountdown(j.lock_seconds);
+      const lockSec = Number(j.lock_seconds || j.pin_lock_remaining_sec || 0);
+      if (lockSec > 0) {
+        _startLockoutCountdown(lockSec);
       } else {
         const remaining = Number(j.remaining_attempts);
         const reason = String(j.error || 'Incorrect PIN');
@@ -337,6 +342,25 @@
     } finally {
       if (btn) btn.disabled = false;
     }
+  }
+
+  function _finishDmUnlock (ok) {
+    _dmUnlockMode = null;
+    _showDmCancel(false);
+    const resolve = _dmUnlockResolve;
+    _dmUnlockResolve = null;
+    _hideLockScreen();
+    if (resolve) resolve(!!ok);
+  }
+
+  function _cancelDmGate () {
+    if (!_dmUnlockMode) return;
+    _finishDmUnlock(false);
+  }
+
+  function _showDmCancel (show) {
+    const btn = $('lock-dm-cancel');
+    if (btn) btn.style.display = show ? '' : 'none';
   }
 
   function _startLockoutCountdown (initialSeconds) {
@@ -651,7 +675,14 @@
     card.appendChild(hint);
 
     const actions = document.createElement('div');
-    actions.style.cssText = 'display:flex;gap:8px;justify-content:center;font-size:12px';
+    actions.style.cssText = 'display:flex;gap:12px;justify-content:center;font-size:12px;flex-wrap:wrap';
+    const cancelDm = document.createElement('button');
+    cancelDm.id = 'lock-dm-cancel';
+    cancelDm.type = 'button';
+    cancelDm.textContent = 'Cancel';
+    cancelDm.style.cssText = 'display:none;background:none;border:none;color:var(--text-muted);cursor:pointer;text-decoration:underline';
+    cancelDm.addEventListener('click', () => _cancelDmGate());
+    actions.appendChild(cancelDm);
     const signOut = document.createElement('button');
     signOut.type = 'button';
     signOut.textContent = 'Sign out';
@@ -690,6 +721,8 @@
   function lockNow () {
     if (_locked) return;
     if (!_cfg.has_pin) return;       // nothing to lock with
+    _dmUnlockMode = null;
+    _showDmCancel(false);
     _ensureLockScreen();
     _locked = true;
     _pinBuffer = '';
@@ -758,20 +791,44 @@
     return new Promise((resolve) => {
       const forAdmin = !!(opts && opts.admin);
       if (forAdmin) _adminGatePending = true;
-      // Server is the source of truth: if it sent 423 {pin_required},
-      // the account has a PIN. Trust that signal even if our local
-      // `_cfg` hasn't yet been populated (e.g. just after a manual
-      // login, before /pin/status has come back) — otherwise the gate
-      // would no-op and the caller would receive the original 423,
-      // dropping the user into a blank app shell.
       if (!_cfg.has_pin) {
-        // Best-effort: tell pin.js this session has a PIN so the
-        // lock screen renders correctly. A subsequent refreshFromServer
-        // will overwrite this with the canonical values.
         try { _cfg.has_pin = true; } catch {}
       }
+      _dmUnlockMode = null;
+      _showDmCancel(false);
       _unlockResolvers.push(resolve);
       lockNow();
+    });
+  }
+
+  function gateDmUnlock (channelId, nickname) {
+    return new Promise((resolve) => {
+      if (!_cfg.has_pin) { resolve(false); return; }
+      if (_locked && _dmUnlockMode) {
+        _dmUnlockResolve = resolve;
+        return;
+      }
+      _adminGatePending = false;
+      _dmUnlockMode = {
+        channelId: Number(channelId) || 0,
+        nickname: String(nickname || '').trim(),
+      };
+      _dmUnlockResolve = resolve;
+      _ensureLockScreen();
+      _locked = true;
+      _pinBuffer = '';
+      _renderDots();
+      _setText('lock-error', '');
+      const nick = _dmUnlockMode.nickname || 'chat';
+      _setText('lock-subtitle', 'Unlock chat with @' + nick);
+      _showDmCancel(true);
+      const el = $('lock-screen');
+      if (el) { el.classList.remove('hidden'); el.style.display = 'flex'; }
+      document.addEventListener('keydown', _lockKeyHandler, true);
+      if (_cfg.pin_lock_remaining_sec > 0) {
+        _startLockoutCountdown(_cfg.pin_lock_remaining_sec);
+        _cfg.pin_lock_remaining_sec = 0;
+      }
     });
   }
 
@@ -1157,6 +1214,7 @@
     gateAdmin,
     gateKeyManager,
     gateRequest,
+    gateDmUnlock,
     lockNow,
     reset,
     isLocked,

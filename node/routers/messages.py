@@ -11,7 +11,7 @@ from slowapi import Limiter
 from typing import Optional
 
 import database as db
-from deps import get_current_user, client_ip
+from deps import get_current_user, client_ip, cw_ack_is_required, cw_http_detail, session_token_from_request
 from ws_manager import manager
 from routers._media_safety import safe_reencode as _media_reencode
 
@@ -83,6 +83,16 @@ class SendMessageRequest(BaseModel):
 async def send_message(request: Request, room_name: str, body: SendMessageRequest,
                        current_user: dict = Depends(get_current_user)):
     """Send a message to a room via REST (reliable for media uploads)."""
+    cw_block = None
+    try:
+        token = session_token_from_request(request) or ""
+        required, flags = cw_ack_is_required(room_name, token)
+        if required:
+            cw_block = JSONResponse(status_code=451, content=cw_http_detail(flags))
+    except Exception:
+        cw_block = None
+    if cw_block is not None:
+        return cw_block
     # Preserve internal whitespace (newlines, tabs, leading indent for
     # code-block style messages). `.strip()` is only used for the empty
     # check so an "all whitespace" body still 400s, but a message that
@@ -248,11 +258,17 @@ async def send_message(request: Request, room_name: str, body: SendMessageReques
 
 
 @router.get("/media/{msg_id}")
-async def get_media(msg_id: int, current_user: dict = Depends(get_current_user)):
+async def get_media(msg_id: int, request: Request, current_user: dict = Depends(get_current_user)):
     """Fetch media_data for a single message (lazy load)."""
     msg = db.get_message(msg_id)
     if not msg:
         return JSONResponse(status_code=404, content={"error": "No media"})
+    room_for_msg = msg.get("room_name") or ""
+    if room_for_msg:
+        token = session_token_from_request(request) or ""
+        required, flags = cw_ack_is_required(room_for_msg, token)
+        if required:
+            return JSONResponse(status_code=451, content=cw_http_detail(flags))
     if not db.user_can_access_room(
         current_user["id"], msg.get("room_name") or "",
         is_admin=bool(current_user.get("is_admin")),
@@ -268,6 +284,7 @@ async def get_media(msg_id: int, current_user: dict = Depends(get_current_user))
 @router.get("/{room_name}")
 async def get_history(
     room_name: str,
+    request: Request,
     limit: int = Query(50, le=200),
     before_id: Optional[int] = Query(None),
     current_user: dict = Depends(get_current_user),
@@ -277,6 +294,10 @@ async def get_history(
         is_admin=bool(current_user.get("is_admin")),
     ):
         return JSONResponse(status_code=403, content={"error": "Not a member of this room"})
+    token = session_token_from_request(request) or ""
+    required, flags = cw_ack_is_required(room_name, token)
+    if required:
+        return JSONResponse(status_code=451, content=cw_http_detail(flags))
     msgs = await asyncio.to_thread(db.get_messages, room_name, limit, before_id)
     # has_media is now returned directly from SQL as 0/1; coerce to bool so
     # the client gets a stable shape. media_data is no longer selected for

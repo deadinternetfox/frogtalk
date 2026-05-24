@@ -12,7 +12,12 @@ from slowapi import Limiter
 
 import database as db
 from deps import get_current_user, client_ip
-from routers.rooms import request_private_room_rekey
+from routers.rooms import (
+    request_private_room_rekey,
+    _broadcast_room_member_joined,
+    _enqueue_room_member_joined,
+    _maybe_fed_directory_and_snapshot,
+)
 from ws_manager import manager
 
 router = APIRouter(prefix="/invites", tags=["invites"])
@@ -455,30 +460,9 @@ async def join_via_invite(code: str, current_user: dict = Depends(get_current_us
     # Actually add the user as a member (was missing — invite was accepted but
     # user was never inserted into room_members, so the sidebar never updated).
     db.join_room(current_user["id"], target_room_id)
-    try:
-        db.insert_federation_outbox_event({
-            "event_id": f"evt_{int(time.time() * 1000):016x}_{uuid.uuid4().hex[:8]}",
-            "event_type": "room.member.joined",
-            "payload": {
-                "room_name": room["name"],
-                "nickname": current_user["nickname"],
-            },
-        })
-    except Exception:
-        pass
-
-    # Broadcast member_joined to existing members so their sidebar updates
-    # without a reload, AND so private-room key rotation can be triggered.
-    try:
-        await manager.broadcast_room(room["name"], {
-            "type": "member_joined",
-            "room": room["name"],
-            "user_id": current_user["id"],
-            "nickname": current_user["nickname"],
-            "avatar": current_user.get("avatar"),
-        })
-    except Exception:
-        pass
+    _enqueue_room_member_joined(current_user, room["name"])
+    await _broadcast_room_member_joined(room["name"], current_user)
+    _maybe_fed_directory_and_snapshot(room["name"])
 
     # Private-room key handoff: the joiner has no current key. Ask the
     # owner/a moderator to rotate so the joiner receives the new secret

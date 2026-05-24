@@ -8,6 +8,7 @@ from datetime import datetime
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
 
 import database as db
+from deps import cw_ack_is_required, cw_http_detail
 from ws_manager import manager, voice_manager
 
 logger = logging.getLogger(__name__)
@@ -324,6 +325,8 @@ async def websocket_endpoint(
         await websocket.close(code=4001)
         return
 
+    session_tok = (token or "").strip() or (websocket.cookies.get("ft_session") or "").strip()
+
     # Authoritative room access check. DM pseudo-rooms (dm-*) are handled by
     # the dedicated DM endpoints/manager and don't live in the rooms table.
     if not room_name.startswith("dm-"):
@@ -578,7 +581,16 @@ async def websocket_endpoint(
             pass
 
     # Send recent history on connect (strip media_data to keep payload small)
-    history = db.get_messages(room_name, limit=50)
+    cw_required, cw_flags = cw_ack_is_required(room_name, session_tok)
+    if cw_required and not room_name.startswith("dm-"):
+        await manager.send_personal(websocket, {
+            "type": "content_warning_required",
+            "room": room_name,
+            "content_warning": db.content_warning_to_dict(True, cw_flags),
+        })
+        history = []
+    else:
+        history = db.get_messages(room_name, limit=50)
     for msg in history:
         if msg.get("media_data"):
             msg["has_media"] = True
@@ -688,6 +700,16 @@ async def websocket_endpoint(
                         except Exception:
                             pass
                         break
+
+                if not room_name.startswith("dm-"):
+                    cw_req, cw_fl = cw_ack_is_required(room_name, session_tok)
+                    if cw_req:
+                        await manager.send_personal(websocket, {
+                            "type": "content_warning_required",
+                            "room": room_name,
+                            "content_warning": db.content_warning_to_dict(True, cw_fl),
+                        })
+                        continue
 
                 # Preserve internal whitespace so multi-line messages
                 # and pasted code-blocks aren't corrupted; only the
