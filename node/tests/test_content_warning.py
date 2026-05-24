@@ -34,6 +34,17 @@ class ContentWarningTests(unittest.TestCase):
     def _hdr(self, token: str):
         return {"X-Session-Token": token}
 
+    def _create_public_room_db(self, owner_token: str, name: str, *, cw=None):
+        """Seed a public CW room via DB — avoids POST /api/rooms rate limits in tests."""
+        uid = int(self.db.get_user_by_token(owner_token)["id"])
+        rid = self.db.create_room(name, "test", "public", uid, None)
+        self.assertIsNotNone(rid)
+        self.db.join_room(uid, rid)
+        if cw is not None and cw.get("enabled"):
+            flags = self.db.parse_content_warning_flags(cw.get("flags") or [])
+            self.assertTrue(self.db.set_room_content_warning(name, enabled=True, flags=flags))
+        return {"name": name}
+
     def _create_public_room(self, owner_token: str, name: str, *, cw=None):
         body = {"name": name, "description": "test", "type": "public"}
         if cw is not None:
@@ -73,7 +84,7 @@ class ContentWarningTests(unittest.TestCase):
 
     def test_creator_must_ack_after_create(self):
         owner = self._session("cw_owner_f")
-        self._create_public_room(
+        self._create_public_room_db(
             owner,
             "cw-pub-f",
             cw={"enabled": True, "flags": ["nudity"]},
@@ -90,7 +101,7 @@ class ContentWarningTests(unittest.TestCase):
     def test_leave_clears_content_warning_ack(self):
         owner = self._session("cw_owner_g")
         member = self._session("cw_member_g")
-        self._create_public_room(
+        self._create_public_room_db(
             owner,
             "cw-pub-g",
             cw={"enabled": True, "flags": ["violence"]},
@@ -126,7 +137,7 @@ class ContentWarningTests(unittest.TestCase):
     def test_status_required_until_ack(self):
         owner = self._session("cw_owner_d")
         member = self._session("cw_member_d")
-        self._create_public_room(
+        self._create_public_room_db(
             owner,
             "cw-pub-d",
             cw={"enabled": True, "flags": ["mature_themes"]},
@@ -167,7 +178,7 @@ class ContentWarningTests(unittest.TestCase):
     def test_flag_change_rerequires_ack(self):
         owner = self._session("cw_owner_e")
         member = self._session("cw_member_e")
-        self._create_public_room(
+        self._create_public_room_db(
             owner,
             "cw-pub-e",
             cw={"enabled": True, "flags": ["nudity"]},
@@ -197,7 +208,7 @@ class ContentWarningTests(unittest.TestCase):
     def test_forget_clears_content_warning_ack(self):
         owner = self._session("cw_owner_h")
         member = self._session("cw_member_h")
-        self._create_public_room(
+        self._create_public_room_db(
             owner,
             "cw-pub-h",
             cw={"enabled": True, "flags": ["nudity"]},
@@ -228,7 +239,7 @@ class ContentWarningTests(unittest.TestCase):
     def test_leave_rejoin_requires_content_warning_gate(self):
         owner = self._session("cw_owner_i")
         member = self._session("cw_member_i")
-        self._create_public_room(
+        self._create_public_room_db(
             owner,
             "cw-pub-i",
             cw={"enabled": True, "flags": ["extremism"]},
@@ -264,7 +275,7 @@ class ContentWarningTests(unittest.TestCase):
         owner = self._session("cw_owner_j")
         uid = self.db.create_user("cw_member_j", "secret12")
         member = self.db.create_session(uid)
-        self._create_public_room(
+        self._create_public_room_db(
             owner,
             "cw-pub-j",
             cw={"enabled": True, "flags": ["nudity"]},
@@ -284,6 +295,60 @@ class ContentWarningTests(unittest.TestCase):
         body = st.json()
         self.assertFalse(body.get("required"), body)
         self.assertTrue(body.get("acknowledged"))
+
+    def _csrf_for(self, token: str) -> str:
+        import hashlib
+        import hmac
+
+        secret = os.environ["FROGTALK_CSRF_SECRET"].encode()
+        return hmac.new(secret, token.encode(), hashlib.sha256).hexdigest()
+
+    def test_ack_via_cookie_and_csrf_without_session_header(self):
+        """Browser SPA path: HttpOnly cookie + double-submit CSRF, no X-Session-Token."""
+        owner = self._session("cw_owner_k")
+        member = self._session("cw_member_k")
+        self._create_public_room_db(
+            owner,
+            "cw-pub-k",
+            cw={"enabled": True, "flags": ["nudity"]},
+        )
+        self.client.post("/api/rooms/cw-pub-k/join", headers=self._hdr(member))
+        csrf = self._csrf_for(member)
+        c = self.client
+        c.cookies.set("ft_session", member)
+        c.cookies.set("ft_csrf", csrf)
+        ack = c.post(
+            "/api/rooms/cw-pub-k/content-warning/ack",
+            json={"confirm": True},
+            headers={"X-CSRF-Token": csrf},
+        )
+        self.assertEqual(ack.status_code, 200, ack.text)
+        self.assertFalse(ack.json().get("required"))
+        c.cookies.clear()
+
+    def test_stale_session_header_falls_back_to_cookie(self):
+        owner = self._session("cw_owner_l")
+        member = self._session("cw_member_l")
+        self._create_public_room_db(
+            owner,
+            "cw-pub-l",
+            cw={"enabled": True, "flags": ["violence"]},
+        )
+        self.client.post("/api/rooms/cw-pub-l/join", headers=self._hdr(member))
+        csrf = self._csrf_for(member)
+        c = self.client
+        c.cookies.set("ft_session", member)
+        c.cookies.set("ft_csrf", csrf)
+        ack = c.post(
+            "/api/rooms/cw-pub-l/content-warning/ack",
+            json={"confirm": True},
+            headers={
+                "X-Session-Token": "stale-invalid-token-not-in-db",
+                "X-CSRF-Token": csrf,
+            },
+        )
+        self.assertEqual(ack.status_code, 200, ack.text)
+        c.cookies.clear()
 
     def test_database_helpers_round_trip(self):
         db = self.db

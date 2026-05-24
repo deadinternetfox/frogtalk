@@ -76,53 +76,48 @@ def client_ip(request: Request) -> str:
 
 
 async def get_current_user(request: Request = None, x_session_token: str = Header(None, alias="X-Session-Token")):
-    # Auth source priority:
+    # Auth source priority (each candidate tried in order; stale header tokens
+    # fall through to the HttpOnly cookie so browser sessions keep working after
+    # federation node switches refresh the cookie before State.token updates):
     #   1. X-Session-Token header (legacy SPA, bots, native clients)
-    #   2. HttpOnly `ft_session` cookie (HIGH-2: not reachable to JS;
-    #      prevents XSS-stolen tokens from logging in elsewhere)
-    #   3. `Authorization: Bearer …` (federated bots, REST clients)
-    #   4. `?token=…` query string (only kept for <img>/<video> src=
-    #      that browsers won't decorate with custom headers; this path
-    #      stays for now but the long-term plan is to move to signed
-    #      short-lived media URLs)
-    if not x_session_token and request is not None:
+    #   2. HttpOnly `ft_session` cookie
+    #   3. `Authorization: Bearer …`
+    #   4. `?token=…` query string (media src= only; long-term: signed URLs)
+    candidates: list[str] = []
+    header_tok = (x_session_token or "").strip()
+    if header_tok:
+        candidates.append(header_tok)
+    if request is not None:
         try:
-            # 2. Cookie — preferred for browser SPA sessions.
             cookie_tok = (request.cookies.get("ft_session") or "").strip()
-            if cookie_tok:
-                x_session_token = cookie_tok
-            else:
-                # 3. Bearer.
-                auth = (request.headers.get("authorization") or "").strip()
-                if auth.lower().startswith("bearer "):
-                    x_session_token = auth[7:].strip()
-                if not x_session_token:
-                    # 4. Query — last resort.
-                    qtok = (request.query_params.get("token") or "").strip()
-                    if qtok:
-                        x_session_token = qtok
+            if cookie_tok and cookie_tok not in candidates:
+                candidates.append(cookie_tok)
+            auth = (request.headers.get("authorization") or "").strip()
+            if auth.lower().startswith("bearer "):
+                bearer_tok = auth[7:].strip()
+                if bearer_tok and bearer_tok not in candidates:
+                    candidates.append(bearer_tok)
+            qtok = (request.query_params.get("token") or "").strip()
+            if qtok and qtok not in candidates:
+                candidates.append(qtok)
         except Exception:
             pass
-    if not x_session_token:
+    if not candidates:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
-    cached = _token_cache_get(x_session_token)
-    if cached is not None:
-        # Opportunistic backfill: if the session row predates v300 (no UA/IP),
-        # capture them now from this live request and kick off a geo lookup.
-        # Single-shot per token via the cache flag below.
-        if request is not None:
-            _maybe_backfill_session(request, x_session_token)
-        return cached
-    # Cache miss: run the sync DB lookup off the event loop so we never
-    # block other requests on it.
     from starlette.concurrency import run_in_threadpool
-    user = await run_in_threadpool(db.get_user_by_token, x_session_token)
-    if not user:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired session")
-    _token_cache_put(x_session_token, user)
-    if request is not None:
-        _maybe_backfill_session(request, x_session_token)
-    return user
+    for tok in candidates:
+        cached = _token_cache_get(tok)
+        if cached is not None:
+            if request is not None:
+                _maybe_backfill_session(request, tok)
+            return cached
+        user = await run_in_threadpool(db.get_user_by_token, tok)
+        if user:
+            _token_cache_put(tok, user)
+            if request is not None:
+                _maybe_backfill_session(request, tok)
+            return user
+    raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired session")
 
 
 # Tokens we've already attempted to backfill this process — keeps us from

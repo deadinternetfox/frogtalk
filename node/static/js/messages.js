@@ -5223,9 +5223,13 @@ window._applyRoomBanUI = function _applyRoomBanUI(room) {
     if (!info) {
       if (existing) existing.remove();
       if (inputWrap) inputWrap.style.display = '';
+      const wasDisabled = !!(ta && ta.disabled);
       if (ta) { ta.disabled = false; ta.placeholder = `Message #${room || 'channel'}`; }
       if (sendBtn) sendBtn.disabled = false;
       _stopRoomBanTicker();
+      if (wasDisabled) {
+        try { window.FtCompose?.restoreFocus?.(); } catch {}
+      }
       return;
     }
     // Cache parsed expiry as epoch ms so the per-second ticker doesn't

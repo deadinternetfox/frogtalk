@@ -1069,8 +1069,12 @@ window._applyRoomMuteUI = function _applyRoomMuteUI(room) {
     const existing = document.getElementById('room-mute-banner');
     if (!m) {
       if (existing) existing.remove();
+      const wasDisabled = !!(ta && ta.disabled);
       if (ta) { ta.disabled = false; ta.placeholder = `Message #${room || 'channel'}`; }
       if (sendBtn) sendBtn.disabled = false;
+      if (wasDisabled) {
+        try { window.FtCompose?.restoreFocus?.(); } catch {}
+      }
       return;
     }
     // Resolve a friendly remaining-time label. Server sends ISO-with-Z so

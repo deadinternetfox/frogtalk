@@ -2949,15 +2949,15 @@ async function loadDMMessages (pageOffset = 0, options = {}) {
   const _isReqCurrent = () => !!(_activeDM && _activeDM.id === _reqRoomId && _reqSeq === _dmLoadReqSeq);
   let loadSuccess = false;
   const _finishLoad = () => {
-    if (pageOffset === 0 && _isReqCurrent()) {
+    if (pageOffset === 0 && !isDelta && _isReqCurrent()) {
       _dmMessagesLoading = false;
       if (loadSuccess) _dmMessagesReady = true;
       _updateDmComposeState();
     }
   };
-  if (pageOffset === 0) {
+  if (pageOffset === 0 && !isDelta) {
     _dmMessagesLoading = true;
-    if (!isDelta) _dmMessagesReady = false;
+    _dmMessagesReady = false;
     _updateDmComposeState();
   }
   try {
@@ -4370,6 +4370,10 @@ function _updateDmComposeState() {
   const input = document.getElementById('msg-input');
   const sendBtn = document.getElementById('send-btn');
   const inputArea = document.getElementById('input-area');
+  const wasBlocked = !!(input && (input.disabled || input.getAttribute('aria-disabled') === 'true'));
+  if (blocked && !wasBlocked) {
+    try { window.FtCompose?.captureFocus?.(); } catch {}
+  }
   if (inputArea) {
     inputArea.classList.toggle('ft-dm-loading', blocked);
     inputArea.setAttribute('aria-busy', blocked ? 'true' : 'false');
@@ -4396,6 +4400,9 @@ function _updateDmComposeState() {
       '#input-area .input-tools button, #input-area .attach-btn, #input-area .icon-btn, #input-area .gif-btn, #input-area .emoji-btn',
     ).forEach((btn) => { btn.disabled = blocked; });
   } catch {}
+  if (!blocked && wasBlocked) {
+    try { window.FtCompose?.restoreFocus?.(); } catch {}
+  }
 }
 
 async function sendDMMessage () {
@@ -4654,6 +4661,7 @@ async function sendDMMessage () {
   // this because the soft keyboard collapse + input shrink happen after
   // the optimistic append, pushing the new bubble below the viewport.
   _scrollDMToBottomStable();
+  try { input?.focus({ preventScroll: true }); } catch {}
   } finally {
     _dmSending = false;
     if (sendBtn) sendBtn.textContent = prevBtnText || '➤';

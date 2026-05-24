@@ -726,6 +726,10 @@
 #messages-area.cw-chat-gated {
   position: relative;
   overflow: hidden;
+  background:
+    radial-gradient(ellipse 70% 55% at 18% 38%, color-mix(in srgb, var(--accent-color, #4caf50) 14%, transparent), transparent 70%),
+    radial-gradient(ellipse 55% 45% at 82% 62%, color-mix(in srgb, var(--accent-color, #4caf50) 10%, transparent), transparent 72%),
+    color-mix(in srgb, var(--bg-color, #0d1117) 94%, var(--surface-color, #161b22));
 }
 
 #messages-area.cw-chat-gated .cw-chat-content {
@@ -802,6 +806,7 @@
   justify-content: flex-end;
   pointer-events: none;
   animation: cwGateOverlayIn 0.28s ease-out;
+  overflow: hidden;
 }
 
 @keyframes cwGateOverlayIn {
@@ -822,14 +827,17 @@
 .cw-gate-inline-backdrop {
   position: absolute;
   inset: 0;
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--bg-color) 55%, transparent) 0%,
-    color-mix(in srgb, var(--bg-color) 78%, black) 55%,
-    color-mix(in srgb, var(--bg-color) 88%, black) 100%
-  );
+  background:
+    radial-gradient(ellipse 70% 55% at 18% 38%, color-mix(in srgb, var(--accent-color, #4caf50) 14%, transparent), transparent 70%),
+    radial-gradient(ellipse 55% 45% at 82% 62%, color-mix(in srgb, var(--accent-color, #4caf50) 10%, transparent), transparent 72%),
+    color-mix(in srgb, var(--bg-color, #0d1117) 90%, var(--surface-color, #161b22));
   pointer-events: none;
   animation: cwGateBackdropIn 0.32s ease-out;
+}
+
+.cw-gate-ambient {
+  z-index: 0;
+  opacity: 0.85;
 }
 
 @keyframes cwGateBackdropIn {
@@ -839,7 +847,7 @@
 
 .cw-gate-banner {
   position: relative;
-  z-index: 1;
+  z-index: 2;
   margin: 12px 14px 16px;
   pointer-events: auto;
   animation: cwGateBannerIn 0.34s cubic-bezier(0.22, 1, 0.36, 1);

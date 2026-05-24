@@ -293,6 +293,10 @@ def _resolve_ws_user(websocket: WebSocket, token: str | None):
     in-memory token; rejecting the upgrade when only the query param is wrong
     surfaces in the browser as a generic "WebSocket connection failed" (uvicorn
     maps pre-accept ``close()`` to HTTP 403).
+
+    Returns ``(user, session_token)`` where ``session_token`` is the credential
+    that authenticated — used for CW ack lookups so a stale ``?token=`` does not
+    bypass a fresh cookie-session ack.
     """
     tried: set[str] = set()
     for raw in (
@@ -304,8 +308,8 @@ def _resolve_ws_user(websocket: WebSocket, token: str | None):
         tried.add(raw)
         user = db.get_user_by_token(raw)
         if user:
-            return user
-    return None
+            return user, raw
+    return None, ""
 
 
 @router.websocket("/ws/{room_name}")
@@ -320,12 +324,10 @@ async def websocket_endpoint(
     if not _ws_origin_allowed(websocket):
         await websocket.close(code=4007)
         return
-    user = _resolve_ws_user(websocket, token)
+    user, session_tok = _resolve_ws_user(websocket, token)
     if not user:
         await websocket.close(code=4001)
         return
-
-    session_tok = (token or "").strip() or (websocket.cookies.get("ft_session") or "").strip()
 
     # Authoritative room access check. DM pseudo-rooms (dm-*) are handled by
     # the dedicated DM endpoints/manager and don't live in the rooms table.

@@ -8931,6 +8931,60 @@ function _mentionColorWithAlpha(color, alpha, fallback) {
   return fallback;
 }
 
+/** Preserve #msg-input focus across brief disable/readonly/loading toggles. */
+(function () {
+  const _saved = { active: false, start: null, end: null };
+
+  function msgInput() {
+    return document.getElementById('msg-input');
+  }
+
+  function isFocused(input) {
+    input = input || msgInput();
+    return !!(input && document.activeElement === input);
+  }
+
+  function captureFocus() {
+    const input = msgInput();
+    if (!isFocused(input)) {
+      _saved.active = false;
+      return;
+    }
+    _saved.active = true;
+    try {
+      _saved.start = input.selectionStart;
+      _saved.end = input.selectionEnd;
+    } catch {
+      _saved.start = _saved.end = null;
+    }
+  }
+
+  function restoreFocus() {
+    if (!_saved.active) return;
+    const input = msgInput();
+    if (!input || input.disabled) return;
+    if (input.getAttribute('readonly') != null) return;
+    _saved.active = false;
+    const start = _saved.start;
+    const end = _saved.end;
+    requestAnimationFrame(() => {
+      try {
+        if (document.activeElement && document.activeElement !== input
+            && document.activeElement !== document.body) {
+          const tag = (document.activeElement.tagName || '').toLowerCase();
+          if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
+        }
+        input.focus({ preventScroll: true });
+        if (typeof start === 'number' && typeof end === 'number') {
+          input.setSelectionRange(start, end);
+        }
+      } catch {}
+    });
+  }
+
+  window.FtCompose = { captureFocus, restoreFocus, isFocused, msgInput };
+})();
+
 function syncMentionDropdownTheme(dropdownEl) {
   const dd = dropdownEl || document.getElementById('mention-dropdown');
   if (!dd) return;

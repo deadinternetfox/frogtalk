@@ -21,6 +21,49 @@
 
   function _el(id) { return document.getElementById(id); }
 
+  async function _cwFetch(url, method, body) {
+    const verb = String(method || 'GET').toUpperCase();
+    if (typeof apiFetch === 'function') {
+      return apiFetch(url, verb, body == null ? null : body);
+    }
+    const headers = { 'X-Session-Token': (window.State && State.token) || '' };
+    if (body != null && verb !== 'GET') {
+      headers['Content-Type'] = 'application/json';
+    }
+    return fetch(url, {
+      method: verb,
+      credentials: 'include',
+      cache: 'no-store',
+      headers,
+      body: body == null ? undefined : JSON.stringify(body),
+    });
+  }
+
+  function _cwErrorMessage(resBody, fallback) {
+    if (!resBody || typeof resBody !== 'object') return fallback;
+    if (resBody.error) return String(resBody.error);
+    if (resBody.detail) return String(resBody.detail);
+    if (resBody.code === 'csrf_missing') return 'Session security token missing — refresh and try again';
+    if (resBody.code === 'csrf_invalid') return 'Session expired — refresh and try again';
+    return fallback;
+  }
+
+  function _resumeChannelAfterCwAck(roomName) {
+    const room = String(roomName || '').trim().toLowerCase();
+    if (!room || !window.State) return;
+    if (String(State.currentRoom || '').toLowerCase() !== room) return;
+    if (State.currentRoomType === 'dm') return;
+    try {
+      if (typeof clearChatTransition === 'function') clearChatTransition();
+    } catch {}
+    try {
+      if (typeof WS !== 'undefined' && WS.connect) {
+        WS.resetHistoryCache?.(room);
+        WS.connect(room, { force: true });
+      }
+    } catch {}
+  }
+
   function escapeHtml(s) {
     if (typeof esc === 'function') return esc(s);
     if (typeof UI !== 'undefined' && UI.escHtml) return UI.escHtml(s);
@@ -85,6 +128,7 @@
   }
 
   function _lockComposer() {
+    try { window.FtCompose?.captureFocus?.(); } catch {}
     try { document.body.classList.add('cw-composer-locked'); } catch {}
     const input = _el('msg-input');
     const inputArea = _el('input-area');
@@ -104,6 +148,7 @@
       input.removeAttribute('aria-disabled');
     }
     if (inputArea) inputArea.removeAttribute('aria-disabled');
+    try { window.FtCompose?.restoreFocus?.(); } catch {}
   }
 
   function _setChatGated(on) {
@@ -159,11 +204,10 @@
 
   async function _fetchStatus(roomName) {
     const name = String(roomName || '').trim().toLowerCase();
-    if (!name || !window.State || !State.token) return null;
+    if (!name) return null;
     try {
-      const r = await fetch(
+      const r = await _cwFetch(
         '/api/rooms/' + encodeURIComponent(name) + '/content-warning/status?_=' + Date.now(),
-        { headers: { 'X-Session-Token': State.token }, cache: 'no-store' },
       );
       if (r.ok) return r.json();
       return { _failed: true, _httpStatus: r.status };
@@ -303,6 +347,12 @@
       backdrop.setAttribute('aria-hidden', 'true');
       overlay.appendChild(backdrop);
 
+      const ambient = document.createElement('div');
+      ambient.className = 'ch-transition-ambient cw-gate-ambient';
+      ambient.setAttribute('aria-hidden', 'true');
+      ambient.innerHTML = '<span class="ch-orb o1"></span><span class="ch-orb o2"></span><span class="ch-orb o3"></span>';
+      overlay.appendChild(ambient);
+
       const banner = document.createElement('div');
       banner.className = 'cw-gate-banner';
       banner.appendChild(_buildGateCardEl(meta, roomName));
@@ -332,21 +382,15 @@
           if (label) label.textContent = 'Confirming…';
         }
         try {
-          const r = await fetch(
+          const r = await _cwFetch(
             '/api/rooms/' + encodeURIComponent(roomName) + '/content-warning/ack',
-            {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'X-Session-Token': (window.State && State.token) || '',
-              },
-              body: JSON.stringify({ confirm: true }),
-            },
+            'POST',
+            { confirm: true },
           );
           if (!r.ok) {
             const err = await r.json().catch(() => ({}));
             if (window.UI && UI.showToast) {
-              UI.showToast(err.error || 'Could not confirm age', 'error');
+              UI.showToast(_cwErrorMessage(err, 'Could not confirm age'), 'error');
             }
             if (enterBtn) {
               enterBtn.disabled = false;
@@ -449,12 +493,9 @@
 
   async function forgetAck(roomName) {
     const name = String(roomName || '').trim().toLowerCase();
-    if (!name || name.startsWith('dm:') || !window.State || !State.token) return;
+    if (!name || name.startsWith('dm:')) return;
     try {
-      await fetch('/api/rooms/' + encodeURIComponent(name) + '/content-warning/forget', {
-        method: 'POST',
-        headers: { 'X-Session-Token': State.token },
-      });
+      await _cwFetch('/api/rooms/' + encodeURIComponent(name) + '/content-warning/forget', 'POST');
     } catch {}
   }
 
@@ -483,6 +524,8 @@
             showDeclinedScreen(room);
           }
         } catch {}
+      } else {
+        _resumeChannelAfterCwAck(room);
       }
     });
   }
