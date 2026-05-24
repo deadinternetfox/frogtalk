@@ -1303,8 +1303,12 @@ const Rooms = (() => {
     }
     try { area.querySelector('#' + _CHAT_TRANSITION_ID)?.remove(); } catch {}
     try {
-      area.querySelectorAll('.cw-chat-loading').forEach((el) => {
-        if (el.id !== _CHAT_TRANSITION_ID) el.remove();
+      area.querySelectorAll('.chat-transition-overlay').forEach((el) => el.remove());
+    } catch {}
+    try {
+      area.querySelectorAll('.ch-loading-state, .ch-loading-card').forEach((el) => {
+        if (el.closest('#' + _CHAT_TRANSITION_ID)) return;
+        el.remove();
       });
     } catch {}
     const content = area.querySelector('#cw-chat-content');

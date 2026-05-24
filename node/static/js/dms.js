@@ -2578,14 +2578,8 @@ async function openDMChannel (id, nickname, avatar) {
   // spinner right away so the user always sees *something* while we derive the
   // ECDH shared secret + fetch messages.
   const area0 = document.getElementById('messages-area');
-  if (area0) {
-    if (typeof showChatTransition === 'function') {
-      showChatTransition('', 'dm', nickname, 'open', { dmAvatar: avatar, switchKey: `dm:${id}` });
-    } else if (typeof inlineSpinner === 'function') {
-      area0.innerHTML = inlineSpinner('Opening conversation with ' + (nickname || '…') + '…');
-    } else {
-      area0.innerHTML = '';
-    }
+  if (area0 && typeof showChatTransition === 'function') {
+    showChatTransition('', 'dm', nickname, 'open', { dmAvatar: avatar, switchKey: `dm:${id}` });
   }
   // DMs have no voice channel — always hide the presence bar.
   const vpb = document.getElementById('voice-presence-bar');
@@ -2630,7 +2624,6 @@ async function openDMChannel (id, nickname, avatar) {
   if (_dmMessages.length) {
     renderDMChat();
     scrollChatBottom();
-    _dmEnsureLoadingOverlay('Loading conversation…');
     if (!_dmSkipHistoricalDecrypt()) void _redecryptStaleDMMessages();
     else void _redecryptTravelDMMessages();
   }
@@ -2942,6 +2935,41 @@ function openDMsPanel () {
 }
 
 /* ── Load messages ─────────────────────────────────────────────────────────── */
+function _dmEnsureChatShell(area) {
+  if (!area) return null;
+  if (window.ContentWarning && typeof ContentWarning.ensureChatShell === 'function') {
+    try { return ContentWarning.ensureChatShell(area); } catch {}
+  }
+  let shell = area.querySelector('#cw-chat-content');
+  if (shell) return shell;
+  shell = document.createElement('div');
+  shell.id = 'cw-chat-content';
+  shell.className = 'cw-chat-content';
+  const keep = new Set(['ft-chat-transition', 'ft-content-warning-gate']);
+  for (const ch of [...area.children]) {
+    if (keep.has(ch.id)) continue;
+    if (ch.classList?.contains('chat-transition-overlay')) continue;
+    if (ch.classList?.contains('cw-chat-loading')) continue;
+    if (ch.classList?.contains('cw-gate-inline')) continue;
+    shell.appendChild(ch);
+  }
+  area.appendChild(shell);
+  return shell;
+}
+
+function _dmPurgeStrayLoading(area) {
+  if (!area) return;
+  try {
+    area.querySelectorAll('.chat-transition-overlay:not(#ft-chat-transition)').forEach((el) => el.remove());
+  } catch {}
+  try {
+    area.querySelectorAll('.ch-loading-state, .ch-loading-card').forEach((el) => {
+      if (el.closest('#ft-chat-transition')) return;
+      el.remove();
+    });
+  } catch {}
+}
+
 function _dmHasTransitionOverlay() {
   return !!document.getElementById('ft-chat-transition');
 }
@@ -2957,23 +2985,9 @@ function _dmShowChatTransition(phase) {
   });
 }
 
-function _dmUpdateTransitionLabel(text) {
-  const label = document.querySelector('#ft-chat-transition .ch-loading-label');
-  if (label) {
-    label.textContent = text;
-    return;
-  }
-  _dmShowChatTransition('load');
-}
-
-function _dmEnsureLoadingOverlay(label) {
+function _dmEnsureLoadingOverlay() {
   if (!_activeDM || !_dmMessagesLoading) return;
-  if (_dmHasTransitionOverlay()) {
-    if (label) _dmUpdateTransitionLabel(label);
-  } else {
-    _dmShowChatTransition('load');
-    if (label) _dmUpdateTransitionLabel(label);
-  }
+  _dmShowChatTransition('load');
 }
 
 function _dmFinishLoadUi() {
@@ -3018,8 +3032,7 @@ async function loadDMMessages (pageOffset = 0, options = {}) {
   }
   try {
   if (pageOffset === 0 && !isDelta) {
-    const area = document.getElementById('messages-area');
-    if (area) _dmEnsureLoadingOverlay('Loading conversation…');
+    _dmEnsureLoadingOverlay();
   }
   const url = isDelta
     ? `/api/dms/${_reqRoomId}/messages?limit=${DM_PER_PAGE}&after=${afterId}`
@@ -3039,7 +3052,7 @@ async function loadDMMessages (pageOffset = 0, options = {}) {
     // show the hard retry panel.
     if (pageOffset === 0 && uiRetry < 2) {
       const area = document.getElementById('messages-area');
-      if (area) _dmEnsureLoadingOverlay('Reconnecting…');
+      if (area) _dmEnsureLoadingOverlay();
       await _sleep(500);
       if (!_isReqCurrent()) return;
       return loadDMMessages(pageOffset, { ...options, uiRetry: uiRetry + 1 });
@@ -3089,7 +3102,7 @@ async function loadDMMessages (pageOffset = 0, options = {}) {
     // Soft-retry once on transient server errors before showing error UI.
     if (pageOffset === 0 && uiRetry < 2 && r && r.status >= 500) {
       const area = document.getElementById('messages-area');
-      if (area) _dmEnsureLoadingOverlay('Reconnecting…');
+      if (area) _dmEnsureLoadingOverlay();
       await _sleep(500);
       if (!_isReqCurrent()) return;
       return loadDMMessages(pageOffset, { ...options, uiRetry: uiRetry + 1 });
@@ -3185,16 +3198,15 @@ async function loadDMMessages (pageOffset = 0, options = {}) {
 function renderDMChat () {
   const area = document.getElementById('messages-area');
   if (!area || !_activeDM) return;
+  _dmPurgeStrayLoading(area);
   const stillLoading = _dmComposeBlocked();
-  if (!stillLoading) {
-    _dmFinishLoadUi();
+  const mount = _dmEnsureChatShell(area);
+  if (!mount) return;
+  if (stillLoading) {
+    _dmShowChatTransition(_dmHasTransitionOverlay() ? 'load' : 'open');
   } else {
-    _dmEnsureLoadingOverlay('Loading conversation…');
+    _dmFinishLoadUi();
   }
-  if (window.ContentWarning && typeof ContentWarning.ensureChatShell === 'function') {
-    try { ContentWarning.ensureChatShell(area); } catch {}
-  }
-  const mount = area.querySelector('#cw-chat-content') || area;
   if (!_dmMessages.length) {
     if (stillLoading) return;
     const onTravel = !!(window.App && typeof App.isAtHomeNode === 'function' && !App.isAtHomeNode());
@@ -4436,22 +4448,22 @@ function _updateDmComposeState() {
     try { window.FtCompose?.captureFocus?.(); } catch {}
   }
   if (inputArea) {
-    inputArea.classList.toggle('ft-dm-loading', blocked);
+    inputArea.classList.toggle('ft-compose-loading', blocked);
+    inputArea.classList.remove('ft-dm-loading');
     inputArea.setAttribute('aria-busy', blocked ? 'true' : 'false');
   }
   if (input) {
     input.disabled = blocked;
     input.setAttribute('aria-disabled', blocked ? 'true' : 'false');
+    const nick = _activeDM?.nickname || '';
+    const ph = nick ? ('Message ' + nick + '…') : '';
     if (blocked) {
       if (input.dataset.ftDmOrigPh == null) {
         input.dataset.ftDmOrigPh = input.placeholder || '';
       }
-      input.placeholder = 'Loading conversation…';
+      if (ph) input.placeholder = ph;
     } else {
-      const nick = _activeDM?.nickname || '';
-      input.placeholder = nick
-        ? ('Message ' + nick + '…')
-        : (input.dataset.ftDmOrigPh || input.placeholder || '');
+      input.placeholder = ph || input.dataset.ftDmOrigPh || input.placeholder || '';
       delete input.dataset.ftDmOrigPh;
     }
   }
