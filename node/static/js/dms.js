@@ -4954,7 +4954,7 @@ function showDisappearSettings() {
         <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border-color,#2a2a2a)">
           <div style="font-size:12px;color:var(--text-muted,#888);margin:-4px 0 8px;text-transform:uppercase;letter-spacing:.5px;font-weight:600">🗝️ Encryption</div>
           <p style="font-size:12px;color:var(--text-muted,#888);line-height:1.45;margin-bottom:10px">
-            View, export, and import keys for this chat and all DMs. Protected by your App PIN and account password.
+            View, export, and import keys for this chat and all DMs. Protected by your App PIN (if set), otherwise your account password.
           </p>
           <button type="button" class="modal-btn primary" style="width:100%"
             data-ft-key-action="keys" id="dm-privacy-open-keymgr">Open key manager</button>

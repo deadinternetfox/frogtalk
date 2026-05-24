@@ -145,6 +145,8 @@
         _toast('PIN required to open the key manager.', 'warning');
         return false;
       }
+      try { sessionStorage.setItem(_SS_AUTH_AT, String(Date.now())); } catch {}
+      return true;
     }
     const pw = await _promptPassword();
     if (!pw) return false;
