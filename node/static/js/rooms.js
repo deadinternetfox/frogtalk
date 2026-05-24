@@ -4613,6 +4613,7 @@ async function viewChannelProfile(channelName) {
 
     overlay.innerHTML = `
       <div class="modal ch-prof-modal">
+        <button type="button" class="ch-prof-close" onclick="document.getElementById('channel-profile-overlay').remove()" aria-label="Close">✕</button>
         ${safeBanner ? `<div class="ch-prof-banner" style="background-image:url('${_cssUrl(safeBanner)}')"></div>` : ''}
         <div class="ch-prof-body">
         <div class="ch-prof-head${ch.banner?' has-banner':''}">
@@ -4628,7 +4629,6 @@ async function viewChannelProfile(channelName) {
               </div>
             </div>
           </div>
-          <button class="ch-prof-close" onclick="document.getElementById('channel-profile-overlay').remove()" aria-label="Close">✕</button>
         </div>
 
         ${aboutText ? `<div class="ch-prof-about-label">About</div><div class="ch-prof-about">${_renderRichText(aboutText)}</div>` : ''}

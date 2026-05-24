@@ -109,11 +109,10 @@
     if (!area) return;
     const name = escapeHtml(roomName || 'this channel');
     area.innerHTML =
-      '<div class="cw-declined-screen" style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:280px;padding:32px 24px;text-align:center">' +
-      '<div style="font-size:48px;margin-bottom:12px" aria-hidden="true">🔞</div>' +
-      '<div style="font-size:17px;font-weight:600;color:#e8c4a8;margin-bottom:8px">18+ only</div>' +
-      '<p style="font-size:13px;line-height:1.5;color:#a89888;max-width:340px;margin:0">' +
-      'You must be 18 or older to view <strong style="color:#d4b896">#' + name + '</strong>. ' +
+      '<div class="cw-declined-screen">' +
+      '<div class="cw-declined-icon" aria-hidden="true">🔞</div>' +
+      '<div class="cw-declined-title">18+ only</div>' +
+      '<p class="cw-declined-text">You must be 18 or older to view <strong>#' + name + '</strong>. ' +
       'This channel is marked for mature audiences.</p></div>';
   }
 
