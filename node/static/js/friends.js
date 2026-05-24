@@ -165,15 +165,15 @@ function renderPending (el) {
   const incomingHtml = incoming.length
     ? `<div style="font-size:12px;color:#9dc4b2;font-weight:700;margin-bottom:8px;letter-spacing:.4px">INCOMING</div>` +
       incoming.map(f => `
-      <div class="fade-in" style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid #244438">
+      <div class="fr-row fade-in">
         <div style="width:40px;height:40px;display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer" onclick="closeFriends();showUserInfo('${esc(f.nickname)}',${Number(f.id)||0})" title="View profile">${fmtAv(f.avatar, f.nickname, 40)}</div>
-        <div style="flex:1">
-          <div style="font-weight:600;font-size:14px;color:#e3f6ec;cursor:pointer" onclick="closeFriends();showUserInfo('${esc(f.nickname)}',${Number(f.id)||0})" title="View profile">${_friendNameHtml(f)}</div>
-          <div style="font-size:12px;color:#9dc4b2">${esc(f.bio||'')}</div>
+        <div class="fr-row-info">
+          <div style="font-weight:600;font-size:14px;color:#e3f6ec;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" onclick="closeFriends();showUserInfo('${esc(f.nickname)}',${Number(f.id)||0})" title="View profile">${_friendNameHtml(f)}</div>
+          <div style="font-size:12px;color:#9dc4b2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(f.bio||'')}</div>
         </div>
-        <div style="display:flex;gap:6px">
-          <button class="modal-btn primary" style="padding:4px 10px;font-size:12px" onclick="acceptFriend('${esc(f.nickname)}', this)">✓ Accept</button>
-          <button class="modal-btn secondary" style="padding:4px 10px;font-size:12px" onclick="declineFriend('${esc(f.nickname)}', this)">✕</button>
+        <div class="fr-row-actions">
+          <button type="button" class="modal-btn primary" style="padding:4px 10px;font-size:12px" onclick="acceptFriend('${esc(f.nickname)}', this)">✓ Accept</button>
+          <button type="button" class="icon-btn fr-cancel-btn" onclick="declineFriend('${esc(f.nickname)}', this)" title="Decline request" aria-label="Decline friend request">✕</button>
         </div>
       </div>`).join('')
     : '';
@@ -181,14 +181,16 @@ function renderPending (el) {
   const outgoingHtml = outgoing.length
     ? `<div style="font-size:12px;color:#9dc4b2;font-weight:700;margin:14px 0 8px;letter-spacing:.4px">OUTGOING</div>` +
       outgoing.map(f => `
-      <div class="fade-in" style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid #244438">
+      <div class="fr-row fade-in">
         <div style="width:40px;height:40px;display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer" onclick="closeFriends();showUserInfo('${esc(f.nickname)}',${Number(f.id)||0})" title="View profile">${fmtAv(f.avatar, f.nickname, 40)}</div>
-        <div style="flex:1">
-          <div style="font-weight:600;font-size:14px;color:#e3f6ec;cursor:pointer" onclick="closeFriends();showUserInfo('${esc(f.nickname)}',${Number(f.id)||0})" title="View profile">${_friendNameHtml(f)}</div>
+        <div class="fr-row-info">
+          <div style="font-weight:600;font-size:14px;color:#e3f6ec;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" onclick="closeFriends();showUserInfo('${esc(f.nickname)}',${Number(f.id)||0})" title="View profile">${_friendNameHtml(f)}</div>
           <div style="font-size:12px;color:#9dc4b2">Waiting for response</div>
         </div>
-        <span style="font-size:12px;color:#7fd2a7;margin-right:4px">Requested</span>
-        <button class="modal-btn secondary" style="padding:4px 10px;font-size:12px" onclick="cancelFriendRequest('${esc(f.nickname)}', this)" title="Cancel request">✕</button>
+        <div class="fr-row-actions">
+          <span class="fr-pending-pill">Requested</span>
+          <button type="button" class="icon-btn fr-cancel-btn" onclick="cancelFriendRequest('${esc(f.nickname)}', this)" title="Cancel request" aria-label="Cancel friend request">✕</button>
+        </div>
       </div>`).join('')
     : '';
 
@@ -234,8 +236,7 @@ async function searchFriends () {
         ${(friendStatus === 'friends' || isFriend)
           ? `<span style="font-size:12px;color:#7fd2a7">Friends</span>`
           : (friendStatus === 'sent' || isRequested)
-          ? `<button class="modal-btn secondary" style="padding:4px 12px;font-size:12px"
-               onclick="cancelFriendRequest('${esc(u.nickname)}',this)">✕ Cancel</button>`
+          ? `<div class="fr-row-actions"><span class="fr-pending-pill">Requested</span><button type="button" class="icon-btn fr-cancel-btn" onclick="cancelFriendRequest('${esc(u.nickname)}',this)" title="Cancel request" aria-label="Cancel friend request">✕</button></div>`
           : (friendStatus === 'received' || isReceived)
           ? `<button class="modal-btn primary" style="padding:4px 12px;font-size:12px"
                onclick="acceptFriend('${esc(u.nickname)}',this)">✓ Accept</button>`
@@ -279,7 +280,7 @@ async function sendFriendReq (nick, btn) {
 }
 
 function _animateRemoveRow (btn) {
-  const row = btn && btn.closest('div[style*="border-bottom"], .ffp-friend');
+  const row = btn && btn.closest('.fr-row, .ffp-friend');
   if (!row) return;
   row.classList.add('row-leaving');
   return new Promise(res => setTimeout(res, 260));
@@ -591,7 +592,7 @@ function openFriendsPanel() {
       .ffp-info { flex: 1; min-width: 0; }
       .ffp-name { font-weight: 600; font-size: 14px; color: #dff3e9; }
       .ffp-status { font-size: 12px; color: #9cb9ae; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-      .ffp-actions { display: flex; gap: 4px; }
+      .ffp-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
       .ffp-empty {
         text-align: center;
         padding: 40px 16px;
@@ -648,7 +649,7 @@ function renderFfpContent(tab) {
         </div>
         <div class="ffp-actions">
           <button class="icon-btn" onclick="acceptFriend('${esc(f.nickname)}', this).then(()=>{renderFfpContent('pending')})" title="Accept" style="color:#4caf50">✓</button>
-          <button class="icon-btn" onclick="declineFriend('${esc(f.nickname)}', this).then(()=>{renderFfpContent('pending')})" title="Decline" style="color:#f44336">✕</button>
+          <button class="icon-btn fr-cancel-btn" onclick="declineFriend('${esc(f.nickname)}', this).then(()=>{renderFfpContent('pending')})" title="Decline" aria-label="Decline friend request">✕</button>
         </div>
       </div>
     `).join('');
@@ -663,7 +664,8 @@ function renderFfpContent(tab) {
           <div class="ffp-status">Waiting for response</div>
         </div>
         <div class="ffp-actions">
-          <button class="icon-btn" onclick="cancelFriendRequest('${esc(f.nickname)}', this).then(()=>{renderFfpContent('pending')})" title="Cancel request" style="color:#f44336">✕</button>
+          <span class="fr-pending-pill">Requested</span>
+          <button type="button" class="icon-btn fr-cancel-btn" onclick="cancelFriendRequest('${esc(f.nickname)}', this).then(()=>{renderFfpContent('pending')})" title="Cancel request" aria-label="Cancel friend request">✕</button>
         </div>
       </div>
     `).join('');
