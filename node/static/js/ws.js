@@ -43,7 +43,9 @@ const WS = (() => {
   function connect(room, opts) {
     const options = opts && typeof opts === 'object' ? opts : {};
     const force = !!options.force;
-    resetHistoryCache(room);
+    if (!options.keepHistoryCache) {
+      resetHistoryCache(room);
+    }
     if (!force && _ws && _room === room) {
       if (_ws.readyState === WebSocket.CONNECTING || _ws.readyState === WebSocket.OPEN) {
         return;
