@@ -3,7 +3,7 @@
   "version": "1.5.3",
   "description": "FrogTalk - End-to-end encrypted chat with voice & video calls",
   "main": "main.js",
-  "homepage": "https://frogtalk.xyz",
+  "homepage": "https://frogtalk.app",
   "scripts": {
     "start": "electron .",
     "build": "electron-builder --linux",
@@ -14,8 +14,8 @@
   },
   "author": {
     "name": "FrogTalk",
-    "email": "support@frogtalk.xyz",
-    "url": "https://frogtalk.xyz"
+    "email": "hello@frogtalk.app",
+    "url": "https://frogtalk.app"
   },
   "license": "MIT",
   "overrides": {

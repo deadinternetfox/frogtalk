@@ -1569,7 +1569,7 @@ _OFFICIAL_MESH_PEERS: list[dict] = [
 
 
 def _is_official_main_hub() -> bool:
-    """True when this process is the frogtalk.xyz clearnet directory hub."""
+    """True when this process is the frogtalk.app clearnet directory hub."""
     if _tor_mode_enabled():
         return False
     try:
@@ -1588,7 +1588,7 @@ def _is_official_main_hub() -> bool:
         host = (_url_hostname(url) or "").strip().lower()
         if host:
             hosts.add(host)
-    return "frogtalk.xyz" in hosts
+    return "frogtalk.app" in hosts or "frogtalk.xyz" in hosts
 
 
 def ensure_official_mesh_peers() -> int:
@@ -1934,7 +1934,7 @@ def _local_web_build_info() -> dict:
 
 
 def _get_update_feed_url() -> str:
-    return (os.getenv("FROGTALK_UPDATE_FEED_URL", "https://frogtalk.xyz/api/network/updates/latest") or "").strip()
+    return (os.getenv("FROGTALK_UPDATE_FEED_URL", "https://frogtalk.app/api/network/updates/latest") or "").strip()
 
 
 def _fetch_update_manifest(feed_url: str, timeout_s: float = 4.0) -> dict:

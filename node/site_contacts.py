@@ -34,6 +34,29 @@ ENV_EMAIL_KEYS = {
     "vapid": "FROGTALK_VAPID_EMAIL",
 }
 
+# Local-part used in role@domain template addresses (support → hello@).
+CONTACT_LOCAL_PARTS = {
+    "security": "security",
+    "privacy": "privacy",
+    "support": "hello",
+    "vapid": "admin",
+}
+
+# Placeholders in static HTML — always replaced with this node's configured contacts.
+CONTACT_PLACEHOLDERS = {
+    "__FT_CONTACT_SECURITY__": "security",
+    "__FT_CONTACT_PRIVACY__": "privacy",
+    "__FT_CONTACT_SUPPORT__": "support",
+    "__FT_CONTACT_VAPID__": "vapid",
+}
+
+LEGACY_DEFAULT_EMAILS = {
+    "security": "security@frogtalk.xyz",
+    "privacy": "privacy@frogtalk.xyz",
+    "support": "hello@frogtalk.xyz",
+    "vapid": "admin@frogtalk.xyz",
+}
+
 
 def normalize_email(raw: str) -> str:
     return (raw or "").strip().lower()[:254]
@@ -181,23 +204,48 @@ def vapid_claims() -> dict[str, str]:
     return {"sub": vapid_mailto_uri()}
 
 
+def _contact_template_addresses(kind: str) -> set[str]:
+    """Known template addresses that may appear in static HTML before substitution."""
+    local = CONTACT_LOCAL_PARTS.get(kind) or kind
+    variants: set[str] = set()
+    for domain in ("frogtalk.app", "frogtalk.xyz"):
+        variants.add(f"{local}@{domain}")
+    try:
+        from public_url_policy import resolve_public_site_host
+
+        host = (resolve_public_site_host() or "").strip().lower()
+        if host and host not in ("frogtalk.app", "www.frogtalk.app", "frogtalk.xyz", "www.frogtalk.xyz"):
+            variants.add(f"{local}@{host}")
+    except Exception:
+        pass
+    default = DEFAULT_EMAILS.get(kind) or ""
+    legacy = LEGACY_DEFAULT_EMAILS.get(kind) or ""
+    if default:
+        variants.add(default)
+    if legacy:
+        variants.add(legacy)
+    return variants
+
+
+def _apply_contact_replacement(out: str, old: str, current: str) -> str:
+    if not old or not current or old not in out:
+        return out
+    out = out.replace(old, current)
+    out = out.replace(f"mailto:{old}", f"mailto:{current}")
+    return out
+
+
 def substitute_contacts_in_text(text: str) -> str:
-    """Replace official default contact emails with this node's configured values."""
+    """Replace contact placeholders and template emails with this node's configured values."""
     out = text or ""
     contacts = resolve_site_contacts()
-    legacy_defaults = {
-        "security": "security@frogtalk.xyz",
-        "privacy": "privacy@frogtalk.xyz",
-        "support": "hello@frogtalk.xyz",
-        "vapid": "admin@frogtalk.xyz",
-    }
-    for kind, default in DEFAULT_EMAILS.items():
-        current = contacts.get(kind) or default
-        for old in (default, legacy_defaults.get(kind, "")):
-            if not old or old == current:
-                continue
-            out = out.replace(old, current)
-            out = out.replace(f"mailto:{old}", f"mailto:{current}")
+    for placeholder, kind in CONTACT_PLACEHOLDERS.items():
+        current = contacts.get(kind) or DEFAULT_EMAILS[kind]
+        out = out.replace(placeholder, current)
+    for kind in DEFAULT_EMAILS:
+        current = contacts.get(kind) or DEFAULT_EMAILS[kind]
+        for old in _contact_template_addresses(kind):
+            out = _apply_contact_replacement(out, old, current)
     return out
 
 

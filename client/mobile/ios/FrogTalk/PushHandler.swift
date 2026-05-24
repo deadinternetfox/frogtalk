@@ -90,7 +90,7 @@ final class PushHandler: NSObject {
             NSLog("[FrogTalk] uploadToken skipped: no session token yet")
             return
         }
-        guard var comps = URLComponents(string: "https://frogtalk.xyz/api/push/fcm-subscribe") else { return }
+        guard var comps = URLComponents(string: "https://frogtalk.app/api/push/fcm-subscribe") else { return }
         comps.queryItems = []
         guard let url = comps.url else { return }
 
@@ -120,7 +120,7 @@ final class PushHandler: NSObject {
     // MARK: - Decline (mirrors FcmBridge.kt declineCall)
     func declineCall(callId: String?, peerNick: String?) {
         guard let session = currentSessionToken() else { return }
-        guard let url = URL(string: "https://frogtalk.xyz/api/calls/decline") else { return }
+        guard let url = URL(string: "https://frogtalk.app/api/calls/decline") else { return }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")

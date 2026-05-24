@@ -114,7 +114,7 @@ async def api_documentation():
     return {
         "name": "FrogTalk External API",
         "version": "1.0",
-        "base_url": "https://frogtalk.xyz/api/external",
+        "base_url": "https://frogtalk.app/api/external",
         "authentication": {
             "type": "API Key",
             "header": "X-API-Key",

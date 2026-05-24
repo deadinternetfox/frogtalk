@@ -1,6 +1,6 @@
 /* FrogTalk — /ios */
 (() => {
-  const canonicalUrl = "https://frogtalk.xyz/ios";
+  const canonicalUrl = "https://frogtalk.app/ios";
   const pageUrl = encodeURIComponent(canonicalUrl);
   const pageText = encodeURIComponent("FrogTalk for iPhone is coming soon. Official launch page:");
   const buttons = [

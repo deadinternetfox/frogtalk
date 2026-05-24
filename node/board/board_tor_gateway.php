@@ -199,7 +199,7 @@ header('Cache-Control: no-store');
 
         <p class="gw-foot">
             FrogTalk · federated imageboard ·
-            <a href="https://frogtalk.xyz/" target="_blank" rel="noopener">frogtalk.xyz</a>
+            <a href="https://frogtalk.app/" target="_blank" rel="noopener">frogtalk.app</a>
         </p>
     </main>
 <script>

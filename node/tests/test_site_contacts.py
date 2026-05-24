@@ -33,6 +33,23 @@ class SiteContactsTests(unittest.TestCase):
             self.assertIn("sec@custom.test", out)
             self.assertNotIn("security@frogtalk.xyz", out)
 
+    def test_substitute_contacts_placeholder_and_app_default(self):
+        with mock.patch("site_contacts.resolve_site_contacts", return_value={
+            "security": "ops@node.test",
+            "privacy": "privacy@node.test",
+            "support": "help@node.test",
+            "vapid": DEFAULT_EMAILS["vapid"],
+        }):
+            src = (
+                "Email __FT_CONTACT_SECURITY__ or security@frogtalk.app — "
+                '<a href="mailto:__FT_CONTACT_PRIVACY__">__FT_CONTACT_PRIVACY__</a>'
+            )
+            out = substitute_contacts_in_text(src)
+            self.assertIn("ops@node.test", out)
+            self.assertIn('href="mailto:privacy@node.test"', out)
+            self.assertNotIn("__FT_CONTACT_", out)
+            self.assertNotIn("security@frogtalk.app", out)
+
     def test_vapid_claims_uses_resolver(self):
         with mock.patch("site_contacts.resolve_contact_email", return_value="push@node.test"):
             self.assertEqual(vapid_claims(), {"sub": "mailto:push@node.test"})

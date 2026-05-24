@@ -2061,6 +2061,8 @@ try {{
 async def api_ping(request: Request):
     """Lightweight health probe used by the client connection-lost overlay."""
     from fastapi.responses import JSONResponse
+    from site_contacts import resolve_site_contacts
+
     base = _site_url(request)
     return JSONResponse(
         {
@@ -2068,6 +2070,7 @@ async def api_ping(request: Request):
             "public_url": base,
             "public_host": resolve_public_site_host(request=request),
             "official_hub_url": official_hub_url(),
+            "contacts": resolve_site_contacts(),
         },
         headers={"Cache-Control": "no-store"},
     )

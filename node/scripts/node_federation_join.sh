@@ -22,7 +22,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/cli.sh"
 
 INSTALL_DIR_DEFAULT="/opt/frogtalk"
-OFFICIAL_DIRECTORY_DEFAULT="https://frogtalk.xyz/api/network/servers"
+OFFICIAL_DIRECTORY_DEFAULT="https://frogtalk.app/api/network/servers"
 ENV_FILE_NAME=".env"
 
 INSTALL_DIR=""
@@ -61,7 +61,7 @@ ${C_DIM}Options:${C_RESET}
   --install-dir PATH   Install root (default: ${INSTALL_DIR_DEFAULT})
   --public-url URL     Set PUBLIC_URL / federation.base_url
   --onion-url URL      Set FROGTALK_ONION_URL (enables Tor mode)
-  --directory-url URL  Official directory feed (default: frogtalk.xyz)
+  --directory-url URL  Official directory feed (default: frogtalk.app)
   -y, --yes            Non-interactive; accept defaults
   --dry-run            Show planned changes only
   --skip-board         Skip imageboard peer linking
@@ -268,12 +268,12 @@ from routers import federation as fed
 
 init_db()
 
-# Last-resort mesh rows when directory HTTP is down (frogtalk.xyz production pair).
+# Last-resort mesh rows when directory HTTP is down (frogtalk.app production pair).
 FALLBACK_PEERS = [
     {
         "server_id": "srv_ee3f0ff0c6e74fadb542",
         "display_name": "FrogTalk Main",
-        "base_url": "https://frogtalk.xyz",
+        "base_url": "https://frogtalk.app",
         "onion_url": "",
         "capabilities": ["federation-v1"],
     },
@@ -447,7 +447,7 @@ announce_hub_listing() {
     HUB_ANNOUNCE_OK=0
     HUB_ANNOUNCE_VERIFIED=0
     HUB_ANNOUNCE_MSG="not configured"
-    warn "FROGTALK_FEDERATION_TOKEN is empty — this node will not appear on frogtalk.xyz until the same token is set here and on FrogTalk Main, then federation join is re-run."
+    warn "FROGTALK_FEDERATION_TOKEN is empty — this node will not appear on frogtalk.app until the same token is set here and on FrogTalk Main, then federation join is re-run."
     return 0
   fi
 
@@ -520,8 +520,8 @@ PY
   if [[ "$ann_ok" == "1" && "$ann_reg" == "1" && "$ann_ver" == "1" ]]; then
     HUB_ANNOUNCE_OK=1
     HUB_ANNOUNCE_VERIFIED=1
-    HUB_ANNOUNCE_MSG="registered on frogtalk.xyz"
-    ok "Hub listing: registered on frogtalk.xyz (verified in directory feed)"
+    HUB_ANNOUNCE_MSG="registered on frogtalk.app"
+    ok "Hub listing: registered on frogtalk.app (verified in directory feed)"
     local disp
     disp="$(printf '%s' "$ann_json" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('display_name',''))" 2>/dev/null || echo "")"
     [[ -n "$disp" ]] && detail "Listed as: ${C_DIM}${disp}${C_RESET}"
@@ -711,7 +711,7 @@ print_summary() {
   say "  ${C_BOLD}Summary${C_RESET}"
   say "    ${C_GREEN}Chat${C_RESET}   directory import: ${CHAT_IMPORTED:-0} / ${CHAT_TOTAL:-0} servers"
   if [[ "${HUB_ANNOUNCE_VERIFIED:-0}" -eq 1 ]]; then
-    say "    ${C_GREEN}Hub${C_RESET}    listing: ${HUB_ANNOUNCE_MSG:-registered on frogtalk.xyz}"
+    say "    ${C_GREEN}Hub${C_RESET}    listing: ${HUB_ANNOUNCE_MSG:-registered on frogtalk.app}"
   elif [[ -n "${HUB_ANNOUNCE_MSG:-}" ]]; then
     say "    ${C_YELLOW}Hub${C_RESET}    listing: ${HUB_ANNOUNCE_MSG}"
   else

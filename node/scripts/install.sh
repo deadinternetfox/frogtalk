@@ -192,7 +192,7 @@ show_menu() {
   clear 2>/dev/null || true
   ft_banner "FrogTalk Node Installer" "$INSTALL_DIR"
   ft_say "  ${C_CYAN}1)${C_RESET}  Setup        — venv, .env, symlinks"
-  ft_say "  ${C_CYAN}2)${C_RESET}  Federation   — join frogtalk.xyz mesh"
+  ft_say "  ${C_CYAN}2)${C_RESET}  Federation   — join frogtalk.app mesh"
   ft_say "  ${C_CYAN}3)${C_RESET}  Update       — check for new commits"
   ft_say "  ${C_CYAN}4)${C_RESET}  Apply update — git pull + restart"
   ft_say "  ${C_CYAN}5)${C_RESET}  systemd      — install service unit"

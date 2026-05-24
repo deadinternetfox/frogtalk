@@ -13,7 +13,7 @@ object FcmBridge {
     private const val PREF_SESSION_TOKEN = "session_token"
     private const val PREF_SERVER_BASE_URL = "server_base_url"
     private const val PREF_LAST_TOKEN_SYNC = "last_fcm_token_sync_at"
-    private const val DEFAULT_API = "https://frogtalk.xyz"
+    private const val DEFAULT_API = "https://frogtalk.app"
 
     private fun apiBase(context: Context): String {
         val custom = try {

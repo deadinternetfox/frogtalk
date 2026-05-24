@@ -16,8 +16,8 @@ final class ViewController: UIViewController {
 
     // ── Configuration ────────────────────────────────────────────────────────
     private static let serverBaseUrlKey = "server_base_url"
-    private static let officialServerInput = "frogtalk.xyz"
-    private let APP_URL  = "https://frogtalk.xyz/app"
+    private static let officialServerInput = "frogtalk.app"
+    private let APP_URL  = "https://frogtalk.app/app"
     private let WEB_CACHE_REV = "20260519-ios-shell-v1"
 
     // ── State ────────────────────────────────────────────────────────────────
@@ -175,7 +175,7 @@ final class ViewController: UIViewController {
         }
         let alert = UIAlertController(
             title: "Connect to your FrogTalk node",
-            message: "Most people use the official FrogTalk node at frogtalk.xyz — it is pre-filled below. Edit or replace it to use your own self-hosted server or any trusted community node.",
+            message: "Most people use the official FrogTalk node at frogtalk.app — it is pre-filled below. Edit or replace it to use your own self-hosted server or any trusted community node.",
             preferredStyle: .alert
         )
         alert.addTextField { tf in

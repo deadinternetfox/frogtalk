@@ -768,7 +768,7 @@ def _env(name: str, default: str | None = None) -> str | None:
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     p = argparse.ArgumentParser(description="RunPod-powered FrogTalk chat bot")
-    p.add_argument("--server-url", default=_env("FROGTALK_SERVER", "https://frogtalk.xyz"))
+    p.add_argument("--server-url", default=_env("FROGTALK_SERVER", "https://frogtalk.app"))
     p.add_argument("--bot-token", default=_env("FROGTALK_BOT_TOKEN"))
     p.add_argument("--bot-name", default=_env("FROGTALK_BOT_NAME"))
     p.add_argument("--channels", default=_env("FROGTALK_CHANNELS", ""),

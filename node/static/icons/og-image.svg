@@ -67,7 +67,7 @@
   </g>
   
   <!-- URL -->
-  <text x="420" y="500" font-family="system-ui" font-size="28" fill="#666">frogtalk.xyz</text>
+  <text x="420" y="500" font-family="system-ui" font-size="28" fill="#666">frogtalk.app</text>
   
   <!-- Corner accent -->
   <path d="M1200 0 L1200 80 L1120 0 Z" fill="#4caf50" opacity="0.3"/>

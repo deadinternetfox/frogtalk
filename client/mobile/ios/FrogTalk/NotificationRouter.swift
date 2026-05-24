@@ -32,7 +32,7 @@ final class NotificationRouter: NSObject, UNUserNotificationCenterDelegate {
         if let urlStr = info["url"] as? String, let url = URL(string: urlStr) {
             ViewController.shared?.loadRequestedURL(url)
         } else if let path = info["path"] as? String,
-                  let url = URL(string: "https://frogtalk.xyz" + path) {
+                  let url = URL(string: "https://frogtalk.app" + path) {
             ViewController.shared?.loadRequestedURL(url)
         }
         completionHandler()

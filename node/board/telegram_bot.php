@@ -67,7 +67,7 @@ class PeasantHuntTelegramBot {
                  . "🌐 *IP Hash:* `" . substr($ipHash, 0, 12) . "...`\n"
                  . "━━━━━━━━━━━━━━━━━━━━━\n\n"
                  . "💡 _Decrypt:_ `php decrypt_tips.js`\n"
-                 . "🔗 [Dashboard](https://frogtalk.xyz/)";
+                 . "🔗 [Dashboard](https://frogtalk.app/)";
         
         return $this->sendMessage($message, 'Markdown');
     }
@@ -103,7 +103,7 @@ class PeasantHuntTelegramBot {
                  . "━━━━━━━━━━━━━━━━━━━━━\n\n"
                  . "💬 _{$preview}_\n\n"
                  . "📊 Total threads: {$totalThreads}\n"
-                 . "🔗 [View Thread](https://frogtalk.xyz/board?thread={$threadId})";
+                 . "🔗 [View Thread](https://frogtalk.app/board?thread={$threadId})";
         
         $msgId = null;
         
@@ -177,7 +177,7 @@ class PeasantHuntTelegramBot {
                  . "━━━━━━━━━━━━━━━━━━━━━\n\n"
                  . "💬 _{$preview}_\n\n"
                  . "📊 Total threads: {$total}\n"
-                 . "🔗 [View Thread](https://frogtalk.xyz/board?thread={$threadId})";
+                 . "🔗 [View Thread](https://frogtalk.app/board?thread={$threadId})";
         
         // Delete placeholder, then send photo
         $this->deleteMessage($oldMsgId);
@@ -361,7 +361,7 @@ class PeasantHuntTelegramBot {
         $msg .= "🔗 Tx: `" . $txHash . "`\n";
         $msg .= "[View on Solscan](https://solscan.io/tx/" . $txHash . ")\n\n";
         $msg .= "✅ *Purchase a Prezzy Virtual Visa for NZD \\$" . number_format($cardAmount, 2) . " and email the card code to the address above.*\n";
-        $msg .= "[Treasury Admin](https://frogtalk.xyz/treasury?admin_orders=1)";
+        $msg .= "[Treasury Admin](https://frogtalk.app/treasury?admin_orders=1)";
         $ok = $this->sendMessage($msg, 'Markdown');
         // Also DM admin personally
         $this->sendAdminDm($msg, 'Markdown');
@@ -389,7 +389,7 @@ class PeasantHuntTelegramBot {
         $msg .= "🔗 Tx: `" . $txHash . "`\n";
         $msg .= "[View on Solscan](https://solscan.io/tx/" . $txHash . ")\n\n";
         $msg .= "✅ *Process bank transfer of " . $currency . " " . $fiatFmt . " to the destination above.*\n";
-        $msg .= "[Treasury Admin](https://frogtalk.xyz/treasury)";
+        $msg .= "[Treasury Admin](https://frogtalk.app/treasury)";
         $ok = $this->sendMessage($msg, 'Markdown');
         // Also DM admin personally
         $this->sendAdminDm($msg, 'Markdown');

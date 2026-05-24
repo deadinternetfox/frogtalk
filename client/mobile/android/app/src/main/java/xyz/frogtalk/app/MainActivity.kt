@@ -38,10 +38,10 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val TAG = "FrogTalk"
-        private const val APP_URL = "https://frogtalk.xyz/app"
+        private const val APP_URL = "https://frogtalk.app/app"
         private const val SETUP_ASSET_URL = "file:///android_asset/mobile_node_setup.html"
         /** Pre-filled in the first-run setup wizard. */
-        private const val OFFICIAL_SERVER_INPUT = "frogtalk.xyz"
+        private const val OFFICIAL_SERVER_INPUT = "frogtalk.app"
         private const val WEB_CACHE_REV = "20260522-fed-sync-v241"
         private const val PREFS = "frogtalk_prefs"
         private const val PREF_SERVER_BASE_URL = "server_base_url"

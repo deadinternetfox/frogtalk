@@ -7,7 +7,7 @@ It uses the FrogTalk API with a bot token for authentication.
 Environment variables:
 - TELEGRAM_BOT_TOKEN: Your Telegram bot token from @BotFather
 - FROGTALK_BOT_TOKEN: Your FrogTalk bot API key (e.g., bot_xxxx)
-- FROGTALK_API_URL: FrogTalk server URL (default: https://frogtalk.xyz)
+- FROGTALK_API_URL: FrogTalk server URL (default: https://frogtalk.app)
 
 Setup:
 1. Create a bot in FrogTalk developer settings
@@ -41,7 +41,7 @@ logger = logging.getLogger(__name__)
 # Configuration
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 FROGTALK_TOKEN = os.getenv("FROGTALK_BOT_TOKEN", "")
-FROGTALK_URL = os.getenv("FROGTALK_API_URL", "https://frogtalk.xyz")
+FROGTALK_URL = os.getenv("FROGTALK_API_URL", "https://frogtalk.app")
 
 # Bridge mappings: Telegram chat_id <-> FrogTalk room_name
 BRIDGE_CONFIG_FILE = "telegram_bridge_config.json"
