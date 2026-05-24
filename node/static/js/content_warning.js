@@ -67,6 +67,40 @@
     return false;
   }
 
+  function _lockComposer() {
+    try { document.body.classList.add('cw-composer-locked'); } catch {}
+    const input = _el('msg-input');
+    const inputArea = _el('input-area');
+    if (input) {
+      input.setAttribute('readonly', 'readonly');
+      input.setAttribute('aria-disabled', 'true');
+    }
+    if (inputArea) inputArea.setAttribute('aria-disabled', 'true');
+  }
+
+  function _unlockComposer() {
+    try { document.body.classList.remove('cw-composer-locked'); } catch {}
+    const input = _el('msg-input');
+    const inputArea = _el('input-area');
+    if (input) {
+      input.removeAttribute('readonly');
+      input.removeAttribute('aria-disabled');
+    }
+    if (inputArea) inputArea.removeAttribute('aria-disabled');
+  }
+
+  function _setChatGated(on) {
+    const area = _el('messages-area');
+    if (!area) return;
+    if (on) area.classList.add('cw-chat-gated');
+    else area.classList.remove('cw-chat-gated');
+  }
+
+  function _preflightInline() {
+    _lockComposer();
+    _setChatGated(true);
+  }
+
   async function _fetchStatus(roomName) {
     const name = String(roomName || '').trim().toLowerCase();
     if (!name || !window.State || !State.token) return null;
@@ -95,12 +129,8 @@
   function _removeOverlay() {
     const el = _el(OVERLAY_ID);
     if (el) el.remove();
-  }
-
-  function _clearRoomCache(roomName) {
-    try {
-      if (window.State && State.messages) State.messages[roomName] = [];
-    } catch {}
+    _setChatGated(false);
+    _unlockComposer();
   }
 
   function showDeclinedScreen(roomName) {
@@ -116,9 +146,7 @@
       'This channel is marked for mature audiences.</p></div>';
   }
 
-  function _showGate(roomName, meta, resolve) {
-    _removeOverlay();
-    _clearRoomCache(roomName);
+  function _gateCardHtml(meta) {
     const flags = (meta && meta.flags) || [];
     const items = formatFlags(flags);
     const listHtml = items.length
@@ -128,24 +156,38 @@
         ).join('') + '</ul>'
       : '<p class="cw-gate-flags-empty">This channel is marked for mature audiences.</p>';
 
-    const overlay = document.createElement('div');
-    overlay.id = OVERLAY_ID;
-    overlay.className = 'cw-gate-overlay';
-    overlay.setAttribute('role', 'dialog');
-    overlay.setAttribute('aria-modal', 'true');
-    overlay.innerHTML =
+    return (
       '<div class="cw-gate-card">' +
       '<div class="cw-gate-badge" aria-hidden="true">18+</div>' +
       '<h2 class="cw-gate-title">18+ content warning</h2>' +
-      '<p class="cw-gate-lead">This channel may contain mature content flagged as:</p>' +
+      '<p class="cw-gate-lead">This channel may contain mature content such as:</p>' +
       listHtml +
       '<p class="cw-gate-confirm">Are you <strong>18 years of age or older</strong>?</p>' +
       '<div class="cw-gate-actions">' +
       '<button type="button" class="modal-btn secondary" id="cw-gate-back">Go back</button>' +
       '<button type="button" class="modal-btn primary" id="cw-gate-enter">I am 18 or older — enter</button>' +
-      '</div></div>';
+      '</div></div>'
+    );
+  }
 
-    document.body.appendChild(overlay);
+  function _showGate(roomName, meta, resolve) {
+    _removeOverlay();
+    _lockComposer();
+    _setChatGated(true);
+
+    const area = _el('messages-area');
+    if (!area) {
+      resolve(false);
+      return;
+    }
+
+    const overlay = document.createElement('div');
+    overlay.id = OVERLAY_ID;
+    overlay.className = 'cw-gate-inline';
+    overlay.innerHTML =
+      '<div class="cw-gate-inline-backdrop" aria-hidden="true"></div>' +
+      '<div class="cw-gate-banner">' + _gateCardHtml(meta) + '</div>';
+    area.appendChild(overlay);
 
     const onBack = () => {
       _removeOverlay();
@@ -215,7 +257,6 @@
         headers: { 'X-Session-Token': State.token },
       });
     } catch {}
-    _clearRoomCache(name);
   }
 
   async function prepareRoomEntry(roomName) {
@@ -225,7 +266,7 @@
     await forgetAck(name);
   }
 
-  /** Call after switchToRoom commits — not when gate overlay resolves. */
+  /** Call after switchToRoom commits and the user passes the gate. */
   function markVisitAcked(roomName) {
     const name = String(roomName || '').trim().toLowerCase();
     if (name && !name.startsWith('dm:')) _visitAcked.add(name);
@@ -246,6 +287,8 @@
       const knownMarked = _cwEnabled(knownCw);
       const localMarked = _cwEnabled(localCw);
 
+      if (knownMarked || localMarked) _preflightInline();
+
       const hasToken = await _waitForToken(options.tokenWaitMs || 8000);
       const displayMeta = _mergeCwMeta(knownCw, localCw);
 
@@ -255,6 +298,7 @@
             _showGate(name, displayMeta, resolve);
           });
         }
+        _removeOverlay();
         return true;
       }
 
@@ -277,8 +321,12 @@
         shouldGate = true;
       }
 
-      if (!shouldGate) return true;
+      if (!shouldGate) {
+        _removeOverlay();
+        return true;
+      }
 
+      _preflightInline();
       return await new Promise((resolve) => {
         _showGate(name, resolvedMeta, resolve);
       });
@@ -287,19 +335,7 @@
 
   function _lockRoomUntilAck(room) {
     try {
-      _clearRoomCache(room);
-      if (typeof showChatTransition === 'function') {
-        showChatTransition(room, 'public', null, 'open');
-      } else {
-        const area = _el('messages-area');
-        if (area) {
-          area.innerHTML =
-            '<div style="display:flex;align-items:center;justify-content:center;min-height:200px;color:#888;font-size:13px">18+ confirmation required…</div>';
-        }
-      }
-      if (typeof WS !== 'undefined' && WS.disconnect) {
-        try { WS.disconnect(); } catch {}
-      }
+      _preflightInline();
     } catch {}
   }
 
@@ -383,5 +419,6 @@
     handleWsRequired,
     showDeclinedScreen,
     badgeHtml,
+    unlockUi: _removeOverlay,
   };
 })();

@@ -1242,6 +1242,9 @@ const Rooms = (() => {
 
     try { delete State._roomSwitchInProgress; } catch {}
     clearChatTransition();
+    if (window.ContentWarning?.unlockUi) {
+      try { ContentWarning.unlockUi(); } catch {}
+    }
     try { WS?.disconnect?.(); } catch {}
     try {
       const lastRaw = localStorage.getItem('fc_last_room');
@@ -1405,18 +1408,6 @@ const Rooms = (() => {
       if (window.ContentWarning?.prepareRoomEntry) {
         try { await ContentWarning.prepareRoomEntry(name); } catch {}
       }
-      if (window.ContentWarning && typeof ContentWarning.gate === 'function') {
-        const cwOk = await ContentWarning.gate(name, {
-          tokenWaitMs: 8000,
-          knownCw: opts.knownCw,
-        });
-        if (!cwOk) {
-          ++_switchSeq;
-          try { UI.showToast(`You must confirm you are 18+ to enter #${name}`, 'info'); } catch {}
-          await _handleCwDecline(name, { prevRoom, prevType, leaveChannel: opts.leaveOnCwDecline !== false });
-          return;
-        }
-      }
     }
 
     if (switchToken !== _switchSeq) return;
@@ -1445,9 +1436,6 @@ const Rooms = (() => {
     State.currentRoom = name;
     State.currentRoomType = type;
     State.dmPeer = dmPeer;
-    if (type !== 'dm' && type !== 'private' && window.ContentWarning?.markVisitAcked) {
-      try { ContentWarning.markVisitAcked(name); } catch {}
-    }
     try {
       if (typeof UI !== 'undefined' && UI.updateTypingBar) UI.updateTypingBar();
     } catch {}
@@ -1674,6 +1662,25 @@ const Rooms = (() => {
         try { Messages.loadHistory(name, State.messages[name].slice()); } catch {}
       } else {
         showChatTransition(name, type, dmPeer, 'load');
+      }
+    }
+
+    if (type !== 'dm' && type !== 'private') {
+      clearChatTransition();
+      if (window.ContentWarning?.gate) {
+        const cwOk = await ContentWarning.gate(name, {
+          tokenWaitMs: 8000,
+          knownCw: opts.knownCw,
+        });
+        if (!cwOk) {
+          ++_switchSeq;
+          try { UI.showToast(`You must confirm you are 18+ to enter #${name}`, 'info'); } catch {}
+          await _handleCwDecline(name, { prevRoom, prevType, leaveChannel: opts.leaveOnCwDecline !== false });
+          return;
+        }
+      }
+      if (window.ContentWarning?.markVisitAcked) {
+        try { ContentWarning.markVisitAcked(name); } catch {}
       }
     }
     

@@ -722,16 +722,87 @@
   -webkit-backdrop-filter: blur(10px);
 }
 
+/* In-chat gate: blurred history + bottom confirm banner */
+#messages-area.cw-chat-gated {
+  position: relative;
+  overflow: hidden;
+}
+
+#messages-area.cw-chat-gated > :not(.cw-gate-inline) {
+  filter: blur(16px) saturate(0.75) brightness(0.72);
+  pointer-events: none;
+  user-select: none;
+  transform: scale(1.02);
+  transform-origin: center center;
+}
+
+.cw-gate-inline {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  pointer-events: none;
+}
+
+.cw-gate-inline-backdrop {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--bg-color) 55%, transparent) 0%,
+    color-mix(in srgb, var(--bg-color) 78%, black) 55%,
+    color-mix(in srgb, var(--bg-color) 88%, black) 100%
+  );
+  pointer-events: none;
+}
+
+.cw-gate-banner {
+  position: relative;
+  z-index: 1;
+  margin: 12px 14px 16px;
+  pointer-events: auto;
+  animation: cwGateBannerIn 0.22s ease-out;
+}
+
+@keyframes cwGateBannerIn {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+body.cw-composer-locked #input-area {
+  opacity: 0.45;
+  pointer-events: none;
+  filter: grayscale(0.35);
+}
+
+body.cw-composer-locked #typing-bar {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+body.cw-composer-locked #msg-input {
+  cursor: not-allowed;
+}
+
 .cw-gate-card {
   width: min(420px, 100%);
-  padding: 28px 24px 22px;
+  margin: 0 auto;
+  padding: 22px 20px 18px;
   border-radius: 14px;
   background: linear-gradient(165deg,
-    color-mix(in srgb, var(--accent-color) 12%, var(--surface-color)) 0%,
-    color-mix(in srgb, var(--accent-color) 6%, var(--bg-deeper)) 100%);
-  border: 1px solid color-mix(in srgb, var(--accent-color) 28%, var(--border-color));
-  box-shadow: 0 24px 64px color-mix(in srgb, var(--bg-color) 55%, black),
-    0 0 0 1px color-mix(in srgb, var(--accent-color) 10%, transparent) inset;
+    color-mix(in srgb, var(--accent-color) 14%, var(--surface-color)) 0%,
+    color-mix(in srgb, var(--accent-color) 8%, var(--bg-deeper)) 100%);
+  border: 1px solid color-mix(in srgb, var(--accent-color) 32%, var(--border-color));
+  box-shadow: 0 16px 48px color-mix(in srgb, var(--bg-color) 60%, black),
+    0 0 0 1px color-mix(in srgb, var(--accent-color) 12%, transparent) inset;
   text-align: center;
 }
 
@@ -798,7 +869,7 @@
 .cw-gate-actions {
   display: flex;
   gap: 10px;
-  margin-top: 18px;
+  margin-top: 14px;
 }
 
 .cw-gate-actions .modal-btn {
