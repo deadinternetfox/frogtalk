@@ -734,6 +734,13 @@
   user-select: none;
   transform: scale(1.015);
   transform-origin: center center;
+  transition: filter 0.42s ease, transform 0.42s ease, opacity 0.35s ease;
+}
+
+#messages-area.cw-unlocking .cw-chat-content {
+  filter: blur(0) saturate(1) brightness(1);
+  transform: scale(1);
+  opacity: 1;
 }
 
 #messages-area.cw-chat-gated .cw-chat-loading,
@@ -767,6 +774,22 @@
   flex-direction: column;
   justify-content: flex-end;
   pointer-events: none;
+  animation: cwGateOverlayIn 0.28s ease-out;
+}
+
+@keyframes cwGateOverlayIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.cw-gate-inline.cw-gate-dismiss {
+  animation: cwGateOverlayOut 0.38s ease-in forwards;
+  pointer-events: none;
+}
+
+@keyframes cwGateOverlayOut {
+  from { opacity: 1; }
+  to { opacity: 0; }
 }
 
 .cw-gate-inline-backdrop {
@@ -779,6 +802,12 @@
     color-mix(in srgb, var(--bg-color) 88%, black) 100%
   );
   pointer-events: none;
+  animation: cwGateBackdropIn 0.32s ease-out;
+}
+
+@keyframes cwGateBackdropIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 .cw-gate-banner {
@@ -786,13 +815,17 @@
   z-index: 1;
   margin: 12px 14px 16px;
   pointer-events: auto;
-  animation: cwGateBannerIn 0.22s ease-out;
+  animation: cwGateBannerIn 0.34s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.cw-gate-inline.cw-gate-dismiss .cw-gate-banner {
+  animation: cwGateBannerOut 0.32s ease-in forwards;
 }
 
 @keyframes cwGateBannerIn {
   from {
     opacity: 0;
-    transform: translateY(12px);
+    transform: translateY(24px) scale(0.97);
   }
   to {
     opacity: 1;
@@ -800,15 +833,28 @@
   }
 }
 
+@keyframes cwGateBannerOut {
+  from {
+    opacity: 1;
+    transform: none;
+  }
+  to {
+    opacity: 0;
+    transform: translateY(16px) scale(0.98);
+  }
+}
+
 body.cw-composer-locked #input-area {
   opacity: 0.45;
   pointer-events: none;
   filter: grayscale(0.35);
+  transition: opacity 0.28s ease, filter 0.28s ease;
 }
 
 body.cw-composer-locked #typing-bar {
   opacity: 0.5;
   pointer-events: none;
+  transition: opacity 0.28s ease;
 }
 
 body.cw-composer-locked #msg-input {
@@ -842,6 +888,16 @@ body.cw-composer-locked #msg-input {
   color: color-mix(in srgb, #ff8080 75%, var(--accent-color));
   background: color-mix(in srgb, #dc3c3c 16%, var(--surface-color));
   border: 1px solid color-mix(in srgb, #ff6464 38%, var(--border-color));
+  animation: cwGateBadgePulse 2.4s ease-in-out infinite;
+}
+
+@keyframes cwGateBadgePulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, #ff6464 0%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 6px color-mix(in srgb, #ff6464 18%, transparent);
+  }
 }
 
 .cw-gate-title {
@@ -898,6 +954,48 @@ body.cw-composer-locked #msg-input {
 .cw-gate-actions .modal-btn {
   flex: 1;
   margin: 0;
+}
+
+#cw-gate-enter.cw-gate-enter-loading {
+  position: relative;
+  pointer-events: none;
+}
+
+#cw-gate-enter.cw-gate-enter-loading .cw-gate-btn-label {
+  opacity: 0.85;
+}
+
+#cw-gate-enter.cw-gate-enter-loading::after {
+  content: '';
+  position: absolute;
+  right: 14px;
+  top: 50%;
+  width: 14px;
+  height: 14px;
+  margin-top: -7px;
+  border: 2px solid color-mix(in srgb, var(--text-color) 25%, transparent);
+  border-top-color: var(--text-color);
+  border-radius: 50%;
+  animation: cwGateBtnSpin 0.65s linear infinite;
+}
+
+@keyframes cwGateBtnSpin {
+  to { transform: rotate(360deg); }
+}
+
+.cw-declined-enter {
+  animation: cwDeclinedIn 0.4s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes cwDeclinedIn {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
 .cw-declined-screen {

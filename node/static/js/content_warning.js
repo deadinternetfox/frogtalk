@@ -6,6 +6,7 @@
 
   const OVERLAY_ID = 'ft-content-warning-gate';
   const CHAT_CONTENT_ID = 'cw-chat-content';
+  const UNLOCK_MS = 420;
   const FLAG_META = {
     nudity: { label: 'Nudity / sexual content', desc: 'May contain nudity or sexual themes' },
     violence: { label: 'Violence', desc: 'May contain graphic violence' },
@@ -15,6 +16,8 @@
 
   /** Rooms acked during the current in-app visit (cleared on prepareRoomEntry). */
   const _visitAcked = new Set();
+  /** One in-flight gate() promise per room — prevents duplicate overlays. */
+  const _gateInflight = new Map();
 
   function _el(id) { return document.getElementById(id); }
 
@@ -68,6 +71,11 @@
     return false;
   }
 
+  function isGateActive(roomName) {
+    const name = String(roomName || '').trim().toLowerCase();
+    return !!_el(OVERLAY_ID) || (name && _gateInflight.has(name));
+  }
+
   function _lockComposer() {
     try { document.body.classList.add('cw-composer-locked'); } catch {}
     const input = _el('msg-input');
@@ -94,7 +102,7 @@
     const area = _el('messages-area');
     if (!area) return;
     if (on) area.classList.add('cw-chat-gated');
-    else area.classList.remove('cw-chat-gated');
+    else area.classList.remove('cw-chat-gated', 'cw-unlocking');
   }
 
   /** Blur target for messages — keeps loading UI and gate banner sharp. */
@@ -127,17 +135,32 @@
     return area.querySelector('#' + CHAT_CONTENT_ID) || area;
   }
 
-  function finishChannelUnlock(roomName) {
+  async function finishChannelUnlock(roomName, opts) {
+    const options = opts && typeof opts === 'object' ? opts : {};
     const name = String(roomName || '').trim().toLowerCase();
     markVisitAcked(name);
+
+    const area = _el('messages-area');
+    const overlay = _el(OVERLAY_ID);
+
+    if (area && overlay) {
+      area.classList.add('cw-unlocking');
+      overlay.classList.add('cw-gate-dismiss');
+      await new Promise((r) => setTimeout(r, UNLOCK_MS));
+    }
+
     _removeOverlay();
+
     try {
       if (typeof clearChatTransition === 'function') clearChatTransition();
     } catch {}
-    try {
-      if (typeof WS !== 'undefined' && WS.resetHistoryCache) WS.resetHistoryCache(name);
-      if (typeof WS !== 'undefined' && WS.connect) WS.connect(name, { force: true });
-    } catch {}
+
+    if (options.connectWs !== false) {
+      try {
+        if (typeof WS !== 'undefined' && WS.resetHistoryCache) WS.resetHistoryCache(name);
+        if (typeof WS !== 'undefined' && WS.connect) WS.connect(name, { force: true });
+      } catch {}
+    }
   }
 
   function _preflightInline() {
@@ -184,7 +207,7 @@
     if (!area) return;
     const name = escapeHtml(roomName || 'this channel');
     area.innerHTML =
-      '<div class="cw-declined-screen">' +
+      '<div class="cw-declined-screen cw-declined-enter">' +
       '<div class="cw-declined-icon" aria-hidden="true">🔞</div>' +
       '<div class="cw-declined-title">18+ only</div>' +
       '<p class="cw-declined-text">You must be 18 or older to view <strong>#' + name + '</strong>. ' +
@@ -204,84 +227,122 @@
     return (
       '<div class="cw-gate-card">' +
       '<div class="cw-gate-badge" aria-hidden="true">18+</div>' +
-      '<h2 class="cw-gate-title">18+ content warning</h2>' +
+      '<h2 class="cw-gate-title" id="cw-gate-title">18+ content warning</h2>' +
       '<p class="cw-gate-lead">This channel may contain mature content such as:</p>' +
       listHtml +
       '<p class="cw-gate-confirm">Are you <strong>18 years of age or older</strong>?</p>' +
       '<div class="cw-gate-actions">' +
-      '<button type="button" class="modal-btn secondary" id="cw-gate-back">Go back</button>' +
-      '<button type="button" class="modal-btn primary" id="cw-gate-enter">I am 18 or older — enter</button>' +
+      '<button type="button" class="modal-btn secondary" id="cw-gate-back">I&rsquo;m under 18 — go back</button>' +
+      '<button type="button" class="modal-btn primary" id="cw-gate-enter">' +
+      '<span class="cw-gate-btn-label">I am 18 or older — enter</span></button>' +
       '</div></div>'
     );
   }
 
-  function _showGate(roomName, meta, resolve) {
-    _lockComposer();
-    _setChatGated(true);
+  function _showGate(roomName, meta) {
+    return new Promise((resolve) => {
+      _lockComposer();
+      _setChatGated(true);
 
-    const area = _el('messages-area');
-    if (!area) {
-      resolve(false);
-      return;
-    }
-    ensureChatShell(area);
-    const existing = _el(OVERLAY_ID);
-    if (existing) existing.remove();
-
-    const overlay = document.createElement('div');
-    overlay.id = OVERLAY_ID;
-    overlay.className = 'cw-gate-inline';
-    overlay.innerHTML =
-      '<div class="cw-gate-inline-backdrop" aria-hidden="true"></div>' +
-      '<div class="cw-gate-banner">' + _gateCardHtml(meta) + '</div>';
-    area.appendChild(overlay);
-
-    const onBack = () => {
-      _removeOverlay();
-      resolve(false);
-    };
-    const onEnter = async () => {
-      const enterBtn = _el('cw-gate-enter');
-      if (enterBtn) {
-        enterBtn.disabled = true;
-        enterBtn.textContent = 'Confirming…';
+      const area = _el('messages-area');
+      if (!area) {
+        resolve(false);
+        return;
       }
-      try {
-        const r = await fetch(
-          '/api/rooms/' + encodeURIComponent(roomName) + '/content-warning/ack',
-          {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'X-Session-Token': (window.State && State.token) || '',
+      ensureChatShell(area);
+      const existing = _el(OVERLAY_ID);
+      if (existing) existing.remove();
+
+      const overlay = document.createElement('div');
+      overlay.id = OVERLAY_ID;
+      overlay.className = 'cw-gate-inline';
+      overlay.setAttribute('role', 'dialog');
+      overlay.setAttribute('aria-modal', 'true');
+      overlay.setAttribute('aria-labelledby', 'cw-gate-title');
+      overlay.innerHTML =
+        '<div class="cw-gate-inline-backdrop" aria-hidden="true"></div>' +
+        '<div class="cw-gate-banner">' + _gateCardHtml(meta) + '</div>';
+      area.appendChild(overlay);
+
+      let settled = false;
+      const finish = (ok) => {
+        if (settled) return;
+        settled = true;
+        document.removeEventListener('keydown', onKey);
+        resolve(ok);
+      };
+
+      const onBack = () => {
+        _removeOverlay();
+        finish(false);
+      };
+
+      const onEnter = async () => {
+        const enterBtn = _el('cw-gate-enter');
+        if (enterBtn?.disabled) return;
+        if (enterBtn) {
+          enterBtn.disabled = true;
+          enterBtn.classList.add('cw-gate-enter-loading');
+          const label = enterBtn.querySelector('.cw-gate-btn-label');
+          if (label) label.textContent = 'Confirming…';
+        }
+        try {
+          const r = await fetch(
+            '/api/rooms/' + encodeURIComponent(roomName) + '/content-warning/ack',
+            {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-Session-Token': (window.State && State.token) || '',
+              },
+              body: JSON.stringify({ confirm: true }),
             },
-            body: JSON.stringify({ confirm: true }),
-          },
-        );
-        if (!r.ok) {
-          const err = await r.json().catch(() => ({}));
-          if (window.UI && UI.showToast) {
-            UI.showToast(err.error || 'Could not confirm age', 'error');
+          );
+          if (!r.ok) {
+            const err = await r.json().catch(() => ({}));
+            if (window.UI && UI.showToast) {
+              UI.showToast(err.error || 'Could not confirm age', 'error');
+            }
+            if (enterBtn) {
+              enterBtn.disabled = false;
+              enterBtn.classList.remove('cw-gate-enter-loading');
+              const label = enterBtn.querySelector('.cw-gate-btn-label');
+              if (label) label.textContent = 'I am 18 or older — enter';
+            }
+            return;
           }
+          await finishChannelUnlock(roomName);
+          finish(true);
+        } catch {
           if (enterBtn) {
             enterBtn.disabled = false;
-            enterBtn.textContent = 'I am 18 or older — enter';
+            enterBtn.classList.remove('cw-gate-enter-loading');
+            const label = enterBtn.querySelector('.cw-gate-btn-label');
+            if (label) label.textContent = 'I am 18 or older — enter';
           }
-          return;
+          if (window.UI && UI.showToast) UI.showToast('Network error', 'error');
         }
-        finishChannelUnlock(roomName);
-        resolve(true);
-      } catch {
-        if (enterBtn) {
-          enterBtn.disabled = false;
-          enterBtn.textContent = 'I am 18 or older — enter';
-        }
-        if (window.UI && UI.showToast) UI.showToast('Network error', 'error');
-      }
-    };
+      };
 
-    _el('cw-gate-back').onclick = onBack;
-    _el('cw-gate-enter').onclick = () => { void onEnter(); };
+      const onKey = (e) => {
+        if (settled) return;
+        if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+          e.preventDefault();
+          void onEnter();
+        } else if (e.key === 'Escape') {
+          e.preventDefault();
+          onBack();
+        }
+      };
+
+      document.addEventListener('keydown', onKey);
+      _el('cw-gate-back').onclick = onBack;
+      _el('cw-gate-enter').onclick = () => { void onEnter(); };
+
+      requestAnimationFrame(() => {
+        try { _el('cw-gate-enter')?.focus(); } catch {}
+      });
+    });
   }
 
   async function _waitForToken(maxMs) {
@@ -319,65 +380,74 @@
     if (name && !name.startsWith('dm:')) _visitAcked.add(name);
   }
 
+  async function _runGate(roomName, options) {
+    const name = String(roomName || '').trim().toLowerCase();
+    const knownCw = options.knownCw;
+    if (_cwEnabled(knownCw)) patchRoomCwMeta(name, knownCw);
+
+    if (_visitAcked.has(name) && !options.forceRecheck) return true;
+
+    const localCw = _roomMeta(name)?.content_warning;
+    const knownMarked = _cwEnabled(knownCw);
+    const localMarked = _cwEnabled(localCw);
+
+    if (knownMarked || localMarked) _preflightInline();
+
+    const hasToken = await _waitForToken(options.tokenWaitMs || 8000);
+    const displayMeta = _mergeCwMeta(knownCw, localCw);
+
+    if (!hasToken) {
+      if (knownMarked || localMarked) {
+        return _showGate(name, displayMeta);
+      }
+      _removeOverlay();
+      return true;
+    }
+
+    const status = await _fetchStatus(name);
+    const cwMeta = _mergeCwMeta(knownCw, localCw, status?.content_warning);
+    let resolvedMeta = cwMeta;
+    if (!_cwEnabled(resolvedMeta)) {
+      resolvedMeta = await resolveCwMeta(name, knownCw);
+    }
+
+    const metaMarked = _cwEnabled(resolvedMeta);
+    let shouldGate = false;
+
+    if (status && !status._failed) {
+      if (!status.required && !options.forceRecheck) {
+        _removeOverlay();
+        markVisitAcked(name);
+        return true;
+      }
+      shouldGate = !!status.required || (!!options.forceRecheck && metaMarked);
+    } else if (status && status._failed) {
+      shouldGate = knownMarked || localMarked || metaMarked;
+    } else if (status === null) {
+      shouldGate = knownMarked || localMarked || metaMarked;
+    }
+
+    if (!shouldGate) {
+      _removeOverlay();
+      return true;
+    }
+
+    _preflightInline();
+    return _showGate(name, resolvedMeta);
+  }
+
   function gate(roomName, opts) {
     const name = String(roomName || '').trim().toLowerCase();
     const options = opts || {};
     if (!name || name.startsWith('dm:')) return Promise.resolve(true);
 
-    return (async () => {
-      const knownCw = options.knownCw;
-      if (_cwEnabled(knownCw)) patchRoomCwMeta(name, knownCw);
+    if (_gateInflight.has(name)) return _gateInflight.get(name);
 
-      if (_visitAcked.has(name) && !options.forceRecheck) return true;
-
-      const localCw = _roomMeta(name)?.content_warning;
-      const knownMarked = _cwEnabled(knownCw);
-      const localMarked = _cwEnabled(localCw);
-
-      if (knownMarked || localMarked) _preflightInline();
-
-      const hasToken = await _waitForToken(options.tokenWaitMs || 8000);
-      const displayMeta = _mergeCwMeta(knownCw, localCw);
-
-      if (!hasToken) {
-        if (knownMarked || localMarked) {
-          return await new Promise((resolve) => {
-            _showGate(name, displayMeta, resolve);
-          });
-        }
-        _removeOverlay();
-        return true;
-      }
-
-      const status = await _fetchStatus(name);
-      const cwMeta = _mergeCwMeta(knownCw, localCw, status?.content_warning);
-      let resolvedMeta = cwMeta;
-      if (!_cwEnabled(resolvedMeta)) {
-        resolvedMeta = await resolveCwMeta(name, knownCw);
-      }
-
-      const statusRequired = !!(status && status.required);
-      const statusMarked = _cwEnabled(status?.content_warning);
-      const metaMarked = _cwEnabled(resolvedMeta);
-
-      let shouldGate = statusRequired || statusMarked || metaMarked || knownMarked || localMarked;
-      if (status && status._failed && (knownMarked || localMarked || metaMarked)) {
-        shouldGate = true;
-      }
-      if (status === null && (knownMarked || localMarked || metaMarked)) {
-        shouldGate = true;
-      }
-
-      if (!shouldGate) {
-        _removeOverlay();
-        return true;
-      }
-
-      _preflightInline();
-      return await new Promise((resolve) => {
-        _showGate(name, resolvedMeta, resolve);
-      });
-    })();
+    const p = _runGate(name, options).finally(() => {
+      _gateInflight.delete(name);
+    });
+    _gateInflight.set(name, p);
+    return p;
   }
 
   function _lockRoomUntilAck(room) {
@@ -386,19 +456,21 @@
     } catch {}
   }
 
-  function handleWsUpdate(data) {
+  function _handleWsGateEvent(data, forceRecheck) {
     const room = String((data && data.room) || '').trim().toLowerCase();
     if (!room) return;
-    const cw = data.content_warning || {};
-    if (!cw.enabled) {
+    const cw = (data && data.content_warning) || {};
+    if (forceRecheck && !cw.enabled) {
       _removeOverlay();
       return;
     }
-    patchRoomCwMeta(room, cw);
+    if (_cwEnabled(cw)) patchRoomCwMeta(room, cw);
     if (!_isViewingRoom(room)) return;
+    if (_el(OVERLAY_ID)) return;
+    if (_gateInflight.has(room)) return;
     _visitAcked.delete(room);
     _lockRoomUntilAck(room);
-    void gate(room, { knownCw: cw, forceRecheck: true }).then((ok) => {
+    void gate(room, { knownCw: cw, forceRecheck: !!forceRecheck }).then((ok) => {
       if (!ok) {
         try {
           if (window.Rooms && typeof Rooms.handleCwDecline === 'function') {
@@ -411,25 +483,12 @@
     });
   }
 
+  function handleWsUpdate(data) {
+    _handleWsGateEvent(data, true);
+  }
+
   function handleWsRequired(data) {
-    const room = String((data && data.room) || '').trim().toLowerCase();
-    if (!room) return;
-    const cw = (data && data.content_warning) || {};
-    if (_cwEnabled(cw)) patchRoomCwMeta(room, cw);
-    if (!_isViewingRoom(room)) return;
-    _visitAcked.delete(room);
-    _lockRoomUntilAck(room);
-    void gate(room, { knownCw: cw, forceRecheck: true }).then((ok) => {
-      if (!ok) {
-        try {
-          if (window.Rooms && typeof Rooms.handleCwDecline === 'function') {
-            void Rooms.handleCwDecline(room, { wasCurrentRoom: true });
-          } else {
-            showDeclinedScreen(room);
-          }
-        } catch {}
-      }
-    });
+    _handleWsGateEvent(data, false);
   }
 
   function badgeHtml(cw) {
@@ -466,5 +525,6 @@
     finishChannelUnlock,
     ensureChatShell,
     historyMount,
+    isGateActive,
   };
 })();

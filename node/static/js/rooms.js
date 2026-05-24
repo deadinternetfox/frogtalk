@@ -1448,17 +1448,7 @@ const Rooms = (() => {
     if (!State.messages[name]) State.messages[name] = [];
     State.oldestMsgId = State.messages[name].length ? State.messages[name][0].id : null;
 
-    // Persist the last-opened channel so the next launch can jump straight
-    // back to it instead of flashing the default welcome header. DMs are
-    // intentionally skipped (they're peer-scoped, not channel-scoped).
-    try {
-      if (type !== 'dm') {
-        localStorage.setItem('fc_last_room', JSON.stringify({
-          name, type, channelType,
-          ts: Date.now()
-        }));
-      }
-    } catch {}
+    // fc_last_room is persisted after the CW gate (public) or at end of switch (private).
 
     // Check if this room has an active outbound bridge. When true, we will
     // attach a `bridge_plain` field on sends so the bridge can forward
@@ -1615,21 +1605,7 @@ const Rooms = (() => {
       else chatHeader.classList.remove('is-dm');
     }
 
-    // Connect WebSocket — skip only when this channel isn't in the local list
-    // or isn't joined (stale fc_last_room from another node).
-    const roomRow = (State.rooms || []).find((r) => r.name === name);
-    const joinedHere = type === 'dm' || !!roomRow?.joined;
-    if (joinedHere) {
-      WS.connect(name);
-    } else {
-      try { WS.disconnect && WS.disconnect(); } catch {}
-      if (typeof UI !== 'undefined' && UI.showToast) {
-        const msg = roomRow && !roomRow.joined
-          ? `Join #${name} from the sidebar first`
-          : `#${name} is not on this node — open a channel from your sidebar or wait for account sync`;
-        UI.showToast(msg, 'warning', 7000);
-      }
-    }
+    // Connect WebSocket after CW gate — see below (deferred for public channels).
 
     // Load full channel member list (online + offline) for the sidebar.
     // DMs don't have this concept, so only fetch for real rooms.
@@ -1655,22 +1631,7 @@ const Rooms = (() => {
     if (typeof Messages !== 'undefined' && Messages.clearReply) Messages.clearReply();
     if (type !== 'dm' && typeof clearReplyToDM === 'function') clearReplyToDM();
 
-    // For text/DM channels, prefer rendering cached history instantly.
-    // Show spinner only when there is no cache yet.
-    if (chType !== 'voice' && msgArea) {
-      // An empty array IS a valid cache state (e.g. a freshly-created
-      // channel that has no messages yet). Treat presence of the array
-      // as cache-hit so loadHistory renders the empty-state immediately
-      // instead of showing a perpetual "Loading #room…" spinner that
-      // the WS history dedup will refuse to clear.
-      const hasCached = type !== 'dm' && hadMessageCache && Array.isArray(State.messages[name]);
-      if (hasCached && typeof Messages !== 'undefined' && Messages.loadHistory) {
-        try { Messages.loadHistory(name, State.messages[name].slice()); } catch {}
-      } else {
-        showChatTransition(name, type, dmPeer, 'load');
-      }
-    }
-
+    // CW gate before WS/history so content cannot flash and WS cannot re-trigger the gate.
     if (type !== 'dm' && type !== 'private') {
       if (window.ContentWarning?.gate) {
         const cwOk = await ContentWarning.gate(name, {
@@ -1688,6 +1649,46 @@ const Rooms = (() => {
         try { ContentWarning.markVisitAcked(name); } catch {}
       }
       clearChatTransition();
+    }
+
+    // Persist last-opened channel only after CW ack (or immediately for private).
+    try {
+      if (type !== 'dm') {
+        localStorage.setItem('fc_last_room', JSON.stringify({
+          name, type, channelType,
+          ts: Date.now()
+        }));
+      }
+    } catch {}
+
+    const roomRow = (State.rooms || []).find((r) => r.name === name);
+    const joinedHere = type === 'dm' || !!roomRow?.joined;
+    if (joinedHere) {
+      WS.connect(name);
+    } else {
+      try { WS.disconnect && WS.disconnect(); } catch {}
+      if (typeof UI !== 'undefined' && UI.showToast) {
+        const msg = roomRow && !roomRow.joined
+          ? `Join #${name} from the sidebar first`
+          : `#${name} is not on this node — open a channel from your sidebar or wait for account sync`;
+        UI.showToast(msg, 'warning', 7000);
+      }
+    }
+
+    // For text/DM channels, prefer rendering cached history instantly.
+    // Show spinner only when there is no cache yet.
+    if (chType !== 'voice' && msgArea) {
+      // An empty array IS a valid cache state (e.g. a freshly-created
+      // channel that has no messages yet). Treat presence of the array
+      // as cache-hit so loadHistory renders the empty-state immediately
+      // instead of showing a perpetual "Loading #room…" spinner that
+      // the WS history dedup will refuse to clear.
+      const hasCached = type !== 'dm' && hadMessageCache && Array.isArray(State.messages[name]);
+      if (hasCached && typeof Messages !== 'undefined' && Messages.loadHistory) {
+        try { Messages.loadHistory(name, State.messages[name].slice()); } catch {}
+      } else {
+        showChatTransition(name, type, dmPeer, 'load');
+      }
     }
     
     // For voice channels, show a prompt to join voice
