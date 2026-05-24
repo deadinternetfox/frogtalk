@@ -68,9 +68,8 @@ def dm_message_target_servers(peer_user: dict | None) -> list[str]:
     if not peer_online_here or remote_conn or homed_remote:
         for sid in fc._clearnet_federation_peer_ids():
             targets.add(sid)
-    elif gid and peer_online_here:
-        # Federated account with a local WS may still be reading on a travel
-        # node while a stale home-tab session keeps peer_online_here true.
+    elif peer_online_here:
+        # A stale local tab may hide that the peer is reading on a travel node.
         for sid in fc._clearnet_federation_peer_ids():
             if sid and sid != local_sid:
                 targets.add(sid)
@@ -81,8 +80,13 @@ def dm_message_target_servers(peer_user: dict | None) -> list[str]:
     return []
 
 
-def federation_mirror_targets(*users: dict | None) -> list[str]:
-    """Server ids that should receive DM channel metadata (disappear timer, etc.)."""
+def dm_message_federation_targets(*users: dict | None) -> list[str]:
+    """Server ids that should receive a ``dm.message.created`` event.
+
+    Union both DM parties — routing on the recipient alone misses travel
+    delivery when the sender is online locally (clearnet fan-out) or the
+    peer looks online here via a stale tab while reading on AU/EU.
+    """
     local_sid = _local_server_id()
     targets: set[str] = set()
     for user in users:
@@ -91,6 +95,16 @@ def federation_mirror_targets(*users: dict | None) -> list[str]:
         for sid in dm_message_target_servers(user):
             if sid:
                 targets.add(sid)
+    return sorted(targets)
+
+
+def federation_mirror_targets(*users: dict | None) -> list[str]:
+    """Server ids that should receive DM channel metadata (disappear timer, etc.)."""
+    local_sid = _local_server_id()
+    targets: set[str] = set()
+    for sid in dm_message_federation_targets(*users):
+        if sid:
+            targets.add(sid)
     for sid in fc._clearnet_federation_peer_ids():
         if sid and sid != local_sid:
             targets.add(sid)
@@ -115,10 +129,10 @@ def should_federate_dm(sender: dict | None, peer: dict | None) -> bool:
     ``user.connection.updated`` shows the peer on a travel node.
     """
     local_sid = _local_server_id()
-    targets = dm_message_target_servers(peer)
+    targets = dm_message_federation_targets(sender, peer)
     if any(t for t in (targets or []) if t and t != local_sid):
         return True
-    if _peer_connected_on_remote_node(peer):
+    if _peer_connected_on_remote_node(peer) or _peer_connected_on_remote_node(sender):
         return True
     if not peer_session_on_local_node(peer):
         return True

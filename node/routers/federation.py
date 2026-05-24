@@ -175,10 +175,12 @@ def enqueue_dm_message_created(
     """
     import federation_dms as fed_dm
 
-    if not fed_dm.should_federate_dm(sender, peer):
-        return {"ok": True, "skipped": "peer_online_local"}
-    targets = fed_dm.dm_message_target_servers(peer)
-    if not targets:
+    targets = fed_dm.dm_message_federation_targets(sender, peer)
+    local_sid = str((db.get_or_create_local_server_identity() or {}).get("server_id") or "").strip()
+    remote_targets = [t for t in (targets or []) if t and t != local_sid]
+    if not remote_targets:
+        if not fed_dm.should_federate_dm(sender, peer):
+            return {"ok": True, "skipped": "peer_online_local"}
         return {"ok": False, "error": "no_dm_route"}
     ts = created_at or (datetime.utcnow().isoformat() + "Z")
     return enqueue_server_event(
@@ -199,7 +201,7 @@ def enqueue_dm_message_created(
             "created_at": ts,
             "source_message_id": str(source_message_id or "").strip(),
         },
-        target_server_ids=targets,
+        target_server_ids=remote_targets,
     )
 
 

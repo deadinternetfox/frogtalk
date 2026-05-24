@@ -4239,6 +4239,10 @@ async function sendDMMessage () {
 
 /* ── Incoming WS DM message ─────────────────────────────────────────────────── */
 function handleWSDMMessage (data) {
+  const _fedInbound = !!(data.federated || data.origin_server_id);
+  if (_fedInbound) {
+    console.info('[DM] federated inbound', data.channel_id, data.id, data.origin_server_id || '');
+  }
   if (window.__ftDmCryptoDebug || window.__ftDctDebug) {
     console.info('[DM] inbound message', {
       id: data.id,
@@ -4270,7 +4274,6 @@ function handleWSDMMessage (data) {
   const _peerForDecrypt = _isMine
     ? 0
     : (Number(data.sender_id) || Number(_activeDM?.user_id) || Number(_ch0?.with_user_id) || 0);
-  const _fedInbound = !!(data.federated || data.origin_server_id);
   const _senderHome = String(data.origin_server_id || '').trim();
   if (_senderHome) {
     const chUp = _dmChannels.find(c => c.id === data.channel_id);
