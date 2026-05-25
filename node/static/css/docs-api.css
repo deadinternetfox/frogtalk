@@ -11,8 +11,14 @@
     --amber: #fbbf24;
   }
   * { box-sizing: border-box; }
+  html {
+    overflow-x: clip;
+    -webkit-text-size-adjust: 100%;
+  }
   body {
     margin: 0;
+    max-width: 100%;
+    overflow-x: clip;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     color: var(--text);
     background:
@@ -23,6 +29,7 @@
     line-height: 1.55;
   }
   body.ft-has-site-nav .wrap { padding-top: 5.3rem; }
+  img, video, svg { max-width: 100%; height: auto; }
   .top {
     position: sticky;
     top: 0;
@@ -51,7 +58,12 @@
     font-size: .78rem;
   }
   .links a:hover { color: var(--text); border-color: #3f566f; }
-  .wrap { max-width: 1180px; margin: 0 auto; padding: 1.3rem 1rem 3rem; }
+  .wrap {
+    width: 100%;
+    max-width: min(1180px, 100%);
+    margin: 0 auto;
+    padding: 1.3rem max(0.85rem, env(safe-area-inset-right)) 3rem max(0.85rem, env(safe-area-inset-left));
+  }
   .hero {
     border: 1px solid var(--border, var(--line));
     border-radius: 16px;
@@ -145,17 +157,48 @@
     border: 1px solid #28313b;
     border-radius: 10px;
     padding: .7rem;
-    overflow: auto;
-    font-size: .82rem;
+    overflow-x: auto;
+    overflow-y: hidden;
+    max-width: 100%;
+    -webkit-overflow-scrolling: touch;
+    font-size: clamp(0.72rem, 2.8vw, .82rem);
     line-height: 1.4;
+    white-space: pre-wrap;
+    word-break: break-word;
+    overflow-wrap: anywhere;
   }
-  code { font-family: "Consolas", "SFMono-Regular", monospace; }
+  code {
+    font-family: "Consolas", "SFMono-Regular", monospace;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+  }
+  .panel table {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
   .ok { color: #86efac; }
   .warn { color: #fde68a; }
 
   @media (max-width: 980px) {
     .layout { grid-template-columns: 1fr; }
-    .toc { position: static; }
+    .toc { position: static; max-height: none; }
+    .top-inner { flex-wrap: wrap; }
+  }
+
+  @media (max-width: 640px) {
+    body.ft-has-site-nav .wrap { padding-top: 4.6rem; }
+    .wrap { padding: 1rem max(0.65rem, env(safe-area-inset-right)) 2.5rem max(0.65rem, env(safe-area-inset-left)); }
+    .hero, .panel, .toc { padding: 0.85rem; border-radius: 12px; }
+    h1 { font-size: 1.35rem; }
+    .sub, .meta { font-size: 0.88rem; }
+    .links { gap: 0.35rem; }
+    .links a { font-size: 0.72rem; padding: 0.28rem 0.55rem; }
+    .toc a { font-size: 0.82rem; }
+    pre { padding: 0.55rem; }
+    .panel th, .panel td { font-size: 0.8rem; padding: 0.4rem 0.45rem; }
   }
 
   .h-mt-14 { margin-top: 14px; }

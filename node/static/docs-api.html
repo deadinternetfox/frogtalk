@@ -129,8 +129,11 @@ GET    /api/federation/profile-card</code></pre>
           (<code>theme</code>, <code>custom_style</code>, <code>client_prefs</code> for Tor/node/sounds,
           notify flags, PIN policy), and FrogSocial posts (paginated). Live stories and notification
           inbox are not bulk-imported — they arrive via federation events after login.
-          <code>PATCH /api/auth/client-prefs</code> merges Tor preference, preferred node URL, and
-          capped app notification sounds (stored server-side; included in sync).
+          <code>PATCH /api/auth/client-prefs</code> merges Tor preference, preferred federation node URL,
+          and capped app notification sounds (stored server-side; included in account sync export).
+          All fields are optional — omitted keys are left unchanged. Invalid
+          <code>preferred_node_url</code> values return <code>400</code> with
+          <code>{"error":"invalid preferred_node_url"}</code>.
           <code>GET /api/federation/profile-card?nickname=&amp;ft_gid=</code> returns a federated user
           card (sanitized <code>custom_style</code> only; raw <code>custom_css</code> is self-only;
           optional wall when subject is at home). Peer export endpoints
@@ -141,6 +144,9 @@ GET    /api/federation/profile-card</code></pre>
           <code>export_sig_b64</code> against the pinned home <code>server_pubkey</code> when
           <code>FROGTALK_SYNC_REQUIRE_EXPORT_SIG=1</code> (default).</p>
 <pre><code>PATCH /api/auth/client-prefs
+X-Session-Token: &lt;session&gt;
+Content-Type: application/json
+
 {
   "prefer_onion": true,
   "preferred_node_url": "https://frogtalk.app",
@@ -148,10 +154,20 @@ GET    /api/federation/profile-card</code></pre>
     "app:msg": "data:audio/wav;base64,…",
     "app:ring": "data:audio/wav;base64,…"
   }
-}</code></pre>
+}
+
+# Response
+{ "ok": true, "client_prefs": { … } }</code></pre>
+          <p class="muted"><strong><code>preferred_node_url</code></strong> — clearnet
+          <code>https://</code> or <code>http://</code> origin (max 512 chars), or a bare
+          <code>.onion</code> host hint for Tor-first clients. Persisted for Settings → Network and
+          re-exported on federation account sync (<code>self_profile.client_prefs</code>).
+          <strong><code>custom_sounds</code></strong> — only keys <code>app:msg</code> and
+          <code>app:ring</code>; values may be <code>data:audio/…;base64,…</code>
+          (size-capped) or stable server URLs under <code>/api/auth/app-sounds/{user_id}/{key}</code>
+          after upload.</p>
           <p class="muted"><code>GET /api/auth/me</code> returns <code>client_prefs</code> and
-          <code>custom_style</code> (self only: <code>custom_css</code> editor blob). Sound URLs are
-          capped server-side; included in account sync <code>self_profile.client_prefs</code>.</p>
+          <code>custom_style</code> (self only: <code>custom_css</code> editor blob).</p>
         </article>
 
         <article class="panel" id="users">
@@ -691,6 +707,18 @@ GET    /api/federation/failover/status</code></pre>
           <p class="muted"><strong>Delivery:</strong> background inbox/outbox processors poll every
           <code>FROGTALK_FEDERATION_INBOX_IDLE_SEC</code> / <code>OUTBOX_IDLE_SEC</code> (default 8s when idle,
           2s when busy). Clearnet hubs reach <code>.onion</code> peers via <code>FROGTALK_TOR_SOCKS_PROXY</code>.</p>
+
+          <h3 class="h-mt-14">Operator mesh config (self-hosted)</h3>
+          <p class="muted">Directory rows and seed peers are <strong>not</strong> hardcoded in Python.
+          Copy <code>node/deploy/federation-mesh.example.json</code> to
+          <code>federation-mesh.local.json</code> on your VPS and set
+          <code>FROGTALK_FEDERATION_MESH_FILE</code>. On the hub that publishes
+          <code>GET /api/network/servers</code>, set <code>FROGTALK_FEDERATION_DIRECTORY_HUB=1</code>
+          and list your hostname under <code>directory_hub_hosts</code>. Use
+          <code>ensure_peers</code>, <code>clearnet_repairs</code>, and
+          <code>fallback_peers</code> as documented in <code>node/deploy/README.md</code>.
+          Reference layout for the public FrogTalk fleet (example only):
+          <code>federation-mesh.frogtalk.example.json</code>.</p>
 
           <h3 class="h-mt-14">Foreign user and room materialization</h3>
           <p class="muted">Federation events referencing an unknown local nickname or room are
