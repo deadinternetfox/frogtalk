@@ -34,6 +34,7 @@ import geoip
 # any <style> block from user data.
 from routers._css_inline import sanitize_inline_style as _sanitize_inline_style
 import crypto_fed
+from public_url_policy import LEGACY_OFFICIAL_HUB_URL, OFFICIAL_HUB_URL_DEFAULT
 
 router = APIRouter(tags=["federation"])
 _log = logging.getLogger(__name__)
@@ -1591,10 +1592,43 @@ def _is_official_main_hub() -> bool:
     return "frogtalk.app" in hosts or "frogtalk.xyz" in hosts
 
 
+def repair_official_main_clearnet_url() -> bool:
+    """Keep the production hub row on frogtalk.app (not legacy frogtalk.xyz)."""
+    if not _is_official_main_hub():
+        return False
+    row = db.get_federation_server_row(_OFFICIAL_MAIN_SERVER_ID)
+    if not row:
+        return False
+    want = OFFICIAL_HUB_URL_DEFAULT.rstrip("/")
+    cur = _normalize_base_url(str(row.get("base_url") or ""))
+    legacy = LEGACY_OFFICIAL_HUB_URL.rstrip("/")
+    if cur == want:
+        return False
+    if cur != legacy and cur and cur != want:
+        # Operator set a custom clearnet URL — do not overwrite.
+        return False
+    db.upsert_federation_server(
+        server_id=_OFFICIAL_MAIN_SERVER_ID,
+        display_name=str(row.get("display_name") or "FrogTalk Main").strip() or "FrogTalk Main",
+        base_url=want,
+        onion_url=str(row.get("onion_url") or "").strip(),
+        region=str(row.get("region") or "").strip(),
+        official=True,
+        trust_tier=str(row.get("trust_tier") or "official").strip() or "official",
+        capabilities=row.get("capabilities") if isinstance(row.get("capabilities"), list) else ["federation-v1"],
+    )
+    local = db.get_or_create_local_server_identity() or {}
+    if str(local.get("server_id") or "").strip() == _OFFICIAL_MAIN_SERVER_ID:
+        db.set_config("federation.base_url", want)
+    _log.info("federation: repaired official main hub base_url %s → %s", cur or "(empty)", want)
+    return True
+
+
 def ensure_official_mesh_peers() -> int:
     """Upsert built-in Tor mirror on the main hub when missing from the directory DB."""
     if not _is_official_main_hub():
         return 0
+    repair_official_main_clearnet_url()
     ensured = 0
     for item in _OFFICIAL_MESH_PEERS:
         row = _coerce_server_row(item)
@@ -2522,7 +2556,7 @@ def announce_local_server_to_hub(
     verify_listing: bool = True,
     timeout_s: float = 15.0,
 ) -> dict:
-    """POST this node's identity to the official hub directory (frogtalk.xyz by default).
+    """POST this node's identity to the official hub directory (frogtalk.app by default).
 
     Called from ``node_federation_join.sh`` after local directory import. Requires
     the same ``FROGTALK_FEDERATION_TOKEN`` on this node and on the hub.

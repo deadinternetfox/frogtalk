@@ -116,7 +116,7 @@ The image `WORKDIR` is `/app` with `node/` contents copied in; `CMD` is `python 
 
 ## Cloudflare Tunnel
 
-Production clearnet nodes often terminate TLS at Cloudflare and run `cloudflared` locally. Point the tunnel origin at **nginx on port 8080** (Main) or **uvicorn on 127.0.0.1:8080** (AU dev — no nginx on 8080).
+Production clearnet nodes often terminate TLS at Cloudflare and run `cloudflared` locally. Point the tunnel origin at **nginx on port 8080** on every clearnet VPS (Main and AU dev). The Frog Channel imageboard (`/board/`) is PHP behind nginx — hitting uvicorn on 8080 directly returns **404** for `/board/`.
 
 **Fleet layout (target):**
 
@@ -136,7 +136,7 @@ bash node/scripts/configure_cloudflare_tunnels.sh
 
 Manual: Zero Trust → Networks → Tunnels → Public Hostname → `http://localhost:8080`.
 
-On Main only, set `FROGTALK_NGINX_TUNNEL_LISTEN=1` when installing nginx so `listen 8080` is kept. **AU dev** must **not** use that flag (app binds 8080 directly).
+Set `FROGTALK_NGINX_TUNNEL_LISTEN=1` when installing nginx so `listen 8080` is kept, and set **`PORT=8000`** in `.env` so uvicorn binds 8000 while nginx owns 8080 for the tunnel. Run `sudo bash node/scripts/install_board_nginx.sh` on AU dev the same as Main. Remove stale `frogtalk-http-redirect` from `sites-enabled` if `nginx -t` reports duplicate `default_server` on port 80.
 
 1. Install [cloudflared](https://github.com/cloudflare/cloudflared/releases) (`.deb` on Debian/Ubuntu).
 2. In **Cloudflare Zero Trust → Networks → Tunnels**, set the public hostname origin to `http://localhost:8080`.
