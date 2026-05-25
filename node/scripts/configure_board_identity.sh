@@ -47,7 +47,7 @@ topic = (os.getenv("FROGTALK_BOARD_TOPIC") or "").strip()
 # Per-node homepage presets (override anytime via FROGTALK_BOARD_* env).
 if not title:
     if home_page == "dev":
-        title = "FrogTalk Development & support"
+        title = "🔧 FrogTalk Development & support"
     elif home_page == "tor":
         title = "🐸 Frog General"
     elif name:
@@ -64,13 +64,14 @@ if not topic:
         topic = "general"
 
 # Light regional / role presets (operators can override via env).
+# Dev/tor home pages use fixed role copy — never regionalize the dev board as "Australian".
 nl = name.lower()
 if not subtitle:
     if home_page == "dev":
-        subtitle = "Development & support — test builds and federation; production hub is frogtalk.app"
+        subtitle = "Development & support — test builds, bugs, and federation; stable hub: frogtalk.app"
     elif home_page == "tor":
         subtitle = "Tor hidden-service imageboard · privacy-first discussion"
-    elif "aus" in nl or region.upper() in ("AU", "AUSTRALIA"):
+    elif home_page not in ("dev", "tor") and ("aus" in nl or region.upper() in ("AU", "AUSTRALIA")):
         subtitle = "G'day — Australian FrogTalk node"
         if "🐸" not in title and "australia" not in title.lower():
             title = f"🐸 {title}" if title.startswith("FrogTalk") else f"🐸 FrogTalk Australia"

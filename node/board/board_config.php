@@ -1191,6 +1191,22 @@ function getBoardInfo(): array {
     ];
 }
 
+/** Production hub board pill must point at frogtalk.app, not legacy frogtalk.xyz. */
+function boardRemapKnownHubPeerUrl(array $peer): array {
+    $nid = strtolower(trim((string)($peer['node_id'] ?? '')));
+    $url = trim((string)($peer['url'] ?? ''));
+    if ($url === '') {
+        return $peer;
+    }
+    $host = strtolower((string)(parse_url($url, PHP_URL_HOST) ?? ''));
+    $isMainHub = in_array($nid, ['frog-general', 'frogtalk-main', 'srv_ee3f0ff0c6e74fadb542'], true)
+        || str_contains(strtolower((string)($peer['title'] ?? '')), 'frog general');
+    if ($isMainHub && (str_ends_with($host, 'frogtalk.xyz') || $host === 'www.frogtalk.xyz')) {
+        $peer['url'] = 'https://frogtalk.app/board/';
+    }
+    return $peer;
+}
+
 /**
  * Return list of federated peer boards, filtered for the current visitor.
  * Tor-only peers are still listed for clearnet visitors (styled with a Tor
@@ -1218,7 +1234,7 @@ function getFederatedPeers(?bool $visitorTor = null): array {
         $isTor = (bool)($p['tor_only'] ?? false);
         // Note: Tor-only peers are returned for everyone — the fed-pill-tor
         // styling on the board indicates "this requires Tor to visit".
-        $out[] = [
+        $entry = [
             'url'      => $url,
             'node_id'  => (string)($p['node_id'] ?? ''),
             'title'    => (string)($p['title'] ?? $url),
@@ -1228,6 +1244,7 @@ function getFederatedPeers(?bool $visitorTor = null): array {
             'tor_onion_url' => (string)($p['tor_onion_url'] ?? ''),
             'last_seen'=> (int)($p['last_seen'] ?? 0),
         ];
+        $out[] = boardRemapKnownHubPeerUrl($entry);
     }
     return $out;
 }
@@ -1437,7 +1454,7 @@ function refreshFederatedPeers(): int {
             continue;
         }
         if (empty($info['node_id'])) continue;
-        $peers[$i] = array_merge($p, [
+        $merged = array_merge($p, [
             'title'    => (string)($info['title'] ?? $p['title'] ?? $url),
             'subtitle' => (string)($info['subtitle'] ?? $p['subtitle'] ?? ''),
             'topic'    => (string)($info['topic'] ?? $p['topic'] ?? ''),
@@ -1445,6 +1462,7 @@ function refreshFederatedPeers(): int {
             'tor_onion_url' => (string)($info['tor_onion_url'] ?? ''),
             'last_seen'=> $now,
         ]);
+        $peers[$i] = boardRemapKnownHubPeerUrl($merged);
         $updated++;
     }
     $s['federated_peers'] = array_values($peers);
