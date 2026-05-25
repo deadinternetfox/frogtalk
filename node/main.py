@@ -2860,26 +2860,26 @@ def _downloads_catalog_entries():
     import re
 
     def _apk_version(path: str) -> int:
-        m = re.search(r"frogtalk-v(\d+)\.apk$", os.path.basename(path), flags=re.IGNORECASE)
+        m = re.search(r"frogtalk-v(\d+)(?:-alpha)?\.apk$", os.path.basename(path), flags=re.IGNORECASE)
         return int(m.group(1)) if m else -1
 
     def _appimage_version(path: str):
         name = os.path.basename(path)
-        m = re.search(r"FrogTalk-(\d+)\.(\d+)\.(\d+)\.AppImage$", name, flags=re.IGNORECASE)
+        m = re.search(r"FrogTalk-(\d+)\.(\d+)\.(\d+)(?:-alpha)?\.AppImage$", name, flags=re.IGNORECASE)
         if not m:
             return (-1, -1, -1, os.path.getmtime(path))
         return (int(m.group(1)), int(m.group(2)), int(m.group(3)), os.path.getmtime(path))
 
     def _deb_version(path: str):
         name = os.path.basename(path)
-        m = re.search(r"frogtalk_(\d+)\.(\d+)\.(\d+)_amd64\.deb$", name, flags=re.IGNORECASE)
+        m = re.search(r"frogtalk_(\d+)\.(\d+)\.(\d+)(?:-alpha)?_amd64\.deb$", name, flags=re.IGNORECASE)
         if not m:
             return (-1, -1, -1, os.path.getmtime(path))
         return (int(m.group(1)), int(m.group(2)), int(m.group(3)), os.path.getmtime(path))
 
     def _win_ver(path: str):
         name = os.path.basename(path)
-        m = re.search(r"FrogTalk-(\d+)\.(\d+)\.(\d+)-", name, flags=re.IGNORECASE)
+        m = re.search(r"FrogTalk-(\d+)\.(\d+)\.(\d+)(?:-alpha)?-", name, flags=re.IGNORECASE)
         if not m:
             return (-1, -1, -1, os.path.getmtime(path))
         return (int(m.group(1)), int(m.group(2)), int(m.group(3)), os.path.getmtime(path))
@@ -3048,7 +3048,7 @@ async def download_android():
     import re
 
     def _apk_version(path: str) -> int:
-        m = re.search(r"frogtalk-v(\d+)\.apk$", os.path.basename(path), flags=re.IGNORECASE)
+        m = re.search(r"frogtalk-v(\d+)(?:-alpha)?\.apk$", os.path.basename(path), flags=re.IGNORECASE)
         return int(m.group(1)) if m else -1
 
     res = _downloads_resolve_artifact(
@@ -3153,7 +3153,7 @@ async def download_linux():
 
     def _appimage_version(path: str):
         name = os.path.basename(path)
-        m = re.search(r"FrogTalk-(\d+)\.(\d+)\.(\d+)\.AppImage$", name, flags=re.IGNORECASE)
+        m = re.search(r"FrogTalk-(\d+)\.(\d+)\.(\d+)(?:-alpha)?\.AppImage$", name, flags=re.IGNORECASE)
         if not m:
             return (-1, -1, -1, os.path.getmtime(path))
         return (int(m.group(1)), int(m.group(2)), int(m.group(3)), os.path.getmtime(path))
@@ -3179,7 +3179,7 @@ async def download_deb():
 
     def _deb_version(path: str):
         name = os.path.basename(path)
-        m = re.search(r"frogtalk_(\d+)\.(\d+)\.(\d+)_amd64\.deb$", name, flags=re.IGNORECASE)
+        m = re.search(r"frogtalk_(\d+)\.(\d+)\.(\d+)(?:-alpha)?_amd64\.deb$", name, flags=re.IGNORECASE)
         if not m:
             return (-1, -1, -1, os.path.getmtime(path))
         return (int(m.group(1)), int(m.group(2)), int(m.group(3)), os.path.getmtime(path))
@@ -3211,7 +3211,7 @@ async def download_windows():
 
     def _win_ver(path: str):
         name = os.path.basename(path)
-        m = re.search(r"FrogTalk-(\d+)\.(\d+)\.(\d+)-", name, flags=re.IGNORECASE)
+        m = re.search(r"FrogTalk-(\d+)\.(\d+)\.(\d+)(?:-alpha)?-", name, flags=re.IGNORECASE)
         if not m:
             return (-1, -1, -1, os.path.getmtime(path))
         return (int(m.group(1)), int(m.group(2)), int(m.group(3)), os.path.getmtime(path))
@@ -3257,7 +3257,7 @@ async def download_windows_zip():
 
     def _zip_ver(path: str):
         name = os.path.basename(path)
-        m = re.search(r"FrogTalk-(\d+)\.(\d+)\.(\d+)-", name, flags=re.IGNORECASE)
+        m = re.search(r"FrogTalk-(\d+)\.(\d+)\.(\d+)(?:-alpha)?-", name, flags=re.IGNORECASE)
         if not m:
             return (-1, -1, -1, os.path.getmtime(path))
         return (int(m.group(1)), int(m.group(2)), int(m.group(3)), os.path.getmtime(path))

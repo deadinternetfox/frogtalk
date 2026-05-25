@@ -39,19 +39,38 @@ except Exception:
 
 name = (os.getenv("FROGTALK_SERVER_NAME") or "").strip()
 region = (os.getenv("FROGTALK_SERVER_REGION") or "").strip()
+home_page = (os.getenv("FROGTALK_HOME_PAGE") or "main").strip().lower()
 title = (os.getenv("FROGTALK_BOARD_TITLE") or "").strip()
 subtitle = (os.getenv("FROGTALK_BOARD_SUBTITLE") or "").strip()
 topic = (os.getenv("FROGTALK_BOARD_TOPIC") or "").strip()
 
-if not title and name:
-    title = name
+# Per-node homepage presets (override anytime via FROGTALK_BOARD_* env).
 if not title:
-    title = "🐸 Frog General"
+    if home_page == "dev":
+        title = "FrogTalk Development & support"
+    elif home_page == "tor":
+        title = "🐸 Frog General"
+    elif name:
+        title = name
+    else:
+        title = "🐸 Frog General"
 
-# Light regional presets (operators can override via env).
+if not topic:
+    if home_page == "tor":
+        topic = "Privacy"
+    elif home_page == "dev":
+        topic = "dev"
+    else:
+        topic = "general"
+
+# Light regional / role presets (operators can override via env).
 nl = name.lower()
 if not subtitle:
-    if "aus" in nl or region.upper() in ("AU", "AUSTRALIA"):
+    if home_page == "dev":
+        subtitle = "Development & support — test builds and federation; production hub is frogtalk.app"
+    elif home_page == "tor":
+        subtitle = "Tor hidden-service imageboard · privacy-first discussion"
+    elif "aus" in nl or region.upper() in ("AU", "AUSTRALIA"):
         subtitle = "G'day — Australian FrogTalk node"
         if "🐸" not in title and "australia" not in title.lower():
             title = f"🐸 {title}" if title.startswith("FrogTalk") else f"🐸 FrogTalk Australia"
@@ -61,10 +80,14 @@ if not subtitle:
         subtitle = f"{name} — federated imageboard"
 
 if topic:
-    s["board_topic"] = topic[:200]
+    s["board_topic"] = topic[:32]
 if subtitle:
     s["board_subtitle"] = subtitle[:120]
 s["board_title"] = title[:80]
+onion_env = (os.getenv("FROGTALK_ONION_URL") or "").strip().rstrip("/")
+if home_page == "tor" and onion_env.startswith("http"):
+    s["tor_onion_url"] = onion_env + "/board/"
+    s["tor_only"] = True
 s["federation_enabled"] = True
 nid = (s.get("node_id") or "").strip()
 if not nid or nid == "frogtalk-node":

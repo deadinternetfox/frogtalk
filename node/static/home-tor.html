@@ -3,18 +3,17 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="description" content="FrogTalk — Pre-alpha encrypted chat, voice &amp; video calls, social posts, Reels, Frog Channel imageboard, federated nodes, and Discord/Telegram bridges. Privacy-first, zero ads.">
+<meta name="description" content="FrogTalk Tor onion node — access via .onion hidden service. Pre-alpha, not audited. No clearnet downloads; use frogtalk.app for production.">
 <meta name="theme-color" content="#4caf50">
 <meta name="author" content="FrogTalk">
-<meta name="keywords" content="encrypted chat, secure messaging, voice calls, video calls, social feed, reels, stories, imageboard, frog channel, anonymous board, music sharing, discord bridge, telegram bridge, privacy, E2E encryption">
-<meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1">
+<meta name="keywords" content="tor, onion, hidden service, encrypted chat, privacy, federated">
+<meta name="robots" content="noindex, nofollow">
 <meta name="format-detection" content="telephone=no">
 
 <!-- Open Graph (Facebook, Discord, Telegram, etc.) -->
 <meta property="og:type" content="website">
-<meta property="og:url" content="https://frogtalk.app/">
-<meta property="og:title" content="FrogTalk — Chat, Post, Vibe Together">
-<meta property="og:description" content="Pre-alpha encrypted chat, voice &amp; video calls, social posts, Reels, Frog Channel imageboard, federated nodes, and Discord/Telegram bridges. Privacy-first, zero ads.">
+<meta property="og:title" content="FrogTalk Tor — Onion Node (Alpha)">
+<meta property="og:description" content="Tor hidden-service node for FrogTalk. Pre-alpha — read security warnings before use.">
 <meta property="og:image" content="https://frogtalk.app/static/icons/og-image.png">
 <meta property="og:image:secure_url" content="https://frogtalk.app/static/icons/og-image.png">
 <meta property="og:image:type" content="image/png">
@@ -27,8 +26,8 @@
 <!-- Twitter Card -->
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:site" content="@frogtalk">
-<meta name="twitter:title" content="FrogTalk — Chat, Post, Vibe Together">
-<meta name="twitter:description" content="Pre-alpha E2E chat, calls, social feed, Reels, Frog Channel, federation, and live bridges. Private by default.">
+<meta name="twitter:title" content="FrogTalk Tor — Onion Node">
+<meta name="twitter:description" content="Tor hidden-service FrogTalk node. Pre-alpha, not audited.">
 <meta name="twitter:image" content="https://frogtalk.app/static/icons/og-image.png">
 <meta name="twitter:image:alt" content="FrogTalk — Chat, Post, Vibe Together">
 
@@ -41,7 +40,6 @@
 <link rel="manifest" href="/manifest.json">
 <meta name="apple-mobile-web-app-title" content="FrogTalk">
 <meta name="application-name" content="FrogTalk">
-<link rel="canonical" href="https://frogtalk.app/">
 <link rel="sitemap" type="application/xml" title="Sitemap" href="/sitemap.xml">
 <link rel="search" type="application/opensearchdescription+xml" title="FrogTalk" href="/opensearch.xml">
 <link rel="alternate" type="text/plain" title="LLM site summary" href="/llms.txt">
@@ -103,28 +101,26 @@
 }
 </script>
 
-  <link rel="stylesheet" href="/static/css/home.css?v=2">
+  <link rel="stylesheet" href="/static/css/home.css?v=3">
 </head>
-<body>
+<body class="home-node-tor">
 
 <!-- Site notice (dismissible): styles in home.css, logic in home-vibe-banner.js -->
 
-<div id="vibe-banner" role="status" aria-live="polite" hidden>
+<div id="vibe-banner" role="status" aria-live="polite">
   <div class="vb-inner">
-    <span class="vb-icon" aria-hidden="true">🐸</span>
+    <span class="vb-icon" aria-hidden="true">🧅</span>
     <div class="vb-text">
       <div class="vb-headline">
-        <strong>Censorship-free, private by design</strong> — end-to-end encrypted DMs and open-source code you can audit.
+        <strong>Tor / onion node</strong> — use the <code>.onion</code> address from your operator. Clearnet mirror may differ.
       </div>
       <div class="vb-sub">
-        Report security issues or read the encryption model on our <a class="vb-link" href="/security">security page</a>.
-        <span class="vb-prealpha"> · Pre-alpha — no uptime or data guarantees.</span>
+        Pre-alpha, not audited. Read <a class="vb-link" href="/security">security warnings</a> before high-risk use.
       </div>
     </div>
     <div class="vb-actions">
-      <a class="vb-btn vb-btn-primary" href="/security">🛡️ Security</a>
-      <a class="vb-btn" href="/docs/api">📘 API</a>
-      <a class="vb-btn" href="https://github.com/deadinternetfox/frogtalk" target="_blank" rel="noopener">⭐ GitHub</a>
+      <a class="vb-btn vb-btn-primary" href="/app">JS app (advanced)</a>
+      <a class="vb-btn" href="https://github.com/deadinternetfox/frogtalk/blob/master/client/tor/TOR_TODO.md" target="_blank" rel="noopener">Tor client plan</a>
     </div>
     <button type="button" class="vb-close" id="vibe-banner-close" aria-label="Dismiss banner">×</button>
   </div>
@@ -360,6 +356,31 @@
           </div>
         </div>
       </div>
+    </div>
+  </div>
+</section>
+
+<section class="section node-identity node-identity--tor" id="this-node">
+  <div class="node-identity-inner">
+    <div class="node-identity-grid">
+      <article class="node-identity-card node-identity-card--tor">
+        <span class="node-identity-kicker">This node</span>
+        <h2>FrogTalk over Tor</h2>
+        <p>Hidden-service access for users who need onion routing. The full web app requires JavaScript — a minimal no-JS Tor client is planned (<a href="https://github.com/deadinternetfox/frogtalk/blob/master/client/tor/TOR_TODO.md" style="color:#c4b5fd">TOR_TODO.md</a>).</p>
+        <div class="node-identity-actions">
+          <a class="primary" href="/app">Open web app</a>
+          <a href="/security">Alpha warnings</a>
+          <a href="https://frogtalk.app" style="color:#9fd9b8">Clearnet hub</a>
+        </div>
+      </article>
+      <article class="node-identity-card">
+        <span class="node-identity-kicker">Operator notes</span>
+        <h2>Running hybrid Tor</h2>
+        <p>Set <code>FROGTALK_TOR_ENABLED=1</code>, SOCKS proxy, and <code>FROGTALK_ONION_URL</code> on your node. Hybrid hubs list the onion mirror in Settings → Network for federated peers.</p>
+        <div class="node-identity-actions">
+          <a href="/docs/node">Node docs</a>
+        </div>
+      </article>
     </div>
   </div>
 </section>

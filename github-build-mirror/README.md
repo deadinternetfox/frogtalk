@@ -1,31 +1,36 @@
 # FrogTalk Build Mirror
 
-Mirrored release artifacts for FrogTalk **v1.6.36** (Android `versionCode` **241**).
+Mirrored release artifacts for FrogTalk **v1.6.37-alpha** (Android `versionCode` **242**).
+
+Default home node: **frogtalk.app** (`client/official-node.json` on `master`).
 
 ## Download Artifacts
 
-### Android (v1.6.36 / 241)
+### Android (v1.6.37-alpha / 242)
 
 | Artifact | File | Use |
 |----------|------|-----|
-| **APK (sideload)** | [frogtalk-v241.apk](./frogtalk-v241.apk) | Direct install, `/download/android` on nodes |
-| **AAB (Play Store)** | [FrogTalk-1.6.36-241.aab](./FrogTalk-1.6.36-241.aab) | Google Play Console upload |
+| **APK (sideload)** | [frogtalk-v242-alpha.apk](./frogtalk-v242-alpha.apk) | Direct install, `/download/android` |
+| **AAB (Play Store)** | [FrogTalk-1.6.37-alpha-242.aab](./FrogTalk-1.6.37-alpha-242.aab) | Google Play Console upload |
 
-**This build:** federation account sync fixes (FrogSocial, DMs, encrypted room history), mobile cache bump.
+### Desktop (v1.6.37-alpha)
+
+| Platform | File |
+|----------|------|
+| Linux AppImage | [FrogTalk-1.6.37-alpha.AppImage](./FrogTalk-1.6.37-alpha.AppImage) |
+| Linux .deb | [FrogTalk-1.6.37-alpha.deb](./FrogTalk-1.6.37-alpha.deb) |
+| Windows portable | [FrogTalk-1.6.37-alpha-win-x64-portable.exe](./FrogTalk-1.6.37-alpha-win-x64-portable.exe) |
+| Windows .zip | [FrogTalk-1.6.37-alpha-win-x64.zip](./FrogTalk-1.6.37-alpha-win-x64.zip) |
 
 ### Verify integrity
 
 ```bash
-sha256sum -c SHA256SUMS-v241.txt
+sha256sum -c SHA256SUMS-v242-alpha.txt
 ```
-
-Checksums: [SHA256SUMS-v241.txt](./SHA256SUMS-v241.txt)
-
-### GitHub Releases
-
-**Release:** [v1.6.36 on GitHub](https://github.com/deadinternetfox/frogtalk/releases/tag/v1.6.36) (APK + AAB attached).
 
 ## Website download endpoints
 
 - https://frogtalk.app/download/android
-- Your node: `https://<host>/download/android`
+- https://frogtalk.app/download/linux
+- https://frogtalk.app/download/deb
+- https://frogtalk.app/download/windows

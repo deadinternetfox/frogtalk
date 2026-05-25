@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="description" content="FrogTalk — Pre-alpha encrypted chat, voice &amp; video calls, social posts, Reels, Frog Channel imageboard, federated nodes, and Discord/Telegram bridges. Privacy-first, zero ads.">
+<meta name="description" content="FrogTalk development node (frogtalk.xyz) — unstable testbed for contributors, federation experiments, and self-host docs. Use frogtalk.app for production.">
 <meta name="theme-color" content="#4caf50">
 <meta name="author" content="FrogTalk">
 <meta name="keywords" content="encrypted chat, secure messaging, voice calls, video calls, social feed, reels, stories, imageboard, frog channel, anonymous board, music sharing, discord bridge, telegram bridge, privacy, E2E encryption">
@@ -12,11 +12,11 @@
 
 <!-- Open Graph (Facebook, Discord, Telegram, etc.) -->
 <meta property="og:type" content="website">
-<meta property="og:url" content="https://frogtalk.app/">
-<meta property="og:title" content="FrogTalk — Chat, Post, Vibe Together">
-<meta property="og:description" content="Pre-alpha encrypted chat, voice &amp; video calls, social posts, Reels, Frog Channel imageboard, federated nodes, and Discord/Telegram bridges. Privacy-first, zero ads.">
-<meta property="og:image" content="https://frogtalk.app/static/icons/og-image.png">
-<meta property="og:image:secure_url" content="https://frogtalk.app/static/icons/og-image.png">
+<meta property="og:url" content="https://frogtalk.xyz/">
+<meta property="og:title" content="FrogTalk Dev — Contributors &amp; Node Testing">
+<meta property="og:description" content="Development instance on frogtalk.xyz — breakage expected. Production hub: frogtalk.app.">
+<meta property="og:image" content="https://frogtalk.xyz/static/icons/og-image.png">
+<meta property="og:image:secure_url" content="https://frogtalk.xyz/static/icons/og-image.png">
 <meta property="og:image:type" content="image/png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
@@ -27,9 +27,9 @@
 <!-- Twitter Card -->
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:site" content="@frogtalk">
-<meta name="twitter:title" content="FrogTalk — Chat, Post, Vibe Together">
-<meta name="twitter:description" content="Pre-alpha E2E chat, calls, social feed, Reels, Frog Channel, federation, and live bridges. Private by default.">
-<meta name="twitter:image" content="https://frogtalk.app/static/icons/og-image.png">
+<meta name="twitter:title" content="FrogTalk Dev — frogtalk.xyz">
+<meta name="twitter:description" content="Unstable dev node for contributors and federation testing. Production: frogtalk.app.">
+<meta name="twitter:image" content="https://frogtalk.xyz/static/icons/og-image.png">
 <meta name="twitter:image:alt" content="FrogTalk — Chat, Post, Vibe Together">
 
 <link rel="icon" href="/static/favicon.ico" sizes="any">
@@ -41,7 +41,7 @@
 <link rel="manifest" href="/manifest.json">
 <meta name="apple-mobile-web-app-title" content="FrogTalk">
 <meta name="application-name" content="FrogTalk">
-<link rel="canonical" href="https://frogtalk.app/">
+<link rel="canonical" href="https://frogtalk.xyz/">
 <link rel="sitemap" type="application/xml" title="Sitemap" href="/sitemap.xml">
 <link rel="search" type="application/opensearchdescription+xml" title="FrogTalk" href="/opensearch.xml">
 <link rel="alternate" type="text/plain" title="LLM site summary" href="/llms.txt">
@@ -103,28 +103,27 @@
 }
 </script>
 
-  <link rel="stylesheet" href="/static/css/home.css?v=2">
+  <link rel="stylesheet" href="/static/css/home.css?v=3">
 </head>
-<body>
+<body class="home-node-dev">
 
 <!-- Site notice (dismissible): styles in home.css, logic in home-vibe-banner.js -->
 
-<div id="vibe-banner" role="status" aria-live="polite" hidden>
+<div id="vibe-banner" role="status" aria-live="polite">
   <div class="vb-inner">
-    <span class="vb-icon" aria-hidden="true">🐸</span>
+    <span class="vb-icon" aria-hidden="true">🔧</span>
     <div class="vb-text">
       <div class="vb-headline">
-        <strong>Censorship-free, private by design</strong> — end-to-end encrypted DMs and open-source code you can audit.
+        <strong>Development node</strong> — <code style="color:#9fd9b8">frogtalk.xyz</code> runs the <code>dev</code> branch. Breakage expected.
       </div>
       <div class="vb-sub">
-        Report security issues or read the encryption model on our <a class="vb-link" href="/security">security page</a>.
-        <span class="vb-prealpha"> · Pre-alpha — no uptime or data guarantees.</span>
+        For everyday use, go to <a class="vb-link" href="https://frogtalk.app">frogtalk.app</a> (production hub).
+        <span class="vb-prealpha"> · Do not store sensitive data here.</span>
       </div>
     </div>
     <div class="vb-actions">
-      <a class="vb-btn vb-btn-primary" href="/security">🛡️ Security</a>
-      <a class="vb-btn" href="/docs/api">📘 API</a>
-      <a class="vb-btn" href="https://github.com/deadinternetfox/frogtalk" target="_blank" rel="noopener">⭐ GitHub</a>
+      <a class="vb-btn vb-btn-primary" href="https://github.com/deadinternetfox/frogtalk/tree/dev" target="_blank" rel="noopener">Contribute</a>
+      <a class="vb-btn" href="/app">Open dev app</a>
     </div>
     <button type="button" class="vb-close" id="vibe-banner-close" aria-label="Dismiss banner">×</button>
   </div>
@@ -364,6 +363,33 @@
   </div>
 </section>
 
+<section class="section node-identity node-identity--dev" id="this-node">
+  <div class="node-identity-inner">
+    <div class="node-identity-grid">
+      <article class="node-identity-card node-identity-card--warn">
+        <span class="node-identity-kicker">This node</span>
+        <h2>FrogTalk Dev · <code>frogtalk.xyz</code></h2>
+        <p>AU-hosted testbed for the <code>dev</code> branch. We deploy here first to break things safely — federation, mobile, and API changes land here before <a href="https://frogtalk.app" style="color:#9fd9b8">frogtalk.app</a>.</p>
+        <div class="node-identity-actions">
+          <a class="primary" href="/app">Open dev app</a>
+          <a href="https://github.com/deadinternetfox/frogtalk/tree/dev" target="_blank" rel="noopener">dev branch</a>
+          <a href="/docs/api">API docs</a>
+        </div>
+      </article>
+      <article class="node-identity-card">
+        <span class="node-identity-kicker">Compare</span>
+        <h2>Dev vs production</h2>
+        <table class="node-compare-table">
+          <tr><th>Dev (<code>.xyz</code>)</th><th>Main (<code>.app</code>)</th></tr>
+          <tr><td>Latest merged PRs</td><td>Promoted, pre-alpha hub</td></tr>
+          <tr><td>May reset or 502</td><td>Best-effort uptime</td></tr>
+          <tr><td>Test federation here</td><td>Official directory</td></tr>
+        </table>
+      </article>
+    </div>
+  </div>
+</section>
+
 <!-- STATS -->
 <div class="stats">
   <div class="stat"><div class="stat-num">E2E</div><div class="stat-label">Encrypted DMs</div></div>
@@ -377,8 +403,8 @@
 
 <!-- DOWNLOADS -->
 <section class="section ft-downloads-section" id="downloads" aria-labelledby="downloads-heading">
-  <div class="section-title" id="downloads-heading">Download FrogTalk</div>
-  <div class="section-sub section-sub--tight">Pre-alpha builds for testing — native Android, desktop, or browser. Not recommended for sensitive or production use.</div>
+  <div class="section-title" id="downloads-heading">Test builds (from main hub)</div>
+  <div class="section-sub section-sub--tight">Same pre-alpha APK/desktop as <a href="https://frogtalk.app/#downloads" style="color:#9fd9b8">frogtalk.app</a> — use dev node for testing only.</div>
   <div data-ft-downloads-root></div>
 </section>
 <link rel="stylesheet" href="/static/css/downloads-picker.css?v=4">

@@ -48,10 +48,11 @@ and private channels (AES-GCM) before data reaches your disk.
 
 | Branch | Deploy target | Use |
 |--------|---------------|-----|
-| **`dev`** | [frogtalk.xyz](https://frogtalk.xyz) (dev node) | Day-to-day development. May be unstable. |
-| **`master`** | [frogtalk.app](https://frogtalk.app) (main node) | Pre-alpha production line. Untested code — use at your own risk. |
+| **`dev`** | [frogtalk.xyz](https://frogtalk.xyz) (dev node) | Day-to-day development. Client default: `frogtalk.xyz`. May be unstable. |
+| **`master`** | [frogtalk.app](https://frogtalk.app) (main node) | Pre-alpha production line. Client default: `frogtalk.app`. |
+| **Tor node** | `.onion` hidden service | `FROGTALK_HOME_PAGE=tor`. Generate vanity: [docs/TOR_VANITY_ONION.md](docs/TOR_VANITY_ONION.md). |
 
-Feature PRs target **`dev`**; tested changes promote to **`master`**. See [CONTRIBUTING.md](CONTRIBUTING.md).
+Code on **`dev`** and **`master`** should match except `client/official-node.json` (`.xyz` vs `.app`). Feature PRs target **`dev`**; promote to **`master`** after testing.
 
 ---
 
