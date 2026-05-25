@@ -1,0 +1,4 @@
+{
+  "_comment": "Optional board nav pill URL overrides by node_id. Set FROGTALK_BOARD_PEER_CANONICAL_FILE to your copy.",
+  "by_node_id": {}
+}
