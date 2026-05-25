@@ -76,13 +76,19 @@ ensure_mkp224o() {
     apt-get update -qq
     apt-get install -y -qq libsodium-dev libssl-dev gcc make git >/dev/null 2>&1 || true
   fi
-  if [[ ! -f "$build_root/mkp224o/Makefile" ]]; then
+  if [[ ! -d "$build_root/mkp224o/.git" ]]; then
     rm -rf "$build_root/mkp224o"
     git clone --depth 1 https://github.com/cathugger/mkp224o.git "$build_root/mkp224o"
   fi
-  make -C "$build_root/mkp224o" -j"$THREADS"
+  if [[ ! -x "$build_root/mkp224o/mkp224o" ]]; then
+    local mkdir="$build_root/mkp224o"
+    if [[ ! -f "$mkdir/GNUmakefile" && ! -f "$mkdir/Makefile" ]]; then
+      (cd "$mkdir" && ./autogen.sh && ./configure --enable-amd64-64-24k 2>/dev/null || ./configure)
+    fi
+    make -C "$mkdir" -j"$THREADS"
+  fi
   MKP224O_BIN="$build_root/mkp224o/mkp224o"
-  [[ -x "$MKP224O_BIN" ]] || ft_die "mkp224o build failed"
+  [[ -x "$MKP224O_BIN" ]] || ft_die "mkp224o build failed (need libsodium-dev, gcc, autoconf, automake, libtool)"
 }
 
 generate_vanity() {

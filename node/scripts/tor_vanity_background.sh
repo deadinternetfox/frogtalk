@@ -90,23 +90,27 @@ if ! command -v git >/dev/null 2>&1 || ! command -v make >/dev/null 2>&1; then
   echo "Installing build deps..."
   export DEBIAN_FRONTEND=noninteractive
   apt-get update -qq
-  apt-get install -y -qq git build-essential tor libsodium-dev libssl-dev >/dev/null
+  apt-get install -y -qq git build-essential tor libsodium-dev libssl-dev autoconf automake libtool pkg-config >/dev/null
 fi
 
 set +e
-onion="\$(
-  FT_INSTALL_DIR="\$INSTALL_DIR" \\
-  FT_VANITY_WORK_DIR="${WORK_DIR}" \\
-  FT_VANITY_THREADS="\$THREADS" \\
-  NO_COLOR=1 \\
-  bash "\$VANITY_SCRIPT" --prefix "\$PREFIX" --threads "\$THREADS" --install-dir "\$INSTALL_DIR" 2>&1 | tail -1
-)"
-rc=\${PIPESTATUS[0]}
+FT_INSTALL_DIR="\$INSTALL_DIR" \\
+FT_VANITY_WORK_DIR="${WORK_DIR}" \\
+FT_VANITY_THREADS="\$THREADS" \\
+NO_COLOR=1 \\
+bash "\$VANITY_SCRIPT" --prefix "\$PREFIX" --threads "\$THREADS" --install-dir "\$INSTALL_DIR" >>"\$LOG_FILE" 2>&1
+rc=\$?
 set -e
 
+hostfile="\$(find "${WORK_DIR}" -maxdepth 2 -name hostname -type f 2>/dev/null | head -1)"
+onion=""
+if [[ -n "\$hostfile" ]]; then
+  onion="\$(tr -d '[:space:]' < "\$hostfile")"
+fi
+
 if [[ "\$rc" -ne 0 ]] || [[ -z "\$onion" ]] || [[ "\$onion" != *.onion ]]; then
-  echo "=== search ended \$(date -Is) rc=\$rc ==="
-  exit "\$rc"
+  echo "=== search ended \$(date -Is) rc=\$rc (no hostname file) ==="
+  exit "\${rc:-1}"
 fi
 
 echo "\$onion" > "\$RESULT_FILE"
