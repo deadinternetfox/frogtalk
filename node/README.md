@@ -44,7 +44,9 @@ Shows incoming commits, warns on dirty trees, re-checks runtime symlinks, and pi
 
 The wizard creates `venv/`, writes `.env`, and symlinks `data/`, `secrets/`, and `.env` into the tree so the unit (`WorkingDirectory=/opt/frogtalk/node`) finds runtime state.
 
-**Docs:** [VPS install guide](../docs/NODE_INSTALL.md) · [Node guide](static/docs-node.html) (`/docs/node`) · [Deploy](deploy/README.md) · [API](static/docs-api.html) (`/docs/api`)
+**Docs:** [VPS install guide](../docs/NODE_INSTALL.md) · [Node guide](static/docs-node.html) (`/docs/node`) · [Deploy](deploy/README.md) (mesh JSON, nginx tunnel, board peers) · [API](static/docs-api.html) (`/docs/api`)
+
+**Federation mesh:** optional `FROGTALK_FEDERATION_MESH_FILE` — see `deploy/federation-mesh.example.json` and `federation_mesh.py` (no hardcoded peer list in `routers/federation.py`).
 
 ## Layout
 

@@ -25,9 +25,10 @@ Self-host your own node and join the mesh — or use the public instance at frog
 [![Stars](https://img.shields.io/github/stars/deadinternetfox/frogtalk?label=stars&style=flat&color=4caf50)](https://github.com/deadinternetfox/frogtalk/stargazers)
 
 [🌐 frogtalk.app](https://frogtalk.app) ·
+[🧪 frogtalk.xyz (dev)](https://frogtalk.xyz) ·
 [📥 Downloads](https://frogtalk.app/#downloads) ·
-[📚 Node Docs](https://frogtalk.app/docs/node) ·
-[🔌 API Docs](https://frogtalk.app/docs/api) ·
+[📚 Node guide](https://frogtalk.app/docs/node) ·
+[🔌 API reference](https://frogtalk.app/docs/api) ·
 [🛡️ Security](https://frogtalk.app/security)
 
 </div>
@@ -44,15 +45,17 @@ and private channels (AES-GCM) before data reaches your disk.
 - **Use the public instance:** [frogtalk.app/app](https://frogtalk.app/app) — **pre-alpha**, no uptime or data guarantees
 - **Run your own:** install under `/opt/frogtalk`, complete the **CLI setup wizard**, join the mesh — **[full VPS guide](docs/NODE_INSTALL.md)** · **[web guide](https://frogtalk.app/docs/node)**
 
-### Branches & hosts
+### Branches & public hosts
 
-| Branch | Deploy target | Use |
-|--------|---------------|-----|
-| **`dev`** | [frogtalk.xyz](https://frogtalk.xyz) (dev node) | Day-to-day development. Client default: `frogtalk.xyz`. May be unstable. |
-| **`master`** | [frogtalk.app](https://frogtalk.app) (main node) | Pre-alpha production line. Client default: `frogtalk.app`. |
-| **Tor node** | `.onion` hidden service | `FROGTALK_HOME_PAGE=tor`. Generate vanity: [docs/TOR_VANITY_ONION.md](docs/TOR_VANITY_ONION.md). |
+| Branch | Default client node | Live host | Role |
+|--------|---------------------|-----------|------|
+| **`master`** | `frogtalk.app` | [frogtalk.app](https://frogtalk.app) | Pre-alpha **production hub** — official directory, stable line for operators |
+| **`dev`** | `frogtalk.xyz` | [frogtalk.xyz](https://frogtalk.xyz) | **Active development** — features land here first; may break without notice |
+| **Tor** (any branch) | varies | `.onion` | Hidden service; `FROGTALK_HOME_PAGE=tor` — vanity search: [docs/TOR_VANITY_ONION.md](docs/TOR_VANITY_ONION.md) |
 
-Code on **`dev`** and **`master`** should match except `client/official-node.json` (`.xyz` vs `.app`). Feature PRs target **`dev`**; promote to **`master`** after testing.
+**Workflow:** fork and PR into **`dev`**. After testing on [frogtalk.xyz](https://frogtalk.xyz), maintainers merge **`dev` → `master`** for production deploys. The only intentional code diff between branches in git is usually `client/official-node.json` (see [client/README.md](client/README.md)); **`dev`** also carries a contributor-focused root README.
+
+**Official directory:** `https://frogtalk.app/api/network/servers` (hub is always **frogtalk.app**, not `.xyz`).
 
 ---
 
@@ -208,12 +211,20 @@ bash node/scripts/node_federation_join.sh --install-dir /opt/frogtalk -y \
 - Peer **Ed25519 keys** are pinned from each peer’s `/api/network/status`
 - Re-run after changing `PUBLIC_URL`, onion URL, or major upgrades
 
-**Official production nodes** (directory + CLI fallback when HTTP is down):
+**Official mesh nodes** (directory + optional `fallback_peers` in your mesh JSON when the directory HTTP fetch fails):
 
-| Node | Clearnet |
-|------|----------|
-| FrogTalk Main | `https://frogtalk.app` |
-| FrogTalk Tor Mirror | Onion address in app **Settings → Network** |
+| Node | Clearnet | Notes |
+|------|----------|--------|
+| FrogTalk Main | `https://frogtalk.app` | Production hub · board `@frog-general` |
+| FrogTalk Dev | `https://frogtalk.xyz` | Development instance · board `@frogtalk-support` |
+| FrogTalk Tor Mirror | `.onion` only | Listed in **Settings → Network** when configured |
+
+Federation is **not hardcoded** in application source. Hub operators copy
+[`node/deploy/federation-mesh.example.json`](node/deploy/federation-mesh.example.json) →
+`federation-mesh.local.json` and set `FROGTALK_FEDERATION_MESH_FILE`. The public FrogTalk fleet
+layout is documented as an example only:
+[`federation-mesh.frogtalk.example.json`](node/deploy/federation-mesh.frogtalk.example.json).
+See [node/deploy/README.md](node/deploy/README.md#federation-mesh-config-open-source).
 
 ### Manual install (no wizard)
 
@@ -249,7 +260,9 @@ bash node/scripts/install.sh federation -y   # refresh peers after releases
 | Problem | Fix |
 |---------|-----|
 | Empty DB / missing tables | `node/data` must symlink to `/opt/frogtalk/data` — run setup or federation join |
-| Domain 502, local `:8080` OK | Match `PORT` in `.env` with nginx `proxy_pass` |
+| Domain 502, local `:8080` OK | Match `PORT` in `.env` with nginx `proxy_pass`; behind Cloudflare tunnel use `PORT=8000` + `FROGTALK_NGINX_TUNNEL_LISTEN=1` (see deploy README) |
+| `/board/` 404 on clearnet | Route tunnel through **nginx on 8080**, not uvicorn directly — `install.sh board-nginx` |
+| Wrong board pill URLs | Optional `FROGTALK_BOARD_PEER_CANONICAL_FILE` — see `board-peer-canonical.example.json` |
 | Federation peers, no delivery | Re-run `federation -y`; check pinned pubkey in DB (`install.sh status`) |
 | CORS in browser | Add your HTTPS origin to `ALLOWED_ORIGINS` |
 
@@ -352,7 +365,9 @@ POST /api/messages       # send a message (with bridge_token)
 WS   /ws/{room}          # real-time message stream
 ```
 
-Full reference: **[frogtalk.app/docs/api](https://frogtalk.app/docs/api)**
+Full reference: **[frogtalk.app/docs/api](https://frogtalk.app/docs/api)** — includes
+`PATCH /api/auth/client-prefs` (`preferred_node_url`, `prefer_onion`, notification sounds)
+for Settings → Network and federation account sync.
 
 ---
 

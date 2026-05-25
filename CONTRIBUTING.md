@@ -6,12 +6,16 @@ FrogTalk is **pre-alpha** software: features ship quickly, APIs may change, and 
 
 ## Branches
 
-| Branch | Deploy target | Purpose |
-|--------|---------------|---------|
-| **`dev`** | [frogtalk.xyz](https://frogtalk.xyz) | Active development. May be broken or incomplete. |
-| **`master`** | [frogtalk.app](https://frogtalk.app) | Pre-alpha production line for the public instance. |
+| Branch | Live host | Client default (`official-node.json`) | Purpose |
+|--------|-----------|--------------------------------------|---------|
+| **`dev`** | [frogtalk.xyz](https://frogtalk.xyz) | `https://frogtalk.xyz` | **Active development** — features and docs land here first; expect breakage |
+| **`master`** | [frogtalk.app](https://frogtalk.app) | `https://frogtalk.app` | Pre-alpha **production hub** — directory API and stable operator line |
 
-**Workflow:** branch from `dev`, open PRs into `dev`. Maintainers promote tested changes from `dev` → `master` for production deploys. Hotfixes for production can branch from `master` and be back-merged into `dev`.
+**Workflow:** fork, branch from **`dev`**, open PRs into **`dev`**. Test against [frogtalk.xyz](https://frogtalk.xyz) when your change touches the live stack. Maintainers merge **`dev` → `master`** for production deploys on [frogtalk.app](https://frogtalk.app). Hotfixes may branch from `master` and be back-merged into `dev`.
+
+**Federation / board ops:** application code no longer embeds FrogTalk server IDs. Operators use env-driven mesh and board canonical files — see [node/deploy/README.md](node/deploy/README.md) and example JSON under `node/deploy/`. Do not commit `*.local.json` or production tokens.
+
+**Docs:** API and node guides are served at `/docs/api` and `/docs/node` on both hosts (mobile-friendly CSS). Update `node/static/docs-*.html` when you change public API behaviour.
 
 ---
 
