@@ -6,10 +6,25 @@ Operator and security documentation published with the repository.
 
 | Document | Audience |
 | -------- | -------- |
-| [NODE_INSTALL.md](NODE_INSTALL.md) | VPS install, nginx, federation join |
+| [NODE_INSTALL.md](NODE_INSTALL.md) | VPS install, nginx, Cloudflare tunnel, federation join |
 | [SECURITY_MODEL.md](SECURITY_MODEL.md) | Encryption, federation trust, account sync, content warnings |
 | [FEDERATED_CALLS.md](FEDERATED_CALLS.md) | Cross-node WebRTC / TURN |
+| [TOR_VANITY_ONION.md](TOR_VANITY_ONION.md) | `mkp224o` vanity `.onion` search on a Tor VPS |
+| [DOMAIN_INFRA_TODO.md](DOMAIN_INFRA_TODO.md) | Fleet / DNS / App Links checklist |
 
-**Branches:** `dev` (development) · `master` (pre-alpha production deploys)
+**Branches**
 
-Live site: [docs/node](https://frogtalk.app/docs/node), [docs/api](https://frogtalk.app/docs/api), [security](https://frogtalk.app/security), [privacy](https://frogtalk.app/privacy).
+| Branch | Host | Notes |
+|--------|------|--------|
+| `dev` | [frogtalk.xyz](https://frogtalk.xyz) | Active development instance; board `@frogtalk-support` |
+| `master` | [frogtalk.app](https://frogtalk.app) | Production hub; federation directory; board `@frog-general` |
+
+**Live docs (same paths on both hosts)**
+
+| Page | Production | Development |
+|------|------------|-------------|
+| Node operator guide | [frogtalk.app/docs/node](https://frogtalk.app/docs/node) | [frogtalk.xyz/docs/node](https://frogtalk.xyz/docs/node) |
+| HTTP API reference | [frogtalk.app/docs/api](https://frogtalk.app/docs/api) | [frogtalk.xyz/docs/api](https://frogtalk.xyz/docs/api) |
+| Security | [frogtalk.app/security](https://frogtalk.app/security) | [frogtalk.xyz/security](https://frogtalk.xyz/security) |
+
+Deploy copies static docs from `node/static/` with the node release — edit HTML/CSS there when documenting new endpoints (e.g. `PATCH /api/auth/client-prefs`).
