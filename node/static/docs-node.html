@@ -52,7 +52,7 @@
   "primaryImageOfPage": "https://frogtalk.app/static/icons/og-image.png"
 }
 </script>
-<link rel="stylesheet" href="/static/css/docs-node.css">
+<link rel="stylesheet" href="/static/css/docs-node.css?v=6">
 </head>
 <body>
   <div id="ft-site-nav-mount"></div>
@@ -82,8 +82,8 @@
 
     <section class="warn-box">
       <strong>Pre-alpha:</strong> FrogTalk is experimental. We do not guarantee uptime, data safety, or API stability.
-      Use <code>master</code> for deploys you intend to run; track <code>dev</code> for bleeding-edge changes.
-      See <a href="/security">security &amp; disclosure</a> before exposing a node to the public internet.
+      Deploy from the <code>master</code> branch for production nodes. See
+      <a href="/security">security &amp; disclosure</a> before exposing a node to the public internet.
     </section>
 
     <section class="warn-box">
@@ -126,14 +126,16 @@ grep ADMIN_PASSWORD /opt/frogtalk/.env</code></pre>
 
     <section class="step" id="prereq">
       <h2>Prerequisites</h2>
-      <table>
-        <tr><th>Item</th><th>Recommendation</th></tr>
-        <tr><td>VPS</td><td>1–2 vCPU, 2–4 GB RAM, 20+ GB disk</td></tr>
-        <tr><td>OS</td><td>Debian 12 / Ubuntu 22.04+ with systemd</td></tr>
-        <tr><td>Python</td><td>3.10+ (3.11+ recommended)</td></tr>
-        <tr><td>DNS</td><td>Optional — A/AAAA for <code>chat.&lt;YOUR_DOMAIN&gt;</code>, or IP-only <code>http://&lt;YOUR_VPS_IP&gt;</code></td></tr>
-        <tr><td>Ports</td><td>22 (SSH), 80/443 (nginx) — app stays on <code>127.0.0.1:8080</code></td></tr>
-      </table>
+      <div class="table-scroll">
+        <table>
+          <tr><th>Item</th><th>Recommendation</th></tr>
+          <tr><td>VPS</td><td>1–2 vCPU, 2–4 GB RAM, 20+ GB disk</td></tr>
+          <tr><td>OS</td><td>Debian 12 / Ubuntu 22.04+ with systemd</td></tr>
+          <tr><td>Python</td><td>3.10+ (3.11+ recommended)</td></tr>
+          <tr><td>DNS</td><td>Optional — A/AAAA for <code>chat.&lt;YOUR_DOMAIN&gt;</code>, or IP-only <code>http://&lt;YOUR_VPS_IP&gt;</code></td></tr>
+          <tr><td>Ports</td><td>22 (SSH), 80/443 (nginx) — app stays on <code>127.0.0.1:8080</code></td></tr>
+        </table>
+      </div>
       <p class="hint">Install wizard = <strong>bash CLI</strong> (<code>node/scripts/install.sh</code>), not a browser UI.</p>
     </section>
 
@@ -208,17 +210,17 @@ curl -sS https://frogtalk.app/api/network/servers | python3 -m json.tool
 
 # Your own node's /api/network/servers always includes local identity —
 # that is NOT proof you are listed on frogtalk.app.</code></pre>
-      <table>
-        <tr><th>Name</th><th>Role</th></tr>
-        <tr><td>FrogTalk Main</td><td><code>https://frogtalk.app</code> — production hub / directory</td></tr>
-        <tr><td>FrogTalk Dev</td><td><code>https://frogtalk.xyz</code> — development instance (optional peer)</td></tr>
-        <tr><td>FrogTalk Tor Mirror</td><td>Onion mirror — listed in network picker when configured</td></tr>
-      </table>
+      <div class="table-scroll">
+        <table>
+          <tr><th>Name</th><th>Role</th></tr>
+          <tr><td>FrogTalk Main</td><td><code>https://frogtalk.app</code> — production hub / official directory</td></tr>
+          <tr><td>FrogTalk Tor Mirror</td><td>Onion mirror — listed in network picker when configured</td></tr>
+        </table>
+      </div>
       <p class="hint"><strong>Mesh config (operators):</strong> federation seed peers and URL repairs are
       defined in <code>FROGTALK_FEDERATION_MESH_FILE</code> (copy
       <code>node/deploy/federation-mesh.example.json</code>). Hub VPS:
-      <code>FROGTALK_FEDERATION_DIRECTORY_HUB=1</code>. Example fleet layout only:
-      <code>federation-mesh.frogtalk.example.json</code>.</p>
+      <code>FROGTALK_FEDERATION_DIRECTORY_HUB=1</code>.</p>
       <pre><code>FROGTALK_FEDERATION_ENABLED=1
 FROGTALK_FEDERATION_REQUIRE_SIGS=1
 FROGTALK_OFFICIAL_DIRECTORY_URL=https://frogtalk.app/api/network/servers
@@ -284,8 +286,9 @@ journalctl -u frogtalk -n 40 --no-pager</code></pre>
 
     <section class="step" id="trouble">
       <h2>Troubleshooting</h2>
-      <table>
-        <tr><th>Symptom</th><th>Fix</th></tr>
+      <div class="table-scroll">
+        <table>
+          <tr><th>Symptom</th><th>Fix</th></tr>
         <tr><td><code>no such table</code> / empty app</td><td>Fix <code>node/data</code> symlink → <code>/opt/frogtalk/data</code></td></tr>
         <tr><td>Works on :8080, not on domain</td><td>Align <code>PORT</code> and nginx <code>proxy_pass</code></td></tr>
         <tr><td><code>federation -y</code> ignored flags</td><td>Use current <code>install.sh</code> — flags must follow the subcommand: <code>federation -y --public-url …</code></td></tr>
@@ -300,7 +303,8 @@ journalctl -u frogtalk -n 40 --no-pager</code></pre>
         <tr><td><code>/board/</code> 404</td><td>Re-run <code>sudo bash node/scripts/install.sh board-nginx</code>; check php-fpm + nginx test</td></tr>
         <tr><td>Board pills / <code>curl_init</code></td><td><code>sudo apt install php-cli php-curl</code>; re-run federation</td></tr>
         <tr><td><code>systemd</code> permission denied</td><td><code>sudo chown -R deploy:deploy /opt/frogtalk</code>; <code>sudo bash node/scripts/install.sh systemd -y</code></td></tr>
-      </table>
+        </table>
+      </div>
       <p class="hint">Security reports: <a href="/security">frogtalk.app/security</a></p>
     </section>
 
@@ -325,8 +329,9 @@ bash node/scripts/install.sh federation -y --public-url "$PUBLIC_URL"</code></pr
     <section class="step" id="features">
       <h2>What your node serves (recent app features)</h2>
       <p class="hint">The web client at <code>$PUBLIC_URL/app</code> includes more than classic chat — operators should know what users will see after federation sync.</p>
-      <table>
-        <tr><th>Area</th><th>Summary</th></tr>
+      <div class="table-scroll">
+        <table>
+          <tr><th>Area</th><th>Summary</th></tr>
         <tr><td>Encryption</td><td>Signal Protocol DMs; AES-256-GCM private channels with AAD binding and key rotation on ban/kick</td></tr>
         <tr><td>Frog Social</td><td>Posts, Reels, stories, reactions, friend wall</td></tr>
         <tr><td>Frog Channel</td><td>PHP imageboard at <code>/board/</code> — threads, greentext, mod tools</td></tr>
@@ -336,7 +341,8 @@ bash node/scripts/install.sh federation -y --public-url "$PUBLIC_URL"</code></pr
         <tr><td>Account sync</td><td>Travelers re-sync signed exports from home (channels, DMs prefs, friends, themes, FrogSocial)</td></tr>
         <tr><td>18+ labels</td><td>Voluntary public-channel content warnings with session age gate (not automated scanning)</td></tr>
         <tr><td>Federation UI</td><td>Release feed SHA-256 checks, trust badges, onion handoffs to <code>/app</code></td></tr>
-      </table>
+        </table>
+      </div>
       <p class="hint">API reference: <a href="/docs/api">frogtalk.app/docs/api</a> · Encryption detail: <a href="https://github.com/deadinternetfox/frogtalk/blob/master/docs/SECURITY_MODEL.md" rel="noopener noreferrer">docs/SECURITY_MODEL.md</a></p>
     </section>
 
