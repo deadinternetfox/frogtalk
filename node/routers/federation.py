@@ -1583,12 +1583,20 @@ def _repair_mesh_clearnet_urls() -> int:
         if cur and cur != want and (legacy_hosts and cur_host not in legacy_hosts):
             continue
         display = str(spec.get("display_name") or row.get("display_name") or sid).strip()
+        mesh_region = str(spec.get("region") or "").strip()
+        repair_row = {
+            **row,
+            "base_url": want,
+            "display_name": display,
+            "region": mesh_region,
+        }
+        region = mesh_region or _resolved_server_region(repair_row)
         db.upsert_federation_server(
             server_id=sid,
             display_name=display[:120] or sid,
             base_url=want,
             onion_url=str(row.get("onion_url") or "").strip(),
-            region=str(row.get("region") or "").strip(),
+            region=region,
             official=True,
             trust_tier=str(row.get("trust_tier") or "official").strip() or "official",
             capabilities=row.get("capabilities") if isinstance(row.get("capabilities"), list) else ["federation-v1"],
@@ -1617,7 +1625,8 @@ def ensure_official_mesh_peers() -> int:
         enabled = int((existing or {}).get("enabled") or 0)
         if existing and onion_ok and enabled:
             continue
-        region = row["region"] or _resolved_server_region(row)
+        mesh_region = str(item.get("region") or "").strip()
+        region = mesh_region or _resolved_server_region(row)
         official = bool(item.get("official", True))
         trust = str(item.get("trust_tier") or "official").strip() or "official"
         db.upsert_federation_server(
@@ -1844,21 +1853,28 @@ def prune_duplicate_federation_servers() -> int:
 
 
 def _resolved_server_region(server: dict) -> str:
-    """Stored region, else GeoIP from clearnet base URL, else Tor label."""
-    region = str(server.get("region") or "").strip()
-    if region:
-        return region[:120]
+    """GeoIP from clearnet base URL (fresh), else stored label, else Tor label.
+
+    Directory rows used to keep a stale ``region`` (e.g. every hostname
+    hard-coded to Spain in the SPA). Prefer live GeoIP so frogtalk.xyz (AU)
+    and frogtalk.app (EU) can differ. Operators may still set
+    ``FROGTALK_SERVER_REGION`` at register time; it is used when GeoIP fails.
+    """
     if _server_advertises_onion_only(server) and str(server.get("onion_url") or "").strip():
-        return "Tor Hidden Service"
+        stored = str(server.get("region") or "").strip()
+        return stored[:120] if stored else "Tor Hidden Service"
     base = _normalize_base_url(str(server.get("base_url") or ""))
-    if not base or ".onion" in base:
-        return ""
-    try:
-        label = geoip.format_region_label(geoip.lookup_base_url(base))
-    except Exception:
-        _log.debug("geo region resolve failed for %s", base, exc_info=True)
-        return ""
-    return label[:120]
+    if base and ".onion" not in base:
+        try:
+            label = geoip.format_region_label(geoip.lookup_base_url(base))
+            if label:
+                return label[:120]
+        except Exception:
+            _log.debug("geo region resolve failed for %s", base, exc_info=True)
+    stored = str(server.get("region") or "").strip()
+    if stored:
+        return stored[:120]
+    return ""
 
 
 def _public_server_view(server: dict, *, onion_only: bool | None = None) -> dict:
