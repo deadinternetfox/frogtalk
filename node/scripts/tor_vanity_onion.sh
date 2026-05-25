@@ -69,9 +69,15 @@ ensure_mkp224o() {
     return 0
   fi
   local build_root="${WORK_DIR}/mkp224o-build"
-  ft_step "Building mkp224o (one-time)…"
+  ft_step "Building mkp224o (one-time)..."
   mkdir -p "$build_root"
-  if [[ ! -d "$build_root/mkp224o/.git" ]]; then
+  if [[ "$(id -u)" -eq 0 ]] && ! dpkg -s libsodium-dev >/dev/null 2>&1; then
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update -qq
+    apt-get install -y -qq libsodium-dev libssl-dev gcc make git >/dev/null 2>&1 || true
+  fi
+  if [[ ! -f "$build_root/mkp224o/Makefile" ]]; then
+    rm -rf "$build_root/mkp224o"
     git clone --depth 1 https://github.com/cathugger/mkp224o.git "$build_root/mkp224o"
   fi
   make -C "$build_root/mkp224o" -j"$THREADS"
