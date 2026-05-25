@@ -1,0 +1,7 @@
+{
+  "_comment": "Copy to federation-mesh.local.json (outside git) and set FROGTALK_FEDERATION_MESH_FILE. Leave empty arrays on a fresh self-hosted node.",
+  "directory_hub_hosts": [],
+  "ensure_peers": [],
+  "clearnet_repairs": [],
+  "fallback_peers": []
+}

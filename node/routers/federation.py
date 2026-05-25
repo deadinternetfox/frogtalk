@@ -34,7 +34,8 @@ import geoip
 # any <style> block from user data.
 from routers._css_inline import sanitize_inline_style as _sanitize_inline_style
 import crypto_fed
-from public_url_policy import LEGACY_OFFICIAL_HUB_URL, OFFICIAL_HUB_URL_DEFAULT
+import federation_mesh
+from public_url_policy import OFFICIAL_HUB_URL_DEFAULT
 
 router = APIRouter(tags=["federation"])
 _log = logging.getLogger(__name__)
@@ -1550,87 +1551,63 @@ def _server_advertises_onion_only(server: dict) -> bool:
     return transport == "onion"
 
 
-# Production directory pair (main clearnet hub + Tor mirror).
-_OFFICIAL_MAIN_SERVER_ID = "srv_ee3f0ff0c6e74fadb542"
-_TOR_MIRROR_SERVER_ID = "srv_c93cf598b239402c8452"
-_TOR_MIRROR_ONION_URL = (
-    "http://icn3a43nb6byhdmon4rqzeqswkskk2bnvf54l6at3iskmqlture3blqd.onion"
-)
-_OFFICIAL_MESH_PEERS: list[dict] = [
-    {
-        "server_id": _TOR_MIRROR_SERVER_ID,
-        "display_name": "FrogTalk Tor Mirror",
-        "base_url": "",
-        "onion_url": _TOR_MIRROR_ONION_URL,
-        "region": "Tor Hidden Service",
-        "capabilities": ["federation-v1"],
-        "transport_preference": "onion",
-    },
-]
-
-
 def _is_official_main_hub() -> bool:
-    """True when this process is the frogtalk.app clearnet directory hub."""
+    """True when this node is configured as the official directory hub (mesh file / env)."""
     if _tor_mode_enabled():
         return False
-    try:
+    return federation_mesh.is_directory_hub()
+
+
+def _repair_mesh_clearnet_urls() -> int:
+    """Apply optional clearnet_repairs from FROGTALK_FEDERATION_MESH_FILE."""
+    if not federation_mesh.is_directory_hub():
+        return 0
+    repaired = 0
+    for spec in federation_mesh.clearnet_repairs():
+        sid = str(spec.get("server_id") or "").strip()
+        want = _normalize_base_url(str(spec.get("canonical_base_url") or ""))
+        if not sid or not want:
+            continue
+        row = db.get_federation_server_row(sid)
+        if not row:
+            continue
+        cur = _normalize_base_url(str(row.get("base_url") or ""))
+        if cur == want:
+            continue
+        legacy_hosts = [
+            str(h).strip().lower()
+            for h in (spec.get("legacy_base_url_hosts") or [])
+            if str(h).strip()
+        ]
+        cur_host = (_url_hostname(cur) or "").strip().lower()
+        if cur and cur != want and (legacy_hosts and cur_host not in legacy_hosts):
+            continue
+        display = str(spec.get("display_name") or row.get("display_name") or sid).strip()
+        db.upsert_federation_server(
+            server_id=sid,
+            display_name=display[:120] or sid,
+            base_url=want,
+            onion_url=str(row.get("onion_url") or "").strip(),
+            region=str(row.get("region") or "").strip(),
+            official=True,
+            trust_tier=str(row.get("trust_tier") or "official").strip() or "official",
+            capabilities=row.get("capabilities") if isinstance(row.get("capabilities"), list) else ["federation-v1"],
+        )
         local = db.get_or_create_local_server_identity() or {}
-    except Exception:
-        return False
-    sid = str(local.get("server_id") or "").strip()
-    if sid == _OFFICIAL_MAIN_SERVER_ID:
-        return True
-    base = _normalize_base_url(str(local.get("base_url") or ""))
-    site = _normalize_base_url(
-        os.getenv("FROGTALK_SITE_URL", "") or os.getenv("SITE_URL", "") or "",
-    )
-    hosts: set[str] = set()
-    for url in (base, site):
-        host = (_url_hostname(url) or "").strip().lower()
-        if host:
-            hosts.add(host)
-    return "frogtalk.app" in hosts or "frogtalk.xyz" in hosts
-
-
-def repair_official_main_clearnet_url() -> bool:
-    """Keep the production hub row on frogtalk.app (not legacy frogtalk.xyz)."""
-    if not _is_official_main_hub():
-        return False
-    row = db.get_federation_server_row(_OFFICIAL_MAIN_SERVER_ID)
-    if not row:
-        return False
-    want = OFFICIAL_HUB_URL_DEFAULT.rstrip("/")
-    cur = _normalize_base_url(str(row.get("base_url") or ""))
-    legacy = LEGACY_OFFICIAL_HUB_URL.rstrip("/")
-    if cur == want:
-        return False
-    if cur != legacy and cur and cur != want:
-        # Operator set a custom clearnet URL — do not overwrite.
-        return False
-    db.upsert_federation_server(
-        server_id=_OFFICIAL_MAIN_SERVER_ID,
-        display_name=str(row.get("display_name") or "FrogTalk Main").strip() or "FrogTalk Main",
-        base_url=want,
-        onion_url=str(row.get("onion_url") or "").strip(),
-        region=str(row.get("region") or "").strip(),
-        official=True,
-        trust_tier=str(row.get("trust_tier") or "official").strip() or "official",
-        capabilities=row.get("capabilities") if isinstance(row.get("capabilities"), list) else ["federation-v1"],
-    )
-    local = db.get_or_create_local_server_identity() or {}
-    if str(local.get("server_id") or "").strip() == _OFFICIAL_MAIN_SERVER_ID:
-        db.set_config("federation.base_url", want)
-    _log.info("federation: repaired official main hub base_url %s → %s", cur or "(empty)", want)
-    return True
+        if str(local.get("server_id") or "").strip() == sid:
+            db.set_config("federation.base_url", want)
+        _log.info("federation: mesh repair %s base_url %s → %s", sid, cur or "(empty)", want)
+        repaired += 1
+    return repaired
 
 
 def ensure_official_mesh_peers() -> int:
-    """Upsert built-in Tor mirror on the main hub when missing from the directory DB."""
-    if not _is_official_main_hub():
+    """Upsert ensure_peers from federation mesh config when this node is the directory hub."""
+    if not federation_mesh.is_directory_hub():
         return 0
-    repair_official_main_clearnet_url()
+    _repair_mesh_clearnet_urls()
     ensured = 0
-    for item in _OFFICIAL_MESH_PEERS:
+    for item in federation_mesh.ensure_peers():
         row = _coerce_server_row(item)
         if not row:
             continue
@@ -1641,23 +1618,28 @@ def ensure_official_mesh_peers() -> int:
         if existing and onion_ok and enabled:
             continue
         region = row["region"] or _resolved_server_region(row)
+        official = bool(item.get("official", True))
+        trust = str(item.get("trust_tier") or "official").strip() or "official"
         db.upsert_federation_server(
             server_id=sid,
             display_name=row["display_name"],
             base_url=row["base_url"],
             onion_url=row["onion_url"],
             region=region,
-            official=True,
-            trust_tier="official",
+            official=official,
+            trust_tier=trust,
             capabilities=row["capabilities"],
         )
         ensured += 1
     return ensured
 
 
-def _builtin_tor_mirror_directory_row() -> dict:
-    """Canonical Tor mirror row for the public network picker (onion-only view)."""
-    item = dict(_OFFICIAL_MESH_PEERS[0])
+def _builtin_tor_mirror_directory_row() -> dict | None:
+    """Tor mirror row from mesh config for the public network picker (onion-only view)."""
+    item = federation_mesh.builtin_tor_mirror_peer()
+    if not item:
+        return None
+    item = dict(item)
     item["official"] = 1
     item["enabled"] = 1
     item["trust_tier"] = "official"
@@ -1707,7 +1689,7 @@ def _is_tor_directory_listing(server: dict) -> bool:
     if not onion:
         return False
     sid = str(server.get("server_id") or "").strip()
-    if sid == _TOR_MIRROR_SERVER_ID:
+    if sid and sid in federation_mesh.tor_mirror_server_ids():
         return True
     transport = str(server.get("transport_preference") or "").strip().lower()
     if transport == "onion":
@@ -2808,10 +2790,12 @@ async def list_network_servers(request: Request, official_only: int = 0):
     local_target = _public_server_target(local_public)
     if local_target and not any((s.get("server_id") == local["server_id"] or _public_server_target(s) == local_target) for s in rows):
         rows.insert(0, local_public)
-    if _is_official_main_hub() and not any(
-        s.get("server_id") == _TOR_MIRROR_SERVER_ID for s in rows
+    tor_ids = federation_mesh.tor_mirror_server_ids()
+    builtin_tor = _builtin_tor_mirror_directory_row()
+    if _is_official_main_hub() and builtin_tor and not any(
+        s.get("server_id") in tor_ids for s in rows
     ):
-        rows.append(_builtin_tor_mirror_directory_row())
+        rows.append(builtin_tor)
     rows = _filter_network_picker_servers(_dedupe_public_servers(rows))
     return {"servers": rows, "network_viewer_mode": _network_viewer_mode()}
 

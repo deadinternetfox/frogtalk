@@ -30,7 +30,7 @@ class TorModeTests(unittest.TestCase):
 
     def test_tor_mirror_listing_hides_clearnet_ip(self):
         server = {
-            "server_id": federation._TOR_MIRROR_SERVER_ID,
+            "server_id": "srv_tor_mirror",
             "display_name": "FrogTalk Tor Mirror",
             "base_url": "http://161.97.182.73",
             "onion_url": "http://icn3a43nb6byhdmon4rqzeqswkskk2bnvf54l6at3iskmqlture3blqd.onion",
@@ -58,7 +58,7 @@ class TorModeTests(unittest.TestCase):
                 "official": 1,
             }),
             federation._public_server_view_for_client({
-                "server_id": federation._TOR_MIRROR_SERVER_ID,
+                "server_id": "srv_tor_mirror",
                 "display_name": "FrogTalk Tor Mirror",
                 "base_url": "http://161.97.182.73",
                 "onion_url": "http://mirror.onion",
@@ -84,7 +84,7 @@ class TorModeTests(unittest.TestCase):
     def test_network_picker_tor_sees_tor_and_hybrid(self, _tor, _hybrid):
         filtered = federation._filter_network_picker_servers(self._sample_network_servers())
         ids = {s["server_id"] for s in filtered}
-        self.assertEqual(ids, {"srv_main", federation._TOR_MIRROR_SERVER_ID})
+        self.assertEqual(ids, {"srv_main", "srv_tor_mirror"})
 
     @mock.patch("routers.federation._hybrid_node_enabled", return_value=False)
     @mock.patch("routers.federation._tor_mode_enabled", return_value=False)
@@ -101,25 +101,32 @@ class TorModeTests(unittest.TestCase):
         self.assertEqual(ui["network_viewer_mode"], "hybrid")
         self.assertTrue(ui["show_block_tor_peers"])
 
+    @mock.patch("federation_mesh.is_directory_hub", return_value=True)
     @mock.patch("routers.federation._tor_mode_enabled", return_value=False)
-    @mock.patch("database.get_or_create_local_server_identity")
-    def test_official_main_hub_auto_hybrid(self, local_mock, _tor):
-        local_mock.return_value = {
-            "server_id": federation._OFFICIAL_MAIN_SERVER_ID,
-            "base_url": "https://frogtalk.xyz",
-            "onion_url": "",
-        }
+    def test_directory_hub_enables_hybrid(self, _tor, _hub):
         self.assertTrue(federation._is_official_main_hub())
         self.assertTrue(federation._hybrid_node_enabled())
 
-    @mock.patch("routers.federation._is_official_main_hub", return_value=True)
+    @mock.patch("federation_mesh.clearnet_repairs", return_value=[])
+    @mock.patch("federation_mesh.ensure_peers", return_value=[
+        {
+            "server_id": "srv_tor_mirror",
+            "display_name": "Tor Mirror",
+            "base_url": "",
+            "onion_url": "http://examplehiddenservice.onion",
+            "region": "Tor Hidden Service",
+            "capabilities": ["federation-v1"],
+            "transport_preference": "onion",
+        },
+    ])
+    @mock.patch("federation_mesh.is_directory_hub", return_value=True)
     @mock.patch("database.get_federation_server_row", return_value=None)
     @mock.patch("database.upsert_federation_server")
-    def test_ensure_official_mesh_peers_seeds_tor_mirror(self, upsert, _row, _hub):
+    def test_ensure_official_mesh_peers_seeds_from_config(self, upsert, _row, _peers, _repairs, _hub):
         n = federation.ensure_official_mesh_peers()
         self.assertEqual(n, 1)
         upsert.assert_called_once()
-        self.assertEqual(upsert.call_args.kwargs["server_id"], federation._TOR_MIRROR_SERVER_ID)
+        self.assertEqual(upsert.call_args.kwargs["server_id"], "srv_tor_mirror")
         self.assertIn(".onion", upsert.call_args.kwargs["onion_url"])
 
     def test_coerce_server_row_accepts_onion_only_payload(self):
@@ -245,22 +252,23 @@ class TorModeTests(unittest.TestCase):
     @mock.patch("routers.federation._hybrid_node_enabled", return_value=True)
     @mock.patch("routers.federation._tor_mode_enabled", return_value=False)
     def test_resolve_server_base_url_hybrid_uses_onion_for_tor_mirror(self, _tor, _hybrid):
+        onion = "http://examplehiddenservice.onion"
         tor_row = {
-            "server_id": federation._TOR_MIRROR_SERVER_ID,
+            "server_id": "srv_tor_mirror",
             "base_url": "",
-            "onion_url": federation._TOR_MIRROR_ONION_URL,
+            "onion_url": onion,
             "transport_preference": "onion",
             "enabled": 1,
         }
         with mock.patch("database.get_federation_server_row", return_value=tor_row):
-            url = auth.resolve_server_base_url(federation._TOR_MIRROR_SERVER_ID)
-        self.assertEqual(url, federation._TOR_MIRROR_ONION_URL.rstrip("/"))
+            url = auth.resolve_server_base_url("srv_tor_mirror")
+        self.assertEqual(url, onion.rstrip("/"))
 
     @mock.patch("federation_calls.db.list_federation_servers", return_value=[
         {
-            "server_id": federation._TOR_MIRROR_SERVER_ID,
+            "server_id": "srv_tor_mirror",
             "base_url": "",
-            "onion_url": federation._TOR_MIRROR_ONION_URL,
+            "onion_url": "http://examplehiddenservice.onion",
             "transport_preference": "onion",
             "enabled": 1,
         },
@@ -281,14 +289,15 @@ class TorModeTests(unittest.TestCase):
         import federation_calls as fc
 
         ids = set(fc._clearnet_federation_peer_ids())
-        self.assertIn(federation._TOR_MIRROR_SERVER_ID, ids)
+        self.assertIn("srv_tor_mirror", ids)
         self.assertIn("srv_clearnet", ids)
 
+    @mock.patch("federation_mesh.tor_mirror_server_ids", return_value={"srv_tor_mirror"})
     @mock.patch("federation_calls.db.list_federation_servers", return_value=[
         {
-            "server_id": federation._TOR_MIRROR_SERVER_ID,
+            "server_id": "srv_tor_mirror",
             "base_url": "",
-            "onion_url": federation._TOR_MIRROR_ONION_URL,
+            "onion_url": "http://examplehiddenservice.onion",
             "transport_preference": "onion",
             "enabled": 1,
         },
@@ -298,14 +307,11 @@ class TorModeTests(unittest.TestCase):
     @mock.patch("routers.federation._hybrid_node_enabled", return_value=False)
     @mock.patch("routers.federation._tor_mode_enabled", return_value=False)
     def test_clearnet_only_federation_peer_ids_skip_tor_mirror(
-        self, _tor, _hybrid, _alias, _local, _peers,
+        self, _tor, _hybrid, _alias, _local, _peers, _tor_ids,
     ):
         import federation_calls as fc
 
-        self.assertNotIn(
-            federation._TOR_MIRROR_SERVER_ID,
-            fc._clearnet_federation_peer_ids(),
-        )
+        self.assertNotIn("srv_tor_mirror", fc._clearnet_federation_peer_ids())
 
 
 if __name__ == "__main__":

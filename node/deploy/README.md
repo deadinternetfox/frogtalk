@@ -170,6 +170,21 @@ Spec: [docs/FEDERATED_CALLS.md](../../docs/FEDERATED_CALLS.md).
 
 **Tor Browser:** WebRTC is blocked in Tor tabs (and some strict privacy extensions). Voice/video calls need a normal browser window or the FrogTalk mobile app — not a server misconfiguration.
 
+## Federation mesh config (open source)
+
+Federation is driven by the **official directory** (`FROGTALK_OFFICIAL_DIRECTORY_URL`) and your local SQLite `federation_servers` table — not hardcoded hostnames in Python.
+
+Optional multi-node / hub operators:
+
+1. Copy `node/deploy/federation-mesh.example.json` → `federation-mesh.local.json` (gitignored on your VPS).
+2. Set `FROGTALK_FEDERATION_MESH_FILE=/opt/frogtalk/federation-mesh.local.json`.
+3. On the **directory hub** VPS, set `FROGTALK_FEDERATION_DIRECTORY_HUB=1` and list your hub hostname(s) under `directory_hub_hosts`.
+4. Use `ensure_peers` to seed Tor mirrors, `clearnet_repairs` to fix stale directory URLs, and `fallback_peers` for `node_federation_join.sh` when the directory HTTP fetch fails.
+
+The public FrogTalk fleet reference (not auto-loaded): `node/deploy/federation-mesh.frogtalk.example.json`.
+
+Board nav pill URL overrides (optional): `FROGTALK_BOARD_PEER_CANONICAL_FILE` — see `board-peer-canonical.example.json`.
+
 ## Federation chat delivery
 
 | Mechanism | Notes |

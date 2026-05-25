@@ -1,0 +1,47 @@
+{
+  "_comment": "Example for the public FrogTalk fleet (frogtalk.app / frogtalk.xyz / Tor). Copy to /opt/frogtalk/federation-mesh.local.json on each VPS — do not treat as automatic defaults.",
+  "directory_hub_hosts": ["frogtalk.app", "www.frogtalk.app"],
+  "ensure_peers": [
+    {
+      "server_id": "srv_c93cf598b239402c8452",
+      "display_name": "FrogTalk Tor Mirror",
+      "base_url": "",
+      "onion_url": "http://icn3a43nb6byhdmon4rqzeqswkskk2bnvf54l6at3iskmqlture3blqd.onion",
+      "region": "Tor Hidden Service",
+      "capabilities": ["federation-v1"],
+      "transport_preference": "onion",
+      "official": true,
+      "trust_tier": "official"
+    }
+  ],
+  "clearnet_repairs": [
+    {
+      "server_id": "srv_ee3f0ff0c6e74fadb542",
+      "canonical_base_url": "https://frogtalk.app",
+      "legacy_base_url_hosts": ["frogtalk.xyz", "www.frogtalk.xyz"],
+      "display_name": "FrogTalk Main"
+    },
+    {
+      "server_id": "srv_de0e973c9d1d46da91a1",
+      "canonical_base_url": "https://frogtalk.xyz",
+      "legacy_base_url_hosts": ["46.250.244.184", "nip.io"],
+      "display_name": "FrogTalk Dev"
+    }
+  ],
+  "fallback_peers": [
+    {
+      "server_id": "srv_ee3f0ff0c6e74fadb542",
+      "display_name": "FrogTalk Main",
+      "base_url": "https://frogtalk.app",
+      "onion_url": "",
+      "capabilities": ["federation-v1"]
+    },
+    {
+      "server_id": "srv_c93cf598b239402c8452",
+      "display_name": "FrogTalk Tor Mirror",
+      "base_url": "",
+      "onion_url": "http://icn3a43nb6byhdmon4rqzeqswkskk2bnvf54l6at3iskmqlture3blqd.onion",
+      "capabilities": ["federation-v1"]
+    }
+  ]
+}

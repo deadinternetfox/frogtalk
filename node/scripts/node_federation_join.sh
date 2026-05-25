@@ -268,30 +268,13 @@ from routers import federation as fed
 
 init_db()
 
-# Last-resort mesh rows when directory HTTP is down (frogtalk.app production pair).
-FALLBACK_PEERS = [
-    {
-        "server_id": "srv_ee3f0ff0c6e74fadb542",
-        "display_name": "FrogTalk Main",
-        "base_url": "https://frogtalk.app",
-        "onion_url": "",
-        "capabilities": ["federation-v1"],
-    },
-    {
-        "server_id": "srv_c93cf598b239402c8452",
-        "display_name": "FrogTalk Tor Mirror",
-        "base_url": "",
-        "onion_url": "http://icn3a43nb6byhdmon4rqzeqswkskk2bnvf54l6at3iskmqlture3blqd.onion",
-        "capabilities": ["federation-v1"],
-    },
-]
-
 async def main():
     dir_url = (os.getenv("FROGTALK_OFFICIAL_DIRECTORY_URL") or "").strip()
     result = await fed.sync_official_directory_once(dir_url or None)
-    if not result.get("ok") and FALLBACK_PEERS:
+    fallback_peers = fed.federation_mesh.fallback_peers()
+    if not result.get("ok") and fallback_peers:
         imported = skipped = 0
-        for item in FALLBACK_PEERS:
+        for item in fallback_peers:
             row = fed._coerce_server_row(item)
             if not row:
                 skipped += 1
@@ -314,7 +297,7 @@ async def main():
             "ok": True,
             "imported": imported,
             "skipped": skipped,
-            "total": len(FALLBACK_PEERS),
+            "total": len(fallback_peers),
             "fallback": True,
             "pinned": pinned,
             "error": result.get("error"),

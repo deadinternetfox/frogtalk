@@ -1191,18 +1191,45 @@ function getBoardInfo(): array {
     ];
 }
 
-/** Production hub board pill must point at frogtalk.app, not legacy frogtalk.xyz. */
-function boardRemapKnownHubPeerUrl(array $peer): array {
+/** Optional operator overrides for federated board nav pill URLs (by node_id). */
+function boardCanonicalPeerMap(): array {
+    static $map = null;
+    if ($map !== null) {
+        return $map;
+    }
+    $map = [];
+    $path = trim((string)(getenv('FROGTALK_BOARD_PEER_CANONICAL_FILE') ?: ''));
+    if ($path === '') {
+        foreach ([__DIR__ . '/../board-peer-canonical.local.json', __DIR__ . '/../deploy/board-peer-canonical.local.json'] as $guess) {
+            if (is_readable($guess)) {
+                $path = $guess;
+                break;
+            }
+        }
+    }
+    if ($path !== '' && is_readable($path)) {
+        $raw = json_decode((string)file_get_contents($path), true);
+        if (is_array($raw) && is_array($raw['by_node_id'] ?? null)) {
+            foreach ($raw['by_node_id'] as $nid => $url) {
+                $nid = strtolower(trim((string)$nid));
+                $url = trim((string)$url);
+                if ($nid !== '' && $url !== '') {
+                    $map[$nid] = $url;
+                }
+            }
+        }
+    }
+    return $map;
+}
+
+function boardApplyCanonicalPeerUrl(array $peer): array {
     $nid = strtolower(trim((string)($peer['node_id'] ?? '')));
-    $url = trim((string)($peer['url'] ?? ''));
-    if ($url === '') {
+    if ($nid === '') {
         return $peer;
     }
-    $host = strtolower((string)(parse_url($url, PHP_URL_HOST) ?? ''));
-    $isMainHub = in_array($nid, ['frog-general', 'frogtalk-main', 'srv_ee3f0ff0c6e74fadb542'], true)
-        || str_contains(strtolower((string)($peer['title'] ?? '')), 'frog general');
-    if ($isMainHub && (str_ends_with($host, 'frogtalk.xyz') || $host === 'www.frogtalk.xyz')) {
-        $peer['url'] = 'https://frogtalk.app/board/';
+    $canonical = boardCanonicalPeerMap()[$nid] ?? '';
+    if ($canonical !== '') {
+        $peer['url'] = $canonical;
     }
     return $peer;
 }
@@ -1244,7 +1271,7 @@ function getFederatedPeers(?bool $visitorTor = null): array {
             'tor_onion_url' => (string)($p['tor_onion_url'] ?? ''),
             'last_seen'=> (int)($p['last_seen'] ?? 0),
         ];
-        $out[] = boardRemapKnownHubPeerUrl($entry);
+        $out[] = boardApplyCanonicalPeerUrl($entry);
     }
     return $out;
 }
@@ -1462,7 +1489,7 @@ function refreshFederatedPeers(): int {
             'tor_onion_url' => (string)($info['tor_onion_url'] ?? ''),
             'last_seen'=> $now,
         ]);
-        $peers[$i] = boardRemapKnownHubPeerUrl($merged);
+        $peers[$i] = boardApplyCanonicalPeerUrl($merged);
         $updated++;
     }
     $s['federated_peers'] = array_values($peers);
