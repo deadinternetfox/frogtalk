@@ -187,6 +187,10 @@ FROGTALK_SYNC_LOGIN_RESUME=1
 FROGTALK_SYNC_PAGINATION=1
 # FROGTALK_SYNC_STALE_HOURS=24</code></pre>
       <p class="hint"><strong>Calls:</strong> DM voice/video between nodes uses home-server signaling. Travelers <em>currently connected</em> to your node are rung locally even when homed elsewhere. Enable <code>FROGTALK_FEDERATION_CALLS_ENABLED=1</code> and publish TURN URLs. See <a href="/docs/api">API docs</a> (Federation) and operator guide in the repo <code>docs/FEDERATED_CALLS.md</code>.</p>
+      <p class="hint"><strong>Preferred node (app):</strong> users save their network choice with
+      <code>PATCH /api/auth/client-prefs</code> (<code>preferred_node_url</code>, optional
+      <code>prefer_onion</code>) — included when they re-sync from home. See
+      <a href="/docs/api#auth">API → Auth</a>.</p>
     </section>
 
     <section class="step" id="federation">
@@ -206,17 +210,31 @@ curl -sS https://frogtalk.app/api/network/servers | python3 -m json.tool
 # that is NOT proof you are listed on frogtalk.app.</code></pre>
       <table>
         <tr><th>Name</th><th>Role</th></tr>
-        <tr><td>FrogTalk Main</td><td><code>https://frogtalk.app</code></td></tr>
-        <tr><td>FrogTalk Tor Mirror</td><td>Onion mirror — network list in app</td></tr>
+        <tr><td>FrogTalk Main</td><td><code>https://frogtalk.app</code> — production hub / directory</td></tr>
+        <tr><td>FrogTalk Dev</td><td><code>https://frogtalk.xyz</code> — development instance (optional peer)</td></tr>
+        <tr><td>FrogTalk Tor Mirror</td><td>Onion mirror — listed in network picker when configured</td></tr>
       </table>
+      <p class="hint"><strong>Mesh config (operators):</strong> federation seed peers and URL repairs are
+      defined in <code>FROGTALK_FEDERATION_MESH_FILE</code> (copy
+      <code>node/deploy/federation-mesh.example.json</code>). Hub VPS:
+      <code>FROGTALK_FEDERATION_DIRECTORY_HUB=1</code>. Example fleet layout only:
+      <code>federation-mesh.frogtalk.example.json</code>.</p>
       <pre><code>FROGTALK_FEDERATION_ENABLED=1
 FROGTALK_FEDERATION_REQUIRE_SIGS=1
+FROGTALK_OFFICIAL_DIRECTORY_URL=https://frogtalk.app/api/network/servers
 FROGTALK_FEDERATION_TOKEN=
+# Hub only (optional):
+# FROGTALK_FEDERATION_DIRECTORY_HUB=1
+# FROGTALK_FEDERATION_MESH_FILE=/opt/frogtalk/federation-mesh.local.json
 FROGTALK_TOR_ENABLED=0
 PUBLIC_URL=https://chat.&lt;YOUR_DOMAIN&gt;
 FROGTALK_SERVER_NAME=My FrogTalk Node
+FROGTALK_HOME_PAGE=main
 ALLOWED_ORIGINS=https://chat.&lt;YOUR_DOMAIN&gt;
-FROGTALK_AUTO_UPDATE_ENABLED=0</code></pre>
+FROGTALK_AUTO_UPDATE_ENABLED=0
+# Clearnet + /board/ behind Cloudflare tunnel (typical):
+PORT=8000
+FROGTALK_NGINX_TUNNEL_LISTEN=1</code></pre>
     </section>
 
     <section class="step" id="https">

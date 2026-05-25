@@ -83,7 +83,7 @@ if not subtitle:
 if topic:
     s["board_topic"] = topic[:32]
 if home_page == "dev":
-    s["node_id"] = "frogtalk-dev"
+    s["node_id"] = "frogtalk-support"
 if subtitle:
     s["board_subtitle"] = subtitle[:120]
 s["board_title"] = title[:80]
