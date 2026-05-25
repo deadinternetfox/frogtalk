@@ -52,7 +52,7 @@
 }
 </script>
 
-  <link rel="stylesheet" href="/static/css/docs-api.css">
+  <link rel="stylesheet" href="/static/css/docs-api.css?v=6">
 </head>
 <body>
   <!-- NAV (shared: static/partials/site-nav.html) -->
@@ -138,9 +138,10 @@ GET    /api/federation/profile-card</code></pre>
           card (sanitized <code>custom_style</code> only; raw <code>custom_css</code> is self-only;
           optional wall when subject is at home). Peer export endpoints
           (<code>federation-sync-export-gid</code>, <code>-ticket</code>, <code>-profile-gid</code>,
-          <code>-memberships-gid</code>) accept <strong>dual federation auth</strong>: legacy
-          <code>X-Federation-Token</code> and/or per-peer Ed25519 signed HTTP headers (same as
-          <code>POST /federation/events/inbox</code>). Imports verify
+          <code>-memberships-gid</code>) accept <strong>federation auth</strong>: per-peer Ed25519
+          signed HTTP headers (same as <code>POST /federation/events/inbox</code>), plus the shared
+          <code>X-Federation-Token</code> when <code>FROGTALK_FEDERATION_AUTH_MODE=dual</code> (default).
+          Imports verify
           <code>export_sig_b64</code> against the pinned home <code>server_pubkey</code> when
           <code>FROGTALK_SYNC_REQUIRE_EXPORT_SIG=1</code> (default).</p>
 <pre><code>PATCH /api/auth/client-prefs
@@ -597,7 +598,7 @@ async function tick() {
 }
 setInterval(tick, 5000);</code></pre>
 
-          <p class="muted" class="h-mt-14">Want to contribute another reference bot
+          <p class="muted h-mt-14">Want to contribute another reference bot
           (TypeScript, Go, Rust, a Discord-style command bot, an RSS poster…)? Open a PR against
           <a href="https://github.com/deadinternetfox/frogtalk/tree/master/bot-examples" target="_blank" rel="noopener noreferrer">bot-examples/</a>.</p>
         </article>
@@ -684,13 +685,13 @@ GET    /api/federation/failover/status</code></pre>
           (<code>FROGTALK_AUTO_UPDATE_ENABLED=0</code>) — operators opt in explicitly.</p>
 <pre><code>POST /api/network/updates/publish
 {
-  "version": "1.5.4-pre-alpha",
-  "package_url": "https://frogtalk.app/releases/frogtalk-1.5.4-pre-alpha.tar.gz",
+  "version": "1.6.37-alpha",
+  "package_url": "https://frogtalk.app/releases/frogtalk-1.6.37-alpha.tar.gz",
   "package_sha256": "&lt;sha256&gt;",
   "build_hash": "&lt;web-build-hash&gt;",
   "signature": "&lt;ed25519-sig-over-canonical-manifest&gt;",
   "signer": "&lt;ed25519-pubkey-hex&gt;",
-  "notes": "Federation-safe rollout"
+  "notes": "Signed release rollout"
 }</code></pre>
           <p class="muted">The <code>POST /api/network/update/apply</code> endpoint verifies the signature,
           checks <code>package_sha256</code>, and enforces version monotonicity before running the apply
@@ -708,6 +709,18 @@ GET    /api/federation/failover/status</code></pre>
           <code>FROGTALK_FEDERATION_INBOX_IDLE_SEC</code> / <code>OUTBOX_IDLE_SEC</code> (default 8s when idle,
           2s when busy). Clearnet hubs reach <code>.onion</code> peers via <code>FROGTALK_TOR_SOCKS_PROXY</code>.</p>
 
+          <h3 class="h-mt-14">Official production mesh</h3>
+          <p class="muted">End-user directory and federation traffic target these production nodes
+          (listed on <code>GET /api/network/servers</code> at the hub). Development or staging hosts
+          are not part of this reference set.</p>
+          <div class="table-scroll">
+            <table>
+              <tr><th>Node</th><th>URL</th><th>Role</th></tr>
+              <tr><td>FrogTalk Main</td><td><code>https://frogtalk.app</code></td><td>Production hub · official directory</td></tr>
+              <tr><td>FrogTalk Tor Mirror</td><td><code>.onion</code> (see network picker)</td><td>Tor-only mirror when configured</td></tr>
+            </table>
+          </div>
+
           <h3 class="h-mt-14">Operator mesh config (self-hosted)</h3>
           <p class="muted">Directory rows and seed peers are <strong>not</strong> hardcoded in Python.
           Copy <code>node/deploy/federation-mesh.example.json</code> to
@@ -716,9 +729,7 @@ GET    /api/federation/failover/status</code></pre>
           <code>GET /api/network/servers</code>, set <code>FROGTALK_FEDERATION_DIRECTORY_HUB=1</code>
           and list your hostname under <code>directory_hub_hosts</code>. Use
           <code>ensure_peers</code>, <code>clearnet_repairs</code>, and
-          <code>fallback_peers</code> as documented in <code>node/deploy/README.md</code>.
-          Reference layout for the public FrogTalk fleet (example only):
-          <code>federation-mesh.frogtalk.example.json</code>.</p>
+          <code>fallback_peers</code> as documented in <code>node/deploy/README.md</code>.</p>
 
           <h3 class="h-mt-14">Foreign user and room materialization</h3>
           <p class="muted">Federation events referencing an unknown local nickname or room are
@@ -794,9 +805,10 @@ social.story.created / social.story.deleted</code></pre>
     }
   }]
 }</code></pre>
-          <p class="muted">Push workers attach <code>x-federation-token</code> (legacy) and/or request
-          Ed25519 headers (<code>FROGTALK_FEDERATION_AUTH_MODE=signed</code>). Rate limit: 600 events /
-          60s per origin.</p>
+          <p class="muted">Peer pushes use Ed25519 request headers. With
+          <code>FROGTALK_FEDERATION_AUTH_MODE=dual</code> (default), workers may also send
+          <code>X-Federation-Token</code>. Set <code>signed</code> to require signatures only.
+          Rate limit: 600 events / 60s per origin.</p>
         </article>
 
         <article class="panel" id="admin">

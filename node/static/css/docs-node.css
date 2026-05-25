@@ -42,6 +42,18 @@ body.ft-has-site-nav .wrap {
   max-width: min(1000px, 100%);
   margin: 0 auto;
   padding: 1.2rem max(0.85rem, env(safe-area-inset-right)) 3rem max(0.85rem, env(safe-area-inset-left));
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.hero,
+.step,
+.warn-box,
+.callout {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 .hero {
@@ -51,6 +63,13 @@ body.ft-has-site-nav .wrap {
   background: linear-gradient(150deg, rgba(22, 27, 34, 0.94), rgba(17, 23, 31, 0.94));
   margin-bottom: 1rem;
   box-shadow: 0 8px 28px rgba(0, 0, 0, 0.25);
+}
+
+.hint,
+.sub,
+.hero-meta {
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .hero-meta {
@@ -147,15 +166,21 @@ code {
   margin-top: 0.6rem;
 }
 
-table {
-  display: block;
+.table-scroll {
   width: 100%;
   max-width: 100%;
+  min-width: 0;
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
+  margin-top: 0.5rem;
+}
+
+table {
+  width: 100%;
+  max-width: 100%;
   border-collapse: collapse;
   font-size: 0.88rem;
-  margin-top: 0.5rem;
+  table-layout: fixed;
 }
 
 th,
@@ -163,6 +188,9 @@ td {
   border: 1px solid var(--line);
   padding: 0.45rem 0.55rem;
   text-align: left;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 th {
@@ -186,12 +214,21 @@ a {
 
   .wrap {
     padding: 1rem max(0.65rem, env(safe-area-inset-right)) 2.5rem max(0.65rem, env(safe-area-inset-left));
+    width: 100%;
+    max-width: 100%;
   }
 
   .hero,
-  .step {
+  .step,
+  .warn-box,
+  .callout {
     padding: 0.85rem;
     border-radius: 12px;
+  }
+
+  pre {
+    margin-left: 0;
+    margin-right: 0;
   }
 
   h1 {
