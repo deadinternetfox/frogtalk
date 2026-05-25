@@ -52,7 +52,7 @@
 }
 </script>
 
-  <link rel="stylesheet" href="/static/css/docs-api.css?v=6">
+  <link rel="stylesheet" href="/static/css/docs-api.css?v=7">
 </head>
 <body>
   <!-- NAV (shared: static/partials/site-nav.html) -->
@@ -61,9 +61,18 @@
 
   <main class="wrap">
     <section class="hero">
-      <h1>Complete API Reference</h1>
-      <p class="sub">Complete reference for FrogTalk HTTP and WebSocket APIs: auth, chat, social, bots, federation, and server administration.</p>
-      <div class="meta">Base URL: <code>https://your-host/api</code> · Session header: <code>X-Session-Token</code> · Developer header: <code>X-API-Key</code> or <code>Authorization: Bearer KEY</code></div>
+      <h1>FrogTalk API Reference</h1>
+      <p class="sub">HTTP and WebSocket endpoints for chat, social, bots, federation, and server administration. Lists show the <strong>HTTP method</strong> first, then the path.</p>
+      <div class="meta">Base URL: <code>https://your-host/api</code> · Session: <code>X-Session-Token</code> · Bots/integrations: <code>X-API-Key</code> or <code>Authorization: Bearer &lt;key&gt;</code> · JSON bodies unless noted</div>
+      <p class="method-key" role="note">
+        <span class="lbl">Methods:</span>
+        <span><span class="m m-get">GET</span> read</span>
+        <span><span class="m m-post">POST</span> create / action</span>
+        <span><span class="m m-patch">PATCH</span> partial update</span>
+        <span><span class="m m-put">PUT</span> replace</span>
+        <span><span class="m m-delete">DELETE</span> remove</span>
+      </p>
+      <p class="callout-tip"><strong>PATCH</strong> means “change only the fields you send” — not a software patch or hotfix. Example: update <code>preferred_node_url</code> without resending your whole profile.</p>
     </section>
 
     <div class="layout">
@@ -94,15 +103,17 @@
 
       <section>
         <article class="panel" id="auth">
-          <h2>Auth Endpoints</h2>
-          <div class="muted"><span class="tag">PREFIX</span> /api/auth</div>
+          <h2>Auth</h2>
+          <div class="muted"><span class="tag">PREFIX</span> /api/auth · most routes need <code>X-Session-Token</code></div>
 <pre><code>POST   /api/auth/register
 POST   /api/auth/login
 POST   /api/auth/logout
 PATCH  /api/auth/nickname
+PATCH  /api/auth/display-name
 GET    /api/auth/me
 PATCH  /api/auth/profile
 PATCH  /api/auth/client-prefs
+PATCH  /api/auth/pin/options
 DELETE /api/auth/account
 GET    /api/auth/captcha
 POST   /api/auth/register-secure
@@ -121,29 +132,22 @@ POST   /api/auth/federation-sync-export-ticket
 POST   /api/auth/federation-sync-export-gid
 POST   /api/auth/federation-sync-memberships-gid
 GET    /api/federation/profile-card</code></pre>
-          <p class="muted"><strong>Account sync</strong> (foreign node): home-signed export chunks
-          import joined rooms (settings: <code>channel_theme</code>, banner, about, slowmode,
-          <code>invite_only</code>, <code>who_can_invite</code>, <code>forwarding_disabled</code>,
-          <code>dj_only_queue</code>), DM peers (disappear timer, per-thread forwarding lock,
-          read cursor, hidden), friends/following/block list, self profile
-          (<code>theme</code>, <code>custom_style</code>, <code>client_prefs</code> for Tor/node/sounds,
-          notify flags, PIN policy), and FrogSocial posts (paginated). Live stories and notification
-          inbox are not bulk-imported — they arrive via federation events after login.
-          <code>PATCH /api/auth/client-prefs</code> merges Tor preference, preferred federation node URL,
-          and capped app notification sounds (stored server-side; included in account sync export).
-          All fields are optional — omitted keys are left unchanged. Invalid
-          <code>preferred_node_url</code> values return <code>400</code> with
-          <code>{"error":"invalid preferred_node_url"}</code>.
-          <code>GET /api/federation/profile-card?nickname=&amp;ft_gid=</code> returns a federated user
-          card (sanitized <code>custom_style</code> only; raw <code>custom_css</code> is self-only;
-          optional wall when subject is at home). Peer export endpoints
-          (<code>federation-sync-export-gid</code>, <code>-ticket</code>, <code>-profile-gid</code>,
-          <code>-memberships-gid</code>) accept <strong>federation auth</strong>: per-peer Ed25519
-          signed HTTP headers (same as <code>POST /federation/events/inbox</code>), plus the shared
-          <code>X-Federation-Token</code> when <code>FROGTALK_FEDERATION_AUTH_MODE=dual</code> (default).
-          Imports verify
-          <code>export_sig_b64</code> against the pinned home <code>server_pubkey</code> when
-          <code>FROGTALK_SYNC_REQUIRE_EXPORT_SIG=1</code> (default).</p>
+
+          <h3>Account sync (visit another node)</h3>
+          <p class="muted">When you log in on a community node, the home server can export a signed bundle: joined channels (themes, slowmode, invites), DM thread prefs, friends/following, profile, and FrogSocial posts (paginated). Stories and the notification inbox are <em>not</em> bulk-imported — they arrive over federation after login.</p>
+          <p class="muted">Peer export routes (<code>federation-sync-export-gid</code>, <code>-ticket</code>, <code>-profile-gid</code>, <code>-memberships-gid</code>) use <strong>federation auth</strong>: Ed25519 signed headers (same as the federation inbox), plus optional <code>X-Federation-Token</code> when <code>FROGTALK_FEDERATION_AUTH_MODE=dual</code>. Imports check <code>export_sig_b64</code> against the pinned home pubkey when <code>FROGTALK_SYNC_REQUIRE_EXPORT_SIG=1</code> (default).</p>
+
+          <h3>Partial updates — profile, nickname, client prefs</h3>
+          <p class="muted">Use <span class="m m-patch">PATCH</span> when you only want to change some fields. Omitted JSON keys are left as-is. Invalid <code>preferred_node_url</code> → <code>400</code> with <code>{"error":"invalid preferred_node_url"}</code>.</p>
+          <ul class="muted">
+            <li><span class="m m-patch">PATCH</span> <code>/api/auth/nickname</code> — change handle</li>
+            <li><span class="m m-patch">PATCH</span> <code>/api/auth/display-name</code> — display name shown in chat</li>
+            <li><span class="m m-patch">PATCH</span> <code>/api/auth/profile</code> — avatar, status, theme, etc.</li>
+            <li><span class="m m-patch">PATCH</span> <code>/api/auth/pin/options</code> — app PIN / admin gate options</li>
+            <li><span class="m m-patch">PATCH</span> <code>/api/auth/client-prefs</code> — Tor preference, preferred node URL, notification sounds (synced on account export)</li>
+          </ul>
+
+          <h4>Example: client preferences</h4>
 <pre><code>PATCH /api/auth/client-prefs
 X-Session-Token: &lt;session&gt;
 Content-Type: application/json
@@ -159,16 +163,9 @@ Content-Type: application/json
 
 # Response
 { "ok": true, "client_prefs": { … } }</code></pre>
-          <p class="muted"><strong><code>preferred_node_url</code></strong> — clearnet
-          <code>https://</code> or <code>http://</code> origin (max 512 chars), or a bare
-          <code>.onion</code> host hint for Tor-first clients. Persisted for Settings → Network and
-          re-exported on federation account sync (<code>self_profile.client_prefs</code>).
-          <strong><code>custom_sounds</code></strong> — only keys <code>app:msg</code> and
-          <code>app:ring</code>; values may be <code>data:audio/…;base64,…</code>
-          (size-capped) or stable server URLs under <code>/api/auth/app-sounds/{user_id}/{key}</code>
-          after upload.</p>
-          <p class="muted"><code>GET /api/auth/me</code> returns <code>client_prefs</code> and
-          <code>custom_style</code> (self only: <code>custom_css</code> editor blob).</p>
+          <p class="muted"><code>preferred_node_url</code> — clearnet <code>https://</code> or <code>http://</code> (max 512 chars), or a bare <code>.onion</code> hint. <code>custom_sounds</code> — only <code>app:msg</code> and <code>app:ring</code> (base64 or URLs under <code>/api/auth/app-sounds/{user_id}/{key}</code>).</p>
+          <p class="muted"><span class="m m-get">GET</span> <code>/api/auth/me</code> returns your session user, <code>client_prefs</code>, and <code>custom_style</code> (<code>custom_css</code> editor blob is self-only).</p>
+          <p class="muted"><span class="m m-get">GET</span> <code>/api/federation/profile-card?nickname=&amp;ft_gid=</code> — federated profile card (sanitized styles; optional wall when the user is at home).</p>
         </article>
 
         <article class="panel" id="users">
@@ -260,21 +257,16 @@ POST   /api/dms/{channel_id}/hide
 POST   /api/dms/{channel_id}/unhide
 POST   /api/dms/{channel_id}/forwarding
 DELETE /api/dms/{channel_id}/messages</code></pre>
-          <p class="muted"><code>PATCH /api/rooms/{room_name}</code> accepts moderation fields including
-          <code>slowmode</code>, <code>invite_only</code>, <code>who_can_invite</code>,
-          <code>forwarding_disabled</code> (0/1), <code>content_warning</code> (public channels only:
-          <code>{"enabled": true, "flags": ["nudity","violence","extremism","mature_themes"]}</code>),
-          <code>channel_theme</code> (sanitized JSON), banner,
-          and about. Joined-room settings replicate on account sync. Public channels flagged 18+
-          require a session age confirmation (<code>POST …/content-warning/ack</code> with
-          <code>{"confirm": true}</code>) before history, media, or WebSocket sends. Ack persists
-          for the session until logout, explicit leave (<code>POST …/leave</code> or
-          <code>POST …/content-warning/forget</code>), or moderator flag changes. Unconfirmed
-          clients receive HTTP <strong>451</strong> with <code>content_warning_required</code>.
-          Labels sync via federation and account export (<code>content_warning_enabled</code> /
-          <code>content_warning_flags</code> on joined public rooms). DM
-          <code>POST …/forwarding</code> body: <code>{"disabled": true}</code> — synced per peer via
-          <code>dm_peers[]</code> in export.</p>
+
+          <h3>Room settings (partial update)</h3>
+          <p class="muted"><span class="m m-patch">PATCH</span> <code>/api/rooms/{room_name}</code> — send only the fields you want to change: <code>slowmode</code>, <code>invite_only</code>, <code>who_can_invite</code>, <code>forwarding_disabled</code>, <code>channel_theme</code>, banner, about, and (public channels) <code>content_warning</code> JSON.</p>
+          <p class="muted"><span class="m m-patch">PATCH</span> <code>/api/messages/{msg_id}</code> — edit a message you authored. <span class="m m-put">PUT</span> on DM messages replaces content on that row.</p>
+
+          <h3>18+ channel labels</h3>
+          <p class="muted">Public channels with content warnings require <span class="m m-post">POST</span> <code>…/content-warning/ack</code> with <code>{"confirm": true}</code> before history, media, or WebSocket sends. Otherwise clients get <strong>451</strong> <code>content_warning_required</code>. Ack lasts for the session until logout, leave, or <code>…/content-warning/forget</code>.</p>
+
+          <h3>DM forwarding lock</h3>
+          <p class="muted"><span class="m m-post">POST</span> <code>/api/dms/{channel_id}/forwarding</code> with <code>{"disabled": true}</code> — per-peer setting; included in account sync as <code>dm_peers[]</code>.</p>
         </article>
 
         <article class="panel" id="media">
@@ -314,10 +306,12 @@ POST   /api/media/stickers/packs/{pack_id}/install
 DELETE /api/media/stickers/packs/{pack_id}/uninstall
 DELETE /api/media/stickers/{sticker_id}
 GET    /api/media/stickers/public</code></pre>
+          <p class="muted"><span class="m m-patch">PATCH</span> <code>/api/location/settings</code> — update location-sharing preferences (partial JSON).</p>
         </article>
 
         <article class="panel" id="social">
           <h2>Social, Wall, Directory, Invites</h2>
+          <p class="muted">Wall post bodies use <span class="m m-post">POST</span> / <span class="m m-put">PUT</span> / <span class="m m-delete">DELETE</span>. Directory listing visibility uses <span class="m m-patch">PATCH</span> <code>/api/directory/channels/{room_name}/visibility</code>. Wall account settings: <span class="m m-patch">PATCH</span> <code>/api/wall/settings</code>.</p>
 <pre><code>POST   /api/social/follow/{nickname}
 DELETE /api/social/follow/{nickname}
 GET    /api/social/profile/{nickname}
@@ -483,15 +477,16 @@ while True:
           <p>Setting <code>reply_to</code> threads the bot's reply under the trigger message so users see the quoted parent.</p>
 
           <h3 id="bot-step-profile">5. Profile (botfather-style)</h3>
-          <p><code>PUT /api/developer/bots/{bot_id}</code> updates the bot's profile. Uses your user
-          session (not the bot key), so typically you'll use the in-app <strong>Edit</strong> dialog.</p>
-          <table>
-            <tr><th>Field</th><th>Type</th><th>Notes</th></tr>
-            <tr><td><code>name</code></td><td>string</td><td>unique handle (≤32 chars)</td></tr>
-            <tr><td><code>avatar</code></td><td>string</td><td>URL or <code>data:</code> URL</td></tr>
-            <tr><td><code>description</code></td><td>string</td><td>shown in the directory (≤500 chars)</td></tr>
-            <tr><td><code>is_public</code></td><td>bool</td><td>list publicly</td></tr>
-          </table>
+          <p><span class="m m-put">PUT</span> <code>/api/developer/bots/{bot_id}</code> replaces bot profile fields. Requires your <strong>user session</strong> (not the bot key) — the in-app <strong>Edit</strong> dialog is the usual path.</p>
+          <div class="table-scroll">
+            <table>
+              <tr><th>Field</th><th>Type</th><th>Notes</th></tr>
+              <tr><td><code>name</code></td><td>string</td><td>unique handle (≤32 chars)</td></tr>
+              <tr><td><code>avatar</code></td><td>string</td><td>URL or <code>data:</code> URL</td></tr>
+              <tr><td><code>description</code></td><td>string</td><td>shown in the directory (≤500 chars)</td></tr>
+              <tr><td><code>is_public</code></td><td>bool</td><td>list publicly</td></tr>
+            </table>
+          </div>
 
           <h3 id="bot-step-etiquette">Etiquette &amp; limits</h3>
           <ul>
@@ -645,6 +640,7 @@ POST   /api/discord-bridges/validate-channel
 POST   /api/discord-bridges/create
 DELETE /api/discord-bridges/{bridge_id}
 POST   /api/bridge/message</code></pre>
+          <p class="muted">Bridges mirror <strong>public</strong> channel plaintext only. End-to-end private rooms cannot be bridged (<code>403</code> on create). DMs are never bridged.</p>
         </article>
 
         <article class="panel" id="federation">
@@ -844,10 +840,11 @@ POST   /api/server-admin/control/unmute</code></pre>
         </article>
 
         <article class="panel" id="misc">
-          <h2>Misc + Real-time</h2>
+          <h2>Health check &amp; real-time</h2>
 <pre><code>GET    /api/ping
-GET    /invite/{code}          (landing)
+GET    /invite/{code}          (public invite landing page)
 WebSocket: /ws/{room_name}?token=SESSION_TOKEN</code></pre>
+          <p class="muted"><span class="m m-get">GET</span> <code>/api/ping</code> — no auth; returns node health JSON. WebSocket — pass the same session token as <code>X-Session-Token</code> in the query string for live room chat, DMs, typing, calls, and push events. Bots should use the <a href="#external">External API</a> (polling), not WebSocket.</p>
         </article>
       </section>
     </div>
