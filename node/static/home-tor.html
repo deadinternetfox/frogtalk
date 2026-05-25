@@ -101,7 +101,7 @@
 }
 </script>
 
-  <link rel="stylesheet" href="/static/css/home.css?v=3">
+  <link rel="stylesheet" href="/static/css/home.css?v=4">
 </head>
 <body class="home-node-tor">
 
@@ -140,222 +140,38 @@
   </div>
   <div class="hero-badges">
     <span class="hero-badge hero-badge--prealpha">🧅 Tor · ⚠️ Alpha</span>
-    <span class="hero-badge">No clearnet leak · Federation · Hidden service</span>
+    <span class="hero-badge hero-badge--role">Hidden service · topic Privacy</span>
+    <span class="hero-badge">No clearnet leak · Federation · E2E DMs</span>
   </div>
   <h1>FrogTalk<br>over Tor</h1>
-  <p>This node is intended for <strong>.onion</strong> access. FrogTalk is <strong>pre-alpha</strong> — not security-audited. Do <em>not</em> rely on it for high-risk communications. A minimal <strong>no-JavaScript</strong> Tor client is planned but <strong>not built yet</strong> — see <a href="https://github.com/deadinternetfox/frogtalk/blob/master/client/tor/TOR_TODO.md" style="color:#7dcea0">TOR_TODO.md</a> on GitHub.</p>
+  <p>Access this node through a <strong>v3 .onion</strong> hidden service in Tor Browser. Same federated chat, board, and encryption stack as clearnet — routed for network privacy. <strong>Pre-alpha:</strong> not audited; JS web app only today. See <a href="https://github.com/deadinternetfox/frogtalk/blob/master/client/tor/TOR_TODO.md" style="color:#c4b5fd">TOR_TODO.md</a> for the planned no-JS client.</p>
   <div class="hero-cta">
-    <a href="/app" class="btn btn-primary btn-lg">Open JS app (advanced)</a>
-    <a href="/security" class="btn btn-ghost btn-lg">Security &amp; alpha warnings</a>
+    <a href="/app" class="btn btn-primary btn-lg">Open web app</a>
+    <a href="/security" class="btn btn-ghost btn-lg">Security warnings</a>
+    <a href="https://frogtalk.app" class="btn btn-ghost btn-lg">Clearnet hub</a>
   </div>
-  <!-- DEMO PREVIEW -->
-  <div class="demo-wrap">
-    <div class="demo-preview">
-      <div class="demo-topbar">
-        <div class="demo-dot r"></div>
-        <div class="demo-dot y"></div>
-        <div class="demo-dot g"></div>
-        <span class="demo-title">🐸 FrogTalk — #general · 12 online · 🎬 Now playing</span>
-      </div>
-      <div class="demo-body">
-        <div class="demo-mobile" aria-hidden="true">
-          <!-- header: frog logo · hamburger · channel avatar + name · icons -->
-          <div class="dmob-header">
-            <div class="dmob-header-left">
-              <span class="dmob-icon-frog">🐸</span>
-              <span class="dmob-icon-menu">☰</span>
-              <div class="dmob-ch-av">🌿</div>
-              <div>
-                <div class="dmob-ch-name">#the-swamp</div>
-                <div class="dmob-ch-topic">chill &amp; bridges 🌉</div>
-              </div>
-            </div>
-            <div class="dmob-header-icons">
-              <span>🔔</span>
-              <span>👥</span>
-              <span class="dmob-icon-dots">···</span>
-            </div>
-          </div>
-          <!-- messages -->
-          <div class="dmob-msgs">
-            <!-- yesterday separator -->
-            <div class="dmob-day-sep">Yesterday</div>
-            <div class="dmob-msg">
-              <div class="dmob-av dmob-av--tide">🌊</div>
-              <div class="dmob-msg-body">
-                <div class="dmob-msg-meta">
-                  <span class="dmob-nick dmob-nick--tide">TideFrog</span>
-                  <span class="dmob-time">21:14</span>
-                </div>
-                <div class="dmob-msg-text">this app is actually good ngl</div>
-              </div>
-            </div>
-            <div class="dmob-msg">
-              <div class="dmob-av">🐸</div>
-              <div class="dmob-msg-body">
-                <div class="dmob-msg-meta">
-                  <span class="dmob-nick">ZippyFrog</span>
-                  <span class="dmob-time">21:45</span>
-                  <span class="dmob-tick">✓</span>
-                </div>
-                <div class="dmob-msg-text">e2e DMs + voice calls too 🔒</div>
-              </div>
-            </div>
-            <!-- today separator -->
-            <div class="dmob-day-sep">Today</div>
-            <!-- normal message -->
-            <div class="dmob-msg">
-              <div class="dmob-av dmob-av--vault">V</div>
-              <div class="dmob-msg-body">
-                <div class="dmob-msg-meta">
-                  <span class="dmob-nick dmob-nick--vault">VaultFrog</span>
-                  <span class="dmob-time">03:10</span>
-                </div>
-                <div class="dmob-msg-text">anyone tried the discord bridge yet?</div>
-              </div>
-            </div>
-            <div class="dmob-msg">
-              <div class="dmob-av">🐸</div>
-              <div class="dmob-msg-body">
-                <div class="dmob-msg-meta">
-                  <span class="dmob-nick">ZippyFrog</span>
-                  <span class="dmob-time">03:22</span>
-                  <span class="dmob-tick">✓</span>
-                </div>
-                <div class="dmob-msg-text">Just bridged this to Telegram 🎉</div>
-              </div>
-            </div>
-            <!-- Telegram bridged message with real badge -->
-            <div class="dmob-msg">
-              <div class="dmob-av dmob-av--tg">TG</div>
-              <div class="dmob-msg-body">
-                <div class="dmob-msg-meta">
-                  <span class="dmob-nick">CrispyPond</span>
-                  <span class="dmob-bridge-pill tg"><svg viewBox="0 0 24 24" fill="currentColor" width="9" height="9"><path d="M21.5 4.1 2.7 11.5c-.9.4-.9 1 .1 1.3l4.8 1.5 1.9 5.9c.2.7.6.9 1.1.4l2.7-2.5 4.8 3.6c.9.5 1.5.2 1.7-.8l3-14.1c.3-1.3-.5-1.9-1.3-1.7zM9.7 14.3l8.8-5.5c.4-.2.8.1.5.5l-7.2 6.5-.3 3.1-1.8-4.6z"/></svg> Telegram</span>
-                  <span class="dmob-time">03:33</span>
-                </div>
-                <div class="dmob-msg-text">just joined from telegram 👋</div>
-                <div class="dmob-msg-text">bridges work super smooth</div>
-              </div>
-            </div>
-            <!-- reply-quote message -->
-            <div class="dmob-msg">
-              <div class="dmob-av dmob-av--reed">N</div>
-              <div class="dmob-msg-body">
-                <div class="dmob-msg-meta">
-                  <span class="dmob-nick dmob-nick--reed">ReedWhistle</span>
-                  <span class="dmob-time">03:50</span>
-                </div>
-                <div class="dmob-reply-quote"><span class="dmob-quote-ref">CrispyPond</span> · bridges work super smooth</div>
-                <div class="dmob-msg-text">yes amazing! 🙏</div>
-              </div>
-            </div>
-            <!-- message with reactions -->
-            <div class="dmob-msg">
-              <div class="dmob-av dmob-av--mossy">🌿</div>
-              <div class="dmob-msg-body">
-                <div class="dmob-msg-meta">
-                  <span class="dmob-nick">MossyLog</span>
-                  <span class="dmob-time">04:36</span>
-                </div>
-                <div class="dmob-msg-text">Start using frogtalk frogsocial 🐸</div>
-                <div class="dmob-reactions">
-                  <span class="dmob-reaction mine">🐸 3</span>
-                  <span class="dmob-reaction">❤️ 2</span>
-                </div>
-              </div>
-            </div>
-          </div>
-          <!-- bottom input bar — matches real app layout exactly -->
-          <div class="dmob-input-bar">
-            <div class="dmob-toolbar">
-              <span>📎</span>
-              <span>📷</span>
-              <span>🎤</span>
-              <span>🎬</span>
-              <span class="dmob-gif-btn">GIF</span>
-              <span>😊</span>
-            </div>
-            <div class="dmob-input-row">
-              <div class="dmob-input-field">Message #the-swamp…</div>
-              <div class="dmob-send-btn">&#9658;</div>
-            </div>
-          </div>
-        </div>
-        <div class="demo-strip" aria-hidden="true">
-          <div class="ds-icon active" title="Home">🐸</div>
-          <div class="ds-divider"></div>
-          <div class="ds-icon" title="DMs">💬</div>
-          <div class="ds-icon" title="Friends">👥</div>
-          <div class="ds-icon social" title="Frog Social">🌐</div>
-          <div class="ds-icon" title="Channel Directory">🧭</div>
-        </div>
-        <div class="demo-sidebar">
-          <div class="sec-label">Channels</div>
-          <div class="demo-ch active"># general</div>
-          <div class="demo-ch"># random <span class="demo-ch-badge">3</span></div>
-          <div class="demo-ch">🔊 voice-lounge</div>
-          <div class="demo-ch">🎬 watch-together</div>
-          <div class="demo-ch">📣 announcements</div>
-          <div class="sec-label">Direct Messages</div>
-          <div class="demo-ch">🔒 ZippyFrog</div>
-          <div class="demo-ch">🔒 MossyLog</div>
-          <div class="sec-label sec-label--voice">🟢 voice-lounge · 4 talking</div>
-        </div>
-        <div class="demo-main-col">
-          <div class="demo-messages">
-            <div class="demo-msg">
-              <div class="demo-av">🐸</div>
-              <div class="demo-msg-body">
-                <div class="demo-msg-name">ZippyFrog <span class="demo-role-hint">· 👑 owner</span></div>
-                <div class="demo-msg-text">Check out <b class="demo-highlight">Frog Social</b> — post updates, watch Reels, share stories, and see what friends are up to 🌐</div>
-                <div class="demo-reactions">
-                  <span class="demo-reaction mine">🐸 4</span>
-                  <span class="demo-reaction">🔥 2</span>
-                  <span class="demo-reaction">❤️ 7</span>
-                </div>
-              </div>
-            </div>
-            <div class="demo-msg">
-              <div class="demo-av">🌿</div>
-              <div class="demo-msg-body">
-                <div class="demo-msg-name">MossyLog</div>
-                <div class="demo-music-pill">🎬 <span class="demo-now-playing">Now playing</span> · Tame Impala — <i>Let It Happen</i> <span class="demo-muted">(synced)</span></div>
-              </div>
-            </div>
-            <div class="demo-msg">
-              <div class="demo-av demo-av--dc">DC</div>
-              <div class="demo-msg-body">
-                <div class="demo-msg-name">blaze <span class="demo-bridge-badge dc"><svg viewBox="0 0 24 24" fill="currentColor" width="9" height="9"><path d="M20.3 4.5a18.3 18.3 0 0 0-4.6-1.4l-.2.4c-1.7-.3-3.4-.3-5 0l-.2-.4a18 18 0 0 0-4.6 1.4C2.3 9.9 1.5 15.2 1.9 20.4a18.5 18.5 0 0 0 5.6 2.8l.4-.6c-.9-.3-1.8-.8-2.6-1.3l.2-.2c5 2.3 10.5 2.3 15.4 0l.2.2c-.8.5-1.7.9-2.6 1.3l.4.6a18.3 18.3 0 0 0 5.6-2.8c.5-6-.9-11.2-4.2-15.9zM8.5 17.2c-1.1 0-2-1-2-2.3 0-1.2.9-2.3 2-2.3s2 1 2 2.3c0 1.2-.9 2.3-2 2.3zm7 0c-1.1 0-2-1-2-2.3 0-1.2.9-2.3 2-2.3s2 1 2 2.3c0 1.2-.9 2.3-2 2.3z"/></svg> Discord</span></div>
-                <div class="demo-msg-text">reactions &amp; media sync both ways 🔁</div>
-              </div>
-            </div>
-            <div class="demo-msg">
-              <div class="demo-av demo-av--tg">TG</div>
-              <div class="demo-msg-body">
-                <div class="demo-msg-name">mira <span class="demo-bridge-badge tg"><svg viewBox="0 0 24 24" fill="currentColor" width="9" height="9"><path d="M21.5 4.1 2.7 11.5c-.9.4-.9 1 .1 1.3l4.8 1.5 1.9 5.9c.2.7.6.9 1.1.4l2.7-2.5 4.8 3.6c.9.5 1.5.2 1.7-.8l3-14.1c.3-1.3-.5-1.9-1.3-1.7zM9.7 14.3l8.8-5.5c.4-.2.8.1.5.5l-7.2 6.5-.3 3.1-1.8-4.6z"/></svg> Telegram</span></div>
-                <div class="demo-msg-text">voice notes and stickers too 🎙️</div>
-              </div>
-            </div>
-            <div class="demo-msg">
-              <div class="demo-av">⚡</div>
-              <div class="demo-msg-body">
-                <div class="demo-msg-name">VaultFrog</div>
-                <div class="demo-msg-text enc">🔒 end-to-end encrypted · Signal Protocol</div>
-              </div>
-            </div>
-          </div>
-          <div class="demo-input-row">
-            <div class="demo-toolbar-icon">📷</div>
-            <div class="demo-toolbar-icon">📎</div>
-            <div class="demo-toolbar-icon">🎙️</div>
-            <input class="demo-input" placeholder="Message #general…" readonly>
-            <div class="demo-toolbar-icon">😀</div>
-            <div class="demo-toolbar-icon">GIF</div>
-            <div class="demo-send-btn">↑</div>
-          </div>
-        </div>
-      </div>
+</section>
+
+<!-- STATS -->
+<div class="stats">
+  <div class="stat"><div class="stat-num">🧅</div><div class="stat-label">Onion routing</div></div>
+  <div class="stat"><div class="stat-num">🔒</div><div class="stat-label">E2E DMs</div></div>
+  <div class="stat"><div class="stat-num">🌐</div><div class="stat-label">Federation</div></div>
+  <div class="stat"><div class="stat-num">🖼️</div><div class="stat-label">Frog Channel</div></div>
+  <div class="stat"><div class="stat-num">#</div><div class="stat-label">Privacy topic</div></div>
+  <div class="stat"><div class="stat-num">0</div><div class="stat-label">Ads / tracking</div></div>
+</div>
+
+<section class="section node-page-section" id="tor-access">
+  <div class="section-title">Hidden service access</div>
+  <div class="section-sub">Use Tor Browser. Your operator publishes a v3 <code>.onion</code> address — vanity generation: <code>node/scripts/tor_vanity_onion.sh</code>.</div>
+  <div class="tor-onion-panel">
+    <p class="tor-onion-hint"><strong>Onion address</strong> (set by your node operator)</p>
+    <code class="tor-onion-host" id="tor-onion-host">http://….onion</code>
+    <p class="tor-onion-hint">Open in <strong>Tor Browser</strong> → <code>/app</code> for chat. Clearnet downloads and account recovery live on <a href="https://frogtalk.app" style="color:#c4b5fd">frogtalk.app</a>.</p>
+    <div class="node-identity-actions" style="justify-content:center;margin-top:1rem;">
+      <a class="primary" href="/app">Open web app</a>
+      <a href="https://github.com/deadinternetfox/frogtalk/blob/master/docs/TOR_VANITY_ONION.md" target="_blank" rel="noopener">Vanity onion docs</a>
     </div>
   </div>
 </section>
@@ -365,321 +181,152 @@
     <div class="node-identity-grid">
       <article class="node-identity-card node-identity-card--tor">
         <span class="node-identity-kicker">This node</span>
-        <h2>FrogTalk over Tor</h2>
-        <p>Hidden-service access for users who need onion routing. The full web app requires JavaScript — a minimal no-JS Tor client is planned (<a href="https://github.com/deadinternetfox/frogtalk/blob/master/client/tor/TOR_TODO.md" style="color:#c4b5fd">TOR_TODO.md</a>).</p>
+        <h2>🐸 Frog General · Tor</h2>
+        <p>Imageboard topic <strong>Privacy</strong> — federated hidden-service mirror. Same FrogTalk stack as clearnet, routed through Tor. <strong>Pre-alpha</strong> — not security-audited.</p>
         <div class="node-identity-actions">
           <a class="primary" href="/app">Open web app</a>
-          <a href="/security">Alpha warnings</a>
-          <a href="https://frogtalk.app" style="color:#9fd9b8">Clearnet hub</a>
+          <a href="/board/">Frog Channel</a>
+          <a href="/security">Warnings</a>
         </div>
       </article>
       <article class="node-identity-card">
-        <span class="node-identity-kicker">Operator notes</span>
-        <h2>Running hybrid Tor</h2>
-        <p>Set <code>FROGTALK_TOR_ENABLED=1</code>, SOCKS proxy, and <code>FROGTALK_ONION_URL</code> on your node. Hybrid hubs list the onion mirror in Settings → Network for federated peers.</p>
+        <span class="node-identity-kicker">What works today</span>
+        <h2>JavaScript web app</h2>
+        <p>Full <code>/app</code> UI over onion when JS is enabled. Voice/video may be limited in Tor Browser. A minimal <strong>no-JS</strong> Tor client is planned — see <a href="https://github.com/deadinternetfox/frogtalk/blob/master/client/tor/TOR_TODO.md" style="color:#c4b5fd">TOR_TODO.md</a>.</p>
+      </article>
+      <article class="node-identity-card">
+        <span class="node-identity-kicker">Operators</span>
+        <h2>Run a Tor node</h2>
+        <p><code>FROGTALK_TOR_ENABLED=1</code>, <code>FROGTALK_ONION_URL</code>, SOCKS proxy, and <code>FROGTALK_HOME_PAGE=tor</code>. Generate <code>frogtalk*.onion</code> with the vanity script.</p>
         <div class="node-identity-actions">
           <a href="/docs/node">Node docs</a>
+          <a href="https://frogtalk.app">Clearnet hub</a>
         </div>
       </article>
     </div>
   </div>
 </section>
 
-<!-- STATS -->
-<div class="stats">
-  <div class="stat"><div class="stat-num">E2E</div><div class="stat-label">Encrypted DMs</div></div>
-  <div class="stat"><div class="stat-num">🌐</div><div class="stat-label">Social Feed</div></div>
-  <div class="stat"><div class="stat-num">🎞️</div><div class="stat-label">Reels</div></div>
-  <div class="stat"><div class="stat-num">🖼️</div><div class="stat-label">Frog Channel</div></div>
-  <div class="stat"><div class="stat-num">🎬</div><div class="stat-label">Watch &amp; Listen Together</div></div>
-  <div class="stat"><div class="stat-num">🔁</div><div class="stat-label">Discord &amp; TG Bridges</div></div>
-  <div class="stat"><div class="stat-num">0</div><div class="stat-label">Ads / Tracking</div></div>
-</div>
-
-<!-- DOWNLOADS -->
-<section class="section ft-downloads-section" id="downloads" aria-labelledby="downloads-heading">
-  <div class="section-title" id="downloads-heading">Download FrogTalk</div>
-  <div class="section-sub section-sub--tight">Pre-alpha builds for testing — native Android, desktop, or browser. Not recommended for sensitive or production use.</div>
-  <div data-ft-downloads-root></div>
-</section>
-<link rel="stylesheet" href="/static/css/downloads-picker.css?v=4">
-<script src="/static/js/downloads-picker.js?v=4" defer></script>
-
-<!-- FEATURES -->
-<section class="section" id="features">
-  <div class="section-title">Everything You Need</div>
-  <div class="section-sub">A full chat + social + reels + Frog Channel imageboard + music platform, built for privacy.</div>
-  <div class="features-grid">
-    <div class="feature-card">
-      <div class="feature-icon">🔒</div>
-      <h3>End-to-End Encrypted DMs &amp; Rooms</h3>
-      <p>DMs are encrypted client-side with the Signal Protocol (X3DH + Double Ratchet). Private channels use a per-room AES-256-GCM key derived from a shared secret, with AAD-bound ciphertext and automatic key rotation when a member is removed — the server only ever sees ciphertext.</p>
+<section class="section node-page-section" id="tor-highlights">
+  <div class="section-title">Built for onion users</div>
+  <div class="section-sub">Network location hidden via Tor — application-layer security is still your responsibility.</div>
+  <div class="node-highlights-grid">
+    <div class="node-highlight-card">
+      <div class="nh-icon">🧅</div>
+      <h3>Hidden service</h3>
+      <p>v3 onion hostname terminates at this node. Clearnet IP is not required for users who connect only via Tor.</p>
     </div>
-    <div class="feature-card">
-      <div class="feature-icon">🌐</div>
-      <h3>Frog Social</h3>
-      <p>A full social feed inside the app — post updates with images, tag friends, follow &amp; block, explore trending posts and channels.</p>
+    <div class="node-highlight-card">
+      <div class="nh-icon">🔒</div>
+      <h3>Client-side encryption</h3>
+      <p>DMs use Signal Protocol; private channels use AES-GCM. Server stores ciphertext only — same as clearnet nodes.</p>
     </div>
-    <div class="feature-card">
-      <div class="feature-icon">🎞️</div>
-      <h3>Reels</h3>
-      <p>Swipe vertical short videos with hot/new/top sorting, fast autoplay, reactions, reposts, and instant comment threads.</p>
+    <div class="node-highlight-card">
+      <div class="nh-icon">🌐</div>
+      <h3>Federated mesh</h3>
+      <p>Peers with SOCKS can reach other <code>.onion</code> boards and nodes. Hub directory lists Tor-capable servers.</p>
     </div>
-    <div class="feature-card">
-      <div class="feature-icon">📸</div>
-      <h3>Stories</h3>
-      <p>Share 24-hour stories with your friends or a public audience. Filters, privacy controls, and a built-in camera.</p>
+    <div class="node-highlight-card">
+      <div class="nh-icon">🖼️</div>
+      <h3>Privacy imageboard</h3>
+      <p>Frog Channel on this node uses topic <code>Privacy</code> — anonymous threads, greentext, mod tools at <code>/board/</code>.</p>
     </div>
-    <div class="feature-card">
-      <div class="feature-icon">🖼️</div>
-      <h3>Frog Channel Imageboard</h3>
-      <p>Anonymous 4chan-style board with threaded replies, post likes, greentext, image/video/audio uploads, live board chat, and moderator approval tools.</p>
+    <div class="node-highlight-card">
+      <div class="nh-icon">📡</div>
+      <h3>No clearnet leak</h3>
+      <p>Onion-only nodes omit clearnet <code>base_url</code> in directory listings when configured correctly.</p>
     </div>
-    <div class="feature-card">
-      <div class="feature-icon">🎬</div>
-      <h3>Watch &amp; Listen Together</h3>
-      <p>Dedicated media channel with a persistent "Now Playing" bar. Watch YouTube, queue Spotify &amp; SoundCloud, and listen together in sync.</p>
-    </div>
-    <div class="feature-card">
-      <div class="feature-icon">🔁</div>
-      <h3>Discord &amp; Telegram Bridges</h3>
-      <p>Link a FrogTalk channel to Discord or Telegram. Messages, photos, videos, voice notes and stickers sync both ways in real time.</p>
-    </div>
-    <div class="feature-card">
-      <div class="feature-icon">🧳</div>
-      <h3>Cross-Node Account Sync</h3>
-      <p>Visit another node and re-sync from home — channel settings, DM prefs, friends, profile themes, client prefs, and FrogSocial posts import with Ed25519-signed exports.</p>
-    </div>
-    <div class="feature-card">
-      <div class="feature-icon">📞</div>
-      <h3>Federated DM Calls</h3>
-      <p>Voice and video calls ring across federation when travelers are connected to your node — home-server signaling with optional TURN for NAT traversal.</p>
-    </div>
-    <div class="feature-card">
-      <div class="feature-icon">🔞</div>
-      <h3>18+ Channel Labels</h3>
-      <p>Moderators mark public channels with voluntary content categories. Visitors confirm age before history loads — session-scoped, not automated scanning.</p>
-    </div>
-    <div class="feature-card">
-      <div class="feature-icon">📞</div>
-      <h3>Voice &amp; Video Calls</h3>
-      <p>1:1 and group calls over WebRTC P2P. Switch camera, share your screen, or go audio-only mid-call.</p>
-    </div>
-    <div class="feature-card">
-      <div class="feature-icon">🎙️</div>
-      <h3>Voice Messages</h3>
-      <p>Hold to record, release to send. Waveform playback, Telegram-style voice notes that stick around.</p>
-    </div>
-    <div class="feature-card">
-      <div class="feature-icon">🏠</div>
-      <h3>Channels &amp; Directory</h3>
-      <p>Public &amp; private text/voice channels, channel images, pinned messages, roles, and a browsable directory.</p>
-    </div>
-    <div class="feature-card">
-      <div class="feature-icon">👥</div>
-      <h3>Friends &amp; Presence</h3>
-      <p>Add friends, see who's online, set a custom status. Real-time presence and typing indicators across the app.</p>
-    </div>
-    <div class="feature-card">
-      <div class="feature-icon">📎</div>
-      <h3>Rich Media</h3>
-      <p>Images, videos, audio, files, GIFs, link previews, and an image lightbox — all inline, all fast.</p>
-    </div>
-    <div class="feature-card">
-      <div class="feature-icon">😄</div>
-      <h3>Reactions, Replies &amp; Polls</h3>
-      <p>React with any emoji, quote-reply to any message, and spin up quick polls for group decisions.</p>
-    </div>
-    <div class="feature-card">
-      <div class="feature-icon">💨</div>
-      <h3>Disappearing Messages</h3>
-      <p>Auto-delete DMs after 1 hour, 24 hours, 7 days or 30 days. Messages vanish on their own.</p>
-    </div>
-    <div class="feature-card">
-      <div class="feature-icon">🎨</div>
-      <h3>Custom Themes</h3>
-      <p>Pick from Cyberpunk, Ocean, Sakura, Retrowave and more — live preview before you switch.</p>
-    </div>
-    <div class="feature-card">
-      <div class="feature-icon">🔔</div>
-      <h3>Real-time Notifications</h3>
-      <p>Instant WebSocket delivery. Browser &amp; mobile push for DMs, mentions, friend requests and posts you're tagged in.</p>
-    </div>
-    <div class="feature-card">
-      <div class="feature-icon">🖥️</div>
-      <h3>Web, Android &amp; Desktop</h3>
-      <p>Pre-alpha PWA web app, Android APK, Windows portable, and Linux AppImage / .deb. Your account works everywhere — builds are for testing only.</p>
+    <div class="node-highlight-card">
+      <div class="nh-icon">⚠️</div>
+      <h3>Alpha warnings</h3>
+      <p>Not audited. Bugs, metadata leaks, and operator mistakes remain possible — read <a href="/security" style="color:#c4b5fd">/security</a>.</p>
     </div>
   </div>
 </section>
 
-<section class="section" id="federation">
-  <div class="section-title">Federation Reliability</div>
-  <div class="section-sub">Keep every FrogTalk node in sync with official release metadata, build hashes, Tor routing preferences, and trust checks.</div>
-  <div class="federation-spotlight">
-    <div>
-      <div class="fed-title">Ship Once From frogtalk.app, Propagate Everywhere</div>
-      <div class="fed-sub">Main site publishes a release feed with package SHA-256 and build hash. Nodes poll the feed, verify legitimacy, prefer onion routes when available, and apply updates safely without leaking onion-only peers.</div>
-      <div class="fed-badges">
-        <span class="fed-badge ok">SAME HASH</span>
-        <span class="fed-badge ok">LEGIT COPY</span>
-        <span class="fed-badge ok">🧅 TOR READY</span>
-        <span class="fed-badge warn">HASH MISMATCH ALERT</span>
-      </div>
-      <div class="fed-actions">
-        <a href="/docs/api" class="btn btn-primary">View API Docs</a>
-        <a href="/docs/node" class="btn btn-ghost">Node Setup Guide</a>
+<section class="section node-page-section" id="tor-steps">
+  <div class="section-title">Connect safely</div>
+  <div class="section-sub">Recommended flow for visitors and operators.</div>
+  <div class="node-steps">
+    <div class="node-step">
+      <div class="node-step-num">1</div>
+      <div>
+        <h3>Use Tor Browser</h3>
+        <p>Paste the operator’s <code>.onion</code> URL — do not open onion links in a normal browser.</p>
       </div>
     </div>
-    <div class="fed-mini-grid">
-      <div class="fed-mini">
-        <h4>Central Release Feed</h4>
-        <p>Publish latest version, package URL, SHA-256, and expected build hash from your main domain.</p>
+    <div class="node-step">
+      <div class="node-step-num">2</div>
+      <div>
+        <h3>Create an account on the onion site</h3>
+        <p>Register at <code>/app</code>. Avoid reusing passwords from clearnet services.</p>
       </div>
-      <div class="fed-mini">
-        <h4>Trust Badges In Network UI</h4>
-        <p>Operators instantly see connected state, official directory status, onion capability, hash match, and legitimacy badges.</p>
+    </div>
+    <div class="node-step">
+      <div class="node-step-num">3</div>
+      <div>
+        <h3>Verify encryption for DMs</h3>
+        <p>Check safety numbers in the 🔒 panel before sensitive conversations.</p>
       </div>
-      <div class="fed-mini">
-        <h4>Safe Apply Flow</h4>
-        <p>Node downloads update package, verifies checksum, syncs files, and restarts service without drift.</p>
-      </div>
-      <div class="fed-mini">
-        <h4>Tor-Enabled Server Handoffs</h4>
-        <p>The app switches users to the node app at <strong>/app</strong>, preserves handoff tickets when possible, and keeps onion links pointed at the real chat surface instead of the marketing home page.</p>
+    </div>
+    <div class="node-step">
+      <div class="node-step-num">4</div>
+      <div>
+        <h3>Operators: publish vanity onion</h3>
+        <p><code>sudo bash node/scripts/tor_vanity_onion.sh --prefix frogtalk --apply</code> then federation join.</p>
       </div>
     </div>
   </div>
 </section>
 
-<!-- PRIVACY -->
-<section class="section privacy-section" id="privacy">
-  <div class="privacy-inner">
-    <div>
-      <h2>Built for Privacy,<br>Not Profit</h2>
-      <p>Most chat apps monetize your conversations. FrogTalk is different — your messages are encrypted before they ever leave your device.</p>
-      <ul class="privacy-checks">
-        <li><span class="check">✓</span> Signal Protocol DMs — X3DH + Double Ratchet, forward secrecy per message</li>
-        <li><span class="check">✓</span> Per-channel AES-256-GCM for private rooms with automatic key rotation on ban/kick — server only sees ciphertext</li>
-        <li><span class="check">✓</span> Verifiable Safety Numbers in the in-app 🔒 panel</li>
-        <li><span class="check">✓</span> WebRTC P2P calls — media never touches our server</li>
-        <li><span class="check">✓</span> Optional 18+ labels on public channels — moderator-set, session age gate (not automated scanning)</li>
-        <li><span class="check">✓</span> No analytics, no third-party SDKs</li>
-        <li><span class="check">✓</span> Self-hosted — run your own instance</li>
-        <li><span class="check">✓</span> SQLite — single file backup, you own your data</li>
-      </ul>
+<section class="section node-page-section" id="tor-federation">
+  <div class="node-fed-spotlight">
+    <h3>Federation over Tor</h3>
+    <p>Hub nodes push to <code>.onion</code> peers via <code>FROGTALK_TOR_SOCKS_PROXY</code>. Network settings in the app expose onion mirrors when the hub advertises them. Release metadata still originates from frogtalk.app.</p>
+    <div class="node-fed-badges">
+      <span class="node-fed-badge">🧅 ONION ROUTE</span>
+      <span class="node-fed-badge">SOCKS PROXY</span>
+      <span class="node-fed-badge">HANDOFF /app</span>
     </div>
-    <div class="code-block">
-<span class="cm">// Your DM encryption (client-side, Signal Protocol)</span>
-<span class="kw">const</span> session = <span class="kw">await</span> Signal.startSession(theirBundle);
-<span class="cm">// X3DH agreement → Double Ratchet session</span>
-
-<span class="kw">const</span> envelope = <span class="kw">await</span> Signal.encryptDM(
-  peerUserId, plaintext
-);
-<span class="cm">// Every message advances the ratchet ↳ forward secrecy</span>
-
-<span class="cm">// Server receives only ciphertext 🔒</span>
-<span class="kw">await</span> fetch(<span class="str">'/api/dms/send'</span>, {
-  method: <span class="str">'POST'</span>,
-  body: JSON.stringify({ to: peerUserId, envelope })
-});
+    <div class="node-identity-actions">
+      <a class="primary" href="/docs/node">Operator guide</a>
+      <a href="https://github.com/deadinternetfox/frogtalk/blob/master/docs/TOR_VANITY_ONION.md" target="_blank" rel="noopener">Vanity onion</a>
     </div>
   </div>
 </section>
 
-<!-- OPEN SOURCE -->
-<section class="section opensource-section" aria-labelledby="open-source-heading">
-  <div class="section-title" id="open-source-heading">100% Open Source</div>
-  <div class="section-sub">Audit the cryptography, run your own node, build a bot, or hack on the client. Every line of FrogTalk is on GitHub.</div>
-  <div class="opensource-grid">
-    <div>
-      <h2 id="open-source">Built In The Open<br><span class="accent">Owned By Everyone</span></h2>
-      <p>FrogTalk is licensed for self-hosting and inspection. The full server, federation layer, web client, Android app, desktop app, and the Tor / onion routing logic all live in one repository — no closed components, no dark services. Verify the build hash on your node against the one published from frogtalk.app before federating.</p>
-      <div class="opensource-meta">
-        <span class="pill green">⚠️ Pre-alpha</span>
-        <span class="pill green">🟢 Active development</span>
-        <span class="pill">🐍 FastAPI + SQLite</span>
-        <span class="pill">🤖 Android (Kotlin)</span>
-        <span class="pill">🖥️ Desktop (Electron)</span>
-        <span class="pill">🧅 Tor-aware</span>
-      </div>
-      <div class="opensource-actions">
-        <a href="https://github.com/deadinternetfox/frogtalk" target="_blank" rel="noopener noreferrer" class="btn btn-github">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.65.5.5 5.65.5 12c0 5.08 3.29 9.39 7.86 10.91.58.11.79-.25.79-.56v-2c-3.2.7-3.87-1.37-3.87-1.37-.52-1.32-1.27-1.67-1.27-1.67-1.04-.71.08-.7.08-.7 1.15.08 1.76 1.18 1.76 1.18 1.02 1.75 2.69 1.24 3.34.95.1-.74.4-1.24.72-1.53-2.55-.29-5.24-1.27-5.24-5.66 0-1.25.45-2.27 1.18-3.07-.12-.29-.51-1.45.11-3.02 0 0 .96-.31 3.15 1.17a10.9 10.9 0 0 1 5.74 0c2.19-1.48 3.15-1.17 3.15-1.17.62 1.57.23 2.73.11 3.02.74.8 1.18 1.82 1.18 3.07 0 4.4-2.69 5.36-5.25 5.65.41.36.78 1.06.78 2.13v3.16c0 .31.21.68.8.56C20.21 21.39 23.5 17.07 23.5 12 23.5 5.65 18.35.5 12 .5Z"/></svg>
-          View on GitHub
-        </a>
-        <a href="/docs/node" class="btn btn-primary">Run Your Own Node →</a>
-      </div>
-    </div>
-    <div class="opensource-cards">
-      <a href="https://github.com/deadinternetfox/frogtalk" target="_blank" rel="noopener noreferrer" class="opensource-card">
-        <div class="row">
-          <h4>📂 GitHub Repository</h4>
-          <span class="arrow">→</span>
-        </div>
-        <p>Server, web client, Android, desktop, federation, and bridges. Issues, PRs, and SHA-256 verifiable release artifacts.</p>
-      </a>
-      <a href="/docs/api" class="opensource-card">
-        <div class="row">
-          <h4>📘 API Documentation</h4>
-          <span class="arrow">→</span>
-        </div>
-        <p>Every public endpoint: auth, users, rooms, DMs, calls, social, bots, federation, admin, and the WebSocket protocol.</p>
-      </a>
-      <a href="/docs/node" class="opensource-card">
-        <div class="row">
-          <h4>🛠️ Run Your Own Node</h4>
-          <span class="arrow">→</span>
-        </div>
-        <p>VPS install: CLI setup wizard, nginx + HTTPS, federation mesh sync with frogtalk.app, systemd, backups, and troubleshooting.</p>
-      </a>
-    </div>
-  </div>
+<section class="section node-page-section node-privacy-band" id="tor-privacy">
+  <h2>Privacy, not perfection</h2>
+  <p>Tor hides network location; FrogTalk is still pre-alpha software. Do not rely on this node for high-risk communications.</p>
+  <ul>
+    <li>JavaScript required for the full app today</li>
+    <li>WebRTC calls may not work in Tor Browser</li>
+    <li>Download clients from frogtalk.app — not from onion</li>
+    <li>Report issues via security page — not public exploits</li>
+  </ul>
+  <a href="/security" class="btn btn-ghost">Security &amp; alpha warnings →</a>
 </section>
 
-<!-- HOW IT WORKS -->
-<section class="section" id="how">
-  <div class="section-title">Get Started in Seconds</div>
-  <div class="section-sub">No email, no phone number, no personal data required.</div>
-  <div class="steps">
-    <div class="step">
-      <div class="step-num">1</div>
-      <div class="step-content">
-        <h3>Create Your Account</h3>
-        <p>Pick a nickname and password. That's it. No email, no phone, no tracking. Your account is yours.</p>
-      </div>
-    </div>
-    <div class="step">
-      <div class="step-num">2</div>
-      <div class="step-content">
-        <h3>Add Friends, Join Channels, Explore Social</h3>
-        <p>Find friends by username, jump into public channels, or open <b class="text-accent-green">Frog Social</b> to post updates, watch Reels, share stories, and see what's trending.</p>
-      </div>
-    </div>
-    <div class="step">
-      <div class="step-num">3</div>
-      <div class="step-content">
-        <h3>Chat, Call, Connect</h3>
-        <p>Send encrypted DMs and voice notes, hop in voice or video calls, watch &amp; listen together, or bridge a channel to Discord / Telegram — all in one app.</p>
-      </div>
-    </div>
-  </div>
-</section>
+<section class="section" id="features" hidden aria-hidden="true"></section>
+<section class="section" id="federation" hidden aria-hidden="true"></section>
+<section class="section ft-downloads-section" id="downloads" hidden aria-hidden="true"></section>
+<section class="section privacy-section" id="privacy" hidden aria-hidden="true"></section>
+<section class="section opensource-section" hidden aria-hidden="true"></section>
+<section class="section" id="how" hidden aria-hidden="true"></section>
 
 <!-- CTA -->
 <section class="cta-banner">
-  <div class="cta-frog">🐸</div>
-  <h2>Ready to Hop In?</h2>
-  <p>Try FrogTalk in the browser or download a pre-alpha build. Free to use — not production-ready yet.</p>
-  <a href="/app" class="btn btn-primary btn-lg">Create Your Account →</a>
+  <div class="cta-frog">🧅</div>
+  <h2>Connect via Tor Browser</h2>
+  <p>Use your operator's .onion address. Pre-alpha — read warnings before high-risk use.</p>
+  <a href="/app" class="btn btn-primary btn-lg">Open web app →</a>
 </section>
 
-<!-- FOOTER (shared: static/partials/site-footer.html) -->
+<!-- FOOTER -->
 <div id="ft-site-footer-mount"></div>
 <script src="/static/js/site-footer.js?v=8" defer></script>
 
-
   <script src="/static/js/home-vibe-banner.js" defer></script>
+  <script src="/static/js/home-tor-onion.js?v=1" defer></script>
 </body>
 </html>
