@@ -3038,7 +3038,8 @@ function _guessNetworkRegionFromBaseUrl(baseUrl) {
   } catch {
     host = String(base).toLowerCase();
   }
-  if (host === 'frogtalk.app' || host.endsWith('.frogtalk.app') || host === 'frogtalk.xyz' || host.endsWith('.frogtalk.xyz')) return 'Spain';
+  // Official FrogTalk hostnames have no fixed geography — use server.region from the API.
+  if (host === 'frogtalk.app' || host.endsWith('.frogtalk.app') || host === 'frogtalk.xyz' || host.endsWith('.frogtalk.xyz')) return '';
   if (host.endsWith('.es')) return 'Spain';
   if (host.endsWith('.fr')) return 'France';
   if (host.endsWith('.de')) return 'Germany';
@@ -3156,7 +3157,9 @@ function _prettyNetworkRegion(region) {
 }
 
 function _networkRegionLabel(server, fallbackBase) {
-  const region = _prettyNetworkRegion(server?.region || _guessNetworkRegionFromBaseUrl(fallbackBase));
+  const fromApi = _prettyNetworkRegion(server?.region);
+  if (fromApi && fromApi !== 'Unknown') return fromApi;
+  const region = _prettyNetworkRegion(_guessNetworkRegionFromBaseUrl(fallbackBase));
   if (region && region !== 'Unknown') return region;
   if (server?.onion_url || _isOnionNetworkUrl(fallbackBase || '')) return 'Tor Hidden Service';
   return 'Unknown';
