@@ -2,6 +2,8 @@
 
 FrogTalk is **pre-alpha** software: features ship quickly, APIs may change, and not every path has been audited. We still welcome issues, security reports, and pull requests — especially if you help us harden the code before wider release.
 
+> **On the `dev` branch:** target [frogtalk.xyz](https://frogtalk.xyz) for manual testing and use `git clone -b dev` when reproducing issues against the live development node.
+
 ---
 
 ## Branches

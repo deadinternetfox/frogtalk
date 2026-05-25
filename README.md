@@ -14,24 +14,52 @@
 
 <p>
 A censorship-free, federated, end-to-end encrypted chat platform.<br>
-Self-host your own node and join the mesh — or use the public instance at frogtalk.app.<br>
+<strong>This checkout is the active <code>dev</code> branch</strong> — try the live stack at
+<a href="https://frogtalk.xyz">frogtalk.xyz</a> before changes reach <a href="https://frogtalk.app">frogtalk.app</a>.<br>
 <strong>Pre-alpha:</strong> expect bugs, breaking changes, and incomplete hardening. Not production-ready.
 </p>
 
+[![Branch](https://img.shields.io/badge/branch-dev-2563eb)](https://github.com/deadinternetfox/frogtalk/tree/dev)
 [![Pre-alpha](https://img.shields.io/badge/status-pre--alpha-orange)](https://frogtalk.app/security)
 [![Release](https://img.shields.io/github/v/release/deadinternetfox/frogtalk?display_name=release&sort=semver&color=4caf50)](https://github.com/deadinternetfox/frogtalk/releases)
 [![License](https://img.shields.io/github/license/deadinternetfox/frogtalk?color=4caf50)](LICENSE)
 [![Docker](https://img.shields.io/badge/ghcr.io-frogtalk-4caf50?logo=docker&logoColor=white)](https://github.com/deadinternetfox/frogtalk/pkgs/container/frogtalk)
 [![Stars](https://img.shields.io/github/stars/deadinternetfox/frogtalk?label=stars&style=flat&color=4caf50)](https://github.com/deadinternetfox/frogtalk/stargazers)
 
-[🌐 frogtalk.app](https://frogtalk.app) ·
-[🧪 frogtalk.xyz (dev)](https://frogtalk.xyz) ·
-[📥 Downloads](https://frogtalk.app/#downloads) ·
-[📚 Node guide](https://frogtalk.app/docs/node) ·
-[🔌 API reference](https://frogtalk.app/docs/api) ·
-[🛡️ Security](https://frogtalk.app/security)
+[🧪 frogtalk.xyz — live dev node](https://frogtalk.xyz) ·
+[🌐 frogtalk.app — production hub](https://frogtalk.app) ·
+[📥 Downloads](https://frogtalk.xyz/#downloads) ·
+[📚 Node guide](https://frogtalk.xyz/docs/node) ·
+[🔌 API reference](https://frogtalk.xyz/docs/api) ·
+[🛡️ Security](https://frogtalk.xyz/security)
 
 </div>
+
+---
+
+## 🔧 Active development branch (`dev`)
+
+You are reading the **contributor default** in git. This branch tracks day-to-day work and deploys to the **development node** at [frogtalk.xyz](https://frogtalk.xyz).
+
+| | **Development (`dev`)** | **Production (`master`)** |
+|---|-------------------------|---------------------------|
+| **Git branch** | `dev` (this tree) | `master` |
+| **Public URL** | [frogtalk.xyz](https://frogtalk.xyz) | [frogtalk.app](https://frogtalk.app) |
+| **Client default** | `client/official-node.json` → `https://frogtalk.xyz` | → `https://frogtalk.app` |
+| **Board identity** | 🔧 Development & support · `@frogtalk-support` | Frog General · `@frog-general` |
+| **Federation directory** | Still published from **frogtalk.app** | Hub (`FROGTALK_FEDERATION_DIRECTORY_HUB=1` on Main) |
+| **Stability** | May break without notice | Slightly more stable; still pre-alpha |
+
+**Clone this branch:**
+
+```bash
+git clone -b dev https://github.com/deadinternetfox/frogtalk.git
+cd frogtalk
+```
+
+**Contributing:** open PRs into `dev`. After review and testing on `.xyz`, maintainers promote to `master` for `.app` deploys. See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+**Intentional diff vs `master`:** almost all files match; the usual exception is `client/official-node.json` (home node URL). This README is **dev-only** (not present on `master`).
 
 ---
 
@@ -42,7 +70,8 @@ vanilla JS in the browser, optional Frog Channel imageboard, Discord/Telegram br
 and **Ed25519-signed federation** between independent operators. Clients encrypt DMs (Signal Protocol)
 and private channels (AES-GCM) before data reaches your disk.
 
-- **Use the public instance:** [frogtalk.app/app](https://frogtalk.app/app) — **pre-alpha**, no uptime or data guarantees
+- **Try the dev instance (this branch):** [frogtalk.xyz/app](https://frogtalk.xyz/app) — bleeding edge, may reset or break
+- **Use the production hub:** [frogtalk.app/app](https://frogtalk.app/app) — **pre-alpha**, no uptime or data guarantees
 - **Run your own:** install under `/opt/frogtalk`, complete the **CLI setup wizard**, join the mesh — **[full VPS guide](docs/NODE_INSTALL.md)** · **[web guide](https://frogtalk.app/docs/node)**
 
 ### Branches & public hosts
