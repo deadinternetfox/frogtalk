@@ -1567,6 +1567,10 @@ body.cw-composer-locked #msg-input {
   gap: 6px;
   padding: 6px 8px 10px;
 }
+#public-channels:has(.ft-sidebar-skeleton),
+#dm-channels:has(.ft-sidebar-skeleton) {
+  min-height: 11.5rem;
+}
 .ft-skel-user-row,
 .ft-skel-sidebar-row {
   display: flex;

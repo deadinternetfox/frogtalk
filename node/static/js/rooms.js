@@ -225,12 +225,38 @@ const Rooms = (() => {
         + '<span class="ft-skel-avatar sm" aria-hidden="true"></span>'
         + '<span class="ft-skel-sidebar-lines">'
         + `<span class="ft-skel-line" style="width:${w1}%"></span>`
-        + (kind === 'channel'
-          ? `<span class="ft-skel-line ft-skel-line-sub" style="width:${w2}%"></span>`
-          : '')
+        + `<span class="ft-skel-line ft-skel-line-sub" style="width:${w2}%"></span>`
         + '</span></div>';
     }).join('');
-    return `<div class="ft-sidebar-skeleton" data-kind="${kind === 'dm' ? 'dm' : 'channel'}">${rows}</div>`;
+    const skKind = kind === 'dm' ? 'dm' : 'channel';
+    return `<div class="ft-sidebar-skeleton" data-kind="${skKind}">${rows}</div>`;
+  }
+
+  function _sidebarListSyncHint(scope) {
+    try {
+      if (window.FtSync && FtSync.state().in_progress) {
+        const fb = scope === 'dm' ? 'Syncing DMs…' : 'Syncing channel directory…';
+        return FtSync.renderInline(FtSync.state(), { compact: true, fallback: fb });
+      }
+    } catch {}
+    return '';
+  }
+
+  /** Paint channel-style sidebar skeleton if the list is still empty (idempotent). */
+  function paintSidebarListSkeleton(listId, scope) {
+    const el = document.getElementById(listId);
+    if (!el || el.querySelector('.channel-item')) return false;
+    if (el.querySelector('.ft-sidebar-skeleton')) return true;
+    if (el.children.length) return false;
+    const sk = scope === 'dm' ? 'dm' : 'channel';
+    el.innerHTML = sidebarListSkeletonHtml(5, sk) + _sidebarListSyncHint(sk);
+    return true;
+  }
+
+  /** Channels + DMs in the left sidebar load together — paint both skeletons at once. */
+  function paintSidebarSkeletonsIfEmpty() {
+    paintSidebarListSkeleton('public-channels', 'channel');
+    paintSidebarListSkeleton('dm-channels', 'dm');
   }
 
   function showChatLoadSkeleton(variant, opts) {
@@ -1349,17 +1375,7 @@ const Rooms = (() => {
   }
 
   async function loadRooms() {
-    // Show skeleton placeholders while loading (first load only)
-    const container = document.getElementById('public-channels');
-    if (container && !container.children.length) {
-      let syncHint = '';
-      try {
-        if (window.FtSync && FtSync.state().in_progress) {
-          syncHint = FtSync.renderInline(FtSync.state(), { compact: true, fallback: 'Syncing channel directory…' });
-        }
-      } catch {}
-      container.innerHTML = sidebarListSkeletonHtml(5, 'channel') + syncHint;
-    }
+    paintSidebarSkeletonsIfEmpty();
     try {
       const res = await apiFetch('/api/rooms');
       const data = await res.json().catch(() => ({}));
@@ -4414,6 +4430,8 @@ const Rooms = (() => {
     showChatLoadSkeleton,
     hideChatLoadSkeleton,
     sidebarListSkeletonHtml,
+    paintSidebarListSkeleton,
+    paintSidebarSkeletonsIfEmpty,
     chatSwitchSyncing,
     clearChatTransition,
     finishChannelSwitch,
@@ -4433,6 +4451,8 @@ try {
   window.showChatLoadSkeleton = Rooms.showChatLoadSkeleton;
   window.hideChatLoadSkeleton = Rooms.hideChatLoadSkeleton;
   window.sidebarListSkeletonHtml = Rooms.sidebarListSkeletonHtml;
+  window.paintSidebarListSkeleton = Rooms.paintSidebarListSkeleton;
+  window.paintSidebarSkeletonsIfEmpty = Rooms.paintSidebarSkeletonsIfEmpty;
   window.chatSwitchSyncing = Rooms.chatSwitchSyncing;
   window.clearChatTransition = Rooms.clearChatTransition;
   window.finishChannelSwitch = Rooms.finishChannelSwitch;
