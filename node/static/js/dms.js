@@ -12,6 +12,7 @@ function _dmSpoilerOverlayHtml () {
 }
 
 let _dmChannels  = [];    // [{id, with_user_id, nickname, avatar, unread, last_msg}]
+let _dmSidebarLoading = false;
 let _activeDM    = null;  // {id, nickname, avatar, user_id}
 let _dmMessages  = [];    // local cache for active DM
 let _dmPage      = 0;
@@ -2366,6 +2367,15 @@ async function _retryDecryptDMMessageInPlace(m) {
 }
 
 /* ── Sidebar DM list ────────────────────────────────────────────────────────── */
+async function _ensureSignalReadyForDmSidebar () {
+  if (!window.Signal || typeof Signal.ensureReady !== 'function' || !State?.user?.id) return;
+  try {
+    if (!Signal.isReady()) {
+      await Signal.ensureReady(State.user.id, { timeoutMs: 15000 });
+    }
+  } catch {}
+}
+
 async function loadDMChannels () {
   try {
     if (typeof paintSidebarListSkeleton === 'function') {
@@ -2374,15 +2384,12 @@ async function loadDMChannels () {
       paintSidebarSkeletonsIfEmpty();
     }
   } catch {}
-  if (window.Signal && typeof Signal.ensureReady === 'function' && State?.user?.id) {
-    try {
-      if (!Signal.isReady()) {
-        await Signal.ensureReady(State.user.id, { timeoutMs: 15000 });
-      }
-    } catch {}
-  }
+  _dmSidebarLoading = true;
   try {
-    const r = await apiFetch('/api/dms');
+    const [, r] = await Promise.all([
+      _ensureSignalReadyForDmSidebar(),
+      apiFetch('/api/dms'),
+    ]);
     if (!r.ok) return;
     const data = await r.json();
     _dmChannels = await Promise.all((data.channels || data || []).map(async (ch) => {
@@ -2412,8 +2419,11 @@ async function loadDMChannels () {
         global_user_id: ch.other_global_user_id || '',
       };
     }));
-    renderDMChannels();
   } catch (e) { console.error('loadDMChannels', e); }
+  finally {
+    _dmSidebarLoading = false;
+    renderDMChannels();
+  }
 }
 
 async function hideDMChannel (channelId) {
@@ -2466,6 +2476,7 @@ function renderDMChannels () {
   const el = document.getElementById('dm-channels');
   if (!el) return;
   if (!_dmChannels.length) {
+    if (_dmSidebarLoading || el.querySelector('.ft-sidebar-skeleton')) return;
     el.innerHTML = '<div style="font-size:12px;color:#555;padding:4px 8px">No DMs yet</div>';
     return;
   }
