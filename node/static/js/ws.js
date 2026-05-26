@@ -208,11 +208,17 @@ const WS = (() => {
           try {
             if (State.currentRoom === room) {
               const area = document.getElementById('messages-area');
-              if (area && _switchUiStillLoading(area)) {
-                const cachedNow = (State.messages && State.messages[room]) || [];
-                const decrypting = _historyInFlight.get(room) != null;
-                if (cachedNow.length || !decrypting) {
-                  Messages.loadHistory(room, cachedNow.slice(), { reveal: true, fromCache: true });
+              const cachedNow = (State.messages && State.messages[room]) || [];
+              const decrypting = _historyInFlight.get(room) != null;
+              if (area && _switchUiStillLoading(area) && (cachedNow.length || !decrypting)) {
+                if (!Messages.mergeRoomHistory?.(room, cachedNow.slice(), { reveal: false, fromCache: true })
+                  && (cachedNow.length || !decrypting)) {
+                  Messages.loadHistory(room, cachedNow.slice(), { reveal: false, fromCache: true });
+                }
+              } else if (area?.classList.contains('chat-switching-swr') && cachedNow.length) {
+                Messages.mergeRoomHistory?.(room, cachedNow.slice(), { fromCache: true });
+                if (typeof finishChannelSwitch === 'function') {
+                  finishChannelSwitch(room, { finish: true, contentReady: true });
                 }
               }
             }
@@ -231,7 +237,7 @@ const WS = (() => {
               if (State.currentRoom === room) {
                 const area = document.getElementById('messages-area');
                 if (area && (_switchUiStillLoading(area) || !area.children.length)) {
-                  Messages.loadHistory(room, cached.slice(), { reveal: true, fromCache: true });
+                  Messages.loadHistory(room, cached.slice(), { reveal: false, fromCache: true });
                 }
               }
             } catch {}
@@ -246,13 +252,20 @@ const WS = (() => {
             if (sameLen && sameFirst && sameLast) {
               _historyLastApplied.set(room, histSig);
               Users.updateList(data.online || []);
-              // Same defensive paint-over as the dedup-by-sig branch
-              // above: if the spinner is still up, render from cache.
               try {
                 if (State.currentRoom === room) {
                   const area = document.getElementById('messages-area');
-                  if (area && _switchUiStillLoading(area)) {
-                    Messages.loadHistory(room, cached.slice(), { reveal: true, fromCache: true });
+                  const merged = Messages.mergeRoomHistory?.(room, cached.slice(), {
+                    reveal: false,
+                    fromCache: true,
+                    fromServer: true,
+                  });
+                  if (!merged && area && _switchUiStillLoading(area)) {
+                    Messages.loadHistory(room, cached.slice(), { reveal: false, fromCache: true });
+                  } else if (area?.classList.contains('chat-switching-swr')) {
+                    if (typeof finishChannelSwitch === 'function') {
+                      finishChannelSwitch(room, { finish: true, contentReady: true });
+                    }
                   }
                 }
               } catch {}
@@ -262,10 +275,21 @@ const WS = (() => {
           const hadVisibleCache = !!(cached.length && State.currentRoom === room
             && document.getElementById('messages-area')?.classList.contains('chat-switching-swr'));
           const decrypted = await _decryptHistoryWindow(incoming, room);
-          Messages.loadHistory(room, decrypted, {
-            reveal: !hadVisibleCache,
-            fromCache: false,
+          const merged = Messages.mergeRoomHistory?.(room, decrypted, {
+            reveal: hadVisibleCache,
+            fromCache: hadVisibleCache,
+            fromServer: true,
+            deferFinish: hadVisibleCache,
           });
+          if (!merged) {
+            Messages.loadHistory(room, decrypted, {
+              reveal: !hadVisibleCache,
+              fromCache: false,
+              forceRebuild: true,
+            });
+          } else if (hadVisibleCache && typeof finishChannelSwitch === 'function') {
+            finishChannelSwitch(room, { finish: true, contentReady: true });
+          }
           try {
             if (State.currentRoom === room && State.currentChannelType !== 'voice') {
               const inputArea = document.getElementById('input-area');

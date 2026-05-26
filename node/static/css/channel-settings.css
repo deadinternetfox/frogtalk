@@ -794,6 +794,14 @@
   opacity: 1 !important;
   pointer-events: auto !important;
 }
+
+/* Cached messages stay visible during SWR; only .ft-msg-reveal tail nodes animate */
+#messages-area.chat-switching-swr .cw-chat-content > :not(.ft-msg-reveal) {
+  opacity: 1 !important;
+  visibility: visible !important;
+  filter: none !important;
+  transform: none !important;
+}
 .ch-transition-icon-wrap {
   display: flex;
   align-items: center;
@@ -1381,59 +1389,133 @@ body.cw-composer-locked #msg-input {
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent-color) 8%, transparent);
 }
 
-/* Thin sync strip (stale-while-revalidate channel switches) */
+/* Thin sync strip (fast channel / DM switches) */
 .ft-chat-sync-strip {
   position: sticky;
-  top: 0;
-  z-index: 24;
+  bottom: 10px;
+  top: auto;
+  z-index: 50;
+  flex-shrink: 0;
+  margin-top: 10px;
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 8px 14px;
-  margin: 0 0 6px;
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--accent-color) 14%, var(--surface-color));
-  border: 1px solid color-mix(in srgb, var(--accent-color) 28%, var(--border-color));
-  box-shadow: 0 6px 20px color-mix(in srgb, var(--bg-color) 50%, transparent);
-  animation: ftSyncStripIn 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+  gap: 11px;
+  padding: 9px 12px 9px 10px;
+  margin: 0 6px 8px;
+  border-radius: 12px;
+  font-family: inherit;
+  -webkit-font-smoothing: antialiased;
+  background: color-mix(in srgb, var(--surface-color) 88%, var(--accent-color) 12%);
+  backdrop-filter: blur(10px) saturate(1.08);
+  border: 1px solid color-mix(in srgb, var(--accent-color) 24%, var(--border-color));
+  box-shadow:
+    0 4px 18px color-mix(in srgb, var(--bg-color) 48%, transparent),
+    inset 0 1px 0 color-mix(in srgb, var(--text-color) 7%, transparent);
+  animation: ftSyncStripIn 0.22s cubic-bezier(0.22, 1, 0.36, 1);
   pointer-events: none;
 }
 
-.ft-chat-sync-strip-label {
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  color: color-mix(in srgb, var(--text-color) 88%, var(--accent-color));
-}
-
-.ft-chat-sync-strip-bar {
-  flex: 0 0 48px;
-  height: 3px;
-  border-radius: 3px;
-  background: color-mix(in srgb, var(--border-color) 60%, transparent);
+.ft-sync-strip-icon-wrap,
+.ft-sync-strip-icon {
+  flex: 0 0 32px;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9px;
   overflow: hidden;
-  position: relative;
+  background: color-mix(in srgb, var(--accent-color) 12%, var(--surface-color));
+  border: 1px solid color-mix(in srgb, var(--accent-color) 22%, var(--border-color));
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--bg-color) 35%, transparent);
 }
 
-.ft-chat-sync-strip-bar::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  width: 42%;
-  border-radius: inherit;
-  background: linear-gradient(90deg, transparent, var(--accent-color), transparent);
-  animation: ftSyncStripSlide 1.35s ease-in-out infinite;
+.ft-sync-strip-icon-inner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  font-size: 1.05rem;
+  line-height: 1;
+  border-radius: 8px;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+}
+
+.ft-sync-strip-icon-inner.is-image {
+  width: 100%;
+  height: 100%;
+  padding: 0;
+}
+
+.ft-sync-strip-icon-inner.is-image img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 8px;
+}
+
+.ft-sync-strip-icon-dm .avatar,
+.ft-sync-strip-icon-dm img {
+  width: 32px !important;
+  height: 32px !important;
+  border-radius: 9px;
+  object-fit: cover;
+}
+
+.ft-sync-strip-icon-emoji {
+  font-size: 1.15rem;
+  line-height: 32px;
+  text-align: center;
+}
+
+.ft-sync-strip-copy {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.ft-sync-strip-title {
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: -0.015em;
+  line-height: 1.25;
+  color: var(--text-color);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ft-sync-strip-sub {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  line-height: 1.2;
+  color: color-mix(in srgb, var(--text-color) 52%, var(--accent-color));
+}
+
+.ft-sync-strip-spinner {
+  flex: 0 0 17px;
+  width: 17px;
+  height: 17px;
+  margin-left: 2px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--border-color) 65%, transparent);
+  border-top-color: var(--accent-color);
+  animation: ftSyncStripSpin 0.7s linear infinite;
 }
 
 @keyframes ftSyncStripIn {
-  from { opacity: 0; transform: translateY(-6px); }
+  from { opacity: 0; transform: translateY(-5px); }
   to { opacity: 1; transform: none; }
 }
 
-@keyframes ftSyncStripSlide {
-  0% { transform: translateX(-120%); opacity: 0.35; }
-  50% { opacity: 0.9; }
-  100% { transform: translateX(260%); opacity: 0.35; }
+@keyframes ftSyncStripSpin {
+  to { transform: rotate(360deg); }
 }
 
 /* Staggered message reveal after channel switch */
@@ -1464,11 +1546,10 @@ body.cw-composer-locked #msg-input {
     animation: none !important;
   }
 
-  .ft-chat-sync-strip-bar::after {
+  .ft-sync-strip-spinner {
     animation: none !important;
     opacity: 0.55;
-    transform: none;
-    width: 100%;
+    border-top-color: var(--accent-color);
   }
 
   #messages-area .ft-msg-reveal {

@@ -2768,65 +2768,56 @@ const Messages = (() => {
     } catch {}
   }
 
-  function _applyMessageReveal(mount, opts) {
-    if (!mount || !opts?.reveal) return;
-    let reduced = false;
-    try { reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch {}
-    const nodes = mount.querySelectorAll('.msg, .msg-date-divider, .msg-system, .msg-group');
-    if (!nodes.length) return;
-    const stagger = reduced ? 0 : Math.min(16, Math.max(5, Math.floor(300 / Math.max(nodes.length, 1))));
-    nodes.forEach((el, i) => {
-      el.classList.add('ft-msg-reveal');
-      const delay = reduced ? 0 : Math.min(i * stagger, 340);
-      el.style.setProperty('--ft-reveal-delay', `${delay}ms`);
-    });
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        nodes.forEach((el) => el.classList.add('ft-msg-reveal-active'));
-      });
-    });
+  function _parseMsgElId(el) {
+    const m = /^msg-(-?\d+)$/.exec(String(el?.id || ''));
+    return m ? Number(m[1]) : null;
   }
 
-  function loadHistory(room, msgs, opts) {
+  function _historyMsgNodes(mount) {
+    if (!mount) return [];
+    return [...mount.querySelectorAll('[id^="msg-"]')].filter((el) => el.id !== 'msg-empty-state');
+  }
+
+  function _syncRoomMessageCache(room, msgs) {
+    State.messages[room] = (msgs || []).slice();
+    if (msgs && msgs.length) State.oldestMsgId = msgs[0].id;
+  }
+
+  function _patchCachedHistoryEdits(room, incoming, prevCache) {
+    if (!incoming?.length) return false;
+    const prev = prevCache || [];
+    let changed = false;
+    incoming.forEach((msg) => {
+      if (!msg?.id) return;
+      const old = prev.find((m) => m && m.id === msg.id);
+      if (!old) return;
+      const textChanged = String(old.content || '') !== String(msg.content || '');
+      const editedFlag = !!(msg.edited || msg.edit_ts);
+      if (textChanged || (editedFlag && !old.edited)) {
+        updateEdited(msg.id, msg.content, room);
+        changed = true;
+      }
+    });
+    return changed;
+  }
+
+  function _insertHistoryHtml(mount, html) {
+    if (!html || !mount) return;
+    const strip = mount.querySelector('#ft-chat-sync-strip');
+    if (strip) strip.insertAdjacentHTML('beforebegin', html);
+    else mount.insertAdjacentHTML('beforeend', html);
+  }
+
+  function _buildHistoryChunkHtml(msgs, opts) {
     const options = opts && typeof opts === 'object' ? opts : {};
-    if (room !== State.currentRoom) return;
-    try {
-      if (window.ContentWarning?.isGateActive?.()) return;
-    } catch {}
-    const area = document.getElementById('messages-area');
-    const mount = _historyMount(area);
-    _lastNick = null;
-    _lastBridge = null;
-    _lastBridgeSource = null;
-    _lastDate = null;
-    // Reset room cache before rebuilding so repeated loadHistory calls
-    // (switching back to a room, WS re-sync, cached re-render) don't duplicate.
-    State.messages[room] = [];
-
-    // Empty channel/DM: render a subtle, non-interactive system note so the
-    // chat doesn't look broken on first open. The note is replaced by real
-    // content as soon as anything arrives (see appendMessage below).
-    if (!msgs || msgs.length === 0) {
-      if (options.deferFinish) return;
-      mount.innerHTML = _emptyStateHtml(room);
-      _finishSwitchAfterPaint(room);
-      mount.scrollTop = mount.scrollHeight;
-      return;
-    }
-
     let html = '';
-    const urlRe = /https?:\/\/[^\s<>"]+/g;
     const linksToPreview = [];
     const _seenIds = new Set();
-
-    msgs.forEach(msg => {
-      // Dedup: skip if same message id already rendered (server sending duplicates).
+    (msgs || []).forEach((msg) => {
       if (msg.id) {
         if (_seenIds.has(msg.id)) return;
         _seenIds.add(msg.id);
       }
-      // Hide messages from blocked authors (client-side filter; server also
-      // enforces blocks in DMs/feed/comments). Own messages always show.
       if (msg.nickname && State.blockedNicks &&
           msg.nickname.toLowerCase() !== (State.user?.nickname || '').toLowerCase() &&
           State.blockedNicks.has(msg.nickname.toLowerCase())) {
@@ -2849,14 +2840,133 @@ const Messages = (() => {
       _lastNick = msg.nickname;
       _lastBridge = msg.bridge_platform || null;
       _lastBridgeSource = msg.bridge_source_name || null;
-
-      State.messages[room].push(msg);
-      
-      // Collect URLs for link previews (skip invite URLs — rendered as cards,
-      // and skip Frog Social profile/post/reel URLs — rendered as our own cards).
       const previewUrl = _extractPreviewUrl(String(msg.content || ''));
       if (previewUrl && !msg.preview_suppressed) linksToPreview.push({ id: msg.id, url: previewUrl });
     });
+    return { html, linksToPreview };
+  }
+
+  /**
+   * Incrementally update the visible history when switching back to a channel
+   * or when the server resends the same window — avoids wiping cached DOM.
+   * @returns {boolean} true when merge handled (skip full rebuild)
+   */
+  function mergeRoomHistory(room, msgs, opts) {
+    const options = opts && typeof opts === 'object' ? opts : {};
+    if (options.forceRebuild) return false;
+    if (room !== State.currentRoom) return false;
+    try {
+      if (window.ContentWarning?.isGateActive?.()) return false;
+    } catch {}
+    const incoming = msgs || [];
+    if (!incoming.length) return false;
+
+    const area = document.getElementById('messages-area');
+    const mount = _historyMount(area);
+    const nodes = _historyMsgNodes(mount);
+    if (!nodes.length) return false;
+
+    const prevCache = (State.messages && State.messages[room]) ? State.messages[room].slice() : [];
+    const firstDom = _parseMsgElId(nodes[0]);
+    const lastDom = _parseMsgElId(nodes[nodes.length - 1]);
+    const firstIn = incoming[0]?.id;
+    const lastIn = incoming[incoming.length - 1]?.id;
+    if (firstDom == null || lastDom == null || firstIn == null || lastIn == null) return false;
+    if (Number(firstIn) !== Number(firstDom)) return false;
+
+    const sameWindow = incoming.length === nodes.length
+      && Number(lastIn) === Number(lastDom);
+    const extended = incoming.length > nodes.length && Number(lastIn) >= Number(lastDom);
+
+    if (!sameWindow && !extended) return false;
+
+    _patchCachedHistoryEdits(room, incoming, prevCache);
+    _syncRoomMessageCache(room, incoming);
+
+    if (extended) {
+      const idx = incoming.findIndex((m) => m && Number(m.id) === Number(lastDom));
+      if (idx < 0) return false;
+      const tail = incoming.slice(idx + 1);
+      if (tail.length) {
+        const tailOpts = { ...options, reveal: options.reveal !== false };
+        const chunk = _buildHistoryChunkHtml(tail, tailOpts);
+        _insertHistoryHtml(mount, chunk.html);
+        if (tailOpts.reveal && chunk.html) _applyMessageReveal(mount, tailOpts);
+        chunk.linksToPreview.slice(-5).forEach(({ id, url }) => {
+          setTimeout(() => _loadLinkPreview(id, url), 100);
+        });
+      }
+    }
+
+    try { bindLongPress(area); } catch {}
+    try { observeLazyMedia(area); } catch {}
+    try { _hydrateStickers(area); } catch {}
+    try { area.scrollTop = area.scrollHeight; } catch {}
+    try { window.restoreSyncStripIfSwitching?.(room); } catch {}
+    if (!options.deferFinish) _finishSwitchAfterPaint(room);
+    return true;
+  }
+
+  function _pendingRevealNodes(mount) {
+    if (!mount) return [];
+    return [...mount.querySelectorAll('.ft-msg-reveal')].filter(
+      (el) => !el.classList.contains('ft-msg-reveal-active'),
+    );
+  }
+
+  /** Fade in only nodes marked .ft-msg-reveal (new tail), not the full cached history. */
+  function _applyMessageReveal(mount, opts) {
+    if (!mount || !opts?.reveal) return;
+    const nodes = _pendingRevealNodes(mount);
+    if (!nodes.length) return;
+    let reduced = false;
+    try { reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch {}
+    const stagger = reduced ? 0 : Math.min(16, Math.max(5, Math.floor(300 / Math.max(nodes.length, 1))));
+    nodes.forEach((el, i) => {
+      const delay = reduced ? 0 : Math.min(i * stagger, 340);
+      el.style.setProperty('--ft-reveal-delay', `${delay}ms`);
+    });
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        nodes.forEach((el) => el.classList.add('ft-msg-reveal-active'));
+      });
+    });
+  }
+
+  function loadHistory(room, msgs, opts) {
+    let options = opts && typeof opts === 'object' ? opts : {};
+    if (options.fromCache) options = { ...options, reveal: false };
+    if (room !== State.currentRoom) return;
+    try {
+      if (window.ContentWarning?.isGateActive?.()) return;
+    } catch {}
+    const area = document.getElementById('messages-area');
+    const mount = _historyMount(area);
+    _lastNick = null;
+    _lastBridge = null;
+    _lastBridgeSource = null;
+    _lastDate = null;
+
+    if (!options.forceRebuild && mergeRoomHistory(room, msgs, options)) return;
+
+    // Reset room cache before rebuilding so repeated loadHistory calls
+    // (switching back to a room, WS re-sync, cached re-render) don't duplicate.
+    State.messages[room] = [];
+
+    // Empty channel/DM: render a subtle, non-interactive system note so the
+    // chat doesn't look broken on first open. The note is replaced by real
+    // content as soon as anything arrives (see appendMessage below).
+    if (!msgs || msgs.length === 0) {
+      if (options.deferFinish) return;
+      mount.innerHTML = _emptyStateHtml(room);
+      _finishSwitchAfterPaint(room);
+      mount.scrollTop = mount.scrollHeight;
+      try { window.restoreSyncStripIfSwitching?.(room); } catch {}
+      return;
+    }
+
+    const { html, linksToPreview } = _buildHistoryChunkHtml(msgs, options);
+    _syncRoomMessageCache(room, msgs);
 
     mount.innerHTML = html;
     if (!html && !options.deferFinish) {
@@ -2935,6 +3045,7 @@ const Messages = (() => {
     });
 
     _scheduleHydrateAllEmbeds();
+    try { window.restoreSyncStripIfSwitching?.(room); } catch {}
   }
 
   function appendMessage(room, msg) {
@@ -3199,6 +3310,15 @@ const Messages = (() => {
   }
 
   function updateEdited(id, content, room) {
+    const r = room || State.currentRoom;
+    try {
+      const cache = State.messages?.[r];
+      const hit = cache && cache.find((m) => m && m.id === id);
+      if (hit) {
+        hit.content = content;
+        hit.edited = true;
+      }
+    } catch {}
     const el = document.getElementById(`msg-${id}`);
     if (!el) return;
     // Strip any previously hoisted share-card rows so editing a message
@@ -4302,7 +4422,7 @@ const Messages = (() => {
 
   _ensureSystemEmbedStyleGuard();
 
-  return { loadHistory, applyMessageReveal: _applyMessageReveal, appendMessage, updateEdited, removeMessage, updateReactions, startEdit, submitEdit, cancelEdit, deleteMsg, showReactMenu, toggleReaction, openMedia, openSticker, hydrateStickers: _hydrateStickers, revealSpoiler, hideSpoiler, revealViewOnce, loadMedia, observeLazyMedia, playInlineAudio, setReplyTo, clearReply, getReplyToId, getReplyTo, openModMenu, openActionSheet, bindLongPress, copyMessage, copyEmbedLink, toggleProfileFollow, scrollToBottom, joinViaInvite, openSocialProfile, openSocialPost, openSocialReel, _toggleChatVideo, forwardMessage, openForwardPicker: _openForwardPicker, forwardedBadgeHtml: _forwardedBadgeHtml, _renderRichShareEmbed, suppressPreview, applyPreviewSuppress, toggleSpoiler, applyMediaBlur, _loadInviteCard, _loadSocialProfileCard, _loadSocialPostCard, _loadSocialReelCard, _hydrateSpecialCards, _scrollIfNearBottom, refreshSystemEmbedGuard: _ensureSystemEmbedStyleGuard };
+  return { loadHistory, mergeRoomHistory, applyMessageReveal: _applyMessageReveal, appendMessage, updateEdited, removeMessage, updateReactions, startEdit, submitEdit, cancelEdit, deleteMsg, showReactMenu, toggleReaction, openMedia, openSticker, hydrateStickers: _hydrateStickers, revealSpoiler, hideSpoiler, revealViewOnce, loadMedia, observeLazyMedia, playInlineAudio, setReplyTo, clearReply, getReplyToId, getReplyTo, openModMenu, openActionSheet, bindLongPress, copyMessage, copyEmbedLink, toggleProfileFollow, scrollToBottom, joinViaInvite, openSocialProfile, openSocialPost, openSocialReel, _toggleChatVideo, forwardMessage, openForwardPicker: _openForwardPicker, forwardedBadgeHtml: _forwardedBadgeHtml, _renderRichShareEmbed, suppressPreview, applyPreviewSuppress, toggleSpoiler, applyMediaBlur, _loadInviteCard, _loadSocialProfileCard, _loadSocialPostCard, _loadSocialReelCard, _hydrateSpecialCards, _scrollIfNearBottom, refreshSystemEmbedGuard: _ensureSystemEmbedStyleGuard };
 })();
 
 // ── Scroll-to-bottom + "jump to latest" pip ─────────────────────────────────
