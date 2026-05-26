@@ -1504,6 +1504,7 @@ const App = {
     // last channel has a chance to open. This is cleared by switchToRoom()
     // or replaced by showEmptyOnboarding() if the user truly has no rooms.
     App.showChannelLoading();
+    try { window.paintSidebarSkeletonsIfEmpty?.(); } catch {}
     try {
       if (typeof ConnErr !== 'undefined' && ConnErr.armBootGrace) {
         ConnErr.armBootGrace(18000);
@@ -1544,6 +1545,7 @@ const App = {
       }
     }
 
+    const dmChannelsBoot = (typeof loadDMChannels === 'function') ? loadDMChannels() : null;
     try {
       await Rooms.loadRooms();
     } catch (e) {
@@ -1746,12 +1748,9 @@ const App = {
       } catch {}
     }
 
-    // Load DM channels sidebar (after Signal is ready on travel nodes).
-    if (typeof loadDMChannels === 'function') {
-      if (!atHomeNode) {
-        try { await this.ensureSignalReadyForDecrypt({ timeoutMs: 12000 }); } catch {}
-      }
-      await loadDMChannels();
+    // DM sidebar fetch started in parallel with loadRooms(); await it here.
+    if (dmChannelsBoot) {
+      try { await dmChannelsBoot; } catch (e) { console.warn('[App] loadDMChannels failed', e); }
     } else if (!atHomeNode) {
       try { this.maybeShowTravelerCryptoNotice({ afterSwitch: false }); } catch {}
     }

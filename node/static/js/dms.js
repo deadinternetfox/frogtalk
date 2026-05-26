@@ -2367,25 +2367,19 @@ async function _retryDecryptDMMessageInPlace(m) {
 
 /* ── Sidebar DM list ────────────────────────────────────────────────────────── */
 async function loadDMChannels () {
+  try {
+    if (typeof paintSidebarListSkeleton === 'function') {
+      paintSidebarListSkeleton('dm-channels', 'dm');
+    } else if (typeof paintSidebarSkeletonsIfEmpty === 'function') {
+      paintSidebarSkeletonsIfEmpty();
+    }
+  } catch {}
   if (window.Signal && typeof Signal.ensureReady === 'function' && State?.user?.id) {
     try {
       if (!Signal.isReady()) {
         await Signal.ensureReady(State.user.id, { timeoutMs: 15000 });
       }
     } catch {}
-  }
-  const sidebarEl = document.getElementById('dm-channels');
-  if (sidebarEl && !_dmChannels.length) {
-    let syncHint = '';
-    try {
-      if (window.FtSync && FtSync.state().in_progress) {
-        syncHint = FtSync.renderInline(FtSync.state(), { compact: true, fallback: 'Syncing DMs…' });
-      }
-    } catch {}
-    const skel = (typeof sidebarListSkeletonHtml === 'function')
-      ? sidebarListSkeletonHtml(4, 'dm')
-      : '<div style="padding:6px 8px"><span class="skel-line" style="width:70%;height:10px;display:block;margin-bottom:6px"></span></div>';
-    sidebarEl.innerHTML = skel + syncHint;
   }
   try {
     const r = await apiFetch('/api/dms');
