@@ -512,11 +512,11 @@ async function submitCustomEmoji() {
       toast(data.error || 'Failed to add emoji', 'error');
       return;
     }
-    toast(roomId ? `Channel emoji :${name}: added` : `Emoji :${name}: added to your account`);
+    toast(scope === 'channel' ? `Channel emoji :${name}: added` : `Personal emoji :${name}: added`);
     closeModal('modal-add-emoji');
     await loadCustomEmojis();
     refreshEmojiRenderCache();
-    renderCategory(roomId ? CAT_CHANNEL : CAT_MY);
+    renderCategory(scope === 'channel' ? CAT_CHANNEL : CAT_MY);
   } catch {
     toast('Failed to add emoji', 'error');
   }
