@@ -2155,7 +2155,9 @@ const Rooms = (() => {
     const nameKey = String(name || '').trim().toLowerCase();
     try { State._roomSwitchInProgress = nameKey; } catch {}
     if (type !== 'dm' && typeof Users !== 'undefined' && Users.prepareMembersListLoad) {
-      try { Users.prepareMembersListLoad(name); } catch {}
+      try {
+        if (!Users.hasMembersCache?.(name)) Users.prepareMembersListLoad(name);
+      } catch {}
     }
     // SWR + skeleton for all text channels (including 18+); DMs/voice keep legacy loaders.
     let useFastSwitch = type !== 'dm'

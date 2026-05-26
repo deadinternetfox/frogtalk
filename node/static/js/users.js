@@ -142,14 +142,61 @@ const Users = (() => {
   let _membersBootPending = false;
   let _membersLoadInflight = null;
   let _membersLoadRoom = null;
+  const _membersRoomCache = new Map();
+  const _MEMBERS_CACHE_MAX = 40;
+
+  function _membersCacheKey(room) {
+    return String(room || '').trim().toLowerCase();
+  }
+
+  function _getCachedMembers(room) {
+    const entry = _membersRoomCache.get(_membersCacheKey(room));
+    if (!entry || !Array.isArray(entry.members) || !entry.members.length) return null;
+    return entry;
+  }
+
+  function _putCachedMembers(room, members, bots) {
+    const key = _membersCacheKey(room);
+    if (!key) return;
+    _membersRoomCache.set(key, {
+      members: (members || []).map((m) => ({ ...m })),
+      bots: (bots || []).map((b) => ({ ...b })),
+      ts: Date.now(),
+    });
+    while (_membersRoomCache.size > _MEMBERS_CACHE_MAX) {
+      const oldest = _membersRoomCache.keys().next().value;
+      if (!oldest) break;
+      _membersRoomCache.delete(oldest);
+    }
+  }
+
+  function _memberListSignature(members, bots) {
+    const mids = (members || []).map((m) => `${m.user_id || ''}\t${m.nickname || ''}`).sort().join('\n');
+    const bnames = (bots || []).map((b) => b.name || '').sort().join('\n');
+    return `${(members || []).length}:${mids}::${(bots || []).length}:${bnames}`;
+  }
+
+  function hasMembersCache(room) {
+    return !!_getCachedMembers(room);
+  }
+
+  function _applyCachedMembers(room) {
+    const entry = _getCachedMembers(room);
+    if (!entry) return false;
+    _channelRoom = String(room);
+    _channelMembers = _mergeLocalSelfIntoList(entry.members.map((m) => ({ ...m })));
+    _channelBots = (entry.bots || []).map((b) => ({ ...b }));
+    return true;
+  }
 
   function _membersPanelShouldSkeleton() {
     if (State.currentRoomType === 'dm') return false;
-    if (_membersLoading || _membersBootPending) return true;
+    if (_membersBootPending) return true;
+    if (_membersLoading && !_channelMembers.length) return true;
     const cur = (State.currentRoom && State.currentRoomType !== 'dm')
       ? String(State.currentRoom)
       : '';
-    return !!(cur && _channelRoom === cur && !_channelMembers.length);
+    return !!(cur && _channelRoom === cur && !_channelMembers.length && !_getCachedMembers(cur));
   }
 
   function _paintMembersSkeleton(list, opts = {}) {
@@ -203,12 +250,22 @@ const Users = (() => {
     const roomChanged = _channelRoom !== room;
     _channelRoom = room;
     _membersLoadRoom = room;
-    _membersLoading = true;
     _membersBootPending = false;
+
+    const fromCache = o.forceRefresh !== true && _applyCachedMembers(room);
+    if (fromCache) {
+      _membersLoading = false;
+      list.classList.remove('users-list-refreshing');
+      _renderFiltered();
+      return;
+    }
+
+    _membersLoading = true;
     if (roomChanged) {
       _channelMembers = [];
       _channelBots = [];
     }
+    list.classList.remove('users-list-refreshing');
     const instant = !!(o.instant || list.querySelector('.users-skeleton'));
     _paintMembersSkeleton(list, { instant });
     const count = document.getElementById('online-count');
@@ -227,7 +284,13 @@ const Users = (() => {
     const roomAhead = curRoom && _channelRoom && _channelRoom !== curRoom;
 
     if (roomAhead) {
-      prepareMembersListLoad(curRoom, { instant: true });
+      if (_applyCachedMembers(_channelRoom)) {
+        _membersLoading = false;
+        if (list) list.classList.add('users-list-refreshing');
+      } else {
+        _paintMembersSkeleton(list, { instant: true });
+      }
+      if (count) count.textContent = '…';
       return;
     }
 
@@ -509,7 +572,22 @@ const Users = (() => {
   async function loadChannelMembers(roomName) {
     if (!roomName || !State.token) return;
     const room = String(roomName);
-    prepareMembersListLoad(room);
+    const list = document.getElementById('users-list');
+    const hadCache = hasMembersCache(room);
+    if (hadCache) {
+      _applyCachedMembers(room);
+      _channelRoom = room;
+      _membersLoadRoom = room;
+      _membersLoading = false;
+      _membersBootPending = false;
+      if (list) {
+        list.classList.add('users-list-refreshing');
+        list.classList.remove('users-skeleton');
+      }
+      _renderFiltered();
+    } else {
+      prepareMembersListLoad(room);
+    }
     if (_membersLoadInflight && _membersLoadRoom === room) return _membersLoadInflight;
     _membersLoadInflight = (async () => {
       try {
@@ -519,8 +597,13 @@ const Users = (() => {
         if (!res.ok) return;
         const data = await res.json();
         if (_channelRoom !== room || State.currentRoom !== room) return;
-        _channelMembers = _mergeLocalSelfIntoList(data.members || []);
-        _channelBots = Array.isArray(data.bots) ? data.bots : [];
+        const prevSig = _memberListSignature(_channelMembers, _channelBots);
+        const nextMembers = _mergeLocalSelfIntoList(data.members || []);
+        const nextBots = Array.isArray(data.bots) ? data.bots : [];
+        const nextSig = _memberListSignature(nextMembers, nextBots);
+        _channelMembers = nextMembers;
+        _channelBots = nextBots;
+        _putCachedMembers(room, _channelMembers, _channelBots);
         // Backfill display_name into any online users that the WS sent without it
         for (const u of _allUsers) {
           if (!u.display_name) {
@@ -532,15 +615,19 @@ const Users = (() => {
         }
         void _hydrateDisplayNames(_channelMembers)
           .then(() => {
-            if (!_membersLoading && _channelRoom === room && State.currentRoom === room) {
+            if (_channelRoom === room && State.currentRoom === room) {
               _renderFiltered();
             }
           })
           .catch(() => {});
+        if (prevSig !== nextSig && _channelRoom === room && State.currentRoom === room) {
+          _renderFiltered();
+        }
       } catch {} finally {
         if (_channelRoom === room) {
           _membersLoading = false;
           _membersBootPending = false;
+          if (list) list.classList.remove('users-list-refreshing');
           _renderFiltered();
         }
       }
@@ -676,7 +763,10 @@ const Users = (() => {
         if (State.onlineUsers.length !== beforeOnline) changed = true;
       }
     } catch {}
-    if (changed) _renderFiltered();
+    if (changed) {
+      if (_channelRoom) _putCachedMembers(_channelRoom, _channelMembers, _channelBots);
+      _renderFiltered();
+    }
     return changed;
   }
 
@@ -736,6 +826,7 @@ const Users = (() => {
     prepareMembersListLoad,
     resetMembersListLoad,
     loadChannelMembers,
+    hasMembersCache,
     getPresenceByNickname,
     removeMember,
   };
@@ -744,5 +835,6 @@ try {
   if (typeof window !== 'undefined' && window.Users) {
     window.Users.prepareMembersPanelBoot = Users.prepareMembersPanelBoot;
     window.Users.prepareMembersListLoad = Users.prepareMembersListLoad;
+    window.Users.hasMembersCache = Users.hasMembersCache;
   }
 } catch {}
