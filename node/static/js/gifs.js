@@ -968,6 +968,24 @@ const GIFs = (() => {
     }
   }
 
+  /** Stage a fetched GIF in the composer with working spoiler / remove controls. */
+  function _stageGifAttachment(blob, name, type) {
+    const attachBlob = blob.type ? blob : new Blob([blob], { type });
+    if (typeof addPendingAttachmentFile === 'function') {
+      if (typeof clearAttachment === 'function') clearAttachment();
+      const file = new File([attachBlob], name, { type: attachBlob.type || type });
+      addPendingAttachmentFile(file);
+      return;
+    }
+    if (typeof _renderAttachmentPreview === 'function') {
+      _renderAttachmentPreview({
+        blob: attachBlob, name, type: attachBlob.type || type, sizeBytes: attachBlob.size,
+      });
+    } else {
+      window._pendingAttachment = { blob: attachBlob, name, type: attachBlob.type || type };
+    }
+  }
+
   async function send(gifUrl) {
     close();
     if (!gifUrl) return;
@@ -994,11 +1012,7 @@ const GIFs = (() => {
       const type = blob.type || (gifUrl.endsWith('.mp4') ? 'video/mp4' : 'image/gif');
       const ext  = type.includes('mp4') ? 'mp4' : 'gif';
       const name = 'gif-' + Date.now() + '.' + ext;
-      const attachBlob = blob.type ? blob : new Blob([blob], { type });
-      window._pendingAttachment = { blob: attachBlob, name, type };
-      if (typeof _renderAttachmentPreview === 'function') {
-        _renderAttachmentPreview({ blob: attachBlob, name, type, sizeBytes: attachBlob.size });
-      }
+      _stageGifAttachment(attachBlob, name, type);
       try { loadingToast?.dismiss?.(); } catch {}
       if (input) input.focus();
     } catch (e) {
@@ -1020,10 +1034,7 @@ const GIFs = (() => {
             const ext2  = type2.includes('mp4') ? 'mp4' : 'gif';
             const name2 = 'gif-' + Date.now() + '.' + ext2;
             const attachBlob2 = blob2.type ? blob2 : new Blob([blob2], { type: type2 });
-            window._pendingAttachment = { blob: attachBlob2, name: name2, type: type2 };
-            if (typeof _renderAttachmentPreview === 'function') {
-              _renderAttachmentPreview({ blob: attachBlob2, name: name2, type: type2, sizeBytes: attachBlob2.size });
-            }
+            _stageGifAttachment(attachBlob2, name2, type2);
             try { loadingToast?.dismiss?.(); } catch {}
             if (input) input.focus();
             return;
