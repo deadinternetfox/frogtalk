@@ -2147,6 +2147,10 @@ const Rooms = (() => {
     if (type !== 'dm' && typeof Users !== 'undefined' && Users.prepareMembersListLoad) {
       try { Users.prepareMembersListLoad(name); } catch {}
     }
+    // Dim the send button immediately on switch so the user sees it's held —
+    // FtCompose will formally call beginChannelSwitch below, but refresh here
+    // ensures the button goes dim before any async awaits.
+    try { window.FtCompose?.refresh?.(); } catch {}
     // SWR + skeleton for all text channels (including 18+); DMs/voice keep legacy loaders.
     let useFastSwitch = type !== 'dm'
       && normalizeChannelType(_chTypeEarly) !== 'voice';
