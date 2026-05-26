@@ -481,6 +481,16 @@ async def gif_categories():
 class CreateStickerPackRequest(BaseModel):
     name: str
     description: str = ""
+    room_id: Optional[int] = None
+
+
+class ImportStickerRequest(BaseModel):
+    sticker_id: int
+
+
+class ImportStickerImageRequest(BaseModel):
+    image_data: str
+    media_type: Optional[str] = None
 
 
 class UpdateStickerPackRequest(BaseModel):
@@ -561,12 +571,12 @@ async def list_sticker_packs(current_user: dict = Depends(get_current_user)):
             FOREIGN KEY (pack_id) REFERENCES sticker_packs(id) ON DELETE CASCADE
         )""")
         
-        # Get user's own packs
+        # Personal packs only (channel packs use /stickers/room/{id})
         own_packs = con.execute("""
             SELECT sp.*, 
                    (SELECT COUNT(*) FROM stickers WHERE pack_id=sp.id) as sticker_count
             FROM sticker_packs sp
-            WHERE sp.owner_id=?
+            WHERE sp.owner_id=? AND sp.room_id IS NULL
         """, (current_user["id"],)).fetchall()
         
         # Get installed packs (includes federated packs whose owner_id = -1)
@@ -576,12 +586,93 @@ async def list_sticker_packs(current_user: dict = Depends(get_current_user)):
             FROM user_sticker_packs usp
             JOIN sticker_packs sp ON usp.pack_id = sp.id
             LEFT JOIN users u ON sp.owner_id = u.id
-            WHERE usp.user_id=? AND sp.owner_id != ?
+            WHERE usp.user_id=? AND sp.owner_id != ? AND sp.room_id IS NULL
         """, (current_user["id"], current_user["id"])).fetchall()
     
     return {
         "own_packs": [dict(p) for p in own_packs],
         "installed_packs": [dict(p) for p in installed_packs]
+    }
+
+
+@router.get("/stickers/room/{room_id}")
+async def list_room_sticker_packs(room_id: int, current_user: dict = Depends(get_current_user)):
+    """Channel sticker packs (visible only in that channel unless saved to account)."""
+    if not db.is_room_member(current_user["id"], room_id):
+        return JSONResponse(status_code=403, content={"error": "Not a member of this channel"})
+    with db._conn() as con:
+        con.execute("""CREATE TABLE IF NOT EXISTS sticker_packs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            description TEXT DEFAULT '',
+            owner_id INTEGER NOT NULL,
+            is_public INTEGER DEFAULT 0,
+            origin_server_id TEXT DEFAULT NULL,
+            foreign_pack_id INTEGER DEFAULT NULL,
+            created_at TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE CASCADE
+        )""")
+        try:
+            con.execute("ALTER TABLE sticker_packs ADD COLUMN room_id INTEGER DEFAULT NULL")
+        except Exception:
+            pass
+        packs = con.execute("""
+            SELECT sp.*,
+                   (SELECT COUNT(*) FROM stickers WHERE pack_id=sp.id) as sticker_count
+            FROM sticker_packs sp
+            WHERE sp.room_id=?
+            ORDER BY sp.created_at DESC
+        """, (room_id,)).fetchall()
+    return {"packs": [dict(p) for p in packs]}
+
+
+@router.post("/stickers/import")
+async def import_sticker(body: ImportStickerRequest, current_user: dict = Depends(get_current_user)):
+    """Save a sticker to your account Saved pack (skips duplicate image)."""
+    result = db.import_sticker_to_user(current_user["id"], int(body.sticker_id))
+    if not result.get("ok"):
+        err = result.get("error") or "import_failed"
+        code = 404 if err == "not_found" else 400
+        return JSONResponse(status_code=code, content={"error": err})
+    return {
+        "ok": True,
+        "skipped": bool(result.get("skipped")),
+        "id": result.get("id"),
+        "pack_id": result.get("pack_id"),
+        "name": result.get("name"),
+    }
+
+
+@router.post("/stickers/import-image")
+async def import_sticker_image(body: ImportStickerImageRequest, current_user: dict = Depends(get_current_user)):
+    """Save sticker image from a chat message into your Saved pack."""
+    if not str(body.image_data or "").startswith("data:image/"):
+        return JSONResponse(status_code=400, content={"error": "Invalid image format"})
+    if len(body.image_data) > 500 * 1024:
+        return JSONResponse(status_code=413, content={"error": "Sticker too large"})
+    fx_json = None
+    mt = str(body.media_type or "")
+    if ";fx=" in mt:
+        try:
+            import re as _re
+            m = _re.search(r";\s*fx=([A-Za-z0-9_-]+)", mt)
+            if m:
+                import base64 as _b64
+                pad = "=" * (-len(m.group(1)) % 4)
+                raw = _b64.urlsafe_b64decode(m.group(1) + pad)
+                fx_json = raw.decode("utf-8")
+        except Exception:
+            fx_json = None
+    result = db.import_sticker_image_to_user(current_user["id"], body.image_data, fx_json)
+    if not result.get("ok"):
+        err = result.get("error") or "import_failed"
+        return JSONResponse(status_code=400, content={"error": err})
+    return {
+        "ok": True,
+        "skipped": bool(result.get("skipped")),
+        "id": result.get("id"),
+        "pack_id": result.get("pack_id"),
+        "name": result.get("name"),
     }
 
 
@@ -591,17 +682,31 @@ async def create_sticker_pack(body: CreateStickerPackRequest, current_user: dict
     if len(body.name) < 2 or len(body.name) > 32:
         return JSONResponse(status_code=400, content={"error": "Pack name must be 2-32 characters"})
     
+    room_id = body.room_id
+    if room_id is not None:
+        if not db.is_room_member(current_user["id"], int(room_id)):
+            return JSONResponse(status_code=403, content={"error": "Not a channel member"})
+        with db._conn() as con:
+            room = con.execute("SELECT name FROM rooms WHERE id=?", (int(room_id),)).fetchone()
+        if not room or not db.can_moderate_room(room["name"], current_user["id"], bool(current_user.get("is_admin"))):
+            return JSONResponse(status_code=403, content={"error": "Only channel mods can create channel sticker packs"})
+
     with db._conn() as con:
+        try:
+            con.execute("ALTER TABLE sticker_packs ADD COLUMN room_id INTEGER DEFAULT NULL")
+        except Exception:
+            pass
         cur = con.execute("""
-            INSERT INTO sticker_packs (name, description, owner_id)
-            VALUES (?, ?, ?)
-        """, (body.name, body.description, current_user["id"]))
+            INSERT INTO sticker_packs (name, description, owner_id, room_id)
+            VALUES (?, ?, ?, ?)
+        """, (body.name, body.description, current_user["id"], room_id))
         pack_id = cur.lastrowid
-        
-        # Auto-install for creator
-        con.execute("""
-            INSERT INTO user_sticker_packs (user_id, pack_id) VALUES (?, ?)
-        """, (current_user["id"], pack_id))
+
+        if room_id is None:
+            con.execute(
+                "INSERT INTO user_sticker_packs (user_id, pack_id) VALUES (?, ?)",
+                (current_user["id"], pack_id),
+            )
     
     # New pack is private by default — no federation emit yet. It will be
     # emitted on the first PATCH that flips is_public=1.

@@ -9192,6 +9192,8 @@ function _mentionColorWithAlpha(color, alpha, fallback) {
     if (!sendBlocked && wasHardBlocked) {
       try { restoreFocus(); } catch {}
     }
+
+    try { window.refreshSyncStripChrome?.(); } catch {}
   }
 
   function cancelChannelSwitch() {

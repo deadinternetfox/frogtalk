@@ -2880,6 +2880,7 @@ const Messages = (() => {
 
     if (!sameWindow && !extended) return false;
 
+    try { window.hideChatLoadSkeleton?.(); } catch {}
     _patchCachedHistoryEdits(room, incoming, prevCache);
     _syncRoomMessageCache(room, incoming);
 
@@ -2937,6 +2938,7 @@ const Messages = (() => {
     let options = opts && typeof opts === 'object' ? opts : {};
     if (options.fromCache) options = { ...options, reveal: false };
     if (room !== State.currentRoom) return;
+    try { window.hideChatLoadSkeleton?.(); } catch {}
     try {
       if (window.ContentWarning?.isGateActive?.()) return;
     } catch {}
@@ -2947,7 +2949,10 @@ const Messages = (() => {
     _lastBridgeSource = null;
     _lastDate = null;
 
-    if (!options.forceRebuild && mergeRoomHistory(room, msgs, options)) return;
+    if (!options.forceRebuild && mergeRoomHistory(room, msgs, options)) {
+      try { window.hideChatLoadSkeleton?.(); } catch {}
+      return;
+    }
 
     // Reset room cache before rebuilding so repeated loadHistory calls
     // (switching back to a room, WS re-sync, cached re-render) don't duplicate.
@@ -4200,6 +4205,43 @@ const Messages = (() => {
       const txt = (btn.textContent || '').trim();
       return t || txt || 'Action';
     };
+
+    const stickerEl = msgEl.querySelector('.frog-sticker-mount[data-fx-src]');
+    if (stickerEl && window.GIFs && typeof GIFs.importStickerImageToAccount === 'function') {
+      const asBtn = document.createElement('button');
+      asBtn.className = 'as-btn';
+      asBtn.style.animationDelay = '12ms';
+      asBtn.innerHTML = '<span class="as-ic">🎴</span><span>Add to my stickers</span>';
+      asBtn.onclick = (e) => {
+        e.stopPropagation();
+        try { navigator.vibrate?.(8); } catch {}
+        close(true);
+        setTimeout(() => {
+          GIFs.importStickerImageToAccount(
+            stickerEl.getAttribute('data-fx-src'),
+            stickerEl.getAttribute('data-fx-mt') || ''
+          );
+        }, 80);
+      };
+      itemsWrap.appendChild(asBtn);
+    }
+    const customEmojiImg = msgEl.querySelector('.custom-emoji-inline[data-emoji-id]');
+    if (customEmojiImg && typeof importEmojiToAccount === 'function') {
+      const eid = customEmojiImg.getAttribute('data-emoji-id');
+      if (eid) {
+        const asBtn = document.createElement('button');
+        asBtn.className = 'as-btn';
+        asBtn.style.animationDelay = '16ms';
+        asBtn.innerHTML = '<span class="as-ic">😀</span><span>Add to my emojis</span>';
+        asBtn.onclick = (e) => {
+          e.stopPropagation();
+          try { navigator.vibrate?.(8); } catch {}
+          close(true);
+          setTimeout(() => importEmojiToAccount(eid), 80);
+        };
+        itemsWrap.appendChild(asBtn);
+      }
+    }
 
     Array.from(actionsRow.querySelectorAll('button.msg-act-btn')).forEach((btn, i) => {
       // Skip the redundant ⋯ sub-menu trigger — its children are already listed here

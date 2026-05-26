@@ -217,7 +217,8 @@ const WS = (() => {
                 }
               } else if (area?.classList.contains('chat-switching-swr') && cachedNow.length) {
                 Messages.mergeRoomHistory?.(room, cachedNow.slice(), { fromCache: true });
-                if (typeof finishChannelSwitch === 'function') {
+                if (typeof finishChannelSwitch === 'function'
+                  && !(window.FtCompose?.isChannelLoading?.())) {
                   finishChannelSwitch(room, { finish: true, contentReady: true });
                 }
               }
@@ -263,7 +264,8 @@ const WS = (() => {
                   if (!merged && area && _switchUiStillLoading(area)) {
                     Messages.loadHistory(room, cached.slice(), { reveal: false, fromCache: true });
                   } else if (area?.classList.contains('chat-switching-swr')) {
-                    if (typeof finishChannelSwitch === 'function') {
+                    if (typeof finishChannelSwitch === 'function'
+                      && !(window.FtCompose?.isChannelLoading?.())) {
                       finishChannelSwitch(room, { finish: true, contentReady: true });
                     }
                   }
@@ -287,7 +289,8 @@ const WS = (() => {
               fromCache: false,
               forceRebuild: true,
             });
-          } else if (hadVisibleCache && typeof finishChannelSwitch === 'function') {
+          } else if (hadVisibleCache && typeof finishChannelSwitch === 'function'
+            && !(window.FtCompose?.isChannelLoading?.())) {
             finishChannelSwitch(room, { finish: true, contentReady: true });
           }
           try {

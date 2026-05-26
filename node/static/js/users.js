@@ -138,12 +138,26 @@ const Users = (() => {
     _hydrateDisplayNames(_allUsers).then(() => _renderFiltered()).catch(() => {});
   }
 
+  let _membersLoading = false;
+
   function _renderFiltered() {
     const list = document.getElementById('users-list');
     const count = document.getElementById('online-count');
     if (!list) return;
 
     const onRoom = _channelRoom && State.currentRoom === _channelRoom;
+
+    if (onRoom && _membersLoading) {
+      const rows = [68, 82, 58, 74, 64].map((w, i) =>
+        `<div class="ft-skel-user-row" style="--ft-skel-i:${i}">`
+        + '<span class="ft-skel-avatar sm" aria-hidden="true"></span>'
+        + `<span class="ft-skel-line" style="width:${w}%"></span></div>`,
+      ).join('');
+      list.innerHTML =
+        `<div class="users-skeleton" role="status" aria-live="polite" aria-busy="true">${rows}</div>`;
+      if (count) count.textContent = '…';
+      return;
+    }
 
     // When we have a full room-member snapshot, use that as the source of
     // truth for names/display_names and only merge online presence into it.
@@ -416,6 +430,9 @@ const Users = (() => {
 
   async function loadChannelMembers(roomName) {
     if (!roomName || !State.token) return;
+    _channelRoom = roomName;
+    _membersLoading = true;
+    _renderFiltered();
     try {
       const res = await fetch(`/api/rooms/${encodeURIComponent(roomName)}/members`, {
         headers: { 'X-Session-Token': State.token }
@@ -423,7 +440,6 @@ const Users = (() => {
       if (!res.ok) return;
       const data = await res.json();
       _channelMembers = _mergeLocalSelfIntoList(data.members || []);
-      _channelRoom = roomName;
       _channelBots = Array.isArray(data.bots) ? data.bots : [];
       // Backfill display_name into any online users that the WS sent without it
       for (const u of _allUsers) {
@@ -436,7 +452,10 @@ const Users = (() => {
       }
       _renderFiltered();
       _hydrateDisplayNames(_channelMembers).then(() => _renderFiltered()).catch(() => {});
-    } catch {}
+    } catch {} finally {
+      _membersLoading = false;
+      _renderFiltered();
+    }
   }
 
   function updateDisplayName(userId, nickname, displayName) {

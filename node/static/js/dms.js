@@ -2588,14 +2588,16 @@ async function openDMChannel (id, nickname, avatar) {
   // Blank chat area up-front to prevent stale-message flash, but drop in a
   // spinner right away so the user always sees *something* while we derive the
   // ECDH shared secret + fetch messages.
-  const _dmHasCache = !!(_dmHistoryCache.get(id)?.length);
   const area0 = document.getElementById('messages-area');
   if (area0 && typeof showChatTransition === 'function') {
     showChatTransition('', 'dm', nickname, 'open', {
       dmAvatar: avatar,
       switchKey: `dm:${id}`,
-      swr: _dmHasCache,
+      swr: true,
     });
+    if (!_dmHistoryCache.get(id)?.length) {
+      try { window.showChatLoadSkeleton?.('dm'); } catch {}
+    }
   }
   // DMs have no voice channel — always hide the presence bar.
   const vpb = document.getElementById('voice-presence-bar');
@@ -2631,16 +2633,14 @@ async function openDMChannel (id, nickname, avatar) {
   _dmMessagesLoading = true;
   _dmMessagesReady = false;
   _updateDmComposeState();
+  try { window.FtCompose?.beginChannelSwitch?.(`dm:${id}`, { swr: true }); } catch {}
   const _cached = _dmHistoryCache.get(id);
   _dmMessages  = Array.isArray(_cached) ? _cached.map(m => ({ ...m })) : [];
   clearReplyToDM();
 
-  // If we have recent cached history for this DM, paint it under the loading
-  // overlay and keep the full-pane spinner until the fetch completes.
   if (_dmMessages.length) {
     renderDMChat();
     scrollChatBottom();
-    try { window.FtCompose?.beginChannelSwitch?.(`dm:${id}`, { swr: true }); } catch {}
     if (!_dmSkipHistoricalDecrypt()) void _redecryptStaleDMMessages();
     else void _redecryptTravelDMMessages();
   }
@@ -2992,30 +2992,30 @@ function _dmHasTransitionOverlay() {
   return !!document.getElementById('ft-chat-transition');
 }
 
-function _dmShowChatTransition(phase) {
+function _dmShowSyncStrip(phase) {
   if (!_activeDM) return;
   const nick = _activeDM.nickname || '';
   if (typeof showChatTransition !== 'function') return;
-  const swr = !!(_dmMessages && _dmMessages.length);
   showChatTransition('', 'dm', nick, phase || 'load', {
     dmAvatar: _activeDM.avatar || null,
     switchKey: `dm:${_activeDM.id}`,
-    beginSwitch: !_dmHasTransitionOverlay(),
-    swr,
+    beginSwitch: false,
+    swr: true,
   });
+  try { window.refreshSyncStripChrome?.(); } catch {}
 }
 
-function _dmEnsureLoadingOverlay() {
+function _dmEnsureSyncStrip() {
   if (!_activeDM || !_dmMessagesLoading) return;
-  _dmShowChatTransition('load');
+  _dmShowSyncStrip('load');
 }
 
 function _dmFinishLoadUi() {
+  try { window.FtCompose?.finishChannelLoad?.(`dm:${_activeDM?.id || ''}`); } catch {}
   try {
     if (typeof clearChatTransition === 'function') clearChatTransition({ finish: true, contentReady: true });
   } catch {}
   try { delete State._roomSwitchInProgress; } catch {}
-  try { window.FtCompose?.finishChannelLoad?.(`dm:${_activeDM?.id || ''}`); } catch {}
 }
 
 function _dmClearTransitionForError() {
@@ -3053,7 +3053,7 @@ async function loadDMMessages (pageOffset = 0, options = {}) {
   }
   try {
   if (pageOffset === 0 && !isDelta) {
-    _dmEnsureLoadingOverlay();
+    _dmEnsureSyncStrip();
   }
   const url = isDelta
     ? `/api/dms/${_reqRoomId}/messages?limit=${DM_PER_PAGE}&after=${afterId}`
@@ -3073,7 +3073,7 @@ async function loadDMMessages (pageOffset = 0, options = {}) {
     // show the hard retry panel.
     if (pageOffset === 0 && uiRetry < 2) {
       const area = document.getElementById('messages-area');
-      if (area) _dmEnsureLoadingOverlay();
+      if (area) _dmEnsureSyncStrip();
       await _sleep(500);
       if (!_isReqCurrent()) return;
       return loadDMMessages(pageOffset, { ...options, uiRetry: uiRetry + 1 });
@@ -3123,7 +3123,7 @@ async function loadDMMessages (pageOffset = 0, options = {}) {
     // Soft-retry once on transient server errors before showing error UI.
     if (pageOffset === 0 && uiRetry < 2 && r && r.status >= 500) {
       const area = document.getElementById('messages-area');
-      if (area) _dmEnsureLoadingOverlay();
+      if (area) _dmEnsureSyncStrip();
       await _sleep(500);
       if (!_isReqCurrent()) return;
       return loadDMMessages(pageOffset, { ...options, uiRetry: uiRetry + 1 });
@@ -3224,17 +3224,13 @@ function renderDMChat () {
   const hasCache = !!_dmMessages.length;
   const mount = _dmEnsureChatShell(area);
   if (!mount) return;
-  if (stillLoading && !hasCache) {
-    _dmShowChatTransition(_dmHasTransitionOverlay() ? 'load' : 'open');
-  } else if (stillLoading && hasCache) {
-    if (typeof showChatTransition === 'function') {
-      showChatTransition('', 'dm', _activeDM.nickname, 'load', {
-        dmAvatar: _activeDM.avatar,
-        switchKey: `dm:${_activeDM.id}`,
-        swr: true,
-      });
+  if (stillLoading) {
+    _dmEnsureSyncStrip();
+    if (!hasCache) {
+      try { window.showChatLoadSkeleton?.('dm'); } catch {}
     }
   } else {
+    try { window.hideChatLoadSkeleton?.(); } catch {}
     _dmFinishLoadUi();
   }
   if (!_dmMessages.length) {
@@ -3251,6 +3247,7 @@ function renderDMChat () {
     </div>`;
     return;
   }
+  try { window.hideChatLoadSkeleton?.(); } catch {}
   _dmMessages = _dmDedupeMessagesById(_dmMessages.map(m => _normalizeDMMessage(m)));
   mount.innerHTML = _dmMessages.map(m => renderDMMessage(m)).join('');
   if (stillLoading && hasCache && window.Messages?.applyMessageReveal) {

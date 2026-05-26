@@ -4062,22 +4062,31 @@ body:is([data-theme="dark"],[data-theme="frog"],:not([data-theme])) .radio-optio
   border:1px dashed color-mix(in srgb, var(--accent-color) 35%, var(--border-color));
   color:var(--text-muted);font-size:20px;
 }
-.ep-create-row{
-  flex:0 0 100%;width:100%;margin-top:6px;padding-top:8px;
-  border-top:1px solid color-mix(in srgb, var(--accent-color) 12%, var(--border-color));
+#emoji-picker.ep-custom-tab .ep-footer{display:block}
+.ep-footer{
+  display:none;flex-shrink:0;margin-top:8px;padding-top:8px;
+  border-top:1px solid color-mix(in srgb, var(--accent-color) 14%, var(--border-color));
 }
 .ep-create-btn{
-  display:block;width:100%;padding:8px 10px;border-radius:8px;cursor:pointer;
-  font-size:12px;font-weight:600;
-  color:var(--accent-color);
-  background:color-mix(in srgb, var(--accent-color) 12%, var(--surface-color));
-  border:1px solid color-mix(in srgb, var(--accent-color) 30%, var(--border-color));
-  transition:background .12s,border-color .12s;
+  display:flex;align-items:center;justify-content:center;gap:6px;
+  width:100%;padding:9px 12px;border-radius:9px;cursor:pointer;
+  font-size:12px;font-weight:600;line-height:1.2;
+  color:color-mix(in srgb, var(--accent-color) 8%, #f0fff4);
+  background:linear-gradient(180deg,
+    color-mix(in srgb, var(--accent-color) 72%, #2d6b4a) 0%,
+    color-mix(in srgb, var(--accent-color) 55%, #1e4a34) 100%);
+  border:1px solid color-mix(in srgb, var(--accent-color) 55%, #1a3d2c);
+  box-shadow:0 2px 8px color-mix(in srgb, var(--accent-color) 25%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #fff 18%, transparent);
+  transition:filter .12s,transform .08s,box-shadow .12s;
 }
 .ep-create-btn:hover{
-  background:color-mix(in srgb, var(--accent-color) 20%, var(--surface-color));
-  border-color:color-mix(in srgb, var(--accent-color) 45%, var(--border-color));
+  filter:brightness(1.08);
+  box-shadow:0 3px 12px color-mix(in srgb, var(--accent-color) 32%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #fff 22%, transparent);
 }
+.ep-create-btn:active{transform:scale(.98)}
+.ep-create-btn-icon{font-size:15px;line-height:1;opacity:.95}
 
 /* ─── Add Custom Emoji upload preview ──────────────────────── */
 .emoji-upload-preview{
@@ -11409,6 +11418,12 @@ window.ConnErr = (function(){
 <div id="emoji-picker">
   <div class="ep-categories" id="ep-cats"></div>
   <div class="emoji-grid" id="ep-grid"></div>
+  <div class="ep-footer" id="ep-footer" hidden>
+    <button type="button" class="ep-create-btn" id="ep-create-btn">
+      <span class="ep-create-btn-icon" aria-hidden="true">＋</span>
+      <span>Add custom emoji</span>
+    </button>
+  </div>
 </div>
 
 <!-- ═══════════ FRIENDS PANEL (replaces users panel when in friends view) ══════ -->
@@ -12060,7 +12075,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoa
 <script src="/static/js/messages.js?v=__APP_ASSET_VERSION__"></script>
 <script src="/static/js/format_toolbar.js?v=2"></script>
 <script src="/static/js/users.js?v=202"></script>
-<script src="/static/js/emoji.js?v=193"></script>
+<script src="/static/js/emoji.js?v=__APP_ASSET_VERSION__"></script>
 <script src="/static/js/friends.js?v=423"></script>
 <script src="/static/js/dms.js?v=__APP_ASSET_VERSION__"></script>
 <script src="/static/js/calls.js?v=246"></script>
