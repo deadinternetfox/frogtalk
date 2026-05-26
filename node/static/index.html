@@ -4098,26 +4098,12 @@ body:is([data-theme="dark"],[data-theme="frog"],:not([data-theme])) .radio-optio
   background:color-mix(in srgb, var(--accent-color) 18%, var(--surface-color));
   border-color:var(--accent-color);
 }
-.add-emoji-scope-row{margin-top:12px}
-.add-emoji-scope-label{display:block;margin-bottom:6px}
-.add-emoji-scope-seg{display:flex;flex-direction:column;gap:6px}
-.add-emoji-scope-opt{display:block;cursor:pointer}
-.add-emoji-scope-opt input{position:absolute;opacity:0;width:0;height:0;pointer-events:none}
-.add-emoji-scope-card{
-  display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:10px;
-  border:1px solid var(--border-color);
-  background:color-mix(in srgb, var(--bg-color) 55%, var(--surface-color));
-  transition:border-color .12s,background .12s,box-shadow .12s;
+.add-emoji-scope-note{
+  margin:10px 0 0;padding:8px 10px;border-radius:8px;font-size:11px;line-height:1.4;
+  color:var(--text-muted);
+  background:color-mix(in srgb, var(--accent-color) 8%, var(--bg-color));
+  border:1px solid color-mix(in srgb, var(--accent-color) 18%, var(--border-color));
 }
-.add-emoji-scope-opt input:checked + .add-emoji-scope-card{
-  border-color:color-mix(in srgb, var(--accent-color) 55%, var(--border-color));
-  background:color-mix(in srgb, var(--accent-color) 12%, var(--surface-color));
-  box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--accent-color) 22%, transparent);
-}
-.add-emoji-scope-ic{font-size:18px;line-height:1;flex-shrink:0}
-.add-emoji-scope-txt{display:flex;flex-direction:column;gap:2px;min-width:0}
-.add-emoji-scope-txt strong{font-size:12px;font-weight:600;color:var(--text-color)}
-.add-emoji-scope-txt small{font-size:10px;color:var(--text-muted);line-height:1.3}
 .add-emoji-actions{margin-top:14px;gap:8px}
 .emoji-upload-preview{
   width:96px;height:96px;background:var(--bg-color);border-radius:12px;
@@ -4171,15 +4157,11 @@ body:is([data-theme="dark"],[data-theme="frog"],:not([data-theme])) #modal-add-e
   background:linear-gradient(180deg,#1a4434,#153a2c) !important;
   border-color:#3e6a5b !important;color:#c8f0d8 !important;
 }
-body:is([data-theme="dark"],[data-theme="frog"],:not([data-theme])) #modal-add-emoji .add-emoji-scope-card{
+body:is([data-theme="dark"],[data-theme="frog"],:not([data-theme])) #modal-add-emoji .add-emoji-scope-note{
+  color:#9bd0ad !important;
   background:linear-gradient(180deg,#142a22,#10241c) !important;
   border-color:#2f5548 !important;
 }
-body:is([data-theme="dark"],[data-theme="frog"],:not([data-theme])) #modal-add-emoji .add-emoji-scope-opt input:checked + .add-emoji-scope-card{
-  border-color:#5cab79 !important;
-  background:linear-gradient(180deg,#1a3d30,#153528) !important;
-}
-body:is([data-theme="dark"],[data-theme="frog"],:not([data-theme])) #modal-add-emoji .add-emoji-scope-txt strong{color:#dff5e8 !important}
 body:is([data-theme="dark"],[data-theme="frog"],:not([data-theme])) #modal-add-emoji .emoji-upload-preview{
   background:linear-gradient(180deg,#163a2d 0%,#123226 60%,#0f2a20 100%) !important;
   border:2px dashed #4a8b6d !important;

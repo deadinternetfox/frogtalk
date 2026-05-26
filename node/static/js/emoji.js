@@ -22,6 +22,8 @@ let _epActiveCategory = CAT_MY;
 let _addEmojiScope = 'mine';
 
 const _EMOJI_DATA_URL_RE = /^data:image\/(png|jpe?g|gif|webp);base64,[A-Za-z0-9+/=]+$/i;
+const _EMOJI_NAME_RE = /^[a-z0-9_]{2,32}$/;
+const _EMOJI_FILE_TYPES = new Set(['image/png', 'image/gif', 'image/webp', 'image/jpeg']);
 
 function _attrEsc(s) {
   return (window.UI && UI.escHtml)
@@ -286,7 +288,7 @@ function renderCategory(cat) {
       const addTile = document.createElement('span');
       addTile.className = 'ep-emoji ep-emoji-add';
       addTile.textContent = '+';
-      addTile.title = isChannel ? 'Add channel emoji' : 'Add emoji to your account';
+      addTile.title = isChannel ? 'Add channel emoji' : 'Add personal emoji';
       addTile.setAttribute('aria-label', addTile.title);
       addTile.onclick = (e) => {
         e.stopPropagation();
@@ -366,10 +368,20 @@ function toggleEmojiPicker(forceClose = false) {
   }
 }
 
-function openAddEmojiModal() {
-  if (_addEmojiScope === 'channel' && !_canModerateCurrentChannel()) {
-    _addEmojiScope = 'mine';
+function _resolveAddEmojiScope() {
+  if (_addEmojiScope === 'channel') {
+    if (!_canModerateCurrentChannel() || !getCurrentRoomId()) {
+      return 'mine';
+    }
+    return 'channel';
   }
+  return 'mine';
+}
+
+function openAddEmojiModal() {
+  const scope = _resolveAddEmojiScope();
+  _addEmojiScope = scope;
+  const isChannel = scope === 'channel';
   toggleEmojiPicker(true);
   let modal = document.getElementById('modal-add-emoji');
   if (!modal) {
@@ -396,31 +408,7 @@ function openAddEmojiModal() {
             <input class="modal-input" id="add-emoji-name" placeholder="cool_frog" maxlength="32" autocomplete="off"
                    oninput="this.value=this.value.toLowerCase().replace(/[^a-z0-9_]/g,'')">
             <p class="add-emoji-name-hint">Lowercase letters, numbers, underscores</p>
-            <div id="add-emoji-scope-row" class="add-emoji-scope-row" hidden>
-              <span class="modal-label add-emoji-scope-label">Save to</span>
-              <div class="add-emoji-scope-seg" role="radiogroup" aria-label="Emoji scope">
-                <label class="add-emoji-scope-opt">
-                  <input type="radio" name="add-emoji-scope" value="mine" checked>
-                  <span class="add-emoji-scope-card">
-                    <span class="add-emoji-scope-ic" aria-hidden="true">👤</span>
-                    <span class="add-emoji-scope-txt">
-                      <strong>My account</strong>
-                      <small>Every channel you join</small>
-                    </span>
-                  </span>
-                </label>
-                <label class="add-emoji-scope-opt add-emoji-channel-opt">
-                  <input type="radio" name="add-emoji-scope" value="channel">
-                  <span class="add-emoji-scope-card">
-                    <span class="add-emoji-scope-ic" aria-hidden="true">📢</span>
-                    <span class="add-emoji-scope-txt">
-                      <strong>This channel</strong>
-                      <small>Only here until saved</small>
-                    </span>
-                  </span>
-                </label>
-              </div>
-            </div>
+            <p class="add-emoji-scope-note" id="add-emoji-scope-note" hidden></p>
           </div>
         </div>
         <div class="modal-actions add-emoji-actions">
@@ -436,8 +424,14 @@ function openAddEmojiModal() {
     document.getElementById('add-emoji-file').onchange = function(e) {
       const file = e.target.files[0];
       if (!file) return;
+      if (!_EMOJI_FILE_TYPES.has(String(file.type || '').toLowerCase())) {
+        toast('Use PNG, GIF, WebP, or JPEG only', 'error');
+        e.target.value = '';
+        return;
+      }
       if (file.size > 256 * 1024) {
         toast('Image too large (max 256KB)', 'error');
+        e.target.value = '';
         return;
       }
       const reader = new FileReader();
@@ -448,18 +442,19 @@ function openAddEmojiModal() {
     };
   }
 
-  const scopeRow = document.getElementById('add-emoji-scope-row');
-  const canChannel = !!(getCurrentRoomId() && _canModerateCurrentChannel());
-  const channelOnly = _addEmojiScope === 'channel' && canChannel;
-  if (scopeRow) scopeRow.hidden = !canChannel;
-  const scopeVal = channelOnly ? 'channel' : 'mine';
-  scopeRow?.querySelectorAll('input[name="add-emoji-scope"]').forEach((inp) => {
-    inp.checked = inp.value === scopeVal;
-  });
   const titleEl = modal.querySelector('#add-emoji-title');
   const submitBtn = document.getElementById('add-emoji-submit-btn');
-  if (titleEl) titleEl.textContent = channelOnly ? 'Add channel emoji' : 'Add emoji';
-  if (submitBtn) submitBtn.textContent = channelOnly ? 'Add to channel' : 'Add to account';
+  const scopeNote = document.getElementById('add-emoji-scope-note');
+  const roomLabel = String(State?.currentRoom || '').replace(/^#/, '');
+  if (titleEl) titleEl.textContent = isChannel ? 'Add channel emoji' : 'Add personal emoji';
+  if (submitBtn) submitBtn.textContent = isChannel ? 'Add to channel' : 'Add to my emojis';
+  if (scopeNote) {
+    scopeNote.hidden = false;
+    scopeNote.textContent = isChannel
+      ? (roomLabel ? `Only visible in #${roomLabel} unless someone saves it to their account.` : 'Only visible in this channel unless saved.')
+      : 'Visible in every channel you join — only on your account.';
+  }
+  modal.dataset.addEmojiScope = scope;
 
   const previewBtn = document.getElementById('add-emoji-preview');
   document.getElementById('add-emoji-name').value = '';
@@ -476,14 +471,22 @@ function openAddEmojiModal() {
 }
 
 async function submitCustomEmoji() {
-  const name = document.getElementById('add-emoji-name').value.trim();
+  const name = document.getElementById('add-emoji-name').value.trim().toLowerCase();
   const imageData = document.getElementById('add-emoji-preview').dataset.imageData;
   if (!name) { toast('Please enter a name', 'error'); return; }
-  if (!imageData) { toast('Please select an image', 'error'); return; }
+  if (!_EMOJI_NAME_RE.test(name)) {
+    toast('Name must be 2–32 characters: lowercase letters, numbers, underscores', 'error');
+    return;
+  }
+  if (!imageData || !_isSafeEmojiDataUrl(imageData)) {
+    toast('Please choose a valid PNG, GIF, or WebP image', 'error');
+    return;
+  }
 
+  const scope = _resolveAddEmojiScope();
+  _addEmojiScope = scope;
   let roomId = null;
-  const scopeInp = document.querySelector('input[name="add-emoji-scope"]:checked');
-  if (scopeInp?.value === 'channel') {
+  if (scope === 'channel') {
     if (!_canModerateCurrentChannel()) {
       toast('Only the channel owner or moderators can add channel emojis', 'error');
       return;
@@ -495,11 +498,14 @@ async function submitCustomEmoji() {
     }
   }
 
+  const body = { name, image_data: imageData };
+  if (scope === 'channel' && roomId) body.room_id = roomId;
+
   try {
     const res = await fetch('/api/emojis', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Session-Token': State.token },
-      body: JSON.stringify({ name, image_data: imageData, room_id: roomId }),
+      body: JSON.stringify(body),
     });
     if (!res.ok) {
       const data = await res.json();
