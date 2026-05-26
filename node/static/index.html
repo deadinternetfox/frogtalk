@@ -3273,6 +3273,22 @@ html.ft-kb-open #input-area{
   box-sizing:border-box;
 }
 #call-overlay.hidden{display:none!important}
+/* Voice-only calls: keep a live media element for WebKit (not display:none). */
+#remote-video.ft-remote-audio-sink,
+#remote-audio{
+  position:fixed;
+  width:1px;height:1px;
+  opacity:0.01;
+  pointer-events:none;
+  overflow:hidden;
+  z-index:0;
+  left:0;bottom:0;
+  border:0;
+}
+#remote-video.ft-remote-audio-sink{
+  display:block !important;
+  object-fit:contain;
+}
 #incoming-call.hidden{display:none!important}
 body.ft-incoming-call-active #incoming-call{z-index:20000}
 #call-top-bar{
@@ -11550,7 +11566,9 @@ window.ConnErr = (function(){
   <div id="call-participants">
     <!-- Remote participant tile -->
     <div id="call-tile-remote" class="call-tile">
-      <video id="remote-video" autoplay playsinline style="width:100%;height:100%;object-fit:cover;border-radius:12px;display:none"></video>
+      <video id="remote-video" autoplay playsinline webkit-playsinline style="width:100%;height:100%;object-fit:cover;border-radius:12px;display:none"></video>
+      <!-- Voice-call audio sink: WebKit won't play remote audio through display:none video. -->
+      <audio id="remote-audio" autoplay playsinline webkit-playsinline></audio>
       <div id="call-remote-avatar" class="call-tile-avatar">
         <div id="call-avatar-big" style="font-size:4rem">🐸</div>
       </div>
