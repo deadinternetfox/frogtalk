@@ -2925,6 +2925,21 @@ function _dmObserveReadMessageEl(el) {
   }
 }
 
+/** Ignore stale peer read cursors that point past the latest message in the thread. */
+function _dmEffectivePeerLastRead() {
+  if (!_activeDM) return 0;
+  let pr = _activeDM.peer_last_read | 0;
+  if (!pr) return 0;
+  const ch = _dmChannels.find((c) => c.id === _activeDM.id);
+  const lastMsg = Math.max(
+    ch?.last_msg_id | 0,
+    ..._dmMessages.map((m) => m.id | 0).filter((id) => id > 0),
+    0,
+  );
+  if (lastMsg > 0 && pr > lastMsg) return 0;
+  return pr;
+}
+
 function _dmSetupReadReceiptUi() {
   _dmTeardownReadReceiptUi();
   const area = document.getElementById('messages-area');
@@ -2970,24 +2985,33 @@ async function markDMRead (opts) {
 function handleWSDMRead (data) {
   const chId = data.channel_id|0;
   // Server broadcasts "last_read"; accept "up_to" as a fallback for forward-compat.
-  const upTo = (data.last_read|0) || (data.up_to|0);
+  let upTo = (data.last_read|0) || (data.up_to|0);
   if (!chId || !upTo) return;
   const readerId = Number(data.reader_id) || 0;
   const myId = Number(STATE?.user?.id) || 0;
   if (readerId && myId && readerId === myId) return;
   const ch = _dmChannels.find(c => c.id === chId);
+  const peerId = (_activeDM && _activeDM.id === chId)
+    ? (Number(_activeDM.user_id) || 0)
+    : (Number(ch?.with_user_id) || 0);
+  if (peerId && readerId && readerId !== peerId) return;
+  if (peerId && !readerId) return;
+  const lastMsg = (ch?.last_msg_id | 0)
+    || (_activeDM && _activeDM.id === chId
+      ? Math.max(0, ..._dmMessages.map((m) => m.id | 0))
+      : 0);
+  if (lastMsg > 0 && upTo > lastMsg) return;
   if (ch) ch.peer_last_read = Math.max(ch.peer_last_read||0, upTo);
   if (_activeDM && _activeDM.id === chId) {
-    const peerId = Number(_activeDM.user_id) || 0;
-    if (readerId && peerId && readerId !== peerId) return;
     _activeDM.peer_last_read = Math.max(_activeDM.peer_last_read||0, upTo);
     // Only upgrade to ✓✓ (read) when BOTH users have read-receipts on.
     const myShowReceipts   = STATE.user?.show_read_receipts !== 0;
     const peerShowReceipts = _activeDM.other_show_read_receipts !== false;
     if (!(myShowReceipts && peerShowReceipts)) return;
+    const peerReadUpTo = _dmEffectivePeerLastRead();
     document.querySelectorAll('#messages-area .msg-tick[data-mine="1"]').forEach(el => {
       const mid = +el.dataset.mid;
-      if (mid && mid <= _activeDM.peer_last_read) {
+      if (mid && mid <= peerReadUpTo) {
         el.textContent = '✓✓';
         el.classList.remove('msg-tick-pending');
         el.classList.add('msg-tick-read');
@@ -3651,7 +3675,7 @@ function renderDMMessage (m) {
     const peerShowReceipts = _activeDM && _activeDM.other_show_read_receipts !== false;
     const receiptsMutual   = myShowReceipts && peerShowReceipts;
     const hasId            = (m.id|0) > 0 && !m._pending;
-    const peerRead         = hasId && _activeDM && (m.id|0) <= (_activeDM.peer_last_read|0);
+    const peerRead         = hasId && _activeDM && (m.id|0) <= _dmEffectivePeerLastRead();
     const showRead         = peerRead && receiptsMutual;
 
     if (!hasId) {
