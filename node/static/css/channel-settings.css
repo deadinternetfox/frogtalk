@@ -1581,6 +1581,16 @@ body.cw-composer-locked #msg-input {
   animation: ftSkelIn 0.18s ease-out both;
   animation-delay: calc(var(--ft-skel-i, 0) * 40ms);
 }
+.users-skeleton .ft-skel-user-row,
+.ft-sidebar-skeleton .ft-skel-sidebar-row {
+  animation-fill-mode: both;
+}
+.users-skeleton.ft-skel-instant .ft-skel-user-row {
+  animation: none;
+}
+#users-list:has(.users-skeleton) {
+  min-height: 11.5rem;
+}
 .ft-skel-sidebar-lines {
   flex: 1;
   min-width: 0;
