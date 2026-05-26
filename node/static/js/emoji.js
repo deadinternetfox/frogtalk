@@ -59,7 +59,10 @@ function _setEmojiPreviewImage(previewEl, dataUrl) {
   previewEl.replaceChildren();
   previewEl.dataset.imageData = '';
   if (!_isSafeEmojiDataUrl(dataUrl)) {
-    previewEl.innerHTML = '<span class="emoji-upload-placeholder">Click</span>';
+    const ph = document.createElement('span');
+    ph.className = 'emoji-upload-placeholder';
+    ph.textContent = 'Tap to upload';
+    previewEl.appendChild(ph);
     return;
   }
   const img = document.createElement('img');
@@ -138,22 +141,11 @@ function buildEmojiPicker() {
       const btn = document.createElement('div');
       const isActive = cat === _epActiveCategory || (i === 0 && !keys.includes(_epActiveCategory));
       btn.className = 'ep-cat' + (isActive ? ' active' : '');
-      if (cat === CAT_CHANNEL && _canModerateCurrentChannel()) {
-        btn.classList.add('ep-cat-channel-manage');
-      }
       btn.title = cat;
       btn.dataset.cat = cat;
       const label = document.createElement('span');
       label.textContent = cat.split(' ')[0];
       btn.appendChild(label);
-      if (cat === CAT_CHANNEL && _canModerateCurrentChannel()) {
-        const plus = document.createElement('span');
-        plus.className = 'ep-cat-channel-add';
-        plus.setAttribute('aria-hidden', 'true');
-        plus.textContent = '+';
-        btn.appendChild(plus);
-        btn.title = 'Channel emojis — tap + in grid to add';
-      }
       btn.onclick = () => {
         document.querySelectorAll('.ep-cat').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
@@ -375,6 +367,9 @@ function toggleEmojiPicker(forceClose = false) {
 }
 
 function openAddEmojiModal() {
+  if (_addEmojiScope === 'channel' && !_canModerateCurrentChannel()) {
+    _addEmojiScope = 'mine';
+  }
   toggleEmojiPicker(true);
   let modal = document.getElementById('modal-add-emoji');
   if (!modal) {
@@ -382,27 +377,62 @@ function openAddEmojiModal() {
     modal.className = 'modal-overlay hidden';
     modal.id = 'modal-add-emoji';
     modal.innerHTML = `
-      <div class="modal modal-add-emoji">
-        <div class="modal-title">Add emoji</div>
-        <label class="modal-label">Emoji Name</label>
-        <input class="modal-input" id="add-emoji-name" placeholder="e.g. cool_frog" maxlength="32"
-               oninput="this.value=this.value.toLowerCase().replace(/[^a-z0-9_]/g,'')">
-        <label class="modal-label">Image (PNG, GIF, WebP, up to 256KB)</label>
-        <input type="file" id="add-emoji-file" accept="image/png,image/gif,image/webp" style="display:none">
-        <div id="add-emoji-preview" class="emoji-upload-preview" onclick="document.getElementById('add-emoji-file').click()">
-          <span class="emoji-upload-placeholder">Click</span>
+      <div class="modal modal-add-emoji" role="dialog" aria-labelledby="add-emoji-title">
+        <div class="add-emoji-header">
+          <div class="modal-title" id="add-emoji-title">Add emoji</div>
+          <p class="add-emoji-lead">Upload an image, then type <span class="add-emoji-code">:name:</span> in chat.</p>
         </div>
-        <div id="add-emoji-scope-row" class="add-emoji-scope-row" style="display:none;flex-direction:column;gap:8px;margin-top:8px">
-          <label class="toggle-row"><input type="radio" name="add-emoji-scope" value="mine" checked> <span class="modal-label">My account (all channels)</span></label>
-          <label class="toggle-row add-emoji-channel-row"><input type="radio" name="add-emoji-scope" value="channel"> <span class="modal-label">This channel only</span></label>
+        <div class="add-emoji-layout">
+          <div class="add-emoji-preview-col">
+            <input type="file" id="add-emoji-file" accept="image/png,image/gif,image/webp" hidden>
+            <button type="button" id="add-emoji-preview" class="emoji-upload-preview" aria-label="Choose emoji image">
+              <span class="emoji-upload-placeholder">Tap to upload</span>
+            </button>
+            <button type="button" class="add-emoji-pick-btn" onclick="document.getElementById('add-emoji-file').click()">Choose image</button>
+            <p class="add-emoji-file-hint">PNG · GIF · WebP · 256KB max</p>
+          </div>
+          <div class="add-emoji-fields">
+            <label class="modal-label" for="add-emoji-name">Name</label>
+            <input class="modal-input" id="add-emoji-name" placeholder="cool_frog" maxlength="32" autocomplete="off"
+                   oninput="this.value=this.value.toLowerCase().replace(/[^a-z0-9_]/g,'')">
+            <p class="add-emoji-name-hint">Lowercase letters, numbers, underscores</p>
+            <div id="add-emoji-scope-row" class="add-emoji-scope-row" hidden>
+              <span class="modal-label add-emoji-scope-label">Save to</span>
+              <div class="add-emoji-scope-seg" role="radiogroup" aria-label="Emoji scope">
+                <label class="add-emoji-scope-opt">
+                  <input type="radio" name="add-emoji-scope" value="mine" checked>
+                  <span class="add-emoji-scope-card">
+                    <span class="add-emoji-scope-ic" aria-hidden="true">👤</span>
+                    <span class="add-emoji-scope-txt">
+                      <strong>My account</strong>
+                      <small>Every channel you join</small>
+                    </span>
+                  </span>
+                </label>
+                <label class="add-emoji-scope-opt add-emoji-channel-opt">
+                  <input type="radio" name="add-emoji-scope" value="channel">
+                  <span class="add-emoji-scope-card">
+                    <span class="add-emoji-scope-ic" aria-hidden="true">📢</span>
+                    <span class="add-emoji-scope-txt">
+                      <strong>This channel</strong>
+                      <small>Only here until saved</small>
+                    </span>
+                  </span>
+                </label>
+              </div>
+            </div>
+          </div>
         </div>
-        <div class="modal-actions">
-          <button class="modal-btn secondary" onclick="closeModal('modal-add-emoji')">Cancel</button>
-          <button class="modal-btn primary" onclick="submitCustomEmoji()">Add</button>
+        <div class="modal-actions add-emoji-actions">
+          <button type="button" class="modal-btn secondary" onclick="closeModal('modal-add-emoji')">Cancel</button>
+          <button type="button" class="modal-btn primary" id="add-emoji-submit-btn" onclick="submitCustomEmoji()">Add emoji</button>
         </div>
       </div>
     `;
     document.body.appendChild(modal);
+    document.getElementById('add-emoji-preview').onclick = () => {
+      document.getElementById('add-emoji-file')?.click();
+    };
     document.getElementById('add-emoji-file').onchange = function(e) {
       const file = e.target.files[0];
       if (!file) return;
@@ -419,17 +449,29 @@ function openAddEmojiModal() {
   }
 
   const scopeRow = document.getElementById('add-emoji-scope-row');
-  const showScope = getCurrentRoomId() && _canModerateCurrentChannel();
-  if (scopeRow) scopeRow.style.display = showScope ? 'flex' : 'none';
-  const scopeVal = _addEmojiScope === 'channel' && showScope ? 'channel' : 'mine';
-  scopeRow?.querySelectorAll('input[name="add-emoji-scope"]').forEach(inp => {
+  const canChannel = !!(getCurrentRoomId() && _canModerateCurrentChannel());
+  const channelOnly = _addEmojiScope === 'channel' && canChannel;
+  if (scopeRow) scopeRow.hidden = !canChannel;
+  const scopeVal = channelOnly ? 'channel' : 'mine';
+  scopeRow?.querySelectorAll('input[name="add-emoji-scope"]').forEach((inp) => {
     inp.checked = inp.value === scopeVal;
   });
+  const titleEl = modal.querySelector('#add-emoji-title');
+  const submitBtn = document.getElementById('add-emoji-submit-btn');
+  if (titleEl) titleEl.textContent = channelOnly ? 'Add channel emoji' : 'Add emoji';
+  if (submitBtn) submitBtn.textContent = channelOnly ? 'Add to channel' : 'Add to account';
 
+  const previewBtn = document.getElementById('add-emoji-preview');
   document.getElementById('add-emoji-name').value = '';
   document.getElementById('add-emoji-file').value = '';
-  document.getElementById('add-emoji-preview').innerHTML = '<span class="emoji-upload-placeholder">Click</span>';
-  document.getElementById('add-emoji-preview').dataset.imageData = '';
+  if (previewBtn) {
+    previewBtn.replaceChildren();
+    const ph = document.createElement('span');
+    ph.className = 'emoji-upload-placeholder';
+    ph.textContent = 'Tap to upload';
+    previewBtn.appendChild(ph);
+    delete previewBtn.dataset.imageData;
+  }
   openModal('modal-add-emoji');
 }
 
@@ -442,6 +484,10 @@ async function submitCustomEmoji() {
   let roomId = null;
   const scopeInp = document.querySelector('input[name="add-emoji-scope"]:checked');
   if (scopeInp?.value === 'channel') {
+    if (!_canModerateCurrentChannel()) {
+      toast('Only the channel owner or moderators can add channel emojis', 'error');
+      return;
+    }
     roomId = getCurrentRoomId();
     if (!roomId) {
       toast('Open a channel to add channel emojis', 'error');
