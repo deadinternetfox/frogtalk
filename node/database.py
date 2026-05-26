@@ -1124,7 +1124,7 @@ def sync_room_content_warning_from_index(room_name: str) -> None:
         return
     fed_en = bool(int(fed.get("content_warning_enabled") or 0))
     fed_fl = int(fed.get("content_warning_flags") or 0) & CW_ALL
-    if fed_en and fed_fl:
+    if fed_en:
         set_room_content_warning(name, enabled=True, flags=fed_fl)
 
 

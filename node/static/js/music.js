@@ -1719,18 +1719,31 @@ const Music = (() => {
 
   async function _maybeSyncQueueFromHome(room) {
     const name = String(room || '').trim().toLowerCase();
-    if (!name || _musicSyncAttempted.has(name)) return null;
-    try {
-      const res = await fetch(`/api/rooms/${encodeURIComponent(name)}/music/sync`, {
+    if (!name) return null;
+
+    async function doSync(force) {
+      const url = `/api/rooms/${encodeURIComponent(name)}/music/sync${force ? '?force=true' : ''}`;
+      const res = await fetch(url, {
         method: 'POST',
-        headers: { 'X-Session-Token': State.token }
+        headers: { 'X-Session-Token': State.token },
       });
       const data = await res.json().catch(() => ({}));
+      return { res, data };
+    }
+
+    try {
+      let { res, data } = await doSync(false);
+      if (data?.skipped && data.reason === 'local_queue_nonempty') {
+        ({ res, data } = await doSync(true));
+      }
       if (res.ok && data.ok) {
         _musicSyncAttempted.add(name);
         return await _fetchState(name);
       }
-      if (data && data.skipped) _musicSyncAttempted.add(name);
+      const reason = String(data?.reason || data?.error || '');
+      if (data?.skipped && (reason === 'authoritative_local' || reason === 'not_music_channel')) {
+        _musicSyncAttempted.add(name);
+      }
     } catch {}
     return null;
   }
@@ -2073,10 +2086,8 @@ const Music = (() => {
     }
     panel.dataset.mountedRoom = roomName;
     _state = await _fetchState(roomName);
-    if (_state && !((_state.queue || []).length)) {
-      const synced = await _maybeSyncQueueFromHome(roomName);
-      if (synced) _state = synced;
-    }
+    const synced = await _maybeSyncQueueFromHome(roomName);
+    if (synced) _state = synced;
     if (!_state) {
       panel.innerHTML = `<div class="mp-empty">Could not load queue</div>`;
       _emitState();
