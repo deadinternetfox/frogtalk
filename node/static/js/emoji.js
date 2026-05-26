@@ -48,22 +48,30 @@ function buildEmojiPicker() {
   loadCustomEmojis().then(() => renderCategory(keys[0]));
 }
 
+function _appendCustomEmojiCreateRow(grid) {
+  if (!grid || !State?.token) return;
+  const row = document.createElement('div');
+  row.className = 'ep-create-row';
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'ep-create-btn';
+  btn.textContent = 'Create custom emoji';
+  btn.onclick = () => openAddEmojiModal();
+  row.appendChild(btn);
+  grid.appendChild(row);
+}
+
 function renderCategory(cat) {
   const grid = document.getElementById('ep-grid');
   grid.innerHTML = '';
   
   if (cat === '⭐ Custom') {
     if (_customEmojis.length === 0) {
-      grid.innerHTML = '<div style="color:var(--text-muted);padding:10px;text-align:center;font-size:12px">No custom emojis yet</div>';
-      // Add upload button for admin
-      if (State.user?.is_admin) {
-        const addBtn = document.createElement('button');
-        addBtn.className = 'modal-btn primary';
-        addBtn.style.cssText = 'margin:10px auto;display:block;font-size:12px;padding:6px 12px';
-        addBtn.textContent = '+ Add Emoji';
-        addBtn.onclick = () => openAddEmojiModal();
-        grid.appendChild(addBtn);
-      }
+      const empty = document.createElement('div');
+      empty.className = 'ep-custom-empty';
+      empty.textContent = 'No custom emojis yet — add one for yourself';
+      grid.appendChild(empty);
+      _appendCustomEmojiCreateRow(grid);
       return;
     }
     
@@ -79,16 +87,14 @@ function renderCategory(cat) {
       grid.appendChild(span);
     });
     
-    // Add upload button for admin
-    if (State.user?.is_admin) {
-      const addBtn = document.createElement('span');
-      addBtn.className = 'ep-emoji';
-      addBtn.style.cssText = 'background:color-mix(in srgb, var(--accent-color) 10%, var(--surface-color));border:1px dashed var(--border-color);border-radius:4px;color:var(--text-color)';
-      addBtn.textContent = '+';
-      addBtn.title = 'Add custom emoji';
-      addBtn.onclick = () => openAddEmojiModal();
-      grid.appendChild(addBtn);
-    }
+    const addTile = document.createElement('span');
+    addTile.className = 'ep-emoji ep-emoji-add';
+    addTile.textContent = '+';
+    addTile.title = 'Create custom emoji';
+    addTile.setAttribute('aria-label', 'Create custom emoji');
+    addTile.onclick = () => openAddEmojiModal();
+    grid.appendChild(addTile);
+    _appendCustomEmojiCreateRow(grid);
   } else {
     (EMOJI_DATA[cat] || []).forEach(e => {
       const span = document.createElement('span');
@@ -159,7 +165,7 @@ function openAddEmojiModal() {
     modal.id = 'modal-add-emoji';
     modal.innerHTML = `
       <div class="modal modal-add-emoji">
-        <div class="modal-title">Add Custom Emoji</div>
+        <div class="modal-title">Create custom emoji</div>
         <label class="modal-label">Emoji Name</label>
         <input class="modal-input" id="add-emoji-name" placeholder="e.g. cool_frog" maxlength="32"
                oninput="this.value=this.value.toLowerCase().replace(/[^a-z0-9_]/g,'')">
@@ -198,13 +204,17 @@ function openAddEmojiModal() {
     };
   }
   
-  // Reset form
+  const isAdmin = !!State.user?.is_admin;
+  const globalRow = modal.querySelector('.add-emoji-toggle-row');
+  const globalCheck = document.getElementById('add-emoji-global');
+  if (globalRow) globalRow.style.display = isAdmin ? '' : 'none';
+  if (globalCheck) globalCheck.checked = isAdmin;
+
   document.getElementById('add-emoji-name').value = '';
   document.getElementById('add-emoji-file').value = '';
   document.getElementById('add-emoji-preview').innerHTML = '<span class="emoji-upload-placeholder">Click</span>';
   document.getElementById('add-emoji-preview').dataset.imageData = '';
-  document.getElementById('add-emoji-global').checked = true;
-  
+
   openModal('modal-add-emoji');
 }
 

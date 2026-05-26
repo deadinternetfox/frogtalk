@@ -219,6 +219,39 @@ const Rooms = (() => {
     try { document.getElementById(_CHAT_SYNC_STRIP_ID)?.remove(); } catch {}
   }
 
+  function _scrubBootLoadingChrome(area) {
+    const mount = area || document.getElementById('messages-area');
+    if (!mount) return;
+    try {
+      mount.querySelectorAll('.ch-loading-state, .ch-loading-card').forEach((el) => {
+        if (el.closest('#' + _CHAT_TRANSITION_ID)) return;
+        el.remove();
+      });
+    } catch {}
+  }
+
+  /** Cold boot: sync strip immediately from fc_last_room before switchToRoom finishes. */
+  function showBootChannelSyncPreview(name, type, channelType) {
+    const r = String(name || '').trim().toLowerCase();
+    if (!r || type === 'dm') return;
+    const area = document.getElementById('messages-area');
+    if (!area || State?.currentRoom === r) return;
+    const chType = normalizeChannelType(channelType || 'text');
+    if (chType === 'voice') return;
+    try { document.body.classList.remove('in-welcome'); } catch {}
+    _scrubBootLoadingChrome(area);
+    try {
+      if (window.ContentWarning?.ensureChatShell) ContentWarning.ensureChatShell(area);
+    } catch {}
+    area.classList.add('chat-switching', 'chat-switching-swr');
+    _showChatSyncStrip(r, type || 'public', null, {
+      channelType: chType,
+      room: { name: r, channel_type: chType },
+    });
+    try { setRoomHeader(r, type || 'public', null, null, chType); } catch {}
+    try { area.scrollTop = area.scrollHeight; } catch {}
+  }
+
   function _setSyncStripCtx(name, type, dmPeer, stripOpts) {
     try {
       State._syncStripCtx = {
@@ -1518,6 +1551,7 @@ const Rooms = (() => {
     ensureLoadingShieldStyle();
 
     if (swr) {
+      _scrubBootLoadingChrome(area);
       const stripOpts = {
         room,
         channelType: room?.channel_type || opts.channelType,
@@ -4234,6 +4268,7 @@ const Rooms = (() => {
     patchContentWarning,
     syncContentWarningFields: _syncContentWarningFields,
     showChatTransition,
+    showBootChannelSyncPreview,
     clearChatTransition,
     finishChannelSwitch,
     recoverChannelSwitch,
@@ -4247,6 +4282,7 @@ const Rooms = (() => {
 
 try {
   window.showChatTransition = Rooms.showChatTransition;
+  window.showBootChannelSyncPreview = Rooms.showBootChannelSyncPreview;
   window.clearChatTransition = Rooms.clearChatTransition;
   window.finishChannelSwitch = Rooms.finishChannelSwitch;
   window.recoverChannelSwitch = Rooms.recoverChannelSwitch;

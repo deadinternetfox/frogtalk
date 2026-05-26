@@ -1491,6 +1491,11 @@ const App = {
       try { State.rooms = []; } catch {}
     }
 
+    if (!this.pendingInvite && !this.pendingRoom && !this.pendingDM && !this.pendingReel
+      && !this.pendingPost && !this.pendingProfile && !this.pendingFedProfileGid) {
+      try { this.tryOpenLastRoomEarly(); } catch {}
+    }
+
     if (!atHomeNode && !this._switchSyncBootstrapped) {
       await this.ensureFederationSyncOnLogin();
     } else if (!atHomeNode && this._switchSyncBootstrapped && this.federationSyncState?.in_progress) {
@@ -2433,6 +2438,32 @@ const App = {
     return applied;
   },
 
+  tryOpenLastRoomEarly() {
+    try {
+      if (State?.currentRoom || State?._explicitRoomNav || State?._roomSwitchInProgress) return false;
+      const joined = (State.rooms || []).filter((r) => r.joined);
+      if (!joined.length) return false;
+      let target = null;
+      try {
+        const lastRaw = localStorage.getItem('fc_last_room');
+        if (lastRaw) {
+          const last = JSON.parse(lastRaw);
+          if (last?.name && last.type !== 'dm') {
+            target = joined.find((r) => r.name === last.name) || null;
+          }
+        }
+      } catch {}
+      if (!target) target = joined[0] || null;
+      if (!target) return false;
+      const roomType = target.type || 'public';
+      const chType = (target.channel_type === 'voice') ? 'music' : (target.channel_type || 'text');
+      void Rooms.switchToRoom(target.name, roomType, null, chType);
+      return true;
+    } catch {
+      return false;
+    }
+  },
+
   openFirstAvailableRoom() {
     try {
       if (State && State._explicitRoomNav) return;
@@ -2477,8 +2508,27 @@ const App = {
    * from flashing while rooms are still loading.
    */
   showChannelLoading() {
-    // Don't overwrite a real channel if one is already active.
     if (State && State.currentRoom) return;
+    document.body.classList.remove('in-welcome');
+    let bootTarget = null;
+    try {
+      const lastRaw = localStorage.getItem('fc_last_room');
+      if (lastRaw) {
+        const last = JSON.parse(lastRaw);
+        if (last?.name && last.type !== 'dm') bootTarget = last;
+      }
+    } catch {}
+    if (bootTarget && typeof Rooms !== 'undefined' && Rooms.showBootChannelSyncPreview) {
+      try {
+        Rooms.showBootChannelSyncPreview(
+          bootTarget.name,
+          bootTarget.type || 'public',
+          bootTarget.channelType || 'text',
+        );
+      } catch {}
+      if (this.federationSyncHint) this._setLoadingSyncHint(this.federationSyncHint);
+      return;
+    }
     const area = document.getElementById('messages-area');
     if (area) {
       area.innerHTML = `
@@ -2492,8 +2542,6 @@ const App = {
     if (titleEl) {
       titleEl.innerHTML = '<span class="room-title-text" style="color:#888">Loading\u2026</span>';
     }
-    // Ensure the welcome-only CSS flag is not set during the load.
-    document.body.classList.remove('in-welcome');
     if (this.federationSyncHint) {
       this._setLoadingSyncHint(this.federationSyncHint);
     }
