@@ -3753,7 +3753,13 @@ function renderDMMessage (m) {
         `<div class="cv-badge"><span class="cv-icon">${_badgeIco}</span><span class="cv-dur">${_badgeLbl}</span></div>`+
       `</div>`;
     } else if (mimeType.startsWith('audio/') || (!mimeType && mediaUrl.startsWith('data:audio'))) {
-      inner = `<audio src="${esc(mediaUrl)}" controls preload="metadata" style="width:260px;display:block;margin-top:6px"></audio>`;
+      const waveBars = Array.from({length:20}, () => `<div class="wave-bar" style="height:${4 + Math.random()*20}px"></div>`).join('');
+      inner = `<div class="audio-msg" id="audio-${m.id}" data-src="${esc(mediaUrl)}" data-sender="${esc(senderNick || '')}" data-time="${time}">
+        <button type="button" class="audio-play-btn" onclick="Messages.playInlineAudio(${m.id},this,event)">▶</button>
+        <div class="audio-waves">${waveBars}</div>
+        <div class="audio-meta"><span class="audio-duration" id="audio-dur-${m.id}">0:00</span></div>
+      </div>`;
+      try { probeAudioDuration(m.id, mediaUrl); } catch {}
     } else {
       const name = mediaUrl.split('/').pop();
       inner = `<a href="${esc(mediaUrl)}" target="_blank" rel="noopener noreferrer" style="color:#4caf50;display:block;margin-top:4px">📄 ${esc(name)}</a>`;
@@ -4398,7 +4404,15 @@ async function loadDMMedia (msgId, channelId) {
       try { setTimeout(() => { try { ChatVideo?.scan?.(document); } catch {} }, 0); } catch {}
       }
     } else if (mediaType.startsWith('audio')) {
-      html = `<audio src="${esc(data.media_data)}" controls preload="metadata" style="width:260px;display:block;margin-top:6px"></audio>`;
+      const waveBars = Array.from({length:20}, () => `<div class="wave-bar" style="height:${4 + Math.random()*20}px"></div>`).join('');
+      const sender = container.getAttribute('data-sender') || '';
+      const time = container.getAttribute('data-time') || '';
+      html = `<div class="audio-msg" id="audio-${msgId}" data-src="${esc(data.media_data)}" data-sender="${esc(sender)}" data-time="${time}">
+        <button type="button" class="audio-play-btn" onclick="Messages.playInlineAudio(${msgId},this,event)">▶</button>
+        <div class="audio-waves">${waveBars}</div>
+        <div class="audio-meta"><span class="audio-duration" id="audio-dur-${msgId}">0:00</span></div>
+      </div>`;
+      try { probeAudioDuration(msgId, data.media_data); } catch {}
     } else if (/;\s*fx=/.test(mediaType) && window.StickerFX) {
       // Deferred-load DM sticker — mount a placeholder and hydrate from
       // the parent container so the shadow-root sandbox stays in effect.
