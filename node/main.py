@@ -959,7 +959,7 @@ def _build_csp_header(nonce: str) -> str:
         # Tenor (legacy fallback until 2026-06-30 sunset). frame-src is
         # narrow on purpose: blocks attacker pages from being iframed
         # inside FrogTalk via stored-XSS injected <iframe>.
-        "connect-src 'self' wss: https://api.klipy.com https://media.klipy.com https://cdn.klipy.com https://tenor.googleapis.com https://media.tenor.com; "
+        "connect-src 'self' wss: https://api.klipy.com https://media.klipy.com https://cdn.klipy.com https://static.klipy.com https://tenor.googleapis.com https://media.tenor.com; "
         "frame-src 'self' https://www.youtube.com https://open.spotify.com https://platform.twitter.com; "
         # Hard locks (no inline-handler dependency, so safe to enforce today).
         "frame-ancestors 'self'; "
