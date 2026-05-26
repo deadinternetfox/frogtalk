@@ -774,15 +774,25 @@
     color-mix(in srgb, var(--accent-color) 5%, var(--bg-color)) 100%) !important;
 }
 
-/* Never flash cached/prior-channel messages through the loading overlay */
-#messages-area.chat-switching .cw-chat-content,
-#messages-area.chat-switching > .msg,
-#messages-area.chat-switching > .msg-group,
-#messages-area.chat-switching > .msg-date-divider,
-#messages-area.chat-switching > .msg-system {
+/* Hide prior-channel bleed — SWR mode keeps cached target-room messages visible */
+#messages-area.chat-switching:not(.chat-switching-swr) .cw-chat-content,
+#messages-area.chat-switching:not(.chat-switching-swr) > .msg,
+#messages-area.chat-switching:not(.chat-switching-swr) > .msg-group,
+#messages-area.chat-switching:not(.chat-switching-swr) > .msg-date-divider,
+#messages-area.chat-switching:not(.chat-switching-swr) > .msg-system {
   visibility: hidden !important;
   opacity: 0 !important;
   pointer-events: none !important;
+}
+
+#messages-area.chat-switching-swr {
+  position: relative;
+}
+
+#messages-area.chat-switching-swr .cw-chat-content {
+  visibility: visible !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
 }
 .ch-transition-icon-wrap {
   display: flex;
@@ -1352,9 +1362,96 @@ body.cw-composer-locked #msg-input {
   cursor: wait;
 }
 
+#input-area.ft-compose-pending #msg-input {
+  cursor: text;
+  opacity: 1;
+}
+
+#input-area.ft-compose-pending.ft-compose-loading {
+  opacity: 0.92;
+  filter: saturate(0.95);
+}
+
+#input-area.ft-compose-pending.ft-compose-loading #msg-input {
+  cursor: text;
+}
+
 #input-area.ft-compose-loading .input-wrap {
   border-color: color-mix(in srgb, var(--accent-color) 22%, var(--border-color)) !important;
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent-color) 8%, transparent);
+}
+
+/* Thin sync strip (stale-while-revalidate channel switches) */
+.ft-chat-sync-strip {
+  position: sticky;
+  top: 0;
+  z-index: 24;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  margin: 0 0 6px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent-color) 14%, var(--surface-color));
+  border: 1px solid color-mix(in srgb, var(--accent-color) 28%, var(--border-color));
+  box-shadow: 0 6px 20px color-mix(in srgb, var(--bg-color) 50%, transparent);
+  animation: ftSyncStripIn 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+  pointer-events: none;
+}
+
+.ft-chat-sync-strip-label {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: color-mix(in srgb, var(--text-color) 88%, var(--accent-color));
+}
+
+.ft-chat-sync-strip-bar {
+  flex: 0 0 48px;
+  height: 3px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--border-color) 60%, transparent);
+  overflow: hidden;
+  position: relative;
+}
+
+.ft-chat-sync-strip-bar::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  width: 42%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, transparent, var(--accent-color), transparent);
+  animation: ftSyncStripSlide 1.35s ease-in-out infinite;
+}
+
+@keyframes ftSyncStripIn {
+  from { opacity: 0; transform: translateY(-6px); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes ftSyncStripSlide {
+  0% { transform: translateX(-120%); opacity: 0.35; }
+  50% { opacity: 0.9; }
+  100% { transform: translateX(260%); opacity: 0.35; }
+}
+
+/* Staggered message reveal after channel switch */
+#messages-area .ft-msg-reveal {
+  opacity: 0;
+  transform: translateY(6px);
+  filter: blur(3px);
+  transition:
+    opacity 0.42s cubic-bezier(0.22, 1, 0.36, 1),
+    transform 0.42s cubic-bezier(0.22, 1, 0.36, 1),
+    filter 0.38s ease;
+  transition-delay: var(--ft-reveal-delay, 0ms);
+}
+
+#messages-area .ft-msg-reveal.ft-msg-reveal-active {
+  opacity: 1;
+  transform: none;
+  filter: none;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1365,6 +1462,20 @@ body.cw-composer-locked #msg-input {
   #messages-area .ch-loading-card .ch-spin,
   #input-area.ft-compose-loading::before {
     animation: none !important;
+  }
+
+  .ft-chat-sync-strip-bar::after {
+    animation: none !important;
+    opacity: 0.55;
+    transform: none;
+    width: 100%;
+  }
+
+  #messages-area .ft-msg-reveal {
+    opacity: 1;
+    transform: none;
+    filter: none;
+    transition: none;
   }
 
   .ch-transition-shimmer {

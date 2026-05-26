@@ -2768,6 +2768,25 @@ const Messages = (() => {
     } catch {}
   }
 
+  function _applyMessageReveal(mount, opts) {
+    if (!mount || !opts?.reveal) return;
+    let reduced = false;
+    try { reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch {}
+    const nodes = mount.querySelectorAll('.msg, .msg-date-divider, .msg-system, .msg-group');
+    if (!nodes.length) return;
+    const stagger = reduced ? 0 : Math.min(16, Math.max(5, Math.floor(300 / Math.max(nodes.length, 1))));
+    nodes.forEach((el, i) => {
+      el.classList.add('ft-msg-reveal');
+      const delay = reduced ? 0 : Math.min(i * stagger, 340);
+      el.style.setProperty('--ft-reveal-delay', `${delay}ms`);
+    });
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        nodes.forEach((el) => el.classList.add('ft-msg-reveal-active'));
+      });
+    });
+  }
+
   function loadHistory(room, msgs, opts) {
     const options = opts && typeof opts === 'object' ? opts : {};
     if (room !== State.currentRoom) return;
@@ -2815,13 +2834,18 @@ const Messages = (() => {
       }
       const dateLabel = _dateChanged(msg);
       if (dateLabel) {
-        html += `<div class="msg-date-divider">${UI.escHtml(dateLabel)}</div>`;
+        const divRv = options.reveal ? ' ft-msg-reveal' : '';
+        html += `<div class="msg-date-divider${divRv}">${UI.escHtml(dateLabel)}</div>`;
         _lastNick = null;
         _lastBridge = null;
         _lastBridgeSource = null;
       }
       const isCont = _shouldContinue(msg);
-      html += _msgHtml(msg, isCont);
+      const revealCls = options.reveal ? ' ft-msg-reveal' : '';
+      html += _msgHtml(msg, isCont).replace(
+        /class="(msg(?:-date-divider|-system|-group)?[^"]*)"/,
+        (m, cls) => `class="${cls}${revealCls}"`,
+      );
       _lastNick = msg.nickname;
       _lastBridge = msg.bridge_platform || null;
       _lastBridgeSource = msg.bridge_source_name || null;
@@ -2837,6 +2861,9 @@ const Messages = (() => {
     mount.innerHTML = html;
     if (!html && !options.deferFinish) {
       mount.innerHTML = _emptyStateHtml(room);
+    }
+    if (options.reveal && html) {
+      _applyMessageReveal(mount, options);
     }
     if (!options.deferFinish) {
       _finishSwitchAfterPaint(room);
@@ -4275,7 +4302,7 @@ const Messages = (() => {
 
   _ensureSystemEmbedStyleGuard();
 
-  return { loadHistory, appendMessage, updateEdited, removeMessage, updateReactions, startEdit, submitEdit, cancelEdit, deleteMsg, showReactMenu, toggleReaction, openMedia, openSticker, hydrateStickers: _hydrateStickers, revealSpoiler, hideSpoiler, revealViewOnce, loadMedia, observeLazyMedia, playInlineAudio, setReplyTo, clearReply, getReplyToId, getReplyTo, openModMenu, openActionSheet, bindLongPress, copyMessage, copyEmbedLink, toggleProfileFollow, scrollToBottom, joinViaInvite, openSocialProfile, openSocialPost, openSocialReel, _toggleChatVideo, forwardMessage, openForwardPicker: _openForwardPicker, forwardedBadgeHtml: _forwardedBadgeHtml, _renderRichShareEmbed, suppressPreview, applyPreviewSuppress, toggleSpoiler, applyMediaBlur, _loadInviteCard, _loadSocialProfileCard, _loadSocialPostCard, _loadSocialReelCard, _hydrateSpecialCards, _scrollIfNearBottom, refreshSystemEmbedGuard: _ensureSystemEmbedStyleGuard };
+  return { loadHistory, applyMessageReveal: _applyMessageReveal, appendMessage, updateEdited, removeMessage, updateReactions, startEdit, submitEdit, cancelEdit, deleteMsg, showReactMenu, toggleReaction, openMedia, openSticker, hydrateStickers: _hydrateStickers, revealSpoiler, hideSpoiler, revealViewOnce, loadMedia, observeLazyMedia, playInlineAudio, setReplyTo, clearReply, getReplyToId, getReplyTo, openModMenu, openActionSheet, bindLongPress, copyMessage, copyEmbedLink, toggleProfileFollow, scrollToBottom, joinViaInvite, openSocialProfile, openSocialPost, openSocialReel, _toggleChatVideo, forwardMessage, openForwardPicker: _openForwardPicker, forwardedBadgeHtml: _forwardedBadgeHtml, _renderRichShareEmbed, suppressPreview, applyPreviewSuppress, toggleSpoiler, applyMediaBlur, _loadInviteCard, _loadSocialProfileCard, _loadSocialPostCard, _loadSocialReelCard, _hydrateSpecialCards, _scrollIfNearBottom, refreshSystemEmbedGuard: _ensureSystemEmbedStyleGuard };
 })();
 
 // ── Scroll-to-bottom + "jump to latest" pip ─────────────────────────────────

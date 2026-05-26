@@ -8934,11 +8934,75 @@ function _mentionColorWithAlpha(color, alpha, fallback) {
   return fallback;
 }
 
-/** Preserve #msg-input focus; gate compose until channel/DM is ready. */
+/** Preserve #msg-input focus; gate send until channel/DM is ready; allow pre-type via drafts. */
 (function () {
   const _saved = { active: false, start: null, end: null };
-  const _chLoad = { room: '', active: false };
+  const _chLoad = { room: '', active: false, swr: false };
   let _loadSafetyTimer = null;
+  let _draftBound = false;
+
+  function _ensureDraftStore() {
+    try {
+      if (!window.State) return;
+      if (!State._composeDrafts || typeof State._composeDrafts !== 'object') {
+        State._composeDrafts = {};
+      }
+    } catch {}
+  }
+
+  function draftKey(room, type) {
+    const r = String(room || '').trim();
+    if (!r) return '';
+    if (type === 'dm' || r.startsWith('dm:')) return `dm:${r.replace(/^dm:/, '')}`;
+    return r.toLowerCase();
+  }
+
+  function stashDraft(room, type) {
+    const key = draftKey(room, type);
+    if (!key) return;
+    const input = msgInput();
+    if (!input) return;
+    _ensureDraftStore();
+    try {
+      const val = String(input.value || '');
+      if (val) State._composeDrafts[key] = val;
+      else delete State._composeDrafts[key];
+    } catch {}
+  }
+
+  function applyDraft(room, type) {
+    const key = draftKey(room, type);
+    if (!key) return;
+    _ensureDraftStore();
+    const input = msgInput();
+    if (!input) return;
+    let val = '';
+    try { val = String(State._composeDrafts[key] || ''); } catch {}
+    input.value = val;
+    try {
+      const end = val.length;
+      input.setSelectionRange(end, end);
+    } catch {}
+  }
+
+  function bindDraftAutosave() {
+    if (_draftBound) return;
+    const input = msgInput();
+    if (!input) return;
+    _draftBound = true;
+    let t = null;
+    input.addEventListener('input', () => {
+      if (t) clearTimeout(t);
+      t = setTimeout(() => {
+        t = null;
+        try {
+          const room = State?.currentRoom;
+          if (!room) return;
+          stashDraft(room, State.currentRoomType);
+        } catch {}
+      }, 180);
+    });
+  }
 
   function msgInput() {
     return document.getElementById('msg-input');
@@ -8968,7 +9032,6 @@ function _mentionColorWithAlpha(color, alpha, fallback) {
     if (!_saved.active) return;
     const input = msgInput();
     if (!input || input.disabled) return;
-    if (input.getAttribute('readonly') != null) return;
     _saved.active = false;
     const start = _saved.start;
     const end = _saved.end;
@@ -9022,70 +9085,87 @@ function _mentionColorWithAlpha(color, alpha, fallback) {
     } catch { return false; }
   }
 
-  function channelLoadBlocked() {
-    if (_isDmView()) return false;
+  function channelSendBlocked() {
+    if (_isDmView()) {
+      try { return !!State._dmSendPending; } catch { return true; }
+    }
     if (!State?.currentRoom) return true;
     if (State.currentChannelType === 'voice') return true;
     if (_chLoad.active) return true;
     try {
       if (State._roomSwitchInProgress) return true;
     } catch {}
-    if (_loadingOverlayVisible()) return true;
+    if (_loadingOverlayVisible() && !_chLoad.swr) return true;
     if (_isCwLocked()) return true;
     if (!_roomJoined()) return true;
     return false;
   }
 
+  function channelLoadBlocked() {
+    return channelSendBlocked();
+  }
+
   function isSendBlocked() {
-    if (_isDmView()) {
-      const input = msgInput();
-      return !!(input && (input.disabled || input.getAttribute('readonly') != null));
-    }
+    if (_isDmView()) return channelSendBlocked();
     if (_isMuteOrBanLocked()) {
       const input = msgInput();
       return !!(input && input.disabled);
     }
-    return channelLoadBlocked();
+    return channelSendBlocked();
   }
 
   function _composePlaceholder() {
     if (_isDmView()) return null;
     const room = String(State?.currentRoom || '').replace(/^#/, '');
-    if (_loadingOverlayVisible() || _chLoad.active) {
+    const sendBlocked = channelSendBlocked();
+    if (sendBlocked && _chLoad.swr) {
+      return room ? `Draft in #${room} — syncing…` : 'Syncing channel…';
+    }
+    if (sendBlocked) {
       return room ? `Loading #${room}…` : 'Loading channel…';
     }
-    try {
-      if (State._roomSwitchInProgress) {
-        return room ? `Loading #${room}…` : 'Loading channel…';
-      }
-    } catch {}
     return room ? `Message #${room}` : 'Message channel';
   }
 
   function refresh() {
+    bindDraftAutosave();
     if (_isDmView()) return;
     if (_isCwLocked() || _isMuteOrBanLocked()) return;
 
-    const blocked = channelLoadBlocked();
+    const sendBlocked = channelSendBlocked();
+    const preType = sendBlocked && _chLoad.swr;
+    const hardBlock = sendBlocked && !preType;
     const input = msgInput();
     const sendBtn = document.getElementById('send-btn');
     const inputArea = document.getElementById('input-area');
-    const wasBlocked = !!(input && (input.disabled || input.getAttribute('aria-disabled') === 'true'));
+    const wasHardBlocked = !!(input && input.disabled);
 
-    if (blocked && !wasBlocked) {
+    if (hardBlock && !wasHardBlocked) {
       try { captureFocus(); } catch {}
     }
 
     if (inputArea) {
-      inputArea.classList.toggle('ft-compose-loading', blocked);
-      inputArea.setAttribute('aria-busy', blocked ? 'true' : 'false');
+      inputArea.classList.toggle('ft-compose-loading', sendBlocked);
+      inputArea.classList.toggle('ft-compose-pending', preType);
+      inputArea.setAttribute('aria-busy', sendBlocked ? 'true' : 'false');
     }
 
     if (input) {
-      input.disabled = blocked;
-      input.setAttribute('aria-disabled', blocked ? 'true' : 'false');
+      if (hardBlock) {
+        input.disabled = true;
+        input.removeAttribute('readonly');
+        input.setAttribute('aria-disabled', 'true');
+      } else if (preType) {
+        input.disabled = false;
+        input.setAttribute('readonly', '');
+        input.setAttribute('aria-disabled', 'false');
+      } else {
+        input.disabled = false;
+        input.removeAttribute('readonly');
+        input.setAttribute('aria-disabled', 'false');
+      }
       const ph = _composePlaceholder();
-      if (blocked) {
+      if (sendBlocked) {
         if (input.dataset.ftChOrigPh == null) {
           input.dataset.ftChOrigPh = input.placeholder || '';
         }
@@ -9097,16 +9177,19 @@ function _mentionColorWithAlpha(color, alpha, fallback) {
     }
 
     if (sendBtn) {
-      sendBtn.disabled = blocked || sendBtn.classList.contains('is-sending');
+      sendBtn.disabled = sendBlocked || sendBtn.classList.contains('is-sending');
+      sendBtn.setAttribute('aria-disabled', sendBtn.disabled ? 'true' : 'false');
+      sendBtn.title = sendBlocked ? 'Wait for messages to finish loading' : '';
     }
 
+    const toolsBlocked = sendBlocked;
     try {
       document.querySelectorAll(
         '#input-area .input-tools button, #input-area .attach-btn, #input-area .icon-btn, #input-area .gif-btn, #input-area .emoji-btn',
-      ).forEach((btn) => { btn.disabled = blocked; });
+      ).forEach((btn) => { btn.disabled = toolsBlocked; });
     } catch {}
 
-    if (!blocked && wasBlocked) {
+    if (!sendBlocked && wasHardBlocked) {
       try { restoreFocus(); } catch {}
     }
   }
@@ -9114,6 +9197,7 @@ function _mentionColorWithAlpha(color, alpha, fallback) {
   function cancelChannelSwitch() {
     _chLoad.active = false;
     _chLoad.room = '';
+    _chLoad.swr = false;
     if (_loadSafetyTimer) {
       clearTimeout(_loadSafetyTimer);
       _loadSafetyTimer = null;
@@ -9121,9 +9205,11 @@ function _mentionColorWithAlpha(color, alpha, fallback) {
     refresh();
   }
 
-  function beginChannelSwitch(room) {
+  function beginChannelSwitch(room, opts) {
+    const o = opts && typeof opts === 'object' ? opts : {};
     _chLoad.room = String(room || '').trim().toLowerCase();
     _chLoad.active = true;
+    _chLoad.swr = !!o.swr;
     if (_loadSafetyTimer) clearTimeout(_loadSafetyTimer);
     const expect = _chLoad.room;
     _loadSafetyTimer = setTimeout(() => {
@@ -9149,6 +9235,7 @@ function _mentionColorWithAlpha(color, alpha, fallback) {
     const r = String(room || '').trim().toLowerCase();
     if (!r || _chLoad.room === r || !_chLoad.room) {
       _chLoad.active = false;
+      _chLoad.swr = false;
     }
     if (_loadSafetyTimer) {
       clearTimeout(_loadSafetyTimer);
@@ -9167,12 +9254,16 @@ function _mentionColorWithAlpha(color, alpha, fallback) {
     isFocused,
     msgInput,
     refresh,
+    stashDraft,
+    applyDraft,
+    draftKey,
     beginChannelSwitch,
     finishChannelLoad,
     cancelChannelSwitch,
     isSendBlocked,
     isChannelLoading,
     channelLoadBlocked,
+    channelSendBlocked,
   };
 })();
 
