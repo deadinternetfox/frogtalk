@@ -3163,10 +3163,12 @@ html.ft-kb-open #input-area{
 .send-btn:disabled,
 .send-btn.ft-send-blocked,
 .send-btn.is-sending{
-  background:linear-gradient(180deg,#2a523b,#1f3f2e);
-  border-color:#4c8168;color:#9de1bc;cursor:not-allowed;
-  box-shadow:inset 0 1px 0 rgba(255,255,255,.12),0 2px 6px rgba(0,0,0,.25);
-  transform:none;pointer-events:none
+  background:linear-gradient(180deg,#243d2f,#1a3024);
+  border-color:color-mix(in srgb,#4c8168 55%,#2a3d32);
+  color:color-mix(in srgb,#9de1bc 72%,#5a7a68);cursor:not-allowed;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.06);
+  transform:none;pointer-events:none;
+  opacity:.42;filter:saturate(.72) brightness(.88);animation:none
 }
 .send-btn:disabled::after,
 .send-btn.ft-send-blocked::after,
