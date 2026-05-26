@@ -671,7 +671,13 @@ function _renderPendingAttachmentList () {
 }
 
 function _removePendingAttachment (index) {
-  if (!Array.isArray(window._pendingAttachments)) return;
+  if (!Array.isArray(window._pendingAttachments) || !window._pendingAttachments.length) {
+    if (window._pendingAttachment) {
+      clearAttachment();
+      return;
+    }
+    return;
+  }
   if (index < 0 || index >= window._pendingAttachments.length) return;
   window._pendingAttachments.splice(index, 1);
   _syncPendingAttachmentState();
@@ -740,6 +746,15 @@ function _renderAttachmentPreview ({ blob, name, type, sizeBytes }) {
   const thumb = document.getElementById('attachment-thumb');
   const prev  = document.getElementById('attachment-preview');
   if (!thumb || !prev) return;
+  // GIF picker / camera paths used to set only `_pendingAttachment`; per-thumb
+  // controls (spoiler eye, ✕) call toggleMediaFlag / _removePendingAttachment
+  // which require `_pendingAttachments`.
+  window._pendingAttachments = [{
+    blob, name, type, sizeBytes,
+    blur: !!window._pendingMediaBlur,
+    viewOnce: !!window._pendingViewOnce,
+  }];
+  _syncPendingAttachmentState();
   prev.style.display = 'flex';
   // Single-item preview uses the legacy 200×150 sizing — make sure any
   // leftover multi-mode class from a previous render is dropped.
@@ -863,7 +878,12 @@ function clearAttachment () {
    item — turning one on turns the other off on the same item. */
 function toggleMediaFlag (flag, index) {
   if (!Array.isArray(window._pendingAttachments) || !window._pendingAttachments.length) {
-    return;
+    if (window._pendingAttachment) {
+      window._pendingAttachments = [{ ...window._pendingAttachment }];
+      _syncPendingAttachmentState();
+    } else {
+      return;
+    }
   }
   const idx = (typeof index === 'number' && index >= 0
                && index < window._pendingAttachments.length)
