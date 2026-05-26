@@ -461,6 +461,10 @@ async def _apply_voice_join(
     nick = _fed_nickname(payload.get("nickname")) or "remote"
     avatar = _safe_avatar(_fed_clip(payload.get("avatar"), 200 * 1024))
 
+    if voice_manager.is_in_voice_by_gid(room_name, gid):
+        _log.info("federation: skip voice.session.join — user already local in voice")
+        return
+
     if not federated_voice_registry.add_remote(
         session_id,
         global_user_id=gid,
@@ -513,12 +517,51 @@ async def _apply_voice_leave(payload, origin, session_id, room_name, _fed_global
     })
 
 
+def _dedupe_voice_participants(parts: list) -> list:
+    """One roster row per ``global_user_id``; prefer local over federated."""
+    by_gid: dict[str, dict] = {}
+    no_gid: list[dict] = []
+    seen_uid: set[int] = set()
+    for p in parts or []:
+        if not isinstance(p, dict):
+            continue
+        gid = str(p.get("global_user_id") or "").strip()
+        uid = int(p.get("user_id") or 0)
+        if gid:
+            cur = by_gid.get(gid)
+            if cur is None:
+                by_gid[gid] = p
+            elif cur.get("federated") and not p.get("federated"):
+                by_gid[gid] = p
+        elif uid:
+            if uid in seen_uid:
+                continue
+            seen_uid.add(uid)
+            no_gid.append(p)
+    return no_gid + list(by_gid.values())
+
+
+def clear_local_remote_voice_duplicate(room_name: str, global_user_id: str) -> None:
+    """Drop federated roster row when the same user joins locally."""
+    gid = str(global_user_id or "").strip()
+    if not gid or not federated_voice_registry.is_remote_in_room(room_name, gid):
+        return
+    sid = federated_voice_registry.session_for_room(room_name)
+    if not sid:
+        return
+    federated_voice_registry.remove_remote(sid, gid)
+    try:
+        db.remove_federation_voice_remote(sid, gid)
+    except Exception:
+        _log.exception("remove_federation_voice_remote after local join failed")
+
+
 def _combined_participants(room_name: str, voice_manager) -> list:
     local: list[dict] = []
     for p in voice_manager.participants(room_name):
         uid = int(p.get("user_id") or 0)
-        gid = ""
-        if uid:
+        gid = str(p.get("global_user_id") or "").strip()
+        if not gid and uid:
             u = db.get_user_by_id(uid) or {}
             gid = str(u.get("global_user_id") or "").strip()
         local.append({
@@ -530,7 +573,7 @@ def _combined_participants(room_name: str, voice_manager) -> list:
             "federated": False,
         })
     remote = federated_voice_registry.remotes_for_room(room_name)
-    return local + remote
+    return _dedupe_voice_participants(local + remote)
 
 
 def peers_for_joiner(room_name: str, voice_manager, user: dict) -> list[dict]:
@@ -582,7 +625,7 @@ def participants_for_room(room_name: str, voice_manager) -> list[dict]:
         )
         combined.append(dict(raw))
         seen.add(gid)
-    return combined
+    return _dedupe_voice_participants(combined)
 
 
 def _remote_in_room(room_name: str, global_user_id: str, voice_manager) -> bool:

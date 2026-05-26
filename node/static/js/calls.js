@@ -2109,6 +2109,26 @@ function _normalizeVoiceParticipant(p) {
   };
 }
 
+/** One roster row per global_user_id; prefer local over federated. */
+function _dedupeVoiceRoster(parts) {
+  const byGid = new Map();
+  const noGid = [];
+  const seenUid = new Set();
+  for (const raw of parts || []) {
+    const p = _normalizeVoiceParticipant(raw);
+    if (!p) continue;
+    if (p.global_user_id) {
+      const cur = byGid.get(p.global_user_id);
+      if (!cur || (cur.federated && !p.federated)) byGid.set(p.global_user_id, p);
+    } else if (p.user_id) {
+      if (seenUid.has(p.user_id)) continue;
+      seenUid.add(p.user_id);
+      noGid.push(p);
+    }
+  }
+  return [...noGid, ...byGid.values()];
+}
+
 async function refreshVoicePresenceBar(roomName) {
   _presenceRoom = roomName || null;
   const bar = document.getElementById('voice-presence-bar');
@@ -2122,7 +2142,7 @@ async function refreshVoicePresenceBar(roomName) {
     if (!r.ok) { bar.style.display = 'none'; return; }
     const data = await r.json();
     const parts = Array.isArray(data.participants) ? data.participants : [];
-    _presenceRoster.set(roomName, parts.map(_normalizeVoiceParticipant).filter(Boolean));
+    _presenceRoster.set(roomName, _dedupeVoiceRoster(parts));
     _renderVoicePresenceBar(roomName);
   } catch {
     bar.style.display = 'none';
@@ -2201,6 +2221,98 @@ function _presenceKey(p) {
   return p?.global_user_id ? `g:${p.global_user_id}` : `u:${p?.user_id || 0}`;
 }
 
+function _peerKeyFromParticipant(p) {
+  if (!p) return '';
+  if (p.self) return 'self';
+  if (p.global_user_id) return `g:${p.global_user_id}`;
+  if (p.user_id) return `u:${p.user_id}`;
+  return `n:${p.nickname || '?'}`;
+}
+
+function _isSafeVoiceAvatar(av) {
+  if (!av) return false;
+  const s = String(av);
+  return s.startsWith('data:image/') || s.startsWith('http://') || s.startsWith('https://');
+}
+
+function _enrichPeerFromRoster(peerKey) {
+  const peer = _voicePeers.get(peerKey);
+  if (!peer || !_voiceRoom) return;
+  const roster = _presenceRoster.get(_voiceRoom) || [];
+  const gid = peer.globalUserId || '';
+  const uid = peer.userId || 0;
+  const match = roster.find(p =>
+    (gid && p.global_user_id === gid) || (uid && p.user_id === uid));
+  if (!match) return;
+  if (match.nickname) peer.nickname = match.nickname;
+  if (match.avatar && !peer.avatar) peer.avatar = match.avatar;
+}
+
+/** Roster for the active voice bar (server truth + self + mesh peers). */
+function _voiceBarRoster() {
+  if (!_voiceRoom) return [];
+  let roster = _dedupeVoiceRoster(_presenceRoster.get(_voiceRoom) || []);
+  const myGid = State.user?.global_user_id || '';
+  const myUid = State.user?.id || 0;
+  const hasSelf = roster.some(p =>
+    (myGid && p.global_user_id === myGid) || (myUid && p.user_id === myUid));
+  if (!hasSelf && myUid) {
+    roster.unshift(_normalizeVoiceParticipant({
+      user_id: myUid,
+      global_user_id: myGid,
+      nickname: State.user?.nickname || 'You',
+      avatar: State.user?.avatar || '',
+    }));
+  }
+  for (const [peerKey, peer] of _voicePeers) {
+    const gid = peer.globalUserId || '';
+    const uid = peer.userId || 0;
+    if (roster.some(p => (gid && p.global_user_id === gid) || (uid && p.user_id === uid))) continue;
+    roster.push(_normalizeVoiceParticipant({
+      user_id: uid,
+      global_user_id: gid,
+      nickname: peer.nickname,
+      avatar: peer.avatar,
+    }));
+  }
+  return roster;
+}
+
+function _isSelfVoiceParticipant(p) {
+  const myGid = State.user?.global_user_id || '';
+  const myUid = State.user?.id || 0;
+  return (myGid && p.global_user_id === myGid) || (myUid && p.user_id === myUid);
+}
+
+function _appendVoiceBarAvatar(btn, avatar, nickname) {
+  const nick = String(nickname || '?');
+  const initials = nick.slice(0, 2).toUpperCase();
+  if (_isSafeVoiceAvatar(avatar)) {
+    const img = document.createElement('img');
+    img.src = avatar;
+    img.alt = nick;
+    img.loading = 'lazy';
+    img.decoding = 'async';
+    img.onerror = () => {
+      img.replaceWith(Object.assign(document.createElement('span'), {
+        className: 'voice-bar-initials',
+        textContent: initials,
+      }));
+    };
+    btn.appendChild(img);
+  } else if (avatar && /^\p{Extended_Pictographic}/u.test(String(avatar))) {
+    const em = document.createElement('span');
+    em.className = 'voice-bar-emoji';
+    em.textContent = String(avatar).slice(0, 2);
+    btn.appendChild(em);
+  } else {
+    const span = document.createElement('span');
+    span.className = 'voice-bar-initials';
+    span.textContent = initials;
+    btn.appendChild(span);
+  }
+}
+
 function _presenceAdd(roomName, p) {
   const list = _presenceRoster.get(roomName) || [];
   const key = _presenceKey(p);
@@ -2258,6 +2370,7 @@ function _syncVoiceTrayNotification(statusText) {
  */
 async function joinVoiceChannel() {
   if (_voiceRoom) {
+    if (_voiceRoom === State.currentRoom) return;
     toast('Already in a voice channel', 'error');
     return;
   }
@@ -2301,6 +2414,7 @@ async function joinVoiceChannel() {
   // Tell server we're joining
   _sendVoiceSignal({ type: 'voice_join' });
   _syncVoiceTrayNotification('Connecting…');
+  _updateVoiceBarParticipants();
   // Refresh member list to show voice badge
   if (typeof Users !== 'undefined' && State.onlineUsers) Users.updateList(State.onlineUsers);
 }
@@ -2346,15 +2460,21 @@ function leaveVoiceChannel() {
 }
 
 /**
- * Mute/unmute a specific peer's audio locally.
+ * Mute/unmute a specific peer's audio locally (peerKey: self | g:… | u:…).
  */
-function toggleMutePeer(userId) {
-  const peer = _voicePeers.get(userId);
+function toggleMutePeer(peerKey) {
+  if (peerKey === 'self') {
+    toggleVoiceMute();
+    return;
+  }
+  const peer = _voicePeers.get(peerKey);
   if (!peer) return;
-  peer.muted = !peer.muted;
-  const audioEl = document.getElementById(`voice-audio-${userId}`);
-  if (audioEl) audioEl.muted = peer.muted;
-  toast(peer.muted ? `Muted ${peer.nickname}` : `Unmuted ${peer.nickname}`);
+  const next = !_voicePeerMuted.get(peerKey);
+  _voicePeerMuted.set(peerKey, next);
+  peer.muted = next;
+  const audioEl = document.getElementById(`voice-audio-${peerKey}`);
+  if (audioEl) audioEl.muted = next;
+  toast(next ? `Muted ${peer.nickname}` : `Unmuted ${peer.nickname}`);
   _updateVoiceBarParticipants();
 }
 
@@ -2371,6 +2491,7 @@ function toggleVoiceMute() {
   try { wsSend({ type: 'voice_mute', muted: _voiceMuted }); } catch {}
   // Repaint user list so our own icon updates too.
   try { if (typeof renderUsers === 'function') renderUsers(); } catch {}
+  _updateVoiceBarParticipants();
   _syncVoiceTrayNotification();
 }
 
@@ -2389,10 +2510,15 @@ function getVoiceMutedNicks() {
 
 /** WS: another participant changed their mute state. */
 function handleVoiceMute(data) {
-  if (!data || !data.user_id) return;
-  _voicePeerMuted.set(data.user_id, !!data.muted);
+  if (!data) return;
+  const key = _voicePeerKey(data) || (data.user_id ? `u:${data.user_id}` : '');
+  if (!key) return;
+  _voicePeerMuted.set(key, !!data.muted);
+  const peer = _voicePeers.get(key);
+  if (peer) peer.muted = !!data.muted;
   try { if (typeof renderUsers === 'function') renderUsers(); } catch {}
   try { _renderVoicePresenceBar?.(_voiceRoom); } catch {}
+  _updateVoiceBarParticipants();
 }
 
 /**
@@ -2422,6 +2548,7 @@ async function _createVoicePeer(userId, nickname, avatar, isOfferer, globalUserI
         document.body.appendChild(audio);
       }
       audio.srcObject = e.streams[0];
+      _updateVoiceBarParticipants();
     }
   };
 
@@ -2442,43 +2569,81 @@ async function _createVoicePeer(userId, nickname, avatar, isOfferer, globalUserI
     }
   };
 
-  _voicePeers.set(peerKey, { pc, nickname, avatar, stream: null, pendingIce: [], remoteDescApplied: false, userId, globalUserId: globalUserId || '' });
-  
+  _voicePeers.set(peerKey, {
+    pc, nickname, avatar, stream: null, pendingIce: [], remoteDescApplied: false,
+    userId, globalUserId: globalUserId || '', muted: !!_voicePeerMuted.get(peerKey),
+  });
+  _enrichPeerFromRoster(peerKey);
+
   return pc;
 }
 
 /**
- * Update the voice bar participant avatars.
+ * Update the voice bar participant avatars (roster-driven, includes self + connecting).
  */
 function _updateVoiceBarParticipants() {
   const container = document.getElementById('voice-bar-participants');
-  container.innerHTML = '';
-  
-  for (const [uid, peer] of _voicePeers) {
-    const div = document.createElement('div');
-    div.className = 'voice-bar-avatar' + (peer.muted ? ' muted-peer' : '');
-    div.title = peer.nickname + ' (click to mute/unmute)';
-    div.setAttribute('data-uid', uid);
-    if (peer.avatar) {
-      div.innerHTML = `<img src="${esc(peer.avatar)}" alt="">`;
-    } else {
-      div.textContent = peer.nickname.slice(0, 2).toUpperCase();
-    }
-    // Click to mute/unmute this participant
-    div.onclick = () => toggleMutePeer(uid);
-    if (peer.muted) {
-      div.innerHTML += '<span class="voice-bar-mute-badge" aria-hidden="true">🔇</span>';
-    }
-    container.appendChild(div);
-  }
-  
-  document.getElementById('voice-bar-status').textContent = 
-    `${_voicePeers.size + 1} connected`;
-  
-  // Refresh sidebar user list to show/clear in-call badges
-  if (typeof Users !== 'undefined' && State.onlineUsers) Users.updateList(State.onlineUsers);
+  const statusEl = document.getElementById('voice-bar-status');
+  if (!container || !statusEl || !_voiceRoom) return;
 
-  // Start VAD loop for group voice
+  for (const key of _voicePeers.keys()) _enrichPeerFromRoster(key);
+
+  const roster = _voiceBarRoster();
+  container.innerHTML = '';
+  let connected = 0;
+
+  for (const p of roster) {
+    const isSelf = _isSelfVoiceParticipant(p);
+    const peerKey = isSelf ? 'self' : _peerKeyFromParticipant(p);
+    const peer = isSelf ? null : _voicePeers.get(peerKey);
+    const avatar = isSelf ? (State.user?.avatar || p.avatar) : (peer?.avatar || p.avatar);
+    const nickname = isSelf ? (State.user?.nickname || p.nickname) : (peer?.nickname || p.nickname);
+    const locallyMuted = isSelf ? _voiceMuted : !!(_voicePeerMuted.get(peerKey) || peer?.muted);
+    const pcState = peer?.pc?.connectionState;
+    const isConnected = isSelf || pcState === 'connected' || !!peer?.stream;
+    if (isConnected) connected += 1;
+
+    const tile = document.createElement('div');
+    tile.className = 'voice-bar-tile' + (isSelf ? ' self' : '') + (locallyMuted ? ' muted-peer' : '');
+    if (!isConnected && !isSelf) tile.classList.add('connecting');
+
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'voice-bar-avatar';
+    btn.dataset.peerKey = peerKey;
+    btn.title = isSelf
+      ? (locallyMuted ? 'Unmute yourself' : 'Mute yourself')
+      : `${nickname} — tap to ${locallyMuted ? 'unmute' : 'mute'} locally`;
+    btn.setAttribute('aria-label', btn.title);
+    _appendVoiceBarAvatar(btn, avatar, nickname);
+    if (locallyMuted) {
+      const badge = document.createElement('span');
+      badge.className = 'voice-bar-mute-badge';
+      badge.setAttribute('aria-hidden', 'true');
+      badge.textContent = '🔇';
+      btn.appendChild(badge);
+    }
+    btn.onclick = () => toggleMutePeer(peerKey);
+    tile.appendChild(btn);
+
+    const label = document.createElement('span');
+    label.className = 'voice-bar-name';
+    label.textContent = isSelf ? 'You' : nickname;
+    tile.appendChild(label);
+
+    container.appendChild(tile);
+  }
+
+  const total = roster.length;
+  if (total === 0) {
+    statusEl.textContent = 'Connecting…';
+  } else if (connected >= total) {
+    statusEl.textContent = `${total} in voice`;
+  } else {
+    statusEl.textContent = `${connected}/${total} connected`;
+  }
+
+  if (typeof Users !== 'undefined' && State.onlineUsers) Users.updateList(State.onlineUsers);
   _startVADLoop();
   _syncVoiceTrayNotification();
 }
@@ -2493,9 +2658,19 @@ async function handleVoiceJoined(data) {
   document.getElementById('voice-bar-status').textContent = 'Connected';
   _syncVoiceTrayNotification('Connected');
 
+  if (data.already) {
+    if (_voiceRoom) {
+      const roster = _dedupeVoiceRoster(data.participants || []);
+      _presenceRoster.set(_voiceRoom, roster);
+      if (_voiceRoom === _presenceRoom) _renderVoicePresenceBar(_voiceRoom);
+    }
+    _updateVoiceBarParticipants();
+    return;
+  }
+
   // Seed the presence roster for our current room with the existing peers.
   if (_voiceRoom) {
-    const roster = (data.participants || []).map(_normalizeVoiceParticipant).filter(Boolean);
+    const roster = _dedupeVoiceRoster(data.participants || []);
     const myGid = State.user?.global_user_id || '';
     if (State.user?.id && !roster.some(p =>
       (myGid && p.global_user_id === myGid) || p.user_id === State.user.id)) {
@@ -2508,6 +2683,7 @@ async function handleVoiceJoined(data) {
     }
     _presenceRoster.set(_voiceRoom, roster);
     if (_voiceRoom === _presenceRoom) _renderVoicePresenceBar(_voiceRoom);
+    _updateVoiceBarParticipants();
   }
 
   const myGid = State.user?.global_user_id || '';
@@ -2542,9 +2718,21 @@ async function handleVoiceJoined(data) {
  */
 function handleVoiceUserJoined(data) {
   const room = data.room || _voiceRoom || _presenceRoom;
+  const myGid = State.user?.global_user_id || '';
+  const myUid = State.user?.id || 0;
+  const joinedGid = String(data.global_user_id || '').trim();
+  const joinedUid = Number(data.user_id) || 0;
+  if (_voiceRoom === room && ((myGid && joinedGid === myGid) || (myUid && joinedUid === myUid))) {
+    if (Array.isArray(data.participants) && data.participants.length) {
+      _presenceRoster.set(room, _dedupeVoiceRoster(data.participants));
+      if (room === _presenceRoom) _renderVoicePresenceBar(room);
+    }
+    try { if (typeof renderUsers === 'function') renderUsers(); } catch {}
+    return;
+  }
   if (room) {
     if (Array.isArray(data.participants) && data.participants.length) {
-      _presenceRoster.set(room, data.participants.map(_normalizeVoiceParticipant).filter(Boolean));
+      _presenceRoster.set(room, _dedupeVoiceRoster(data.participants));
       if (room === _presenceRoom) _renderVoicePresenceBar(room);
     } else {
       const p = _normalizeVoiceParticipant({
@@ -2557,6 +2745,7 @@ function handleVoiceUserJoined(data) {
       if (p) _presenceAdd(room, p);
     }
   }
+  if (_voiceRoom === room) _updateVoiceBarParticipants();
   try { if (typeof renderUsers === 'function') renderUsers(); } catch {}
 }
 
@@ -2579,7 +2768,7 @@ function handleVoiceUserLeft(data) {
   const room = data.room || _voiceRoom || _presenceRoom;
   if (room) {
     if (Array.isArray(data.participants)) {
-      _presenceRoster.set(room, data.participants.map(_normalizeVoiceParticipant).filter(Boolean));
+      _presenceRoster.set(room, _dedupeVoiceRoster(data.participants));
       if (room === _presenceRoom) _renderVoicePresenceBar(room);
     } else {
       _presenceRemove(room, {
@@ -2756,8 +2945,9 @@ function _startVADLoop() {
           const d = new Uint8Array(peer._analyser.frequencyBinCount);
           peer._analyser.getByteFrequencyData(d);
           const avg = d.reduce((a, b) => a + b, 0) / d.length;
-          const el = document.querySelector(`.voice-bar-avatar[data-uid="${uid}"]`);
-          if (el) el.style.borderColor = avg > threshold ? '#4caf50' : '#1a3a1a';
+          const sel = `.voice-bar-avatar[data-peer-key="${CSS.escape(uid)}"]`;
+          const el = document.querySelector(sel);
+          if (el) el.classList.toggle('speaking', avg > threshold);
         } catch {}
       }
     }
