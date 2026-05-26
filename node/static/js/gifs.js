@@ -91,11 +91,12 @@ const GIFs = (() => {
 
     grid.innerHTML = gifs.map(gif => {
       const safeUrl = String(gif?.url || '').replace(/'/g, '&#39;');
+      const safeMime = String(gif?.mime || '').replace(/'/g, '&#39;');
       const safePreview = String(gif?.preview || gif?.url || '')
         .replace(/&/g, '&amp;')
         .replace(/"/g, '&quot;');
       return `
-        <div class="gif-item" onclick="GIFs.send('${safeUrl}')" title="Click to send">
+        <div class="gif-item" onclick="GIFs.send('${safeUrl}', '${safeMime}')" title="Click to send">
           <img src="${safePreview}" alt="GIF" loading="lazy">
         </div>
       `;
@@ -968,6 +969,18 @@ const GIFs = (() => {
     }
   }
 
+  function _gifMimeForAttachment(gifUrl, blobType) {
+    let type = (blobType || '').split(';')[0].trim().toLowerCase();
+    if (!type || type === 'application/octet-stream') {
+      const path = String(gifUrl || '').split('?')[0].toLowerCase();
+      if (path.endsWith('.mp4')) type = 'video/mp4';
+      else if (path.endsWith('.webm')) type = 'video/webm';
+      else type = 'image/gif';
+    }
+    if (type.startsWith('video/')) return type + ';gif=1';
+    return type === 'image/gif' ? type : 'image/gif';
+  }
+
   /** Stage a fetched GIF in the composer with working spoiler / remove controls. */
   function _stageGifAttachment(blob, name, type) {
     const attachBlob = blob.type ? blob : new Blob([blob], { type });
@@ -986,7 +999,7 @@ const GIFs = (() => {
     }
   }
 
-  async function send(gifUrl) {
+  async function send(gifUrl, mimeHint) {
     close();
     if (!gifUrl) return;
     // Fetch the GIF so we can upload it like any other attachment — this
@@ -1008,9 +1021,9 @@ const GIFs = (() => {
         UI.showToast && UI.showToast('GIF too large, sending as link', 'info');
         return _sendAsLink(gifUrl);
       }
-      // Tenor sometimes returns image/gif, sometimes video/mp4 — preserve it.
-      const type = blob.type || (gifUrl.endsWith('.mp4') ? 'video/mp4' : 'image/gif');
-      const ext  = type.includes('mp4') ? 'mp4' : 'gif';
+      const attachBlob = blob.type ? blob : new Blob([blob], { type: blob.type || mimeHint || 'image/gif' });
+      const type = _gifMimeForAttachment(gifUrl, mimeHint || attachBlob.type);
+      const ext  = type.includes('mp4') ? 'mp4' : (type.includes('webm') ? 'webm' : 'gif');
       const name = 'gif-' + Date.now() + '.' + ext;
       _stageGifAttachment(attachBlob, name, type);
       try { loadingToast?.dismiss?.(); } catch {}
@@ -1030,10 +1043,10 @@ const GIFs = (() => {
         if (resp2.ok) {
           const blob2 = await resp2.blob();
           if (blob2.size <= 20 * 1024 * 1024) {
-            const type2 = blob2.type || (gifUrl.endsWith('.mp4') ? 'video/mp4' : 'image/gif');
-            const ext2  = type2.includes('mp4') ? 'mp4' : 'gif';
+            const attachBlob2 = blob2.type ? blob2 : new Blob([blob2], { type: mimeHint || 'image/gif' });
+            const type2 = _gifMimeForAttachment(gifUrl, mimeHint || attachBlob2.type);
+            const ext2  = type2.includes('mp4') ? 'mp4' : (type2.includes('webm') ? 'webm' : 'gif');
             const name2 = 'gif-' + Date.now() + '.' + ext2;
-            const attachBlob2 = blob2.type ? blob2 : new Blob([blob2], { type: type2 });
             _stageGifAttachment(attachBlob2, name2, type2);
             try { loadingToast?.dismiss?.(); } catch {}
             if (input) input.focus();

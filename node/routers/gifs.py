@@ -230,6 +230,59 @@ def _klipy_pick_url(file_obj: dict, *keys: str) -> str:
     return ""
 
 
+def _klipy_pick_format_url(node: dict, *formats: str) -> str:
+    """Return the first animated/static format URL under a size tier node."""
+    if not isinstance(node, dict):
+        return ""
+    for fmt in formats:
+        sub = node.get(fmt)
+        if isinstance(sub, dict):
+            url = sub.get("url")
+            if url:
+                return url
+        elif isinstance(sub, str) and sub:
+            return sub
+    return ""
+
+
+def _klipy_pick_animated_url(file_obj: dict) -> str:
+    """Prefer hd.gif / md.gif (or mp4) — not hd.jpg preview stills."""
+    if not isinstance(file_obj, dict):
+        return ""
+    for tier in ("hd", "md", "sm", "xs"):
+        url = _klipy_pick_format_url(file_obj.get(tier) or {}, "gif", "mp4", "webm")
+        if url:
+            return url
+    flat = file_obj.get("gif")
+    if isinstance(flat, dict) and flat.get("url"):
+        return flat["url"]
+    if isinstance(flat, str) and flat:
+        return flat
+    return _klipy_pick_url(file_obj, "gif", "url")
+
+
+def _klipy_pick_preview_url(file_obj: dict) -> str:
+    """Static thumbnail for the picker grid (jpg/webp), not the send URL."""
+    if not isinstance(file_obj, dict):
+        return ""
+    for tier in ("xs", "sm", "md", "hd"):
+        url = _klipy_pick_format_url(
+            file_obj.get(tier) or {}, "jpg", "webp", "png", "gif",
+        )
+        if url:
+            return url
+    return ""
+
+
+def _klipy_mime_hint(url: str) -> str:
+    path = (url or "").split("?", 1)[0].lower()
+    if path.endswith(".mp4"):
+        return "video/mp4"
+    if path.endswith(".webm"):
+        return "video/webm"
+    return "image/gif"
+
+
 def _klipy_to_gif(item: dict) -> Optional[dict]:
     if not isinstance(item, dict):
         return None
@@ -237,10 +290,11 @@ def _klipy_to_gif(item: dict) -> Optional[dict]:
     if str(item.get("type") or "").lower() == "ad":
         return None
     f = item.get("file") or item.get("file_meta") or {}
-    full = _klipy_pick_url(f, "hd", "md", "sm", "xs", "gif", "url")
-    preview = _klipy_pick_url(f, "sm", "xs", "md", "hd") or full
+    full = _klipy_pick_animated_url(f)
+    preview = _klipy_pick_preview_url(f) or full
     if not full:
         return None
+    mime_hint = _klipy_mime_hint(full)
     # Width/height — KLIPY exposes dims under the same variant or top-level.
     dims = item.get("dims") or {}
     try:
@@ -252,6 +306,7 @@ def _klipy_to_gif(item: dict) -> Optional[dict]:
         "id": item.get("slug") or item.get("id") or "",
         "url": full,
         "preview": preview,
+        "mime": mime_hint,
         "width": w,
         "height": h,
         "title": item.get("title") or item.get("alt") or "",

@@ -12,6 +12,17 @@ let _animFrame   = null;
 let _recMode     = 'voice'; // 'voice' or 'video'
 let _previewStream = null;
 
+/** MP4/WebM GIF loops from KLIPY (not regular chat videos). */
+function isLoopingGifVideo (mediaType, name) {
+  const raw = String(mediaType || '').toLowerCase();
+  if (raw.includes('gif=1')) return true;
+  const base = raw.split(';')[0].trim();
+  if (!base.startsWith('video/')) return false;
+  const nm = String(name || '').toLowerCase();
+  return nm.startsWith('gif-') || nm.includes('.gif.');
+}
+window.isLoopingGifVideo = isLoopingGifVideo;
+
 /* ── Voice-message recording toggle ─────────────────────────────────────────── */
 async function toggleVoiceRecord () {
   if (document.body.classList.contains('in-music-channel')) {
@@ -638,6 +649,11 @@ function _renderPendingAttachmentList () {
       vid.muted = true;
       vid.playsInline = true;
       vid.preload = 'metadata';
+      if (isLoopingGifVideo(item.type, item.name)) {
+        vid.autoplay = true;
+        vid.loop = true;
+        vid.preload = 'auto';
+      }
       mediaWrap.appendChild(vid);
     } else {
       const icon = document.createElement('div');
@@ -772,7 +788,11 @@ function _renderAttachmentPreview ({ blob, name, type, sizeBytes }) {
     mediaHtml = `<div class="att-media-wrap"><img src="${url}" alt=""></div>`;
   } else if (isVid) {
     const url = URL.createObjectURL(blob);
-    mediaHtml = `<div class="att-media-wrap"><video src="${url}" muted playsinline preload="metadata"></video></div>`;
+    const loopGif = isLoopingGifVideo(type, name);
+    const vidAttrs = loopGif
+      ? 'autoplay loop muted playsinline preload="auto"'
+      : 'muted playsinline preload="metadata"';
+    mediaHtml = `<div class="att-media-wrap"><video src="${url}" ${vidAttrs}></video></div>`;
   } else {
     const icon = /pdf/.test(type || '') ? '📕'
                : /audio/.test(type || '') ? '🎵'

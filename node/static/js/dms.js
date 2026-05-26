@@ -3724,6 +3724,8 @@ function renderDMMessage (m) {
         data-fx-time="${time}"
         onclick="Messages.openSticker(this)"
         style="display:inline-block;line-height:0;cursor:pointer"></span>`;
+    } else if (typeof isLoopingGifVideo === 'function' && isLoopingGifVideo(mimeType, m.media_name)) {
+      inner = `<video src="${esc(mediaUrl)}" class="msg-media msg-gif-video" data-lburl="${esc(mediaUrl)}" onclick="openLightbox(this.dataset.lburl)" autoplay loop muted playsinline preload="auto" loading="lazy"></video>`;
     } else if (mimeType.startsWith('image/') || (!mimeType && mediaUrl.startsWith('data:image'))) {
       // SECURITY: media_data is sender-controlled (a `data:` URL is allowed
       // by the server) and can therefore contain ' or " — escape into both
@@ -4370,6 +4372,9 @@ async function loadDMMedia (msgId, channelId) {
     const mediaType = data.media_type || '';
     let html;
     if (mediaType.startsWith('video')) {
+      if (typeof isLoopingGifVideo === 'function' && isLoopingGifVideo(mediaType, data.media_name)) {
+        html = `<video src="${esc(data.media_data)}" class="msg-media msg-gif-video" data-lburl="${esc(data.media_data)}" onclick="openLightbox(this.dataset.lburl)" autoplay loop muted playsinline preload="auto" loading="lazy"></video>`;
+      } else {
       const _isNote = mediaType.includes('videonote=1') || /(^|\/)videonote-/.test(data.media_name || '');
       const _noteAttr = _isNote ? ' data-video-note="1"' : '';
       const _noteCls  = _isNote ? ' is-note' : '';
@@ -4391,6 +4396,7 @@ async function loadDMMedia (msgId, channelId) {
       // manually right after to ensure poster generation + themed overlay
       // run on the freshly-rendered video.
       try { setTimeout(() => { try { ChatVideo?.scan?.(document); } catch {} }, 0); } catch {}
+      }
     } else if (mediaType.startsWith('audio')) {
       html = `<audio src="${esc(data.media_data)}" controls preload="metadata" style="width:260px;display:block;margin-top:6px"></audio>`;
     } else if (/;\s*fx=/.test(mediaType) && window.StickerFX) {

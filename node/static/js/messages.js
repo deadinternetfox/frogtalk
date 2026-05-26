@@ -2012,6 +2012,9 @@ const Messages = (() => {
     // Base media element
     let inner;
     if (msg.media_type?.startsWith('video')) {
+      if (typeof isLoopingGifVideo === 'function' && isLoopingGifVideo(msg.media_type, msg.media_name)) {
+        inner = `<video class="msg-media msg-gif-video clickable-media" src="${msg.media_data}" data-sender="${UI.escHtml(msg.nickname)}" data-time="${time}" onclick="Messages.openMedia(this)" autoplay loop muted playsinline preload="auto"></video>`;
+      } else {
       // Telegram-style "video note" hint travels via mime-type param so
       // the wrapper renders as a round bubble immediately (instead of
       // waiting on videoWidth/Height metadata which some Android cameras
@@ -2042,6 +2045,7 @@ const Messages = (() => {
           `<div class="cv-overlay"><div class="cv-play" aria-label="Play video" role="button"></div></div>`+
           `<div class="cv-badge"><span class="cv-icon">${badgeIco}</span><span class="cv-dur">${badgeLbl}</span></div>`+
         `</div>`;
+      }
       }
     } else if (msg.media_type?.startsWith('audio')) {
       const waveBars = Array.from({length:20}, () => `<div class="wave-bar" style="height:${4 + Math.random()*20}px"></div>`).join('');
@@ -3937,6 +3941,9 @@ const Messages = (() => {
       const mediaType = data.media_type || container.getAttribute('data-media-type') || '';
       let html;
       if (mediaType.startsWith('video')) {
+        if (typeof isLoopingGifVideo === 'function' && isLoopingGifVideo(mediaType, '')) {
+          html = `<video class="msg-media msg-gif-video clickable-media" src="${data.media_data}" data-sender="${UI.escHtml(sender)}" data-time="${time}" onclick="Messages.openMedia(this)" autoplay loop muted playsinline preload="auto"></video>`;
+        } else {
         const isNote = mediaType.includes('videonote=1');
         const noteAttr = isNote ? ' data-video-note="1"' : '';
         const noteCls  = isNote ? ' is-note' : '';
@@ -3955,6 +3962,7 @@ const Messages = (() => {
             `<div class="cv-overlay"><div class="cv-play" aria-label="Play video" role="button"></div></div>`+
             `<div class="cv-badge"><span class="cv-icon">${badgeIco}</span><span class="cv-dur">${badgeLbl}</span></div>`+
           `</div>`;
+        }
         }
       } else if (mediaType.startsWith('audio')) {
         const waveBars = Array.from({length:20}, () => `<div class="wave-bar" style="height:${4 + Math.random()*20}px"></div>`).join('');

@@ -245,7 +245,9 @@ def _reencode_raster(data: bytes, src_mime: str) -> Tuple[bytes, str]:
             img.save(out, format="WEBP", quality=85)
             return out.getvalue(), "image/webp"
         if src_mime == "image/gif":
-            # Preserve animation when re-saving.
+            # Animated GIFs: passthrough bytes so we never flatten to frame 0.
+            if getattr(img, "is_animated", False):
+                return data, "image/gif"
             img.save(out, format="GIF", save_all=True)
             return out.getvalue(), "image/gif"
         if src_mime == "image/avif":
