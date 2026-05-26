@@ -29,14 +29,56 @@ const Music = (() => {
       const src = (frame && frame.src) || '';
       if (!src || src.startsWith('about:') || src.startsWith('blob:')) return '*';
       const o = new URL(src, window.location.href).origin;
-      return _PROVIDER_ORIGINS.indexOf(o) >= 0 ? o : '*';
+      if (_PROVIDER_ORIGINS.indexOf(o) < 0) return '*';
+      // Until navigation finishes, the child may still be about:blank /
+      // parent-origin — posting with the provider origin throws in DevTools.
+      if (frame.dataset.ftEmbedReady !== '1') return '*';
+      return o;
     } catch { return '*'; }
   }
+  function _bindEmbedFrame (frame) {
+    if (!frame) return;
+    const src = String(frame.src || '');
+    if (!src || src.startsWith('about:') || src.startsWith('blob:')) return;
+    let expectedOrigin;
+    try {
+      expectedOrigin = new URL(src, window.location.href).origin;
+      if (_PROVIDER_ORIGINS.indexOf(expectedOrigin) < 0) return;
+    } catch { return; }
+    if (frame.dataset.ftEmbedSrc === src && frame.dataset.ftEmbedBound === '1') return;
+    frame.dataset.ftEmbedSrc = src;
+    frame.dataset.ftEmbedBound = '1';
+    frame.dataset.ftEmbedReady = '0';
+    frame.addEventListener('load', () => {
+      frame.dataset.ftEmbedReady = '1';
+    });
+  }
+  function _wireEmbedFrame () {
+    const frame = document.querySelector('#mp-player-wrap iframe.mp-frame');
+    if (!frame) return;
+    _bindEmbedFrame(frame);
+    if ((frame.src || '').includes('soundcloud.com')) _bindSoundCloudWidget(frame);
+  }
   function _postToFrame (frame, msg) {
-    if (!frame || !frame.contentWindow) return;
+    if (!frame || !frame.contentWindow) return false;
+    _bindEmbedFrame(frame);
+    if (frame.dataset.ftEmbedReady !== '1') return false;
     const target = _frameOrigin(frame);
+    if (target === '*') return false;
     const payload = (typeof msg === 'string') ? msg : JSON.stringify(msg);
-    try { frame.contentWindow.postMessage(payload, target); } catch {}
+    try {
+      frame.contentWindow.postMessage(payload, target);
+      return true;
+    } catch { return false; }
+  }
+  function _postYtProbe (frame) {
+    if (!frame) return;
+    const poke = () => {
+      _postToFrame(frame, { event: 'listening', id: 'frogtalk-music' });
+      _postToFrame(frame, { event: 'command', func: 'getPlayerState', args: [] });
+    };
+    if (frame.dataset.ftEmbedReady === '1') poke();
+    else frame.addEventListener('load', poke, { once: true });
   }
 
   let _room = null;       // active music room name
@@ -149,14 +191,10 @@ const Music = (() => {
     if (!(frame.src || '').includes('soundcloud.com')) return;
     if (frame.dataset.scBound === '1') return;
     frame.dataset.scBound = '1';
-    try {
-      ['play', 'pause', 'finish'].forEach(ev => {
-        frame.contentWindow.postMessage(
-          JSON.stringify({ method: 'addEventListener', value: ev }), _frameOrigin(frame));
-      });
-      frame.contentWindow.postMessage(
-        JSON.stringify({ method: 'getDuration' }), _frameOrigin(frame));
-    } catch {}
+    ['play', 'pause', 'finish'].forEach((ev) => {
+      _postToFrame(frame, { method: 'addEventListener', value: ev });
+    });
+    _postToFrame(frame, { method: 'getDuration' });
   }
 
   function _startUiSync() {
@@ -169,26 +207,11 @@ const Music = (() => {
         const cur = _state && _state.queue && _state.queue[0];
         const frame = document.querySelector('#mp-player-wrap iframe.mp-frame');
         if (cur && cur.provider === 'youtube') {
-          if (frame && frame.contentWindow) {
-            try {
-              frame.contentWindow.postMessage(
-                JSON.stringify({ event: 'listening', id: 'frogtalk-music' }), _frameOrigin(frame));
-              // Asking for currentTime triggers an infoDelivery reply
-              // which carries playerState. Free state-truth refresh.
-              frame.contentWindow.postMessage(
-                JSON.stringify({ event: 'command', func: 'getPlayerState', args: [] }), _frameOrigin(frame));
-            } catch {}
-          }
+          if (frame) _postYtProbe(frame);
         } else if (cur && cur.provider === 'soundcloud') {
-          if (frame && frame.contentWindow) {
-            try {
-              _bindSoundCloudWidget(frame);
-              // Cheap state-truth refresh: SC widget answers with
-              // {method:"isPaused", value:bool} which the listener
-              // reconciles into _paused.
-              frame.contentWindow.postMessage(
-                JSON.stringify({ method: 'isPaused' }), _frameOrigin(frame));
-            } catch {}
+          if (frame) {
+            _bindSoundCloudWidget(frame);
+            _postToFrame(frame, { method: 'isPaused' });
           }
         }
         _syncPlayPauseButtons();
@@ -626,12 +649,7 @@ const Music = (() => {
     try {
       const frame = document.querySelector('#mp-player-wrap iframe.mp-frame');
       const cur = _state && _state.queue && _state.queue[0];
-      if (frame && frame.contentWindow && cur && cur.provider === 'youtube') {
-        try {
-          frame.contentWindow.postMessage(JSON.stringify({ event: 'listening', id: 'frogtalk-music' }), _frameOrigin(frame));
-          frame.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'getPlayerState', args: [] }), _frameOrigin(frame));
-        } catch {}
-      }
+      if (frame && cur && cur.provider === 'youtube') _postYtProbe(frame);
     } catch {}
     // Belt + braces re-paint ladder. Each tick re-derives from
     // _currentEffectivePaused() so any state event landing in between
@@ -985,22 +1003,12 @@ const Music = (() => {
     const frame = document.querySelector('#mp-player-wrap iframe.mp-frame');
     if (!frame || !frame.contentWindow) return false;
     const src = frame.src || '';
-    try {
-      if (src.includes('youtube.com')) {
-        frame.contentWindow.postMessage(
-          JSON.stringify({ event: 'command', func: 'seekTo', args: [posSec, true] }),
-          _frameOrigin(frame)
-        );
-        return true;
-      }
-      if (src.includes('soundcloud.com')) {
-        frame.contentWindow.postMessage(
-          JSON.stringify({ method: 'seekTo', value: posSec * 1000 }),
-          _frameOrigin(frame)
-        );
-        return true;
-      }
-    } catch {}
+    if (src.includes('youtube.com')) {
+      return _postToFrame(frame, { event: 'command', func: 'seekTo', args: [posSec, true] });
+    }
+    if (src.includes('soundcloud.com')) {
+      return _postToFrame(frame, { method: 'seekTo', value: posSec * 1000 });
+    }
     return false;
   }
 
@@ -1426,22 +1434,21 @@ const Music = (() => {
       }, SYNC_PROBE_TIMEOUT_MS + 50);
 
       if (cur.provider === 'youtube') {
-        try {
-          // 'listening' handshake registers us with the YouTube embed so
-          // it accepts our 'command' messages. Idempotent.
-          frame.contentWindow.postMessage(
-            JSON.stringify({ event: 'listening', id: 'frogtalk-music' }), _frameOrigin(frame));
-          frame.contentWindow.postMessage(
-            JSON.stringify({ event: 'command', func: 'getCurrentTime', args: [] }), _frameOrigin(frame));
-        } catch { _syncProbePending = false; }
+        const poke = () => {
+          _postToFrame(frame, { event: 'listening', id: 'frogtalk-music' });
+          _postToFrame(frame, { event: 'command', func: 'getCurrentTime', args: [] });
+        };
+        _bindEmbedFrame(frame);
+        if (frame.dataset.ftEmbedReady === '1') poke();
+        else frame.addEventListener('load', poke, { once: true });
       } else if (cur.provider === 'soundcloud') {
-        try {
-          _bindSoundCloudWidget(frame);
-          frame.contentWindow.postMessage(
-            JSON.stringify({ method: 'getDuration' }), _frameOrigin(frame));
-          frame.contentWindow.postMessage(
-            JSON.stringify({ method: 'getPosition' }), _frameOrigin(frame));
-        } catch { _syncProbePending = false; }
+        _bindSoundCloudWidget(frame);
+        const poke = () => {
+          _postToFrame(frame, { method: 'getDuration' });
+          _postToFrame(frame, { method: 'getPosition' });
+        };
+        if (frame.dataset.ftEmbedReady === '1') poke();
+        else frame.addEventListener('load', poke, { once: true });
       } else {
         _syncProbePending = false;
       }
@@ -1492,16 +1499,11 @@ const Music = (() => {
 
       const frame = document.querySelector('#mp-player-wrap iframe.mp-frame');
       if (!frame || !frame.contentWindow) return;
-      const win = frame.contentWindow;
       // Make sure we're listening for the iframe's onStateChange replies
       // even if the steady probe hasn't started yet.
       _bindSyncMessageListener();
 
-      // Helper that survives any cross-origin oddity.
-      const send = (msg) => {
-        try { win.postMessage(typeof msg === 'string' ? msg : JSON.stringify(msg), _frameOrigin(frame)); }
-        catch { /* nothing we can do */ }
-      };
+      const send = (msg) => { _postToFrame(frame, msg); };
 
       const targetSec = _expectedPosSec();
       // Cancel any in-flight retry chain from a prior return.
@@ -1652,10 +1654,7 @@ const Music = (() => {
     try {
       const frame = document.querySelector('#mp-player-wrap iframe.mp-frame');
       const cur = _state && _state.queue && _state.queue[0];
-      if (frame && frame.contentWindow && cur && cur.provider === 'youtube') {
-        frame.contentWindow.postMessage(JSON.stringify({ event: 'listening', id: 'frogtalk-music' }), _frameOrigin(frame));
-        frame.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'getPlayerState', args: [] }), _frameOrigin(frame));
-      }
+      if (frame && cur && cur.provider === 'youtube') _postYtProbe(frame);
     } catch {}
     // Keep _paused as-is for now. The bounded retry ladder below will
     // attempt a resume regardless (ignorePaused) and reconcile _paused
@@ -1992,10 +1991,7 @@ const Music = (() => {
         try { _hydrateTrackArtwork(t); } catch {}
       }
     }
-    try {
-      const scFrame = document.querySelector('#mp-player-wrap iframe.mp-frame');
-      if (cur && cur.provider === 'soundcloud') _bindSoundCloudWidget(scFrame);
-    } catch {}
+    try { _wireEmbedFrame(); } catch {}
   }
 
   async function mount(roomName, channelType) {
@@ -2284,21 +2280,13 @@ const Music = (() => {
     const effectivelyPaused = _currentEffectivePaused();
     const playing = !effectivelyPaused;       // currently playing?
     const src = frame.src || '';
-    try {
-      if (src.includes('youtube.com')) {
-        frame.contentWindow.postMessage(
-          JSON.stringify({ event: 'command', func: playing ? 'pauseVideo' : 'playVideo', args: [] }),
-          _frameOrigin(frame)
-        );
-      } else if (src.includes('soundcloud.com')) {
-        frame.contentWindow.postMessage(
-          JSON.stringify({ method: playing ? 'pause' : 'play' }),
-          _frameOrigin(frame)
-        );
-      } else {
-        return;
-      }
-    } catch {}
+    if (src.includes('youtube.com')) {
+      if (!_postToFrame(frame, { event: 'command', func: playing ? 'pauseVideo' : 'playVideo', args: [] })) return;
+    } else if (src.includes('soundcloud.com')) {
+      if (!_postToFrame(frame, { method: playing ? 'pause' : 'play' })) return;
+    } else {
+      return;
+    }
     const nowPlaying = !playing;
     // Track user-intent pause separately from _paused. _paused gets
     // flipped by lots of paths (visibility, infoDelivery, surrender);
@@ -2373,6 +2361,7 @@ const Music = (() => {
     // hardcoded data-playing="1" template default.
     try { _syncPlayPauseButtons(); } catch {}
     try { _startUiSync(); } catch {}
+    try { _wireEmbedFrame(); } catch {}
   }
 
   function expand() {
@@ -2874,16 +2863,12 @@ const Music = (() => {
       if (!frame || !frame.contentWindow) return false;
       const src = frame.src || '';
       if (src.includes('youtube.com')) {
-        // Seek to 0, then play. YT iframe accepts both messages back to back.
-        frame.contentWindow.postMessage(
-          JSON.stringify({ event: 'command', func: 'seekTo', args: [0, true] }), _frameOrigin(frame));
-        frame.contentWindow.postMessage(
-          JSON.stringify({ event: 'command', func: 'playVideo', args: [] }), _frameOrigin(frame));
-        return true;
-      } else if (src.includes('soundcloud.com')) {
-        frame.contentWindow.postMessage(JSON.stringify({ method: 'seekTo', value: 0 }), _frameOrigin(frame));
-        frame.contentWindow.postMessage(JSON.stringify({ method: 'play' }), _frameOrigin(frame));
-        return true;
+        _postToFrame(frame, { event: 'command', func: 'seekTo', args: [0, true] });
+        return _postToFrame(frame, { event: 'command', func: 'playVideo', args: [] });
+      }
+      if (src.includes('soundcloud.com')) {
+        _postToFrame(frame, { method: 'seekTo', value: 0 });
+        return _postToFrame(frame, { method: 'play' });
       }
     } catch {}
     return false;
