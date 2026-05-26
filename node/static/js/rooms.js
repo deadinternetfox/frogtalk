@@ -247,7 +247,6 @@ const Rooms = (() => {
     const el = document.getElementById(listId);
     if (!el || el.querySelector('.channel-item')) return false;
     if (el.querySelector('.ft-sidebar-skeleton')) return true;
-    if (el.children.length) return false;
     const sk = scope === 'dm' ? 'dm' : 'channel';
     el.innerHTML = sidebarListSkeletonHtml(5, sk) + _sidebarListSyncHint(sk);
     return true;
