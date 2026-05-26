@@ -321,6 +321,42 @@ def enqueue_dm_disappear_updated(
     )
 
 
+def enqueue_dm_read_receipt(
+    reader: dict,
+    peer: dict,
+    *,
+    channel_id: int = 0,
+    up_to: int = 0,
+) -> dict:
+    """Enqueue a signed ``dm.read.receipt`` event so the sender on another node
+    can update their ✓✓ tick when the reader is on a different node."""
+    import federation_dms as fed_dm
+
+    # Sender (peer) needs the tick update — route to their home/connection nodes only.
+    targets = fed_dm.dm_message_federation_remote_targets(peer)
+    if not targets:
+        return {"ok": True, "skipped": "no_remote_targets"}
+    reader_gid = str(reader.get("global_user_id") or "").strip()
+    peer_gid = str(peer.get("global_user_id") or "").strip()
+    if not reader_gid or not peer_gid or reader_gid == peer_gid:
+        return {"ok": False, "error": "no_global_user_id"}
+    up_to_i = max(0, int(up_to or 0))
+    if up_to_i <= 0:
+        return {"ok": False, "error": "bad_up_to"}
+    return enqueue_server_event(
+        "dm.read.receipt",
+        {
+            "channel_id": int(channel_id or 0),
+            "reader_global_user_id": reader_gid,
+            "peer_global_user_id": peer_gid,
+            "reader_nickname": str(reader.get("nickname") or "").strip(),
+            "peer_nickname": str(peer.get("nickname") or "").strip(),
+            "up_to": up_to_i,
+        },
+        target_server_ids=targets,
+    )
+
+
 def enqueue_dm_wipe_all(
     actor: dict,
     peer: dict,
@@ -6536,6 +6572,79 @@ async def _handle_dm_wipe_all(event: dict) -> None:
         _log.debug("federation: dm wipe side-effects failed", exc_info=True)
 
 
+async def _handle_dm_read_receipt(event: dict) -> None:
+    """Apply a federated read receipt — push a local dm_read WS event to the sender."""
+    payload = event.get("payload") or {}
+    reader_gid = str(payload.get("reader_global_user_id") or "").strip()
+    peer_gid = str(payload.get("peer_global_user_id") or "").strip()
+    if not reader_gid or not peer_gid or reader_gid == peer_gid:
+        return
+    try:
+        up_to = int(payload.get("up_to") or 0)
+    except (TypeError, ValueError):
+        return
+    if up_to <= 0:
+        return
+    try:
+        channel_id = int(payload.get("channel_id") or 0)
+    except (TypeError, ValueError):
+        channel_id = 0
+    origin = str(event.get("origin_server_id") or "").strip()
+    reader_nick = _fed_nickname(payload.get("reader_nickname") or "")
+    peer_nick = _fed_nickname(payload.get("peer_nickname") or "")
+    if not reader_nick or not peer_nick:
+        return
+    reader = _fed_resolve_user_for_dm(reader_nick, reader_gid, origin_server_id=origin)
+    peer_user = _fed_resolve_user_for_dm(peer_nick, peer_gid, origin_server_id=origin)
+    if not reader or not peer_user:
+        _log.debug(
+            "federation: drop dm.read.receipt — user missing (reader=%s peer=%s)",
+            reader_nick,
+            peer_nick,
+        )
+        return
+    pair_gids = {
+        str(reader.get("global_user_id") or "").strip(),
+        str(peer_user.get("global_user_id") or "").strip(),
+    }
+    if reader_gid not in pair_gids or peer_gid not in pair_gids:
+        _log.info("federation: drop dm.read.receipt — gids not in resolved pair")
+        return
+    if db.is_blocked_either_way(int(reader["id"]), int(peer_user["id"])):
+        return
+    if not db.get_privacy_read_receipts(int(reader["id"])):
+        return
+    if channel_id > 0:
+        with db._conn() as con:
+            ch_row = con.execute(
+                "SELECT user_a, user_b FROM dm_channels WHERE id=? "
+                "AND ((user_a=? AND user_b=?) OR (user_a=? AND user_b=?))",
+                (
+                    channel_id,
+                    reader["id"], peer_user["id"],
+                    peer_user["id"], reader["id"],
+                ),
+            ).fetchone()
+        if not ch_row:
+            _log.info("federation: drop dm.read.receipt — channel membership mismatch")
+            return
+    else:
+        channel_id = db.get_or_create_dm(int(reader["id"]), int(peer_user["id"]))
+    ok, marked_peer_id, new_read = db.mark_dm_read(channel_id, int(reader["id"]), up_to)
+    if not ok or int(marked_peer_id or 0) != int(peer_user["id"]):
+        return
+    try:
+        from ws_manager import manager as ws_manager
+        await ws_manager.send_to_user(int(peer_user["id"]), {
+            "type": "dm_read",
+            "channel_id": channel_id,
+            "reader_id": int(reader["id"]),
+            "last_read": new_read,
+        })
+    except Exception:
+        _log.debug("federation: dm.read.receipt ws delivery failed", exc_info=True)
+
+
 async def _handle_dm_event(event: dict) -> None:
     """Handle incoming federated DM events."""
     event_type = str(event.get("event_type") or "")
@@ -6547,6 +6656,9 @@ async def _handle_dm_event(event: dict) -> None:
         return
     if event_type == "dm.wipe.all":
         await _handle_dm_wipe_all(event)
+        return
+    if event_type == "dm.read.receipt":
+        await _handle_dm_read_receipt(event)
         return
     if event_type != "dm.message.created":
         return

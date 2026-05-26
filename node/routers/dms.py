@@ -253,6 +253,54 @@ class DMLockUnlockBody(BaseModel):
     password: Optional[str] = Field(default=None, max_length=128)
 
 
+async def _deliver_dm_read_to_peer(
+    *,
+    channel_id: int,
+    reader: dict,
+    peer_id: int,
+    last_read: int,
+) -> None:
+    """Notify the message sender of a read cursor (local WS + federation fallback)."""
+    cid = int(channel_id or 0)
+    rid = int((reader or {}).get("id") or 0)
+    pid = int(peer_id or 0)
+    up_to = int(last_read or 0)
+    if cid <= 0 or rid <= 0 or pid <= 0 or up_to <= 0 or rid == pid:
+        return
+    if not db.get_privacy_read_receipts(rid):
+        return
+    if db.is_blocked_either_way(rid, pid):
+        return
+    peer_row = db.get_user_by_id(pid) or {}
+    payload = {
+        "type": "dm_read",
+        "channel_id": cid,
+        "reader_id": rid,
+        "last_read": up_to,
+    }
+    delivered_local = False
+    try:
+        delivered_local = bool(await manager.send_to_user(pid, payload))
+    except Exception:
+        pass
+    try:
+        import federation_dms as fed_dm
+        from routers.federation import enqueue_dm_read_receipt
+
+        remote = fed_dm.dm_message_federation_remote_targets(peer_row)
+        peer_elsewhere = fed_dm._peer_connected_on_remote_node(peer_row)
+        peer_travel = fed_dm.user_session_on_travel_node(peer_row)
+        if remote and (not delivered_local or peer_elsewhere or peer_travel):
+            enqueue_dm_read_receipt(
+                reader,
+                peer_row,
+                channel_id=cid,
+                up_to=up_to,
+            )
+    except Exception:
+        _log.debug("dm read receipt federation enqueue failed", exc_info=True)
+
+
 async def _notify_dm_messages_wiped(
     channel_id: int,
     *,
@@ -444,17 +492,13 @@ async def mark_read(channel_id: int, body: dict = None,
     ok, peer_id, new_read = db.mark_dm_read(channel_id, current_user["id"], up_to)
     if not ok:
         return JSONResponse(status_code=403, content={"error": "Not a member of this channel"})
-    # Only notify peer if user allows read-receipts
-    if peer_id and db.get_privacy_read_receipts(current_user["id"]):
-        try:
-            await manager.send_to_user(peer_id, {
-                "type": "dm_read",
-                "channel_id": channel_id,
-                "reader_id": current_user["id"],
-                "last_read": new_read,
-            })
-        except Exception:
-            pass
+    if peer_id:
+        await _deliver_dm_read_to_peer(
+            channel_id=channel_id,
+            reader=current_user,
+            peer_id=peer_id,
+            last_read=new_read,
+        )
     return {"ok": True, "last_read": new_read}
 
 

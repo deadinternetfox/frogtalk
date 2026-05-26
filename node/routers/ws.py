@@ -1181,13 +1181,17 @@ async def websocket_endpoint(
                 if up_to <= 0:
                     continue
                 ok, peer_id, new_read = db.mark_dm_read(channel_id, user["id"], up_to)
-                if ok and peer_id and peer_id != user["id"] and db.get_privacy_read_receipts(user["id"]):
-                    await manager.send_to_user(peer_id, {
-                        "type": "dm_read",
-                        "channel_id": channel_id,
-                        "reader_id": user["id"],
-                        "last_read": new_read,
-                    })
+                if ok and peer_id and peer_id != user["id"]:
+                    try:
+                        from routers.dms import _deliver_dm_read_to_peer
+                        await _deliver_dm_read_to_peer(
+                            channel_id=channel_id,
+                            reader=user,
+                            peer_id=peer_id,
+                            last_read=new_read,
+                        )
+                    except Exception:
+                        pass
 
             # ── DM react ─────────────────────────────────────────────
             elif msg_type == "dm_react":
