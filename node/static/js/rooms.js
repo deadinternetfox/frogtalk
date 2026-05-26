@@ -2147,14 +2147,19 @@ const Rooms = (() => {
     if (type !== 'dm' && typeof Users !== 'undefined' && Users.prepareMembersListLoad) {
       try { Users.prepareMembersListLoad(name); } catch {}
     }
-    // Dim the send button immediately on switch so the user sees it's held —
-    // FtCompose will formally call beginChannelSwitch below, but refresh here
-    // ensures the button goes dim before any async awaits.
-    try { window.FtCompose?.refresh?.(); } catch {}
     // SWR + skeleton for all text channels (including 18+); DMs/voice keep legacy loaders.
     let useFastSwitch = type !== 'dm'
       && normalizeChannelType(_chTypeEarly) !== 'voice';
     let useSwr = useFastSwitch;
+    if (prevType === 'dm' && type !== 'dm') {
+      try { clearDmComposeForChannelSwitch?.(); } catch {}
+    }
+    if (type !== 'dm') {
+      try { window.FtCompose?.beginChannelSwitch?.(nameKey, { swr: useSwr }); } catch {}
+      try { window.FtCompose?.syncSendButton?.({ channelMode: true }); } catch {}
+    } else {
+      try { window.FtCompose?.refresh?.(); } catch {}
+    }
     const hasCached = channelHasUsableCache(name);
     try {
 
@@ -2204,6 +2209,10 @@ const Rooms = (() => {
       try { _activeDM = null; } catch {}
       if (typeof renderDMChannels === 'function') {
         try { renderDMChannels(); } catch {}
+      }
+      if (type !== 'dm') {
+        try { clearDmComposeForChannelSwitch?.(); } catch {}
+        try { window.FtCompose?.syncSendButton?.({ channelMode: true }); } catch {}
       }
     }
     // We're entering an actual channel now — drop the welcome-screen flag

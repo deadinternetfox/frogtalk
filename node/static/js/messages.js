@@ -5528,7 +5528,11 @@ window._applyRoomBanUI = function _applyRoomBanUI(room) {
       if (inputWrap) inputWrap.style.display = '';
       const wasDisabled = !!(ta && ta.disabled);
       if (ta) { ta.disabled = false; ta.placeholder = `Message #${room || 'channel'}`; }
-      if (sendBtn) sendBtn.disabled = false;
+      if (sendBtn) {
+        const held = !!(window.FtCompose?.isSendBlocked?.());
+        sendBtn.disabled = held;
+        sendBtn.classList.toggle('ft-send-blocked', held);
+      }
       _stopRoomBanTicker();
       if (wasDisabled) {
         try { window.FtCompose?.restoreFocus?.(); } catch {}
