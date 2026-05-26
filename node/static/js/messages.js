@@ -2909,6 +2909,9 @@ const Messages = (() => {
     } else {
       try { window.hideChatLoadSkeleton?.(true); } catch {}
     }
+    if (!addedTail) {
+      try { WS?.noteHistoryCaughtUp?.(room); } catch {}
+    }
     if (!options.deferFinish || options.noNewMessages || !addedTail) {
       try { window.hideChatLoadSkeleton?.(true); } catch {}
       _finishSwitchAfterPaint(room);
@@ -2983,7 +2986,7 @@ const Messages = (() => {
     const roomKey = String(room || '').trim().toLowerCase();
     const keepTailSkel = !!options.deferFinish
       && areaEl?.classList.contains('chat-switching-swr')
-      && (typeof WS !== 'undefined' && WS.isHistorySyncing?.(roomKey));
+      && (typeof WS !== 'undefined' && WS.isHistoryApplying?.(roomKey));
     let savedSkel = null;
     if (keepTailSkel) {
       savedSkel = mount.querySelector('#ft-chat-skeleton');
@@ -3005,6 +3008,7 @@ const Messages = (() => {
       try { window.hideChatLoadSkeleton?.(true); } catch {}
       _finishSwitchAfterPaint(room);
     } else if (options.fromCache) {
+      try { WS?.noteHistoryCaughtUp?.(room); } catch {}
       try { window.FtCompose?.finishChannelLoad?.(room); } catch {}
       try { window.FtCompose?.syncSendButton?.(); } catch {}
     }

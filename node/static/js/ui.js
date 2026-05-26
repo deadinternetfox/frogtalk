@@ -9073,14 +9073,42 @@ function _mentionColorWithAlpha(color, alpha, fallback) {
     } catch {}
   }
 
-  /** True only while WS may still deliver new history for the open channel. */
+  function _channelShellReady() {
+    try {
+      const area = document.getElementById('messages-area');
+      const shell = area?.querySelector('#cw-chat-content');
+      return !!(shell && shell.querySelector('[id^="msg-"]:not(#msg-empty-state)'));
+    } catch { return false; }
+  }
+
+  /** Only while a history packet is actively being applied (not WS connect wait). */
   function _channelHistorySyncing() {
     try {
       const r = String(State?.currentRoom || '').trim().toLowerCase();
       if (!r) return false;
-      if (typeof WS !== 'undefined' && WS.isHistorySyncing?.(r)) return true;
+      if (typeof WS !== 'undefined' && WS.isHistoryApplying?.(r)) return true;
     } catch {}
     return false;
+  }
+
+  function _restoreComposePlaceholder(input) {
+    if (!input) return;
+    const room = String(State?.currentRoom || '').replace(/^#/, '');
+    const ph = room ? `Message #${room}` : 'Message channel';
+    input.placeholder = input.dataset.ftChOrigPh || ph;
+    delete input.dataset.ftChOrigPh;
+  }
+
+  /** Drop stale compose lock when cached messages are already on screen. */
+  function _maybeReleaseStaleComposeLock() {
+    if (_isDmView() || !_chLoad.active) return;
+    const cur = String(State?.currentRoom || '').trim().toLowerCase();
+    const loadRoom = String(_chLoad.room || '').trim().toLowerCase();
+    if (!cur || (loadRoom && cur !== loadRoom)) return;
+    if (!_channelShellReady()) return;
+    if (typeof WS !== 'undefined' && WS.isHistoryApplying?.(cur)) return;
+    try { WS?.noteHistoryCaughtUp?.(cur); } catch {}
+    finishChannelLoad(cur);
   }
 
   function _isCwLocked() {
@@ -9129,6 +9157,7 @@ function _mentionColorWithAlpha(color, alpha, fallback) {
   }
 
   function channelSendBlocked() {
+    _maybeReleaseStaleComposeLock();
     if (_isDmView()) {
       try { return !!State._dmSendPending; } catch { return true; }
     }
@@ -9184,6 +9213,7 @@ function _mentionColorWithAlpha(color, alpha, fallback) {
   function refresh() {
     bindDraftAutosave();
     if (_isDmView()) return;
+    _maybeReleaseStaleComposeLock();
     _scrubDmComposeChrome();
     syncSendButton();
     if (_isCwLocked() || _isMuteOrBanLocked()) return;
@@ -9224,8 +9254,7 @@ function _mentionColorWithAlpha(color, alpha, fallback) {
         }
         if (ph && (!preType || !hasDraft)) input.placeholder = ph;
       } else {
-        input.placeholder = input.dataset.ftChOrigPh || ph || input.placeholder || '';
-        delete input.dataset.ftChOrigPh;
+        _restoreComposePlaceholder(input);
       }
     }
 
@@ -9285,9 +9314,12 @@ function _mentionColorWithAlpha(color, alpha, fallback) {
 
   function finishChannelLoad(room) {
     const r = String(room || '').trim().toLowerCase();
-    if (!r || _chLoad.room === r || !_chLoad.room) {
+    const cur = String(State?.currentRoom || '').trim().toLowerCase();
+    const loadRoom = String(_chLoad.room || '').trim().toLowerCase();
+    if (!r || r === loadRoom || r === cur || !loadRoom) {
       _chLoad.active = false;
       _chLoad.swr = false;
+      if (!loadRoom && r) _chLoad.room = r;
     }
     if (_loadSafetyTimer) {
       clearTimeout(_loadSafetyTimer);

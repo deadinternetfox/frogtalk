@@ -224,7 +224,7 @@ const Rooms = (() => {
     if (!area?.classList.contains('chat-switching-swr')) return false;
     try {
       const r = String(State?.currentRoom || '').trim().toLowerCase();
-      if (WS?.isHistorySyncing?.(r)) return true;
+      if (WS?.isHistoryApplying?.(r)) return true;
       return !!window.FtCompose?.isChannelLoading?.();
     } catch {
       return false;
@@ -424,7 +424,7 @@ const Rooms = (() => {
     try { window.FtCompose?.refresh?.(); } catch {}
     if (channelHasUsableCache(r)) {
       _paintChannelCacheNow(r, { deferFinish: true });
-      if (WS?.isHistorySyncing?.(r)) {
+      if (WS?.isHistoryApplying?.(r)) {
         showChatLoadSkeleton('channel', { tail: true });
       }
     } else {
@@ -457,7 +457,7 @@ const Rooms = (() => {
     const area = document.getElementById('messages-area');
     if (!area || !area.classList.contains('chat-switching-swr')) return;
     if (String(State?.currentRoom || '').trim().toLowerCase() !== r) return;
-    if (!WS?.isHistorySyncing?.(r)) {
+    if (!WS?.isHistoryApplying?.(r)) {
       try { hideChatLoadSkeleton(true); } catch {}
       return;
     }
@@ -1745,10 +1745,10 @@ const Rooms = (() => {
       if (!opts.skipSkeleton) {
         const skVar = type === 'dm' ? 'dm' : 'channel';
         const r = String(switchKey || name || '').trim().toLowerCase();
-        const awaitingHistory = !!(r && WS?.isHistorySyncing?.(r));
+        const applyingHistory = !!(r && WS?.isHistoryApplying?.(r));
         if (!_shellHasRealMessages()) {
           showChatLoadSkeleton(skVar);
-        } else if (awaitingHistory) {
+        } else if (applyingHistory) {
           showChatLoadSkeleton(skVar, { tail: true });
         }
       }
@@ -2185,6 +2185,7 @@ const Rooms = (() => {
         channelType: _chTypeEarly,
         switchToken,
         swr: useSwr,
+        beginSwitch: type === 'dm',
       });
       if (!hasCached) _clearMessageContent();
       try {
@@ -2546,6 +2547,16 @@ const Rooms = (() => {
       try {
         if (!_isSwitchAlive(switchToken)) return;
         const r = String(name || '').trim().toLowerCase();
+        const cur = String(State?.currentRoom || '').trim().toLowerCase();
+        if (cur === r && type !== 'dm') {
+          try { WS?.noteHistoryCaughtUp?.(r); } catch {}
+          if (_shellHasContent(r)) {
+            try { window.FtCompose?.finishChannelLoad?.(r); } catch {}
+            if (!isSwitchOverlayVisible()) {
+              try { finishChannelSwitch(r, { finish: true, contentReady: true }); } catch {}
+            }
+          }
+        }
         if (State._roomSwitchInProgress === r && !isSwitchOverlayVisible()) {
           delete State._roomSwitchInProgress;
         }

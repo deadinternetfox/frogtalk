@@ -48,19 +48,29 @@ const WS = (() => {
     _historyLastApplied.delete(r);
   }
 
-  function isHistorySyncing(room) {
+  /** True while decrypting/applying a history packet (may add DOM). */
+  function isHistoryApplying(room) {
     const r = String(room || _room || '').trim().toLowerCase();
     if (!r) return false;
-    if (_historyAwaiting.has(r)) return true;
     for (const k of _historyInFlight.keys()) {
       if (String(k).trim().toLowerCase() === r) return true;
     }
     return false;
   }
 
+  /** @deprecated alias — only blocks UI while history is actively applying */
+  function isHistorySyncing(room) {
+    return isHistoryApplying(room);
+  }
+
   function _clearHistoryAwait(room) {
     const r = String(room || '').trim().toLowerCase();
     if (r) _historyAwaiting.delete(r);
+  }
+
+  /** Cached channel already painted — WS catch-up must not lock compose. */
+  function noteHistoryCaughtUp(room) {
+    _clearHistoryAwait(room);
   }
 
   function noteRoomVisit(room) {
@@ -242,6 +252,7 @@ const WS = (() => {
                   Messages.loadHistory(room, cachedNow.slice(), { reveal: false, fromCache: true });
                 }
               } else if (area?.classList.contains('chat-switching-swr')) {
+                noteHistoryCaughtUp(room);
                 try { window.hideChatLoadSkeleton?.(true); } catch {}
                 Messages.mergeRoomHistory?.(room, cachedNow.slice(), { fromCache: true });
                 if (typeof finishChannelSwitch === 'function') {
@@ -292,6 +303,7 @@ const WS = (() => {
                   if (!merged && area && _switchUiStillLoading(area)) {
                     Messages.loadHistory(room, cached.slice(), { reveal: false, fromCache: true });
                   } else {
+                    noteHistoryCaughtUp(room);
                     try { window.hideChatLoadSkeleton?.(true); } catch {}
                     if (typeof finishChannelSwitch === 'function') {
                       finishChannelSwitch(room, { finish: true, contentReady: true });
@@ -1164,6 +1176,8 @@ const WS = (() => {
     noteRoomVisit,
     shouldKeepHistoryCache,
     isHistorySyncing,
+    isHistoryApplying,
+    noteHistoryCaughtUp,
   };
 })();
 
