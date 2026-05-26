@@ -6,7 +6,9 @@ const GIFs = (() => {
   let _isOpen = false;
   let _searchTimeout = null;
   let _currentTab = 'gifs';  // 'gifs' or 'stickers'
+  let _stickerSubTab = 'mine'; // 'mine' | 'channel'
   let _stickerPacks = [];
+  let _channelStickerPacks = [];
   let _stickersById = new Map(); // sticker_id -> { image_data, name, effects }
   let _stickerGridDelegated = false;
   let _smStickerCache = {};      // sticker_id -> full sticker row (used by the FX editor)
@@ -111,6 +113,7 @@ const GIFs = (() => {
         <div class="gif-tabs">
           <button class="gif-tab active" data-tab="gifs" onclick="GIFs.switchTab('gifs')">GIFs</button>
           <button class="gif-tab" data-tab="stickers" onclick="GIFs.switchTab('stickers')">Stickers</button>
+          <button class="gif-tab" data-tab="channel-stickers" onclick="GIFs.switchTab('channel-stickers')" id="gif-tab-channel-stickers" style="display:none">Channel</button>
         </div>
         <div style="display:flex;gap:6px;align-items:center">
           <button class="gif-manage-btn" id="gif-manage-btn" onclick="GIFs.openManager()" title="Manage sticker packs" style="display:none;padding:5px 10px;border-radius:8px;cursor:pointer;font-size:12px;font-weight:600">⚙ Manage</button>
@@ -470,10 +473,13 @@ const GIFs = (() => {
     }
 
     if (_isOpen) {
+      _updateChannelStickerTabVisible();
       _attachOutsideClose();
       if (_currentTab === 'gifs') {
         loadTrending();
         loadCategories();
+      } else if (_currentTab === 'channel-stickers') {
+        loadChannelStickerPacks();
       } else {
         loadStickerPacks();
       }
@@ -489,22 +495,41 @@ const GIFs = (() => {
     _detachOutsideClose();
   }
 
+  function _currentRoomId() {
+    if (!State?.currentRoom || State.currentRoomType === 'dm') return null;
+    const row = (State.rooms || []).find(r => r.name === State.currentRoom);
+    return row?.id != null ? Number(row.id) : null;
+  }
+
+  function _updateChannelStickerTabVisible() {
+    const tab = document.getElementById('gif-tab-channel-stickers');
+    if (tab) tab.style.display = _currentRoomId() ? '' : 'none';
+  }
+
   function switchTab(tab) {
     _currentTab = tab;
     document.querySelectorAll('.gif-tab').forEach(t => {
       t.classList.toggle('active', t.dataset.tab === tab);
     });
-    
+    _updateChannelStickerTabVisible();
+
     const searchInput = document.getElementById('gif-search');
     const categoriesEl = document.getElementById('gif-categories');
-    
+
     if (tab === 'gifs') {
       searchInput.placeholder = 'Search GIFs...';
       categoriesEl.style.display = 'flex';
       document.getElementById('gif-manage-btn').style.display = 'none';
       loadTrending();
       loadCategories();
+    } else if (tab === 'channel-stickers') {
+      _stickerSubTab = 'channel';
+      searchInput.placeholder = 'Search channel stickers...';
+      categoriesEl.style.display = 'none';
+      document.getElementById('gif-manage-btn').style.display = 'none';
+      loadChannelStickerPacks();
     } else {
+      _stickerSubTab = 'mine';
       searchInput.placeholder = 'Search stickers...';
       categoriesEl.style.display = 'none';
       document.getElementById('gif-manage-btn').style.display = '';
@@ -661,6 +686,145 @@ const GIFs = (() => {
     if (searchInput) searchInput.value = trimmed;
   }
 
+  async function loadChannelStickerPacks() {
+    const grid = document.getElementById('gif-grid');
+    if (!grid) return;
+    const rid = _currentRoomId();
+    if (!rid) {
+      grid.innerHTML = '<div class="gif-empty">Open a channel to use channel stickers</div>';
+      return;
+    }
+    grid.innerHTML = '<div class="gif-loading">Loading channel stickers...</div>';
+    try {
+      const res = await apiFetch(`/api/media/stickers/room/${rid}`);
+      if (!res.ok) throw new Error('API error');
+      const data = await res.json();
+      _channelStickerPacks = data.packs || [];
+      await _renderStickerPackGrid(grid, _channelStickerPacks, {
+        emptyHtml: '<div class="gif-empty">No channel stickers yet — channel mods can add packs in ⚙ Manage</div>',
+      });
+    } catch {
+      grid.innerHTML = '<div class="gif-empty">Failed to load channel stickers</div>';
+    }
+  }
+
+  async function _renderStickerPackGrid(grid, packs, opts = {}) {
+    _stickersById.clear();
+    const _toHydrate = [];
+    if (!packs.length) {
+      grid.innerHTML = opts.emptyHtml || '<div class="gif-empty">No stickers</div>';
+      return;
+    }
+    let html = '';
+    for (const pack of packs) {
+      const packRes = await apiFetch(`/api/media/stickers/packs/${pack.id}`);
+      if (!packRes.ok) continue;
+      const packData = await packRes.json();
+      if (!packData.stickers?.length) continue;
+      html += `<div class="sticker-pack-header">${UI.escHtml(pack.name)}</div>`;
+      html += packData.stickers.map(s => {
+        _stickersById.set(String(s.id), {
+          image_data: s.image_data,
+          name: s.name,
+          effects: s.effects || null,
+        });
+        const hasFx = s.effects && window.StickerFX && !StickerFX.isDefault(s.effects);
+        if (hasFx) _toHydrate.push(String(s.id));
+        return `
+          <div class="sticker-item" data-sticker-id="${UI.escHtml(String(s.id))}" title="${UI.escHtml(s.name)}">
+            <div class="sticker-host" data-sticker-id="${UI.escHtml(String(s.id))}">
+              ${hasFx ? '' : `<img src="${UI.escHtml(s.image_data)}" alt="${UI.escHtml(s.name)}" loading="lazy">`}
+            </div>
+          </div>`;
+      }).join('');
+    }
+    grid.innerHTML = html || '<div class="gif-empty">No stickers in these packs</div>';
+    if (window.StickerFX) {
+      for (const sid of _toHydrate) {
+        const rec = _stickersById.get(sid);
+        const slot = grid.querySelector(`.sticker-host[data-sticker-id="${CSS.escape(sid)}"]`);
+        if (!rec || !slot) continue;
+        StickerFX.renderInto(slot, { src: rec.image_data, effects: rec.effects, alt: rec.name, size: 96 });
+      }
+    }
+    if (!_stickerGridDelegated) {
+      grid.addEventListener('click', e => {
+        const item = e.target.closest('.sticker-item[data-sticker-id]');
+        if (!item) return;
+        const rec = _stickersById.get(String(item.dataset.stickerId || ''));
+        if (rec?.image_data) sendSticker(rec.image_data, rec.effects);
+      });
+      _stickerGridDelegated = true;
+    }
+    _bindStickerGridLongPress(grid);
+  }
+
+  function _canModerateChannel() {
+    if (!State?.user || State.currentRoomType === 'dm') return false;
+    if (State.user.is_admin) return true;
+    return State.currentRoomOwner === State.user.nickname
+      || (Array.isArray(State.currentRoomMods) && State.currentRoomMods.includes(State.user.nickname));
+  }
+
+  function _bindStickerGridLongPress(grid) {
+    if (!grid) return;
+    grid.querySelectorAll('.sticker-item:not([data-lp-bound])').forEach(item => {
+      item.dataset.lpBound = '1';
+      item.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        _openStickerItemMenu(item.dataset.stickerId, _stickerSubTab);
+      });
+      if (typeof bindLongPress === 'function') {
+        bindLongPress(item, (ev) => {
+          ev.preventDefault();
+          _openStickerItemMenu(item.dataset.stickerId, _stickerSubTab);
+        });
+      }
+    });
+  }
+
+  function _openStickerItemMenu(stickerId, scope) {
+    const items = [];
+    if (scope === 'channel') {
+      items.push({ label: 'Add to my stickers', icon: '➕', onclick: () => importStickerToAccount(stickerId) });
+    }
+    if (scope === 'mine') {
+      items.push({ label: 'Delete sticker', icon: '🗑', danger: true, onclick: () => deleteSticker(stickerId) });
+    }
+    if (!items.length) return;
+    if (typeof showActionSheet === 'function') showActionSheet('Sticker', items);
+    else if (items[0]?.onclick) items[0].onclick();
+  }
+
+  async function importStickerToAccount(stickerId) {
+    if (!stickerId) return;
+    try {
+      const r = await apiFetch('/api/media/stickers/import', 'POST', { sticker_id: Number(stickerId) });
+      const d = await r.json();
+      if (!r.ok) { UI.showToast(d.error || 'Could not save sticker', 'error'); return; }
+      UI.showToast(d.skipped ? 'Already in your stickers' : 'Added to your stickers', d.skipped ? 'info' : 'success');
+      if (_currentTab === 'stickers') loadStickerPacks();
+    } catch {
+      UI.showToast('Failed to save sticker', 'error');
+    }
+  }
+
+  async function importStickerImageToAccount(imageData, mediaType) {
+    if (!imageData) return;
+    try {
+      const r = await apiFetch('/api/media/stickers/import-image', 'POST', {
+        image_data: imageData,
+        media_type: mediaType || '',
+      });
+      const d = await r.json();
+      if (!r.ok) { UI.showToast(d.error || 'Could not save sticker', 'error'); return; }
+      UI.showToast(d.skipped ? 'Already in your stickers' : 'Added to your stickers', d.skipped ? 'info' : 'success');
+    } catch {
+      UI.showToast('Failed to save sticker', 'error');
+    }
+  }
+
   async function loadStickerPacks() {
     const grid = document.getElementById('gif-grid');
     grid.innerHTML = '<div class="gif-loading">Loading stickers...</div>';
@@ -683,63 +847,9 @@ const GIFs = (() => {
         `;
         return;
       }
-      
-      let html = '';
-      _stickersById.clear();
-      // Track which sticker items need shadow-DOM hosts mounted after
-      // the grid HTML is injected (so we can animate stickers in-place).
-      const _toHydrate = [];
-      for (const pack of _stickerPacks) {
-        const packRes = await apiFetch(`/api/media/stickers/packs/${pack.id}`);
-        if (packRes.ok) {
-          const packData = await packRes.json();
-          if (packData.stickers && packData.stickers.length > 0) {
-            html += `<div class="sticker-pack-header">${UI.escHtml(pack.name)}</div>`;
-            html += packData.stickers.map(s => {
-              _stickersById.set(String(s.id), {
-                image_data: s.image_data,
-                name: s.name,
-                effects: s.effects || null,
-              });
-              const hasFx = s.effects && window.StickerFX && !StickerFX.isDefault(s.effects);
-              if (hasFx) _toHydrate.push(String(s.id));
-              return `
-              <div class="sticker-item" data-sticker-id="${UI.escHtml(String(s.id))}" title="${UI.escHtml(s.name)}">
-                <div class="sticker-host" data-sticker-id="${UI.escHtml(String(s.id))}">
-                  ${hasFx ? '' : `<img src="${UI.escHtml(s.image_data)}" alt="${UI.escHtml(s.name)}" loading="lazy">`}
-                </div>
-              </div>`;
-            }).join('');
-          }
-        }
-      }
-      
-      grid.innerHTML = html || '<div class="gif-empty">No stickers in your packs</div>';
-      // Hydrate animated sticker hosts into the grid. Each host is its
-      // own closed shadow-root sandbox so the per-sticker CSS can never
-      // bleed into the picker UI.
-      if (window.StickerFX) {
-        for (const sid of _toHydrate) {
-          const rec = _stickersById.get(sid);
-          const slot = grid.querySelector(`.sticker-host[data-sticker-id="${CSS.escape(sid)}"]`);
-          if (!rec || !slot) continue;
-          StickerFX.renderInto(slot, {
-            src: rec.image_data,
-            effects: rec.effects,
-            alt: rec.name,
-            size: 96,
-          });
-        }
-      }
-      if (!_stickerGridDelegated) {
-        grid.addEventListener('click', e => {
-          const item = e.target.closest('.sticker-item[data-sticker-id]');
-          if (!item) return;
-          const rec = _stickersById.get(String(item.dataset.stickerId || ''));
-          if (rec && rec.image_data) sendSticker(rec.image_data, rec.effects);
-        });
-        _stickerGridDelegated = true;
-      }
+      await _renderStickerPackGrid(grid, _stickerPacks, {
+        emptyHtml: '<div class="gif-empty">No stickers in your packs</div>',
+      });
     } catch (e) {
       grid.innerHTML = '<div class="gif-empty">Failed to load stickers</div>';
     }
@@ -1494,6 +1604,9 @@ const GIFs = (() => {
     handleSearch,
     searchGifs,
     loadStickerPacks,
+    loadChannelStickerPacks,
+    importStickerToAccount,
+    importStickerImageToAccount,
     showPublicPacks,
     installPack,
     send,

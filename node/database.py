@@ -2703,11 +2703,13 @@ def _migrate():
             id         INTEGER PRIMARY KEY AUTOINCREMENT,
             name       TEXT NOT NULL,
             image_data TEXT NOT NULL,
+            image_hash TEXT NOT NULL DEFAULT '',
             uploaded_by INTEGER NOT NULL,
+            room_id    INTEGER DEFAULT NULL,
             is_global  INTEGER DEFAULT 0,
             created_at TEXT DEFAULT (datetime('now')),
-            UNIQUE(name),
-            FOREIGN KEY(uploaded_by) REFERENCES users(id) ON DELETE CASCADE
+            FOREIGN KEY(uploaded_by) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY(room_id) REFERENCES rooms(id) ON DELETE CASCADE
         )""")
         
         # ===================================================================
@@ -3302,6 +3304,8 @@ def _migrate():
                 con.execute(_idx)
             except Exception:
                 pass
+
+        _migrate_custom_emoji_sticker_scope(con)
 
         # Refresh planner statistics so the new indexes are actually used.
         try:
@@ -8834,13 +8838,130 @@ def get_blocked_users(user_id: int) -> List[Dict]:
 # Custom emoji helpers
 # ---------------------------------------------------------------------------
 
-def add_custom_emoji(name: str, image_data: str, uploaded_by: int, is_global: bool = False) -> Optional[int]:
+def _hash_data_url(image_data: str) -> str:
+    """SHA-256 hex of decoded data-URL payload (for dedupe)."""
+    try:
+        raw = str(image_data or "")
+        comma = raw.find(",")
+        if comma < 0:
+            return ""
+        payload = base64.b64decode(raw[comma + 1 :], validate=True)
+        return hashlib.sha256(payload).hexdigest()
+    except Exception:
+        return ""
+
+
+def _migrate_custom_emoji_sticker_scope(con: sqlite3.Connection) -> None:
+    """Per-user + per-channel emoji scope; room_id on sticker packs."""
+    try:
+        ce_cols = {r["name"] for r in con.execute("PRAGMA table_info(custom_emojis)").fetchall()}
+    except Exception:
+        return
+    if "room_id" not in ce_cols:
+        con.execute("""CREATE TABLE IF NOT EXISTS custom_emojis_v2 (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            name        TEXT NOT NULL,
+            image_data  TEXT NOT NULL,
+            image_hash  TEXT NOT NULL DEFAULT '',
+            uploaded_by INTEGER NOT NULL,
+            room_id     INTEGER DEFAULT NULL,
+            is_global   INTEGER DEFAULT 0,
+            created_at  TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY(uploaded_by) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY(room_id) REFERENCES rooms(id) ON DELETE CASCADE
+        )""")
+        old_rows = con.execute(
+            "SELECT id, name, image_data, uploaded_by, is_global, created_at FROM custom_emojis"
+        ).fetchall()
+        for row in old_rows:
+            img = row["image_data"] or ""
+            ih = _hash_data_url(img)
+            rid = None
+            con.execute(
+                """INSERT INTO custom_emojis_v2
+                   (id, name, image_data, image_hash, uploaded_by, room_id, is_global, created_at)
+                   VALUES (?,?,?,?,?,?,0,?)""",
+                (row["id"], row["name"], img, ih, row["uploaded_by"], rid, row["created_at"]),
+            )
+        con.execute("DROP TABLE custom_emojis")
+        con.execute("ALTER TABLE custom_emojis_v2 RENAME TO custom_emojis")
+        ce_cols = {r["name"] for r in con.execute("PRAGMA table_info(custom_emojis)").fetchall()}
+    if "image_hash" not in ce_cols:
+        try:
+            con.execute("ALTER TABLE custom_emojis ADD COLUMN image_hash TEXT NOT NULL DEFAULT ''")
+        except Exception:
+            pass
+        for row in con.execute("SELECT id, image_data FROM custom_emojis WHERE COALESCE(image_hash,'')=''").fetchall():
+            con.execute(
+                "UPDATE custom_emojis SET image_hash=? WHERE id=?",
+                (_hash_data_url(row["image_data"] or ""), row["id"]),
+            )
+    if "room_id" not in ce_cols:
+        try:
+            con.execute("ALTER TABLE custom_emojis ADD COLUMN room_id INTEGER DEFAULT NULL REFERENCES rooms(id)")
+        except Exception:
+            pass
+    try:
+        con.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_custom_emojis_personal "
+            "ON custom_emojis(uploaded_by, name) WHERE room_id IS NULL"
+        )
+        con.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_custom_emojis_room "
+            "ON custom_emojis(room_id, name) WHERE room_id IS NOT NULL"
+        )
+    except Exception:
+        pass
+    try:
+        sp_cols = {r["name"] for r in con.execute("PRAGMA table_info(sticker_packs)").fetchall()}
+    except Exception:
+        sp_cols = set()
+    if sp_cols and "room_id" not in sp_cols:
+        try:
+            con.execute(
+                "ALTER TABLE sticker_packs ADD COLUMN room_id INTEGER DEFAULT NULL "
+                "REFERENCES rooms(id) ON DELETE CASCADE"
+            )
+        except Exception:
+            pass
+    try:
+        con.execute("CREATE INDEX IF NOT EXISTS idx_sticker_packs_room ON sticker_packs(room_id)")
+    except Exception:
+        pass
+    con.commit()
+
+
+def add_custom_emoji(
+    name: str,
+    image_data: str,
+    uploaded_by: int,
+    *,
+    room_id: Optional[int] = None,
+    is_global: bool = False,
+) -> Optional[int]:
     """Add a custom emoji. Returns emoji ID or None if name taken."""
+    img_hash = _hash_data_url(image_data)
     try:
         with _conn() as con:
+            if room_id is None:
+                dup = con.execute(
+                    "SELECT id FROM custom_emojis WHERE uploaded_by=? AND room_id IS NULL AND image_hash=?",
+                    (uploaded_by, img_hash),
+                ).fetchone()
+                if dup and img_hash:
+                    return int(dup["id"])
             cur = con.execute(
-                "INSERT INTO custom_emojis (name, image_data, uploaded_by, is_global) VALUES (?,?,?,?)",
-                (name, image_data, uploaded_by, 1 if is_global else 0)
+                """INSERT INTO custom_emojis
+                   (name, image_data, image_hash, uploaded_by, room_id, is_global)
+                   VALUES (?,?,?,?,?,?)""",
+                (
+                    name,
+                    image_data,
+                    img_hash,
+                    uploaded_by,
+                    room_id,
+                    1 if (is_global and room_id is None) else 0,
+                ),
             )
             con.commit()
             return cur.lastrowid
@@ -8848,26 +8969,78 @@ def add_custom_emoji(name: str, image_data: str, uploaded_by: int, is_global: bo
         return None
 
 
-def delete_custom_emoji(emoji_id: int, user_id: int, is_admin: bool) -> bool:
-    """Delete a custom emoji. Only uploader or admin can delete."""
+def import_custom_emoji_to_user(user_id: int, source_emoji_id: int) -> Dict:
+    """Copy a channel/other emoji into the user's personal collection (hash dedupe)."""
     with _conn() as con:
+        row = con.execute(
+            "SELECT id, name, image_data, image_hash, uploaded_by, room_id FROM custom_emojis WHERE id=?",
+            (source_emoji_id,),
+        ).fetchone()
+        if not row:
+            return {"ok": False, "error": "not_found"}
+        src = dict(row)
+        ih = src.get("image_hash") or _hash_data_url(src.get("image_data") or "")
+        if ih:
+            dup = con.execute(
+                "SELECT id, name FROM custom_emojis WHERE uploaded_by=? AND room_id IS NULL AND image_hash=?",
+                (user_id, ih),
+            ).fetchone()
+            if dup:
+                return {"ok": True, "skipped": True, "id": int(dup["id"]), "name": dup["name"]}
+        base_name = str(src["name"] or "emoji")[:32]
+        name = base_name
+        n = 2
+        while con.execute(
+            "SELECT 1 FROM custom_emojis WHERE uploaded_by=? AND room_id IS NULL AND name=?",
+            (user_id, name),
+        ).fetchone():
+            suffix = f"_{n}"
+            name = (base_name[: max(2, 32 - len(suffix))] + suffix)[:32]
+            n += 1
+        try:
+            cur = con.execute(
+                """INSERT INTO custom_emojis
+                   (name, image_data, image_hash, uploaded_by, room_id, is_global)
+                   VALUES (?,?,?,?,NULL,0)""",
+                (name, src["image_data"], ih, user_id),
+            )
+            con.commit()
+            return {"ok": True, "skipped": False, "id": cur.lastrowid, "name": name}
+        except sqlite3.IntegrityError:
+            return {"ok": False, "error": "name_taken"}
+
+
+def delete_custom_emoji(emoji_id: int, user_id: int, is_admin: bool) -> bool:
+    """Delete a custom emoji (personal uploader or channel mod/admin)."""
+    with _conn() as con:
+        row = con.execute(
+            "SELECT uploaded_by, room_id FROM custom_emojis WHERE id=?", (emoji_id,)
+        ).fetchone()
+        if not row:
+            return False
+        rid = row["room_id"]
         if is_admin:
             cur = con.execute("DELETE FROM custom_emojis WHERE id=?", (emoji_id,))
-        else:
+        elif rid is None:
             cur = con.execute(
-                "DELETE FROM custom_emojis WHERE id=? AND uploaded_by=?",
-                (emoji_id, user_id)
+                "DELETE FROM custom_emojis WHERE id=? AND uploaded_by=? AND room_id IS NULL",
+                (emoji_id, user_id),
             )
+        else:
+            room = con.execute("SELECT name FROM rooms WHERE id=?", (int(rid),)).fetchone()
+            if not room or not can_moderate_room(room["name"], user_id, False):
+                return False
+            cur = con.execute("DELETE FROM custom_emojis WHERE id=?", (emoji_id,))
         con.commit()
-    return cur.rowcount > 0
+        return cur.rowcount > 0
 
 
 def get_custom_emojis() -> List[Dict]:
-    """Get all custom emojis."""
+    """Legacy: all custom emojis (avoid for picker; use scoped helpers)."""
     with _conn() as con:
         rows = con.execute("""
-            SELECT e.id, e.name, e.image_data, e.is_global, e.created_at,
-                   u.nickname AS uploaded_by_nick
+            SELECT e.id, e.name, e.image_data, e.image_hash, e.is_global, e.room_id,
+                   e.created_at, u.nickname AS uploaded_by_nick
             FROM custom_emojis e
             JOIN users u ON e.uploaded_by = u.id
             ORDER BY e.created_at DESC
@@ -8875,14 +9048,176 @@ def get_custom_emojis() -> List[Dict]:
     return [dict(r) for r in rows]
 
 
-def get_custom_emoji_by_name(name: str) -> Optional[Dict]:
-    """Get a custom emoji by name."""
+def get_user_custom_emojis(user_id: int) -> List[Dict]:
+    """Personal emojis for picker (account-wide)."""
+    with _conn() as con:
+        rows = con.execute("""
+            SELECT e.id, e.name, e.image_data, e.image_hash, e.created_at,
+                   u.nickname AS uploaded_by_nick
+            FROM custom_emojis e
+            JOIN users u ON e.uploaded_by = u.id
+            WHERE e.uploaded_by=? AND e.room_id IS NULL
+            ORDER BY e.created_at DESC
+        """, (user_id,)).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_room_custom_emojis(room_id: int) -> List[Dict]:
+    """Channel-scoped emojis (visible in that channel picker tab)."""
+    with _conn() as con:
+        rows = con.execute("""
+            SELECT e.id, e.name, e.image_data, e.image_hash, e.created_at,
+                   u.nickname AS uploaded_by_nick
+            FROM custom_emojis e
+            JOIN users u ON e.uploaded_by = u.id
+            WHERE e.room_id=?
+            ORDER BY e.created_at DESC
+        """, (room_id,)).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_custom_emojis_for_render(user_id: int, room_id: Optional[int]) -> List[Dict]:
+    """Union used to render :name: in the current channel (mine + channel)."""
+    out: Dict[str, Dict] = {}
+    for row in get_user_custom_emojis(user_id):
+        out[row["name"]] = row
+    if room_id:
+        for row in get_room_custom_emojis(room_id):
+            out[row["name"]] = row
+    return list(out.values())
+
+
+def get_custom_emoji_by_id(emoji_id: int) -> Optional[Dict]:
     with _conn() as con:
         row = con.execute(
-            "SELECT id, name, image_data, is_global FROM custom_emojis WHERE name=?",
-            (name,)
+            "SELECT id, name, image_data, image_hash, uploaded_by, room_id, is_global "
+            "FROM custom_emojis WHERE id=?",
+            (emoji_id,),
         ).fetchone()
     return dict(row) if row else None
+
+
+def get_custom_emoji_by_name(name: str, *, user_id: Optional[int] = None, room_id: Optional[int] = None) -> Optional[Dict]:
+    """Resolve a custom emoji by name in personal or channel scope."""
+    with _conn() as con:
+        if room_id is not None:
+            row = con.execute(
+                "SELECT id, name, image_data, room_id FROM custom_emojis WHERE name=? AND room_id=?",
+                (name, room_id),
+            ).fetchone()
+            if row:
+                return dict(row)
+        if user_id is not None:
+            row = con.execute(
+                "SELECT id, name, image_data, room_id FROM custom_emojis "
+                "WHERE name=? AND uploaded_by=? AND room_id IS NULL",
+                (name, user_id),
+            ).fetchone()
+            if row:
+                return dict(row)
+        row = con.execute(
+            "SELECT id, name, image_data, is_global, room_id FROM custom_emojis WHERE name=? LIMIT 1",
+            (name,),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def import_sticker_image_to_user(
+    user_id: int, image_data: str, effects: Optional[str] = None
+) -> Dict:
+    """Save sticker bytes into Saved pack (hash / exact data dedupe)."""
+    with _conn() as con:
+        pack_id = ensure_user_saved_sticker_pack(user_id)
+        dup = con.execute(
+            """SELECT s.id FROM stickers s
+               JOIN sticker_packs p ON s.pack_id = p.id
+               WHERE p.owner_id=? AND p.room_id IS NULL AND s.image_data=?""",
+            (user_id, image_data),
+        ).fetchone()
+        if dup:
+            return {"ok": True, "skipped": True, "id": int(dup["id"]), "pack_id": pack_id}
+        count = con.execute("SELECT COUNT(*) FROM stickers WHERE pack_id=?", (pack_id,)).fetchone()[0]
+        if count >= 30:
+            return {"ok": False, "error": "saved_pack_full"}
+        name = f"saved_{int(time.time())}"[-32:]
+        cur = con.execute(
+            "INSERT INTO stickers (pack_id, name, image_data, emoji, effects) VALUES (?,?,?,?,?)",
+            (pack_id, name, image_data, "", effects),
+        )
+        con.commit()
+        return {"ok": True, "skipped": False, "id": cur.lastrowid, "pack_id": pack_id, "name": name}
+
+
+def import_sticker_to_user(user_id: int, source_sticker_id: int) -> Dict:
+    """Copy a sticker into the user's Saved pack (skip if same image hash)."""
+    with _conn() as con:
+        src = con.execute(
+            "SELECT id, pack_id, name, image_data, emoji, effects FROM stickers WHERE id=?",
+            (source_sticker_id,),
+        ).fetchone()
+        if not src:
+            return {"ok": False, "error": "not_found"}
+        src = dict(src)
+        ih = _hash_data_url(src.get("image_data") or "")
+        pack_id = ensure_user_saved_sticker_pack(user_id)
+        if ih:
+            dup = con.execute(
+                """SELECT s.id FROM stickers s
+                   JOIN sticker_packs p ON s.pack_id = p.id
+                   WHERE p.owner_id=? AND p.room_id IS NULL AND s.image_data=?""",
+                (user_id, src["image_data"]),
+            ).fetchone()
+            if dup:
+                return {"ok": True, "skipped": True, "id": int(dup["id"]), "pack_id": pack_id}
+        count = con.execute("SELECT COUNT(*) FROM stickers WHERE pack_id=?", (pack_id,)).fetchone()[0]
+        if count >= 30:
+            return {"ok": False, "error": "saved_pack_full"}
+        base_name = str(src.get("name") or "sticker")[:32]
+        name = base_name
+        n = 2
+        while con.execute(
+            "SELECT 1 FROM stickers WHERE pack_id=? AND name=?", (pack_id, name)
+        ).fetchone():
+            suffix = f"_{n}"
+            name = (base_name[: max(2, 32 - len(suffix))] + suffix)[:32]
+            n += 1
+        cur = con.execute(
+            "INSERT INTO stickers (pack_id, name, image_data, emoji, effects) VALUES (?,?,?,?,?)",
+            (pack_id, name, src["image_data"], src.get("emoji") or "", src.get("effects")),
+        )
+        con.commit()
+        return {"ok": True, "skipped": False, "id": cur.lastrowid, "pack_id": pack_id, "name": name}
+
+
+def ensure_user_saved_sticker_pack(user_id: int) -> int:
+    """Default pack for stickers saved from chat."""
+    with _conn() as con:
+        con.execute("""CREATE TABLE IF NOT EXISTS sticker_packs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            description TEXT DEFAULT '',
+            owner_id INTEGER NOT NULL,
+            is_public INTEGER DEFAULT 0,
+            room_id INTEGER DEFAULT NULL,
+            created_at TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE CASCADE
+        )""")
+        try:
+            con.execute("ALTER TABLE sticker_packs ADD COLUMN room_id INTEGER DEFAULT NULL")
+        except Exception:
+            pass
+        row = con.execute(
+            "SELECT id FROM sticker_packs WHERE owner_id=? AND room_id IS NULL AND name='Saved'",
+            (user_id,),
+        ).fetchone()
+        if row:
+            return int(row["id"])
+        cur = con.execute(
+            "INSERT INTO sticker_packs (name, description, owner_id, is_public) VALUES ('Saved', 'Saved from chat', ?, 0)",
+            (user_id,),
+        )
+        con.commit()
+        return int(cur.lastrowid)
 
 
 # ---------------------------------------------------------------------------

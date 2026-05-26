@@ -1389,6 +1389,156 @@ body.cw-composer-locked #msg-input {
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent-color) 8%, transparent);
 }
 
+/* Message pane sync pulse (matches composer top bar while history loads) */
+#main #messages-area.chat-switching-swr.ft-sync-active {
+  position: relative;
+}
+#main #messages-area.chat-switching-swr.ft-sync-active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 2px;
+  z-index: 40;
+  pointer-events: none;
+  border-radius: 2px 2px 0 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    color-mix(in srgb, var(--accent-color) 35%, transparent) 35%,
+    var(--accent-color) 50%,
+    color-mix(in srgb, var(--accent-color) 35%, transparent) 65%,
+    transparent 100%
+  );
+  background-size: 220% 100%;
+  animation: ftComposeLoadBar 2.6s ease-in-out infinite;
+}
+
+/* Discord-style outline skeletons (channels, DMs, member list) */
+@keyframes ftSkelIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes ftSkelShimmer {
+  0% { transform: translateX(-100%); opacity: 0.25; }
+  55% { opacity: 0.55; }
+  100% { transform: translateX(100%); opacity: 0.25; }
+}
+
+#main #messages-area.ft-chat-skeleton-active .cw-chat-content {
+  min-height: 120px;
+}
+
+.ft-chat-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 10px 14px 4px;
+  pointer-events: none;
+  animation: ftSkelIn 0.16s ease-out both;
+}
+
+.ft-skel-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  max-width: min(88%, 520px);
+  animation: ftSkelIn 0.2s ease-out both;
+  animation-delay: calc(var(--ft-skel-i, 0) * 35ms);
+}
+.ft-skel-row.is-self {
+  flex-direction: row-reverse;
+  margin-left: auto;
+  max-width: min(78%, 440px);
+}
+
+.ft-skel-avatar {
+  flex: 0 0 34px;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  position: relative;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--surface-color) 92%, var(--accent-color) 8%);
+  border: 1px solid color-mix(in srgb, var(--border-color) 70%, var(--accent-color) 12%);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text-color) 4%, transparent);
+}
+.ft-skel-avatar.sm {
+  flex: 0 0 28px;
+  width: 28px;
+  height: 28px;
+}
+
+.ft-skel-bubble {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-width: 72px;
+  padding: 9px 11px;
+  border-radius: 12px;
+  position: relative;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--surface-color) 90%, var(--accent-color) 10%);
+  border: 1px solid color-mix(in srgb, var(--border-color) 72%, var(--accent-color) 10%);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text-color) 3%, transparent);
+}
+.ft-skel-row.is-self .ft-skel-bubble {
+  border-radius: 12px 12px 4px 12px;
+}
+.ft-skel-row:not(.is-self) .ft-skel-bubble {
+  border-radius: 4px 12px 12px 12px;
+}
+
+.ft-skel-line {
+  display: block;
+  height: 11px;
+  border-radius: 6px;
+  position: relative;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--bg-color) 55%, var(--surface-color));
+  border: 1px solid color-mix(in srgb, var(--border-color) 55%, transparent);
+}
+
+.ft-skel-avatar::before,
+.ft-skel-bubble::before,
+.ft-skel-line::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    color-mix(in srgb, var(--accent-color) 12%, var(--surface-color)) 48%,
+    color-mix(in srgb, var(--accent-color) 22%, var(--surface-color)) 52%,
+    transparent 100%
+  );
+  animation: ftSkelShimmer 1.05s ease-in-out infinite;
+  animation-delay: calc(var(--ft-skel-i, 0) * 45ms);
+}
+
+.users-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px 8px 14px;
+}
+.ft-skel-user-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 6px;
+  border-radius: 8px;
+  animation: ftSkelIn 0.18s ease-out both;
+  animation-delay: calc(var(--ft-skel-i, 0) * 40ms);
+}
+.ft-skel-user-row .ft-skel-line {
+  flex: 1;
+  height: 12px;
+  max-width: 72%;
+}
+
 /* Thin sync strip (fast channel / DM switches) */
 .ft-chat-sync-strip {
   position: sticky;
@@ -1557,6 +1707,14 @@ body.cw-composer-locked #msg-input {
     transform: none;
     filter: none;
     transition: none;
+  }
+
+  .ft-chat-skeleton,
+  .ft-skel-row,
+  .ft-skel-avatar::before,
+  .ft-skel-bubble::before,
+  .ft-skel-line::before {
+    animation: none !important;
   }
 
   .ch-transition-shimmer {

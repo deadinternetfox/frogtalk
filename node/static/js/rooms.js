@@ -126,6 +126,7 @@ const Rooms = (() => {
   const _SWITCH_WATCHDOG_MS = 8000;
   const _CHAT_TRANSITION_ID = 'ft-chat-transition';
   const _CHAT_SYNC_STRIP_ID = 'ft-chat-sync-strip';
+  const _CHAT_SKELETON_ID = 'ft-chat-skeleton';
   const _ROOM_REVISIT_MS = 45000;
 
   function _isSwitchAlive(token) {
@@ -145,7 +146,70 @@ const Rooms = (() => {
     const area = document.getElementById('messages-area');
     if (!area) return false;
     const shell = area.querySelector('#cw-chat-content');
-    return !!(shell && shell.children.length);
+    if (!shell || !shell.children.length) return false;
+    return _shellHasRealMessages(shell);
+  }
+
+  function _shellHasRealMessages(shellIn) {
+    const shell = shellIn || _chatShell();
+    if (!shell) return false;
+    return !!shell.querySelector('[id^="msg-"]:not(#msg-empty-state)');
+  }
+
+  function _chatSkeletonRowHtml(row, i) {
+    const self = !!row.self;
+    const lines = (row.w || [70]).map((pct) => {
+      const p = Math.max(28, Math.min(96, Number(pct) || 70));
+      return `<span class="ft-skel-line" style="width:${p}%"></span>`;
+    }).join('');
+    return `<div class="ft-skel-row${self ? ' is-self' : ''}" style="--ft-skel-i:${i}">`
+      + '<span class="ft-skel-avatar" aria-hidden="true"></span>'
+      + `<span class="ft-skel-bubble">${lines}</span>`
+      + '</div>';
+  }
+
+  function _chatSkeletonMarkup(variant) {
+    const channelRows = [
+      { self: false, w: [92, 68] },
+      { self: false, w: [78, 52, 38] },
+      { self: true, w: [62, 44] },
+      { self: false, w: [88, 58] },
+      { self: false, w: [72] },
+      { self: true, w: [66, 40] },
+    ];
+    const dmRows = [
+      { self: false, w: [74, 48] },
+      { self: true, w: [58, 36] },
+      { self: false, w: [82, 54, 32] },
+      { self: true, w: [48] },
+      { self: false, w: [70, 42] },
+    ];
+    const rows = variant === 'dm' ? dmRows : channelRows;
+    return `<div class="ft-chat-skeleton" id="${_CHAT_SKELETON_ID}" aria-hidden="true" data-variant="${variant}">`
+      + rows.map((r, i) => _chatSkeletonRowHtml(r, i)).join('')
+      + '</div>';
+  }
+
+  function showChatLoadSkeleton(variant) {
+    const area = document.getElementById('messages-area');
+    if (!area || !area.classList.contains('chat-switching-swr')) return;
+    if (_shellHasRealMessages()) return;
+    const shell = _chatShell(area);
+    if (!shell) return;
+    if (document.getElementById(_CHAT_SKELETON_ID)) return;
+    const wrap = document.createElement('div');
+    wrap.innerHTML = _chatSkeletonMarkup(variant === 'dm' ? 'dm' : 'channel');
+    const skel = wrap.firstElementChild;
+    if (!skel) return;
+    const strip = shell.querySelector('#' + _CHAT_SYNC_STRIP_ID);
+    if (strip) shell.insertBefore(skel, strip);
+    else shell.appendChild(skel);
+    area.classList.add('ft-chat-skeleton-active');
+  }
+
+  function hideChatLoadSkeleton() {
+    try { document.getElementById(_CHAT_SKELETON_ID)?.remove(); } catch {}
+    try { document.getElementById('messages-area')?.classList.remove('ft-chat-skeleton-active'); } catch {}
   }
 
   function _messageSafeForCachePreview(msg) {
@@ -249,7 +313,13 @@ const Rooms = (() => {
       room: { name: r, channel_type: chType },
     });
     try { setRoomHeader(r, type || 'public', null, null, chType); } catch {}
+    try {
+      const sk = r;
+      window.FtCompose?.beginChannelSwitch?.(sk, { swr: true });
+    } catch {}
+    try { window.FtCompose?.refresh?.(); } catch {}
     try { area.scrollTop = area.scrollHeight; } catch {}
+    if (!channelHasUsableCache(r)) showChatLoadSkeleton('channel');
   }
 
   function _setSyncStripCtx(name, type, dmPeer, stripOpts) {
@@ -300,13 +370,58 @@ const Rooms = (() => {
       + roomIconHtml(room?.icon, type, 'ft-sync-strip-icon-inner', chType) + '</span>';
   }
 
+  function _channelSwitchUiPending() {
+    try {
+      if (window.FtCompose?.isChannelLoading?.()) return true;
+    } catch {}
+    try {
+      if (State._roomSwitchInProgress) return true;
+    } catch {}
+    return false;
+  }
+
+  function refreshSyncStripChrome() {
+    const area = document.getElementById('messages-area');
+    if (!area) return;
+    const swr = area.classList.contains('chat-switching-swr');
+    const pending = _channelSwitchUiPending();
+    area.classList.toggle('ft-sync-active', pending && swr);
+    if (!pending || !swr) return;
+    const ctx = State._syncStripCtx;
+    if (!ctx) return;
+    _showChatSyncStrip(ctx.name, ctx.type, ctx.dmPeer, {
+      ...(ctx.stripOpts || {}),
+      noFlash: true,
+    });
+  }
+
   function _showChatSyncStrip(name, type, dmPeer, stripOpts) {
     const area = document.getElementById('messages-area');
     const shell = _chatShell(area);
     if (!area || !shell) return;
-    _hideChatSyncStrip();
     const o = stripOpts && typeof stripOpts === 'object' ? stripOpts : {};
     _setSyncStripCtx(name, type, dmPeer, o);
+    const existing = document.getElementById(_CHAT_SYNC_STRIP_ID);
+    if (existing && o.noFlash) {
+      const roomKey = String(name || '').replace(/^#/, '').trim();
+      let title = '';
+      let sub = '';
+      if (type === 'dm') {
+        const nick = String(dmPeer || '').replace(/^@/, '');
+        title = nick ? `@${_escTransition(nick)}` : 'Direct message';
+        sub = 'Updating conversation';
+      } else {
+        title = roomKey ? `#${_escTransition(roomKey)}` : 'Channel';
+        sub = 'Syncing messages';
+      }
+      const tEl = existing.querySelector('.ft-sync-strip-title');
+      const sEl = existing.querySelector('.ft-sync-strip-sub');
+      if (tEl) tEl.textContent = title;
+      if (sEl) sEl.textContent = `${sub}…`;
+      area.classList.add('ft-sync-active');
+      return;
+    }
+    _hideChatSyncStrip();
     const roomKey = String(name || '').replace(/^#/, '').trim();
     let title = '';
     let sub = '';
@@ -332,6 +447,7 @@ const Rooms = (() => {
       '</span>' +
       '<span class="ft-sync-strip-spinner" aria-hidden="true"></span>';
     shell.appendChild(strip);
+    area.classList.add('ft-sync-active');
     try {
       requestAnimationFrame(() => {
         area.scrollTop = area.scrollHeight;
@@ -1557,11 +1673,16 @@ const Rooms = (() => {
         channelType: room?.channel_type || opts.channelType,
         dmAvatar: opts.dmAvatar,
       };
-      _showChatSyncStrip(name, type, dmPeer, stripOpts);
+      _showChatSyncStrip(name, type, dmPeer, {
+        ...stripOpts,
+        noFlash: !!document.getElementById(_CHAT_SYNC_STRIP_ID),
+      });
       if (opts.beginSwitch !== false && switchKey) {
         try { window.FtCompose?.beginChannelSwitch?.(switchKey, { swr: true }); } catch {}
       }
       try { window.FtCompose?.refresh?.(); } catch {}
+      try { refreshSyncStripChrome(); } catch {}
+      if (!_shellHasRealMessages()) showChatLoadSkeleton(type === 'dm' ? 'dm' : 'channel');
       return;
     }
 
@@ -1650,7 +1771,20 @@ const Rooms = (() => {
     const area = document.getElementById('messages-area');
     if (!area) return;
     const shell = area.querySelector('#cw-chat-content');
-    if (shell) { shell.innerHTML = ''; return; }
+    if (shell) {
+      let savedStrip = null;
+      let savedSkel = null;
+      if (area.classList.contains('chat-switching-swr')) {
+        savedStrip = shell.querySelector('#' + _CHAT_SYNC_STRIP_ID);
+        if (savedStrip) savedStrip.remove();
+        savedSkel = shell.querySelector('#' + _CHAT_SKELETON_ID);
+        if (savedSkel) savedSkel.remove();
+      }
+      shell.innerHTML = '';
+      if (savedSkel) shell.appendChild(savedSkel);
+      if (savedStrip) shell.appendChild(savedStrip);
+      return;
+    }
     const keepIds = new Set([_CHAT_TRANSITION_ID, 'ft-content-warning-gate']);
     for (const ch of [...area.children]) {
       if (keepIds.has(ch.id)) continue;
@@ -1759,9 +1893,16 @@ const Rooms = (() => {
 
     const wasSwr = !!(area && area.classList.contains('chat-switching-swr'));
 
-    // Content painted under the shell — reveal chat and cut overlay instantly (no fade gap).
+    // Content painted — only peel sync chrome when compose load is actually done.
     if (finish && contentReady) {
-      try { area?.classList.remove('chat-switching', 'chat-switching-swr'); } catch {}
+      if (_channelSwitchUiPending() && !force) {
+        refreshSyncStripChrome();
+        try { overlay?.remove(); } catch {}
+        finalizeCompose();
+        return;
+      }
+      try { area?.classList.remove('chat-switching', 'chat-switching-swr', 'ft-sync-active', 'ft-chat-skeleton-active'); } catch {}
+      hideChatLoadSkeleton();
       _hideChatSyncStrip();
       try { overlay?.remove(); } catch {}
       finalizeCompose();
@@ -1770,7 +1911,8 @@ const Rooms = (() => {
 
     const finalize = () => {
       try { document.getElementById(_CHAT_TRANSITION_ID)?.remove(); } catch {}
-      try { area?.classList.remove('chat-switching', 'chat-switching-swr'); } catch {}
+      try { area?.classList.remove('chat-switching', 'chat-switching-swr', 'ft-sync-active', 'ft-chat-skeleton-active'); } catch {}
+      hideChatLoadSkeleton();
       _hideChatSyncStrip();
       finalizeCompose();
     };
@@ -2017,6 +2159,10 @@ const Rooms = (() => {
     State.currentRoom = name;
     State.currentRoomType = type;
     State.dmPeer = dmPeer;
+    try {
+      if (typeof refreshEmojiRenderCache === 'function') void refreshEmojiRenderCache();
+      else if (typeof loadCustomEmojis === 'function') void loadCustomEmojis();
+    } catch {}
     try {
       if (typeof UI !== 'undefined' && UI.updateTypingBar) UI.updateTypingBar();
     } catch {}
@@ -4269,6 +4415,9 @@ const Rooms = (() => {
     syncContentWarningFields: _syncContentWarningFields,
     showChatTransition,
     showBootChannelSyncPreview,
+    refreshSyncStripChrome,
+    showChatLoadSkeleton,
+    hideChatLoadSkeleton,
     clearChatTransition,
     finishChannelSwitch,
     recoverChannelSwitch,
@@ -4283,6 +4432,9 @@ const Rooms = (() => {
 try {
   window.showChatTransition = Rooms.showChatTransition;
   window.showBootChannelSyncPreview = Rooms.showBootChannelSyncPreview;
+  window.refreshSyncStripChrome = Rooms.refreshSyncStripChrome;
+  window.showChatLoadSkeleton = Rooms.showChatLoadSkeleton;
+  window.hideChatLoadSkeleton = Rooms.hideChatLoadSkeleton;
   window.clearChatTransition = Rooms.clearChatTransition;
   window.finishChannelSwitch = Rooms.finishChannelSwitch;
   window.recoverChannelSwitch = Rooms.recoverChannelSwitch;
