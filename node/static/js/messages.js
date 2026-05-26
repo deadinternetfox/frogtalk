@@ -2803,8 +2803,8 @@ const Messages = (() => {
 
   function _insertHistoryHtml(mount, html) {
     if (!html || !mount) return;
-    const strip = mount.querySelector('#ft-chat-sync-strip');
-    if (strip) strip.insertAdjacentHTML('beforebegin', html);
+    const skel = mount.querySelector('#ft-chat-skeleton');
+    if (skel) skel.insertAdjacentHTML('beforebegin', html);
     else mount.insertAdjacentHTML('beforeend', html);
   }
 
@@ -2880,7 +2880,6 @@ const Messages = (() => {
 
     if (!sameWindow && !extended) return false;
 
-    try { window.hideChatLoadSkeleton?.(); } catch {}
     _patchCachedHistoryEdits(room, incoming, prevCache);
     _syncRoomMessageCache(room, incoming);
 
@@ -2904,7 +2903,10 @@ const Messages = (() => {
     try { _hydrateStickers(area); } catch {}
     try { area.scrollTop = area.scrollHeight; } catch {}
     try { window.restoreSyncStripIfSwitching?.(room); } catch {}
-    if (!options.deferFinish) _finishSwitchAfterPaint(room);
+    if (!options.deferFinish) {
+      try { window.hideChatLoadSkeleton?.(true); } catch {}
+      _finishSwitchAfterPaint(room);
+    }
     return true;
   }
 
@@ -2938,7 +2940,6 @@ const Messages = (() => {
     let options = opts && typeof opts === 'object' ? opts : {};
     if (options.fromCache) options = { ...options, reveal: false };
     if (room !== State.currentRoom) return;
-    try { window.hideChatLoadSkeleton?.(); } catch {}
     try {
       if (window.ContentWarning?.isGateActive?.()) return;
     } catch {}
@@ -2950,7 +2951,6 @@ const Messages = (() => {
     _lastDate = null;
 
     if (!options.forceRebuild && mergeRoomHistory(room, msgs, options)) {
-      try { window.hideChatLoadSkeleton?.(); } catch {}
       return;
     }
 
@@ -2973,7 +2973,21 @@ const Messages = (() => {
     const { html, linksToPreview } = _buildHistoryChunkHtml(msgs, options);
     _syncRoomMessageCache(room, msgs);
 
+    const areaEl = area;
+    const keepTailSkel = !!options.deferFinish
+      && areaEl?.classList.contains('chat-switching-swr')
+      && (typeof window.chatSwitchSyncing === 'function' ? window.chatSwitchSyncing() : true);
+    let savedSkel = null;
+    if (keepTailSkel) {
+      savedSkel = mount.querySelector('#ft-chat-skeleton');
+      if (savedSkel) savedSkel.remove();
+    }
     mount.innerHTML = html;
+    if (savedSkel) {
+      mount.appendChild(savedSkel);
+    } else if (keepTailSkel && msgs.length) {
+      try { window.showChatLoadSkeleton?.('channel', { tail: true, noAnim: true }); } catch {}
+    }
     if (!html && !options.deferFinish) {
       mount.innerHTML = _emptyStateHtml(room);
     }
@@ -2981,6 +2995,7 @@ const Messages = (() => {
       _applyMessageReveal(mount, options);
     }
     if (!options.deferFinish) {
+      try { window.hideChatLoadSkeleton?.(true); } catch {}
       _finishSwitchAfterPaint(room);
     }
     mount.scrollTop = mount.scrollHeight;
@@ -4161,6 +4176,35 @@ const Messages = (() => {
     return { id: _replyTo.id, nickname: _replyTo.nickname, content: _replyTo.content };
   }
 
+  function _actionSheetRank(label) {
+    const s = String(label || '').toLowerCase();
+    if (s.includes('reply')) return 10;
+    if (s.includes('react')) return 20;
+    if (s === 'copy' || s.includes('copy message')) return 30;
+    if (s.includes('copy link')) return 35;
+    if (s.includes('add emoji')) return 40;
+    if (s.includes('add sticker')) return 42;
+    if (s.includes('forward')) return 50;
+    if (s.includes('pin')) return 55;
+    if (s.includes('edit')) return 60;
+    if (s.includes('spoiler')) return 65;
+    if (s.includes('moderation') || s === 'moderate') return 80;
+    if (s.includes('kick')) return 85;
+    if (s.includes('mute')) return 86;
+    if (s.includes('ban') && !s.includes('unban')) return 87;
+    if (s.includes('delete')) return 100;
+    return 70;
+  }
+
+  function _mountActionSheetBtn(itemsWrap, item, delayMs) {
+    const asBtn = document.createElement('button');
+    asBtn.className = 'as-btn' + (item.danger ? ' danger' : '');
+    asBtn.style.animationDelay = `${delayMs}ms`;
+    asBtn.innerHTML = `<span class="as-ic">${UI.escHtml(item.icon)}</span><span>${UI.escHtml(item.label)}</span>`;
+    asBtn.onclick = item.onClick;
+    itemsWrap.appendChild(asBtn);
+  }
+
   // Open an action sheet for a message — pulls buttons from the hidden .msg-actions
   // of that message and shows them as a mobile-friendly overlay.
   function openActionSheet(msgId) {
@@ -4184,107 +4228,11 @@ const Messages = (() => {
     `;
     const itemsWrap = sheet.querySelector('.as-items');
 
-    const embedUrls = _collectEmbedUrlsFromMessage(msgEl);
-    embedUrls.forEach((url, i) => {
-      const asBtn = document.createElement('button');
-      asBtn.className = 'as-btn';
-      asBtn.style.animationDelay = (20 + i * 24) + 'ms';
-      const label = embedUrls.length > 1 ? `Copy link ${i + 1}` : 'Copy link';
-      asBtn.innerHTML = `<span class="as-ic">🔗</span><span>${UI.escHtml(label)}</span>`;
-      asBtn.onclick = (e) => {
-        e.stopPropagation();
-        try { navigator.vibrate?.(8); } catch {}
-        _copyTextToClipboard(url, 'Link copied');
-        close(true);
-      };
-      itemsWrap.appendChild(asBtn);
-    });
-
     const labelFor = (btn) => {
       const t = (btn.getAttribute('title') || '').trim();
       const txt = (btn.textContent || '').trim();
       return t || txt || 'Action';
     };
-
-    const stickerEl = msgEl.querySelector('.frog-sticker-mount[data-fx-src]');
-    if (stickerEl && window.GIFs && typeof GIFs.importStickerImageToAccount === 'function') {
-      const asBtn = document.createElement('button');
-      asBtn.className = 'as-btn';
-      asBtn.style.animationDelay = '12ms';
-      asBtn.innerHTML = '<span class="as-ic">🎴</span><span>Add to my stickers</span>';
-      asBtn.onclick = (e) => {
-        e.stopPropagation();
-        try { navigator.vibrate?.(8); } catch {}
-        close(true);
-        setTimeout(() => {
-          GIFs.importStickerImageToAccount(
-            stickerEl.getAttribute('data-fx-src'),
-            stickerEl.getAttribute('data-fx-mt') || ''
-          );
-        }, 80);
-      };
-      itemsWrap.appendChild(asBtn);
-    }
-    const customEmojiImg = msgEl.querySelector('.custom-emoji-inline[data-emoji-id]');
-    if (customEmojiImg && typeof importEmojiToAccount === 'function') {
-      const eid = customEmojiImg.getAttribute('data-emoji-id');
-      if (eid) {
-        const asBtn = document.createElement('button');
-        asBtn.className = 'as-btn';
-        asBtn.style.animationDelay = '16ms';
-        asBtn.innerHTML = '<span class="as-ic">😀</span><span>Add to my emojis</span>';
-        asBtn.onclick = (e) => {
-          e.stopPropagation();
-          try { navigator.vibrate?.(8); } catch {}
-          close(true);
-          setTimeout(() => importEmojiToAccount(eid), 80);
-        };
-        itemsWrap.appendChild(asBtn);
-      }
-    }
-
-    Array.from(actionsRow.querySelectorAll('button.msg-act-btn')).forEach((btn, i) => {
-      // Skip the redundant ⋯ sub-menu trigger — its children are already listed here
-      if (btn.classList.contains('msg-mod-more')) return;
-      const isDanger = btn.classList.contains('danger');
-      const icon = (btn.textContent || '•').trim();
-      const label = labelFor(btn);
-      const actionTitle = label.toLowerCase();
-      const asBtn = document.createElement('button');
-      asBtn.className = 'as-btn' + (isDanger ? ' danger' : '');
-      asBtn.style.animationDelay = (40 + i * 28) + 'ms';
-      asBtn.innerHTML = `<span class="as-ic">${UI.escHtml(icon)}</span><span>${UI.escHtml(label)}</span>`;
-      asBtn.onclick = (e) => {
-        e.stopPropagation();
-        try { navigator.vibrate?.(8); } catch {}
-        const isForwardAction = actionTitle.includes('forward');
-        close(isForwardAction);
-        // Defer so the sheet is gone before any menu/popup the action opens.
-        // On some media/link-only messages, programmatic clicks on hidden
-        // action-row buttons can be flaky, so invoke Forward directly.
-        setTimeout(() => {
-          if (isForwardAction) {
-            const isDM = !!msgEl.getAttribute('data-dmid');
-            if (isDM && typeof window.forwardDMMessage === 'function') {
-              window.forwardDMMessage(msgId);
-              return;
-            }
-            if (!isDM && typeof forwardMessage === 'function') {
-              forwardMessage(msgId);
-              return;
-            }
-          }
-          try {
-            btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
-          } catch {
-            try { btn.click(); } catch {}
-          }
-        }, isForwardAction ? 25 : 180);
-      };
-      itemsWrap.appendChild(asBtn);
-    });
-
-    if (!itemsWrap.children.length) return;
 
     const close = (immediate) => {
       if (sheet.classList.contains('closing')) return;
@@ -4295,6 +4243,109 @@ const Messages = (() => {
       sheet.classList.add('closing');
       setTimeout(() => sheet.remove(), 180);
     };
+
+    const menuItems = [];
+
+    const embedUrls = _collectEmbedUrlsFromMessage(msgEl);
+    embedUrls.forEach((url, i) => {
+      const label = embedUrls.length > 1 ? `Copy link ${i + 1}` : 'Copy link';
+      menuItems.push({
+        rank: _actionSheetRank(label),
+        icon: '🔗',
+        label,
+        onClick: (e) => {
+          e.stopPropagation();
+          try { navigator.vibrate?.(8); } catch {}
+          _copyTextToClipboard(url, 'Link copied');
+          close(true);
+        },
+      });
+    });
+
+    const stickerEl = msgEl.querySelector('.frog-sticker-mount[data-fx-src]');
+    if (stickerEl && window.GIFs && typeof GIFs.importStickerImageToAccount === 'function') {
+      menuItems.push({
+        rank: _actionSheetRank('add sticker'),
+        icon: '🎴',
+        label: 'Add sticker',
+        onClick: (e) => {
+          e.stopPropagation();
+          try { navigator.vibrate?.(8); } catch {}
+          close(true);
+          setTimeout(() => {
+            GIFs.importStickerImageToAccount(
+              stickerEl.getAttribute('data-fx-src'),
+              stickerEl.getAttribute('data-fx-mt') || ''
+            );
+          }, 80);
+        },
+      });
+    }
+
+    const customEmojiImg = msgEl.querySelector('.custom-emoji-inline[data-emoji-id]');
+    if (customEmojiImg && typeof importEmojiToAccount === 'function') {
+      const eid = customEmojiImg.getAttribute('data-emoji-id');
+      if (eid) {
+        menuItems.push({
+          rank: _actionSheetRank('add emoji'),
+          icon: '😀',
+          label: 'Add emoji',
+          onClick: (e) => {
+            e.stopPropagation();
+            try { navigator.vibrate?.(8); } catch {}
+            close(true);
+            setTimeout(() => importEmojiToAccount(eid), 80);
+          },
+        });
+      }
+    }
+
+    Array.from(actionsRow.querySelectorAll('button.msg-act-btn')).forEach((btn) => {
+      const isDanger = btn.classList.contains('danger');
+      const icon = (btn.textContent || '•').trim();
+      const label = labelFor(btn);
+      const actionTitle = label.toLowerCase();
+      const isModMore = btn.classList.contains('msg-mod-more');
+      const displayLabel = isModMore ? 'Moderate' : label;
+      menuItems.push({
+        rank: _actionSheetRank(displayLabel),
+        icon,
+        label: displayLabel,
+        danger: isDanger,
+        onClick: (e) => {
+          e.stopPropagation();
+          try { navigator.vibrate?.(8); } catch {}
+          const isForwardAction = actionTitle.includes('forward');
+          close(isForwardAction);
+          setTimeout(() => {
+            if (isForwardAction) {
+              const isDM = !!msgEl.getAttribute('data-dmid');
+              if (isDM && typeof window.forwardDMMessage === 'function') {
+                window.forwardDMMessage(msgId);
+                return;
+              }
+              if (!isDM && typeof forwardMessage === 'function') {
+                forwardMessage(msgId);
+                return;
+              }
+            }
+            try {
+              btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+            } catch {
+              try { btn.click(); } catch {}
+            }
+          }, isForwardAction ? 25 : 180);
+        },
+      });
+    });
+
+    menuItems.sort((a, b) => a.rank - b.rank || a.label.localeCompare(b.label));
+    menuItems.forEach((item, i) => {
+      _mountActionSheetBtn(itemsWrap, item, 24 + i * 26);
+    });
+
+    if (!itemsWrap.children.length) return;
+
     sheet.addEventListener('click', close);
     sheet.querySelector('.as-cancel').addEventListener('click', (e) => { e.stopPropagation(); close(); });
     document.body.appendChild(sheet);

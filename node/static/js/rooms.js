@@ -168,14 +168,18 @@ const Rooms = (() => {
       + '</div>';
   }
 
-  function _chatSkeletonMarkup(variant) {
+  function _chatSkeletonMarkup(variant, tail) {
     const channelRows = [
-      { self: false, w: [92, 68] },
-      { self: false, w: [78, 52, 38] },
-      { self: true, w: [62, 44] },
       { self: false, w: [88, 58] },
-      { self: false, w: [72] },
-      { self: true, w: [66, 40] },
+      { self: false, w: [76, 48, 32] },
+      { self: false, w: [64] },
+      { self: false, w: [82, 44] },
+      { self: false, w: [70, 38] },
+    ];
+    const channelTailRows = [
+      { self: false, w: [78, 52] },
+      { self: false, w: [66, 40] },
+      { self: false, w: [54] },
     ];
     const dmRows = [
       { self: false, w: [74, 48] },
@@ -184,30 +188,70 @@ const Rooms = (() => {
       { self: true, w: [48] },
       { self: false, w: [70, 42] },
     ];
-    const rows = variant === 'dm' ? dmRows : channelRows;
-    return `<div class="ft-chat-skeleton" id="${_CHAT_SKELETON_ID}" aria-hidden="true" data-variant="${variant}">`
+    const rows = variant === 'dm'
+      ? dmRows
+      : (tail ? channelTailRows : channelRows);
+    const tailAttr = tail ? ' data-tail="1"' : '';
+    return `<div class="ft-chat-skeleton" id="${_CHAT_SKELETON_ID}" aria-hidden="true" data-variant="${variant}"${tailAttr}>`
       + rows.map((r, i) => _chatSkeletonRowHtml(r, i)).join('')
       + '</div>';
   }
 
-  function showChatLoadSkeleton(variant) {
-    const area = document.getElementById('messages-area');
-    if (!area || !area.classList.contains('chat-switching-swr')) return;
-    if (_shellHasRealMessages()) return;
-    const shell = _chatShell(area);
-    if (!shell) return;
-    if (document.getElementById(_CHAT_SKELETON_ID)) return;
-    const wrap = document.createElement('div');
-    wrap.innerHTML = _chatSkeletonMarkup(variant === 'dm' ? 'dm' : 'channel');
-    const skel = wrap.firstElementChild;
-    if (!skel) return;
-    const strip = shell.querySelector('#' + _CHAT_SYNC_STRIP_ID);
-    if (strip) shell.insertBefore(skel, strip);
-    else shell.appendChild(skel);
-    area.classList.add('ft-chat-skeleton-active');
+  function _chatSkeletonVariantKey(variant) {
+    return variant === 'dm' ? 'dm' : 'channel';
   }
 
-  function hideChatLoadSkeleton() {
+  /** True while SWR switch is active and send is still gated (tail skeleton may show). */
+  function chatSwitchSyncing() {
+    const area = document.getElementById('messages-area');
+    if (!area?.classList.contains('chat-switching-swr')) return false;
+    try {
+      return !!window.FtCompose?.channelSendBlocked?.();
+    } catch {
+      return true;
+    }
+  }
+
+  function showChatLoadSkeleton(variant, opts) {
+    const area = document.getElementById('messages-area');
+    if (!area || !area.classList.contains('chat-switching-swr')) return;
+    const o = opts && typeof opts === 'object' ? opts : {};
+    const tail = !!o.tail;
+    if (!tail && _shellHasRealMessages()) return;
+    const shell = _chatShell(area);
+    if (!shell) return;
+    const vKey = _chatSkeletonVariantKey(variant);
+    const existing = document.getElementById(_CHAT_SKELETON_ID);
+    if (existing) {
+      const exVar = existing.getAttribute('data-variant') || 'channel';
+      const exTail = existing.getAttribute('data-tail') === '1';
+      if (exVar === vKey && exTail === tail) return;
+      if (exVar === vKey && tail && !exTail && _shellHasRealMessages()) {
+        existing.setAttribute('data-tail', '1');
+        existing.classList.add('ft-chat-skeleton-tail');
+        try {
+          requestAnimationFrame(() => { area.scrollTop = area.scrollHeight; });
+        } catch {}
+        return;
+      }
+      try { existing.remove(); } catch {}
+    }
+    const wrap = document.createElement('div');
+    wrap.innerHTML = _chatSkeletonMarkup(vKey, tail);
+    const skel = wrap.firstElementChild;
+    if (!skel) return;
+    if (o.noAnim) skel.classList.add('ft-chat-skeleton-instant');
+    shell.appendChild(skel);
+    area.classList.add('ft-chat-skeleton-active');
+    try {
+      requestAnimationFrame(() => {
+        area.scrollTop = area.scrollHeight;
+      });
+    } catch {}
+  }
+
+  function hideChatLoadSkeleton(force) {
+    if (!force && chatSwitchSyncing() && _shellHasRealMessages()) return;
     try { document.getElementById(_CHAT_SKELETON_ID)?.remove(); } catch {}
     try { document.getElementById('messages-area')?.classList.remove('ft-chat-skeleton-active'); } catch {}
   }
@@ -308,18 +352,18 @@ const Rooms = (() => {
       if (window.ContentWarning?.ensureChatShell) ContentWarning.ensureChatShell(area);
     } catch {}
     area.classList.add('chat-switching', 'chat-switching-swr');
-    _showChatSyncStrip(r, type || 'public', null, {
-      channelType: chType,
-      room: { name: r, channel_type: chType },
-    });
     try { setRoomHeader(r, type || 'public', null, null, chType); } catch {}
     try {
-      const sk = r;
-      window.FtCompose?.beginChannelSwitch?.(sk, { swr: true });
+      window.FtCompose?.beginChannelSwitch?.(r, { swr: true });
     } catch {}
     try { window.FtCompose?.refresh?.(); } catch {}
+    if (channelHasUsableCache(r)) {
+      _paintChannelCacheNow(r, { deferFinish: true });
+      showChatLoadSkeleton('channel', { tail: true });
+    } else {
+      showChatLoadSkeleton('channel');
+    }
     try { area.scrollTop = area.scrollHeight; } catch {}
-    if (!channelHasUsableCache(r)) showChatLoadSkeleton('channel');
   }
 
   function _setSyncStripCtx(name, type, dmPeer, stripOpts) {
@@ -337,14 +381,17 @@ const Rooms = (() => {
     try { delete State._syncStripCtx; } catch {}
   }
 
-  /** Re-append sync strip at bottom of chat after history render (switch in progress). */
+  /** Keep tail skeleton visible while background sync runs (no sync strip). */
   function restoreSyncStripIfSwitching(room) {
     const r = String(room || '').trim().toLowerCase();
-    const ctx = State._syncStripCtx;
-    if (!ctx || String(ctx.name || '').trim().toLowerCase() !== r) return;
     const area = document.getElementById('messages-area');
     if (!area || !area.classList.contains('chat-switching-swr')) return;
-    _showChatSyncStrip(ctx.name, ctx.type, ctx.dmPeer, ctx.stripOpts);
+    if (String(State?.currentRoom || '').trim().toLowerCase() !== r) return;
+    if (_shellHasRealMessages()) {
+      showChatLoadSkeleton('channel', { tail: true, noAnim: true });
+    } else if (!document.getElementById(_CHAT_SKELETON_ID)) {
+      showChatLoadSkeleton('channel', { noAnim: true });
+    }
     try {
       requestAnimationFrame(() => {
         area.scrollTop = area.scrollHeight;
@@ -383,76 +430,12 @@ const Rooms = (() => {
   function refreshSyncStripChrome() {
     const area = document.getElementById('messages-area');
     if (!area) return;
-    const swr = area.classList.contains('chat-switching-swr');
-    const pending = _channelSwitchUiPending();
-    area.classList.toggle('ft-sync-active', pending && swr);
-    if (!pending || !swr) return;
-    const ctx = State._syncStripCtx;
-    if (!ctx) return;
-    _showChatSyncStrip(ctx.name, ctx.type, ctx.dmPeer, {
-      ...(ctx.stripOpts || {}),
-      noFlash: true,
-    });
+    area.classList.remove('ft-sync-active');
+    _hideChatSyncStrip();
   }
 
-  function _showChatSyncStrip(name, type, dmPeer, stripOpts) {
-    const area = document.getElementById('messages-area');
-    const shell = _chatShell(area);
-    if (!area || !shell) return;
-    const o = stripOpts && typeof stripOpts === 'object' ? stripOpts : {};
-    _setSyncStripCtx(name, type, dmPeer, o);
-    const existing = document.getElementById(_CHAT_SYNC_STRIP_ID);
-    if (existing && o.noFlash) {
-      const roomKey = String(name || '').replace(/^#/, '').trim();
-      let title = '';
-      let sub = '';
-      if (type === 'dm') {
-        const nick = String(dmPeer || '').replace(/^@/, '');
-        title = nick ? `@${_escTransition(nick)}` : 'Direct message';
-        sub = 'Updating conversation';
-      } else {
-        title = roomKey ? `#${_escTransition(roomKey)}` : 'Channel';
-        sub = 'Syncing messages';
-      }
-      const tEl = existing.querySelector('.ft-sync-strip-title');
-      const sEl = existing.querySelector('.ft-sync-strip-sub');
-      if (tEl) tEl.textContent = title;
-      if (sEl) sEl.textContent = `${sub}…`;
-      area.classList.add('ft-sync-active');
-      return;
-    }
+  function _showChatSyncStrip(_name, _type, _dmPeer, _stripOpts) {
     _hideChatSyncStrip();
-    const roomKey = String(name || '').replace(/^#/, '').trim();
-    let title = '';
-    let sub = '';
-    if (type === 'dm') {
-      const nick = String(dmPeer || '').replace(/^@/, '');
-      title = nick ? `@${_escTransition(nick)}` : 'Direct message';
-      sub = 'Updating conversation';
-    } else {
-      title = roomKey ? `#${_escTransition(roomKey)}` : 'Channel';
-      sub = 'Syncing messages';
-    }
-    const strip = document.createElement('div');
-    strip.id = _CHAT_SYNC_STRIP_ID;
-    strip.className = 'ft-chat-sync-strip';
-    strip.setAttribute('role', 'status');
-    strip.setAttribute('aria-live', 'polite');
-    strip.setAttribute('aria-busy', 'true');
-    strip.innerHTML =
-      _syncStripIconHtml(name, type, dmPeer, o) +
-      '<span class="ft-sync-strip-copy">' +
-      `<span class="ft-sync-strip-title">${title}</span>` +
-      `<span class="ft-sync-strip-sub">${_escTransition(sub)}…</span>` +
-      '</span>' +
-      '<span class="ft-sync-strip-spinner" aria-hidden="true"></span>';
-    shell.appendChild(strip);
-    area.classList.add('ft-sync-active');
-    try {
-      requestAnimationFrame(() => {
-        area.scrollTop = area.scrollHeight;
-      });
-    } catch {}
   }
 
   /** Paint cached/empty history or dismiss — never leave a blank pane under the overlay. */
@@ -1668,21 +1651,17 @@ const Rooms = (() => {
 
     if (swr) {
       _scrubBootLoadingChrome(area);
-      const stripOpts = {
-        room,
-        channelType: room?.channel_type || opts.channelType,
-        dmAvatar: opts.dmAvatar,
-      };
-      _showChatSyncStrip(name, type, dmPeer, {
-        ...stripOpts,
-        noFlash: !!document.getElementById(_CHAT_SYNC_STRIP_ID),
-      });
+      _hideChatSyncStrip();
+      area.classList.remove('ft-sync-active');
       if (opts.beginSwitch !== false && switchKey) {
         try { window.FtCompose?.beginChannelSwitch?.(switchKey, { swr: true }); } catch {}
       }
       try { window.FtCompose?.refresh?.(); } catch {}
-      try { refreshSyncStripChrome(); } catch {}
-      if (!_shellHasRealMessages()) showChatLoadSkeleton(type === 'dm' ? 'dm' : 'channel');
+      if (_shellHasRealMessages()) {
+        showChatLoadSkeleton(type === 'dm' ? 'dm' : 'channel', { tail: true });
+      } else {
+        showChatLoadSkeleton(type === 'dm' ? 'dm' : 'channel');
+      }
       return;
     }
 
@@ -1775,14 +1754,11 @@ const Rooms = (() => {
       let savedStrip = null;
       let savedSkel = null;
       if (area.classList.contains('chat-switching-swr')) {
-        savedStrip = shell.querySelector('#' + _CHAT_SYNC_STRIP_ID);
-        if (savedStrip) savedStrip.remove();
         savedSkel = shell.querySelector('#' + _CHAT_SKELETON_ID);
         if (savedSkel) savedSkel.remove();
       }
       shell.innerHTML = '';
       if (savedSkel) shell.appendChild(savedSkel);
-      if (savedStrip) shell.appendChild(savedStrip);
       return;
     }
     const keepIds = new Set([_CHAT_TRANSITION_ID, 'ft-content-warning-gate']);
@@ -1895,16 +1871,11 @@ const Rooms = (() => {
 
     // Content painted — only peel sync chrome when compose load is actually done.
     if (finish && contentReady) {
-      if (_channelSwitchUiPending() && !force) {
-        refreshSyncStripChrome();
-        try { overlay?.remove(); } catch {}
-        finalizeCompose();
-        return;
-      }
-      try { area?.classList.remove('chat-switching', 'chat-switching-swr', 'ft-sync-active', 'ft-chat-skeleton-active'); } catch {}
-      hideChatLoadSkeleton();
+      hideChatLoadSkeleton(true);
       _hideChatSyncStrip();
       try { overlay?.remove(); } catch {}
+      try { area?.classList.remove('chat-switching', 'chat-switching-swr', 'ft-sync-active', 'ft-chat-skeleton-active'); } catch {}
+      _clearSyncStripCtx();
       finalizeCompose();
       return;
     }
@@ -2085,13 +2056,9 @@ const Rooms = (() => {
     _disarmSwitchWatchdog();
     const nameKey = String(name || '').trim().toLowerCase();
     try { State._roomSwitchInProgress = nameKey; } catch {}
-    const _cwRoomEarly = type !== 'dm' && type !== 'private'
-      && !!(_roomDataEarly?.content_warning?.enabled);
-    // Thin sync strip for every text-channel switch (not only when cache exists).
-    // Full spinner is reserved for CW gate, DMs, and voice.
+    // SWR + skeleton for all text channels (including 18+); DMs/voice keep legacy loaders.
     let useFastSwitch = type !== 'dm'
-      && normalizeChannelType(_chTypeEarly) !== 'voice'
-      && !_cwRoomEarly;
+      && normalizeChannelType(_chTypeEarly) !== 'voice';
     let useSwr = useFastSwitch;
     const hasCached = channelHasUsableCache(name);
     try {
@@ -2168,6 +2135,8 @@ const Rooms = (() => {
     } catch {}
     if (!State.messages[name]) State.messages[name] = [];
     State.oldestMsgId = State.messages[name].length ? State.messages[name][0].id : null;
+
+    try { window.FtCompose?.applyDraft?.(name, type); } catch {}
 
     if (hasCached && useFastSwitch && type !== 'dm' && channelHasUsableCache(name)) {
       _paintChannelCacheNow(name, { deferFinish: true });
@@ -2417,23 +2386,15 @@ const Rooms = (() => {
     }
 
     if (!_isSwitchAlive(switchToken)) return;
-    try { window.FtCompose?.applyDraft?.(name, type); } catch {}
     if (chType !== 'voice' && msgArea) {
       const cachedMsgs = Array.isArray(State.messages[name]) ? State.messages[name] : [];
       const paintCache = type !== 'dm' && hasCached && cachedMsgs.length > 0;
       if (paintCache && !_channelCacheAlreadyPainted(name)) {
         _paintChannelCacheNow(name, { deferFinish: true });
-        try {
-          window.FtCompose?.beginChannelSwitch?.(nameKey, { swr: useFastSwitch });
-        } catch {}
-      } else if (paintCache) {
+      }
+      if (msgArea.classList.contains('chat-switching-swr')) {
         try { restoreSyncStripIfSwitching(name); } catch {}
         try { msgArea.scrollTop = msgArea.scrollHeight; } catch {}
-        try {
-          window.FtCompose?.beginChannelSwitch?.(nameKey, { swr: useFastSwitch });
-        } catch {}
-      } else if (useFastSwitch) {
-        try { window.FtCompose?.beginChannelSwitch?.(nameKey, { swr: true }); } catch {}
       }
       const shell = msgArea.querySelector('#cw-chat-content');
       const hasRendered = !!(shell && shell.children.length);
@@ -2444,6 +2405,7 @@ const Rooms = (() => {
       }
       _armSwitchWatchdog(switchToken, name);
     }
+    try { window.FtCompose?.refresh?.(); } catch {}
     
     // For voice channels, show a prompt to join voice
     if (chType === 'voice') {
@@ -4418,6 +4380,7 @@ const Rooms = (() => {
     refreshSyncStripChrome,
     showChatLoadSkeleton,
     hideChatLoadSkeleton,
+    chatSwitchSyncing,
     clearChatTransition,
     finishChannelSwitch,
     recoverChannelSwitch,
@@ -4435,6 +4398,7 @@ try {
   window.refreshSyncStripChrome = Rooms.refreshSyncStripChrome;
   window.showChatLoadSkeleton = Rooms.showChatLoadSkeleton;
   window.hideChatLoadSkeleton = Rooms.hideChatLoadSkeleton;
+  window.chatSwitchSyncing = Rooms.chatSwitchSyncing;
   window.clearChatTransition = Rooms.clearChatTransition;
   window.finishChannelSwitch = Rooms.finishChannelSwitch;
   window.recoverChannelSwitch = Rooms.recoverChannelSwitch;

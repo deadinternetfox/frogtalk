@@ -9093,7 +9093,7 @@ function _mentionColorWithAlpha(color, alpha, fallback) {
     if (State.currentChannelType === 'voice') return true;
     if (_chLoad.active) return true;
     try {
-      if (State._roomSwitchInProgress) return true;
+      if (State._roomSwitchInProgress && !_chLoad.swr) return true;
     } catch {}
     if (_loadingOverlayVisible() && !_chLoad.swr) return true;
     if (_isCwLocked()) return true;
@@ -9119,7 +9119,7 @@ function _mentionColorWithAlpha(color, alpha, fallback) {
     const room = String(State?.currentRoom || '').replace(/^#/, '');
     const sendBlocked = channelSendBlocked();
     if (sendBlocked && _chLoad.swr) {
-      return room ? `Draft in #${room} — syncing…` : 'Syncing channel…';
+      return room ? `Draft in #${room} — syncing…` : 'Draft — syncing…';
     }
     if (sendBlocked) {
       return room ? `Loading #${room}…` : 'Loading channel…';
@@ -9155,21 +9155,18 @@ function _mentionColorWithAlpha(color, alpha, fallback) {
         input.disabled = true;
         input.removeAttribute('readonly');
         input.setAttribute('aria-disabled', 'true');
-      } else if (preType) {
-        input.disabled = false;
-        input.setAttribute('readonly', '');
-        input.setAttribute('aria-disabled', 'false');
       } else {
         input.disabled = false;
         input.removeAttribute('readonly');
         input.setAttribute('aria-disabled', 'false');
       }
       const ph = _composePlaceholder();
+      const hasDraft = !!String(input.value || '').trim();
       if (sendBlocked) {
         if (input.dataset.ftChOrigPh == null) {
           input.dataset.ftChOrigPh = input.placeholder || '';
         }
-        if (ph) input.placeholder = ph;
+        if (ph && (!preType || !hasDraft)) input.placeholder = ph;
       } else {
         input.placeholder = input.dataset.ftChOrigPh || ph || input.placeholder || '';
         delete input.dataset.ftChOrigPh;
@@ -9179,10 +9176,12 @@ function _mentionColorWithAlpha(color, alpha, fallback) {
     if (sendBtn) {
       sendBtn.disabled = sendBlocked || sendBtn.classList.contains('is-sending');
       sendBtn.setAttribute('aria-disabled', sendBtn.disabled ? 'true' : 'false');
-      sendBtn.title = sendBlocked ? 'Wait for messages to finish loading' : '';
+      sendBtn.title = sendBlocked
+        ? (preType ? 'Syncing messages — you can keep drafting' : 'Wait for messages to finish loading')
+        : '';
     }
 
-    const toolsBlocked = sendBlocked;
+    const toolsBlocked = hardBlock;
     try {
       document.querySelectorAll(
         '#input-area .input-tools button, #input-area .attach-btn, #input-area .icon-btn, #input-area .gif-btn, #input-area .emoji-btn',

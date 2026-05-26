@@ -17,9 +17,11 @@ const WS = (() => {
 
   function _switchUiStillLoading(area) {
     if (!area) return false;
-    return !!document.getElementById('ft-chat-transition')
-      || area.classList.contains('chat-switching')
-      || !!area.querySelector('#ch-loading-state');
+    if (document.getElementById('ft-chat-transition')) return true;
+    if (area.classList.contains('chat-switching') && !area.classList.contains('chat-switching-swr')) {
+      return true;
+    }
+    return !!area.querySelector('#ch-loading-state');
   }
 
   // Word-boundary @mention detector.
