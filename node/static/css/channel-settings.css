@@ -1602,6 +1602,12 @@ body.cw-composer-locked #msg-input {
 #users-list:has(.users-skeleton) {
   min-height: 11.5rem;
 }
+#users-list.users-list-refreshing {
+  opacity: 0.96;
+}
+#users-list.users-list-refreshing .member-search-input {
+  opacity: 0.92;
+}
 .ft-skel-sidebar-lines {
   flex: 1;
   min-width: 0;
