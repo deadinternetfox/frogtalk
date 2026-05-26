@@ -4932,6 +4932,7 @@ async function sendDMMessage () {
       if (!saved) return;
       appendDMMessage(saved);
       clearReplyToDM();
+      clearAttachment();
       input.value = '';
       autoResize(input);
       return;
@@ -4996,6 +4997,7 @@ async function sendDMMessage () {
   } catch (e) { console.warn('optimistic DM append failed', e); }
 
   clearReplyToDM();
+  clearAttachment();
   input.value = '';
   autoResize(input);
   // Re-snap AFTER input/reply chip layout changes settle. Mobile needs

@@ -4955,12 +4955,9 @@ function handleFileSelect(input) {
   input.value = '';
 }
 
-function clearAttachment() {
-  State.pendingAttachment = null;
-  const preview = document.getElementById('attachment-preview');
-  preview.style.display = 'none';
-  document.getElementById('attachment-thumb').innerHTML = '';
-}
+// clearAttachment() lives in media.js — do not redefine here (an old stub
+// only cleared State.pendingAttachment and left window._pendingAttachment set,
+// which re-sent voice/video notes on the next message).
 
 function handleMsgScroll() {
   const area = document.getElementById('messages-area');

@@ -324,13 +324,11 @@ function finaliseVoiceMemo () {
   const ext  = mime.includes('ogg') ? 'ogg' : mime.includes('mp4') ? 'mp4' : 'webm';
   const blob = new Blob(_mediaChunks, { type: mime });
 
-  // Put into pending attachment (same slot as file attachment)
-  window._pendingAttachment = {
-    blob,
-    name: `voice-${Date.now()}.${ext}`,
-    type: mime,
-    isVoice: true,
-  };
+  const name = `voice-${Date.now()}.${ext}`;
+  window._pendingAttachments = [{
+    blob, name, type: mime, sizeBytes: blob.size, isVoice: true,
+  }];
+  _syncPendingAttachmentState();
 
   // Show preview using the same chat-bubble look the recipient will see.
   // Wrapped in .att-preview-item so it inherits the same composer-preview
@@ -409,14 +407,12 @@ function finaliseVideoNote () {
   // params when decoding, so playback is unaffected.
   const taggedMime = mime + ';videonote=1';
 
-  // Put into pending attachment
-  window._pendingAttachment = {
-    blob,
-    name: `videonote-${Date.now()}.${ext}`,
-    type: taggedMime,
-    isVideo: true,
-    isVideoNote: true,
-  };
+  const vnName = `videonote-${Date.now()}.${ext}`;
+  window._pendingAttachments = [{
+    blob, name: vnName, type: taggedMime, sizeBytes: blob.size,
+    isVideo: true, isVideoNote: true,
+  }];
+  _syncPendingAttachmentState();
 
   // Show preview with circular video bubble — tap to play/pause, with a
   // first-frame poster captured to canvas so the user sees what they
@@ -1014,6 +1010,7 @@ function clearAttachment () {
   // also clear reply
   if (typeof clearReplyToDM === 'function') clearReplyToDM();
 }
+window.clearAttachment = clearAttachment;
 
 /* Toggle a media flag (`blur` or `view_once`) on a specific attachment.
    When called without an index (the legacy global-bar buttons) the flag
