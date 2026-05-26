@@ -2161,16 +2161,11 @@ const Rooms = (() => {
     let useFastSwitch = type !== 'dm'
       && normalizeChannelType(_chTypeEarly) !== 'voice';
     let useSwr = useFastSwitch;
+    const hasCached = channelHasUsableCache(name);
+    const cacheFast = !!(hasCached && useSwr && type !== 'dm');
     if (prevType === 'dm' && type !== 'dm') {
       try { clearDmComposeForChannelSwitch?.(); } catch {}
     }
-    if (type !== 'dm') {
-      try { window.FtCompose?.beginChannelSwitch?.(nameKey, { swr: useSwr }); } catch {}
-      try { window.FtCompose?.syncSendButton?.({ channelMode: true }); } catch {}
-    } else {
-      try { window.FtCompose?.refresh?.(); } catch {}
-    }
-    const hasCached = channelHasUsableCache(name);
     try {
 
     if (prevRoom && prevRoom !== name) {
@@ -2185,7 +2180,8 @@ const Rooms = (() => {
         channelType: _chTypeEarly,
         switchToken,
         swr: useSwr,
-        beginSwitch: type === 'dm',
+        beginSwitch: false,
+        skipSkeleton: hasCached,
       });
       if (!hasCached) _clearMessageContent();
       try {
@@ -2253,8 +2249,22 @@ const Rooms = (() => {
 
     try { window.FtCompose?.applyDraft?.(name, type); } catch {}
 
-    if (hasCached && useFastSwitch && type !== 'dm' && channelHasUsableCache(name)) {
-      _paintChannelCacheNow(name, { deferFinish: true });
+    if (type !== 'dm') {
+      try {
+        window.FtCompose?.beginChannelSwitch?.(nameKey, { swr: useSwr, soft: cacheFast });
+      } catch {}
+    }
+    if (hasCached && useFastSwitch && type !== 'dm') {
+      if (!_channelCacheAlreadyPainted(name)) {
+        _paintChannelCacheNow(name, { deferFinish: true });
+      }
+      if (cacheFast) {
+        try { WS?.noteHistoryCaughtUp?.(name); } catch {}
+        try { window.FtCompose?.finishChannelLoad?.(nameKey); } catch {}
+        try { window.FtCompose?.refresh?.(); } catch {}
+      }
+    } else if (type !== 'dm') {
+      try { window.FtCompose?.refresh?.(); } catch {}
     }
 
     // fc_last_room is persisted after the CW gate (public) or at end of switch (private).

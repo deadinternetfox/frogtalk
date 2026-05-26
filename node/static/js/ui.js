@@ -8945,7 +8945,7 @@ function _mentionColorWithAlpha(color, alpha, fallback) {
 /** Preserve #msg-input focus; gate send until channel/DM is ready; allow pre-type via drafts. */
 (function () {
   const _saved = { active: false, start: null, end: null };
-  const _chLoad = { room: '', active: false, swr: false };
+  const _chLoad = { room: '', active: false, swr: false, soft: false };
   let _loadSafetyTimer = null;
   let _draftBound = false;
 
@@ -9145,7 +9145,7 @@ function _mentionColorWithAlpha(color, alpha, fallback) {
   function _channelComposeSendBlocked() {
     if (!State?.currentRoom) return true;
     if (State.currentChannelType === 'voice') return true;
-    if (_chLoad.active) return true;
+    if (_chLoad.active && !_chLoad.soft) return true;
     if (_channelHistorySyncing()) return true;
     try {
       if (State._roomSwitchInProgress && !_chLoad.swr) return true;
@@ -9174,7 +9174,8 @@ function _mentionColorWithAlpha(color, alpha, fallback) {
     sendBtn.disabled = sendHeld || sending;
     sendBtn.classList.toggle('ft-send-blocked', sendHeld);
     sendBtn.setAttribute('aria-disabled', sendBtn.disabled ? 'true' : 'false');
-    const preType = sendBlocked && _chLoad.swr;
+    const softLive = !!(_chLoad.swr && !_chLoad.active);
+    const preType = sendBlocked && _chLoad.swr && !softLive;
     if (sendHeld) {
       sendBtn.title = preType
         ? 'Syncing messages — you can keep drafting'
@@ -9219,8 +9220,9 @@ function _mentionColorWithAlpha(color, alpha, fallback) {
     if (_isCwLocked() || _isMuteOrBanLocked()) return;
 
     const sendBlocked = channelSendBlocked();
-    const preType = sendBlocked && _chLoad.swr;
-    const hardBlock = sendBlocked && !preType;
+    const softLive = !!(_chLoad.swr && !_chLoad.active);
+    const preType = sendBlocked && _chLoad.swr && !softLive;
+    const hardBlock = sendBlocked && !preType && !softLive;
     const input = msgInput();
     const sendBtn = document.getElementById('send-btn');
     const inputArea = document.getElementById('input-area');
@@ -9231,9 +9233,10 @@ function _mentionColorWithAlpha(color, alpha, fallback) {
     }
 
     if (inputArea) {
-      inputArea.classList.toggle('ft-compose-loading', sendBlocked);
+      const showLoadChrome = sendBlocked && !softLive;
+      inputArea.classList.toggle('ft-compose-loading', showLoadChrome);
       inputArea.classList.toggle('ft-compose-pending', preType);
-      inputArea.setAttribute('aria-busy', sendBlocked ? 'true' : 'false');
+      inputArea.setAttribute('aria-busy', showLoadChrome ? 'true' : 'false');
     }
 
     if (input) {
@@ -9278,6 +9281,7 @@ function _mentionColorWithAlpha(color, alpha, fallback) {
     _chLoad.active = false;
     _chLoad.room = '';
     _chLoad.swr = false;
+    _chLoad.soft = false;
     if (_loadSafetyTimer) {
       clearTimeout(_loadSafetyTimer);
       _loadSafetyTimer = null;
@@ -9287,27 +9291,34 @@ function _mentionColorWithAlpha(color, alpha, fallback) {
 
   function beginChannelSwitch(room, opts) {
     const o = opts && typeof opts === 'object' ? opts : {};
+    const soft = !!o.soft;
     _chLoad.room = String(room || '').trim().toLowerCase();
-    _chLoad.active = true;
     _chLoad.swr = !!o.swr;
-    if (_loadSafetyTimer) clearTimeout(_loadSafetyTimer);
-    const expect = _chLoad.room;
-    _loadSafetyTimer = setTimeout(() => {
-      if (_chLoad.active && _chLoad.room === expect) {
-        try {
-          if (typeof recoverChannelSwitch === 'function') {
-            recoverChannelSwitch(expect);
-          } else if (typeof finishChannelSwitch === 'function') {
-            finishChannelSwitch(expect, { finish: true, contentReady: true, force: true });
-          } else {
-            finishChannelLoad(expect);
-            if (typeof clearChatTransition === 'function') {
-              clearChatTransition({ finish: true, force: true });
+    _chLoad.soft = soft;
+    _chLoad.active = !soft;
+    if (_loadSafetyTimer) {
+      clearTimeout(_loadSafetyTimer);
+      _loadSafetyTimer = null;
+    }
+    if (_chLoad.active) {
+      const expect = _chLoad.room;
+      _loadSafetyTimer = setTimeout(() => {
+        if (_chLoad.active && _chLoad.room === expect) {
+          try {
+            if (typeof recoverChannelSwitch === 'function') {
+              recoverChannelSwitch(expect);
+            } else if (typeof finishChannelSwitch === 'function') {
+              finishChannelSwitch(expect, { finish: true, contentReady: true, force: true });
+            } else {
+              finishChannelLoad(expect);
+              if (typeof clearChatTransition === 'function') {
+                clearChatTransition({ finish: true, force: true });
+              }
             }
-          }
-        } catch {}
-      }
-    }, 12000);
+          } catch {}
+        }
+      }, 12000);
+    }
     refresh();
     syncSendButton({ channelMode: !_isDmView() });
   }
@@ -9319,6 +9330,7 @@ function _mentionColorWithAlpha(color, alpha, fallback) {
     if (!r || r === loadRoom || r === cur || !loadRoom) {
       _chLoad.active = false;
       _chLoad.swr = false;
+      _chLoad.soft = false;
       if (!loadRoom && r) _chLoad.room = r;
     }
     if (_loadSafetyTimer) {
@@ -9330,7 +9342,8 @@ function _mentionColorWithAlpha(color, alpha, fallback) {
   }
 
   function isChannelLoading() {
-    return _chLoad.active || channelLoadBlocked();
+    if (_chLoad.active && !_chLoad.soft) return true;
+    return channelLoadBlocked();
   }
 
   window.FtCompose = {
