@@ -4511,6 +4511,28 @@ function _dmComposePreType() {
   return _dmComposeBlocked() && !!(_dmMessages && _dmMessages.length);
 }
 
+/** Leaving DM for a channel — drop DM compose chrome so FtCompose can dim send. */
+function clearDmComposeForChannelSwitch() {
+  try { State._dmSendPending = false; } catch {}
+  const inputArea = document.getElementById('input-area');
+  if (inputArea) {
+    inputArea.classList.remove('ft-compose-loading', 'ft-compose-pending', 'ft-dm-loading');
+    inputArea.removeAttribute('aria-busy');
+  }
+  const input = document.getElementById('msg-input');
+  if (input) {
+    input.disabled = false;
+    input.removeAttribute('readonly');
+    input.setAttribute('aria-disabled', 'false');
+    if (input.dataset.ftDmOrigPh != null) {
+      input.placeholder = input.dataset.ftDmOrigPh || input.placeholder || '';
+      delete input.dataset.ftDmOrigPh;
+    }
+  }
+  try { window.FtCompose?.syncSendButton?.({ channelMode: true }); } catch {}
+}
+window.clearDmComposeForChannelSwitch = clearDmComposeForChannelSwitch;
+
 function _updateDmComposeState() {
   const sendBlocked = _dmComposeBlocked();
   const preType = _dmComposePreType();

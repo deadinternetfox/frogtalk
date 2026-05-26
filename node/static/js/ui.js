@@ -9059,7 +9059,35 @@ function _mentionColorWithAlpha(color, alpha, fallback) {
   }
 
   function _isDmView() {
-    try { return typeof isDMView === 'function' && isDMView(); } catch { return false; }
+    try { return State?.currentRoomType === 'dm'; } catch { return false; }
+  }
+
+  function _scrubDmComposeChrome() {
+    try {
+      const inputArea = document.getElementById('input-area');
+      if (inputArea) {
+        inputArea.classList.remove('ft-compose-loading', 'ft-compose-pending', 'ft-dm-loading');
+        inputArea.removeAttribute('aria-busy');
+      }
+      try { State._dmSendPending = false; } catch {}
+    } catch {}
+  }
+
+  /** Chat still syncing after compose load finished (SWR tail / history in flight). */
+  function _channelHistorySyncing() {
+    try {
+      const area = document.getElementById('messages-area');
+      if (!area?.classList.contains('chat-switching-swr')) return false;
+      if (_chLoad.active) return true;
+      try {
+        const r = String(State?._roomSwitchInProgress || '').trim().toLowerCase();
+        const cur = String(State?.currentRoom || '').trim().toLowerCase();
+        if (r && cur && r === cur) return true;
+      } catch {}
+      if (area.classList.contains('ft-chat-skeleton-active')) return true;
+      if (document.getElementById('ft-chat-skeleton')) return true;
+    } catch {}
+    return false;
   }
 
   function _isCwLocked() {
@@ -9093,13 +9121,11 @@ function _mentionColorWithAlpha(color, alpha, fallback) {
     } catch { return false; }
   }
 
-  function channelSendBlocked() {
-    if (_isDmView()) {
-      try { return !!State._dmSendPending; } catch { return true; }
-    }
+  function _channelComposeSendBlocked() {
     if (!State?.currentRoom) return true;
     if (State.currentChannelType === 'voice') return true;
     if (_chLoad.active) return true;
+    if (_channelHistorySyncing()) return true;
     try {
       if (State._roomSwitchInProgress && !_chLoad.swr) return true;
     } catch {}
@@ -9107,6 +9133,33 @@ function _mentionColorWithAlpha(color, alpha, fallback) {
     if (_isCwLocked()) return true;
     if (!_roomJoined()) return true;
     return false;
+  }
+
+  function channelSendBlocked() {
+    if (_isDmView()) {
+      try { return !!State._dmSendPending; } catch { return true; }
+    }
+    return _channelComposeSendBlocked();
+  }
+
+  function syncSendButton(opts) {
+    const o = opts && typeof opts === 'object' ? opts : {};
+    const sendBlocked = o.channelMode ? _channelComposeSendBlocked() : channelSendBlocked();
+    const sendBtn = document.getElementById('send-btn');
+    if (!sendBtn) return;
+    const sending = sendBtn.classList.contains('is-sending');
+    const sendHeld = sendBlocked && !sending;
+    sendBtn.disabled = sendHeld || sending;
+    sendBtn.classList.toggle('ft-send-blocked', sendHeld);
+    sendBtn.setAttribute('aria-disabled', sendBtn.disabled ? 'true' : 'false');
+    const preType = sendBlocked && _chLoad.swr;
+    if (sendHeld) {
+      sendBtn.title = preType
+        ? 'Syncing messages — you can keep drafting'
+        : 'Wait for messages to finish loading';
+    } else if (!sending) {
+      sendBtn.title = '';
+    }
   }
 
   function channelLoadBlocked() {
@@ -9138,6 +9191,8 @@ function _mentionColorWithAlpha(color, alpha, fallback) {
   function refresh() {
     bindDraftAutosave();
     if (_isDmView()) return;
+    _scrubDmComposeChrome();
+    syncSendButton();
     if (_isCwLocked() || _isMuteOrBanLocked()) return;
 
     const sendBlocked = channelSendBlocked();
@@ -9181,16 +9236,7 @@ function _mentionColorWithAlpha(color, alpha, fallback) {
       }
     }
 
-    if (sendBtn) {
-      const sending = sendBtn.classList.contains('is-sending');
-      const sendHeld = sendBlocked && !sending;
-      sendBtn.disabled = sendHeld || sending;
-      sendBtn.classList.toggle('ft-send-blocked', sendHeld);
-      sendBtn.setAttribute('aria-disabled', sendBtn.disabled ? 'true' : 'false');
-      sendBtn.title = sendHeld
-        ? (preType ? 'Syncing messages — you can keep drafting' : 'Wait for messages to finish loading')
-        : (sending ? 'Sending…' : '');
-    }
+    syncSendButton();
 
     const toolsBlocked = hardBlock;
     try {
@@ -9241,6 +9287,7 @@ function _mentionColorWithAlpha(color, alpha, fallback) {
       }
     }, 12000);
     refresh();
+    syncSendButton({ channelMode: !_isDmView() });
   }
 
   function finishChannelLoad(room) {
@@ -9254,6 +9301,7 @@ function _mentionColorWithAlpha(color, alpha, fallback) {
       _loadSafetyTimer = null;
     }
     refresh();
+    syncSendButton({ channelMode: !_isDmView() });
   }
 
   function isChannelLoading() {
@@ -9266,6 +9314,7 @@ function _mentionColorWithAlpha(color, alpha, fallback) {
     isFocused,
     msgInput,
     refresh,
+    syncSendButton,
     stashDraft,
     applyDraft,
     draftKey,
