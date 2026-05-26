@@ -699,6 +699,18 @@ const App = {
       if (document.visibilityState === 'visible') void this.refreshHomeTravelUpdates();
     });
     window.addEventListener('focus', () => { void this.refreshHomeTravelUpdates(); });
+    if (!this._pinUnlockRefreshBound) {
+      this._pinUnlockRefreshBound = true;
+      window.addEventListener('ft:pin-unlocked', () => {
+        void this.refreshHomeTravelUpdates();
+        try { if (typeof loadDMChannels === 'function') void loadDMChannels(); } catch {}
+        try {
+          if (State.currentRoom && typeof WS !== 'undefined' && WS.connect) {
+            WS.connect(State.currentRoom, { force: true, keepHistoryCache: true });
+          }
+        } catch {}
+      });
+    }
   },
 
   scheduleTravelPushToHome(reason = '', opts = {}) {

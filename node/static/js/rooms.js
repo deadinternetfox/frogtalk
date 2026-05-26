@@ -1345,18 +1345,24 @@ const Rooms = (() => {
         </div>`).join('') + syncHint;
     }
     try {
-      const res = await fetch('/api/rooms', { headers: { 'X-Session-Token': State.token } });
+      const res = await apiFetch('/api/rooms');
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
+        // apiFetch prompts for PIN on 423 and retries; if we still get 423,
+        // keep the last good channel list instead of painting a blank shell.
+        if (res.status === 423 && data?.pin_required) {
+          console.warn('[rooms] loadRooms PIN locked');
+          return;
+        }
         console.warn('[rooms] loadRooms failed', res.status, data?.error || data);
-        State.rooms = [];
+        if (res.status === 401 || res.status === 403) State.rooms = [];
       } else {
         State.rooms = data.rooms || [];
       }
       try { State._showAllChannels = false; } catch {}
     } catch (e) {
       console.warn('[rooms] loadRooms error', e);
-      State.rooms = [];
+      // Network/abort — preserve cached channels (common after idle/tab return).
     }
     renderRooms();
   }
