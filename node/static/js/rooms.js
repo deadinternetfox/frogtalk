@@ -1789,10 +1789,13 @@ const Rooms = (() => {
     try { State._roomSwitchInProgress = nameKey; } catch {}
     const _cwRoomEarly = type !== 'dm' && type !== 'private'
       && !!(_roomDataEarly?.content_warning?.enabled);
-    let useSwr = type !== 'dm'
+    // Thin sync strip for every text-channel switch (not only when cache exists).
+    // Full spinner is reserved for CW gate, DMs, and voice.
+    let useFastSwitch = type !== 'dm'
       && normalizeChannelType(_chTypeEarly) !== 'voice'
-      && channelHasUsableCache(name)
       && !_cwRoomEarly;
+    let useSwr = useFastSwitch;
+    const hasCached = channelHasUsableCache(name);
     try {
 
     if (prevRoom && prevRoom !== name) {
@@ -2056,7 +2059,8 @@ const Rooms = (() => {
           await _handleCwDecline(name, { prevRoom, prevType, leaveChannel: opts.leaveOnCwDecline !== false });
           return;
         }
-        if (channelHasUsableCache(name)) useSwr = true;
+        useFastSwitch = true;
+        useSwr = true;
       }
       if (!_isSwitchAlive(switchToken)) return;
       showChatTransition(name, type, dmPeer, 'load', {
@@ -2089,7 +2093,7 @@ const Rooms = (() => {
     // already painted (that race stuck users until refresh).
     if (!_isSwitchAlive(switchToken)) return;
     if (joinedHere) {
-      const keepCache = !!(useSwr && WS?.shouldKeepHistoryCache?.(name));
+      const keepCache = !!(hasCached && WS?.shouldKeepHistoryCache?.(name));
       if (!keepCache) {
         try { WS?.resetHistoryCache?.(name); } catch {}
       }
@@ -2110,8 +2114,8 @@ const Rooms = (() => {
     try { window.FtCompose?.applyDraft?.(name, type); } catch {}
     if (chType !== 'voice' && msgArea) {
       const cachedMsgs = Array.isArray(State.messages[name]) ? State.messages[name] : [];
-      const hasCached = type !== 'dm' && useSwr && cachedMsgs.length > 0;
-      if (hasCached && typeof Messages !== 'undefined' && Messages.loadHistory) {
+      const paintCache = type !== 'dm' && hasCached && cachedMsgs.length > 0;
+      if (paintCache && typeof Messages !== 'undefined' && Messages.loadHistory) {
         try {
           if (window.ContentWarning && typeof ContentWarning.ensureChatShell === 'function') {
             ContentWarning.ensureChatShell(msgArea);
@@ -2122,13 +2126,15 @@ const Rooms = (() => {
             fromCache: true,
           });
           try {
-            window.FtCompose?.beginChannelSwitch?.(nameKey, { swr: true });
+            window.FtCompose?.beginChannelSwitch?.(nameKey, { swr: useFastSwitch });
           } catch {}
         } catch {}
+      } else if (useFastSwitch) {
+        try { window.FtCompose?.beginChannelSwitch?.(nameKey, { swr: true }); } catch {}
       }
       const shell = msgArea.querySelector('#cw-chat-content');
       const hasRendered = !!(shell && shell.children.length);
-      if (!hasRendered && !document.getElementById(_CHAT_TRANSITION_ID) && !useSwr) {
+      if (!hasRendered && !document.getElementById(_CHAT_TRANSITION_ID) && !useFastSwitch) {
         showChatTransition(name, type, dmPeer, 'load', {
           room: roomData, channelType: chType, beginSwitch: false, switchToken,
         });
