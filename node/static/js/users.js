@@ -139,8 +139,18 @@ const Users = (() => {
   }
 
   let _membersLoading = false;
+  let _membersBootPending = false;
   let _membersLoadInflight = null;
   let _membersLoadRoom = null;
+
+  function _membersPanelShouldSkeleton() {
+    if (State.currentRoomType === 'dm') return false;
+    if (_membersLoading || _membersBootPending) return true;
+    const cur = (State.currentRoom && State.currentRoomType !== 'dm')
+      ? String(State.currentRoom)
+      : '';
+    return !!(cur && _channelRoom === cur && !_channelMembers.length);
+  }
 
   function _paintMembersSkeleton(list, opts = {}) {
     if (!list) return;
@@ -162,8 +172,23 @@ const Users = (() => {
 
   function resetMembersListLoad() {
     _membersLoading = false;
+    _membersBootPending = false;
     _membersLoadInflight = null;
     _membersLoadRoom = null;
+  }
+
+  /** Paint members skeleton at login boot (before rooms list / last-room are known). */
+  function prepareMembersPanelBoot() {
+    if (!State.token) return;
+    const panel = document.getElementById('users-panel');
+    if (panel) panel.classList.remove('hidden');
+    const list = document.getElementById('users-list');
+    if (!list) return;
+    _membersBootPending = true;
+    _membersLoading = true;
+    _paintMembersSkeleton(list);
+    const count = document.getElementById('online-count');
+    if (count) count.textContent = '…';
   }
 
   /** Sync paint before fetch — keeps members panel from sitting blank during switch/boot. */
@@ -179,6 +204,7 @@ const Users = (() => {
     _channelRoom = room;
     _membersLoadRoom = room;
     _membersLoading = true;
+    _membersBootPending = false;
     if (roomChanged) {
       _channelMembers = [];
       _channelBots = [];
@@ -205,7 +231,7 @@ const Users = (() => {
       return;
     }
 
-    if (_membersLoading && State.currentRoomType !== 'dm') {
+    if (_membersPanelShouldSkeleton()) {
       _paintMembersSkeleton(list, { instant: true });
       if (count) count.textContent = '…';
       return;
@@ -514,6 +540,7 @@ const Users = (() => {
       } catch {} finally {
         if (_channelRoom === room) {
           _membersLoading = false;
+          _membersBootPending = false;
           _renderFiltered();
         }
       }
@@ -705,6 +732,7 @@ const Users = (() => {
     updateAvatar,
     updateDisplayName,
     updatePresence,
+    prepareMembersPanelBoot,
     prepareMembersListLoad,
     resetMembersListLoad,
     loadChannelMembers,
@@ -714,6 +742,7 @@ const Users = (() => {
 })();
 try {
   if (typeof window !== 'undefined' && window.Users) {
+    window.Users.prepareMembersPanelBoot = Users.prepareMembersPanelBoot;
     window.Users.prepareMembersListLoad = Users.prepareMembersListLoad;
   }
 } catch {}

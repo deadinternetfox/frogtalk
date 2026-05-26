@@ -426,6 +426,9 @@ const Rooms = (() => {
     } else {
       showChatLoadSkeleton('channel');
     }
+    if (typeof Users !== 'undefined' && Users.prepareMembersListLoad) {
+      try { Users.prepareMembersListLoad(r); } catch {}
+    }
     try { area.scrollTop = area.scrollHeight; } catch {}
   }
 

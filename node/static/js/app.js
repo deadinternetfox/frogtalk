@@ -1506,14 +1506,10 @@ const App = {
     App.showChannelLoading();
     try { window.paintSidebarSkeletonsIfEmpty?.(); } catch {}
     try {
-      let bootMembersRoom = null;
-      try {
-        const lastRaw = localStorage.getItem('fc_last_room');
-        if (lastRaw) {
-          const last = JSON.parse(lastRaw);
-          if (last?.name && last.type !== 'dm') bootMembersRoom = last.name;
-        }
-      } catch {}
+      if (typeof Users !== 'undefined' && Users.prepareMembersPanelBoot) {
+        Users.prepareMembersPanelBoot();
+      }
+      const bootMembersRoom = App.resolveBootChannelRoom();
       if (bootMembersRoom && typeof Users !== 'undefined' && Users.prepareMembersListLoad) {
         Users.prepareMembersListLoad(bootMembersRoom);
       }
@@ -1565,6 +1561,13 @@ const App = {
       console.warn('[App] loadRooms failed', e);
       try { State.rooms = []; } catch {}
     }
+
+    try {
+      const bootRoom = this.resolveBootChannelRoom();
+      if (bootRoom && typeof Users !== 'undefined' && Users.prepareMembersListLoad) {
+        Users.prepareMembersListLoad(bootRoom);
+      }
+    } catch {}
 
     if (!this.pendingInvite && !this.pendingRoom && !this.pendingDM && !this.pendingReel
       && !this.pendingPost && !this.pendingProfile && !this.pendingFedProfileGid) {
@@ -2508,6 +2511,27 @@ const App = {
     this._setLoadingSyncHint('');
     if (!applied) this.startFederationSyncWatcher();
     return applied;
+  },
+
+  /** Room name we will open on cold boot (joined list + fc_last_room), or null. */
+  resolveBootChannelRoom() {
+    try {
+      const joined = (State.rooms || []).filter((r) => r.joined);
+      if (!joined.length) return null;
+      try {
+        const lastRaw = localStorage.getItem('fc_last_room');
+        if (lastRaw) {
+          const last = JSON.parse(lastRaw);
+          if (last?.name && last.type !== 'dm') {
+            const hit = joined.find((r) => r.name === last.name);
+            if (hit) return hit.name;
+          }
+        }
+      } catch {}
+      return joined[0]?.name || null;
+    } catch {
+      return null;
+    }
   },
 
   tryOpenLastRoomEarly() {
