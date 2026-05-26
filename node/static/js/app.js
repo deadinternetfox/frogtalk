@@ -1404,6 +1404,9 @@ const App = {
     document.getElementById('auth-overlay').classList.add('hidden');
     document.getElementById('app').classList.remove('hidden');
     try { window.__ftApplyMiniBoardGuestMode && window.__ftApplyMiniBoardGuestMode(); } catch {}
+    // Skeleton chrome before profile/Signal awaits — members panel must not wait
+    // until the bottom of launch() while channel sidebars already shimmer.
+    try { this._paintBootLoadingChrome(); } catch {}
 
     // Apply saved theme
     const savedThemeRaw = State.user?.theme || localStorage.getItem('frogtalk-theme') || 'frog';
