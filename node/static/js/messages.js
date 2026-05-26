@@ -2883,11 +2883,13 @@ const Messages = (() => {
     _patchCachedHistoryEdits(room, incoming, prevCache);
     _syncRoomMessageCache(room, incoming);
 
+    let addedTail = false;
     if (extended) {
       const idx = incoming.findIndex((m) => m && Number(m.id) === Number(lastDom));
       if (idx < 0) return false;
       const tail = incoming.slice(idx + 1);
       if (tail.length) {
+        addedTail = true;
         const tailOpts = { ...options, reveal: options.reveal !== false };
         const chunk = _buildHistoryChunkHtml(tail, tailOpts);
         _insertHistoryHtml(mount, chunk.html);
@@ -2902,8 +2904,12 @@ const Messages = (() => {
     try { observeLazyMedia(area); } catch {}
     try { _hydrateStickers(area); } catch {}
     try { area.scrollTop = area.scrollHeight; } catch {}
-    try { window.restoreSyncStripIfSwitching?.(room); } catch {}
-    if (!options.deferFinish) {
+    if (addedTail) {
+      try { window.restoreSyncStripIfSwitching?.(room); } catch {}
+    } else {
+      try { window.hideChatLoadSkeleton?.(true); } catch {}
+    }
+    if (!options.deferFinish || options.noNewMessages || !addedTail) {
       try { window.hideChatLoadSkeleton?.(true); } catch {}
       _finishSwitchAfterPaint(room);
     }
@@ -2974,9 +2980,10 @@ const Messages = (() => {
     _syncRoomMessageCache(room, msgs);
 
     const areaEl = area;
+    const roomKey = String(room || '').trim().toLowerCase();
     const keepTailSkel = !!options.deferFinish
       && areaEl?.classList.contains('chat-switching-swr')
-      && (typeof window.chatSwitchSyncing === 'function' ? window.chatSwitchSyncing() : true);
+      && (typeof WS !== 'undefined' && WS.isHistorySyncing?.(roomKey));
     let savedSkel = null;
     if (keepTailSkel) {
       savedSkel = mount.querySelector('#ft-chat-skeleton');
@@ -2997,6 +3004,9 @@ const Messages = (() => {
     if (!options.deferFinish) {
       try { window.hideChatLoadSkeleton?.(true); } catch {}
       _finishSwitchAfterPaint(room);
+    } else if (options.fromCache) {
+      try { window.FtCompose?.finishChannelLoad?.(room); } catch {}
+      try { window.FtCompose?.syncSendButton?.(); } catch {}
     }
     mount.scrollTop = mount.scrollHeight;
     if (msgs.length) State.oldestMsgId = msgs[0].id;
