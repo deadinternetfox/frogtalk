@@ -3359,7 +3359,17 @@ function _scrollDMToBottomStable() {
   const go = () => { area.scrollTop = area.scrollHeight; };
   go();
   requestAnimationFrame(() => { go(); requestAnimationFrame(go); });
-  [80, 220, 500].forEach(ms => setTimeout(go, ms));
+  const delays = window.innerWidth <= 768 ? [80, 220, 500, 900] : [80, 220];
+  delays.forEach(ms => setTimeout(go, ms));
+  try {
+    if (window.FtViewport?.keyboardLikelyOpen?.()) {
+      const off = window.FtViewport.onVisibleResize?.(() => {
+        go();
+        try { off?.(); } catch {}
+      });
+      setTimeout(() => { try { off?.(); } catch {} }, 1200);
+    }
+  } catch {}
 }
 
 function _dmKeyTriggerAttrs() {

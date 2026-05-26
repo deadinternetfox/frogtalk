@@ -4533,7 +4533,17 @@ function scrollToBottom(smooth) {
   // keyboard collapse all reshape the layout AFTER this call. Without
   // these delayed re-snaps, the freshly-sent message ends up just below
   // the visible viewport. Desktop is unaffected (already at bottom).
-  [80, 220, 500, 900].forEach(ms => setTimeout(snap, ms));
+  const delays = window.innerWidth <= 768 ? [80, 220, 500, 900] : [80, 220];
+  delays.forEach(ms => setTimeout(snap, ms));
+  try {
+    if (window.FtViewport?.keyboardLikelyOpen?.()) {
+      const off = window.FtViewport.onVisibleResize?.(() => {
+        snap();
+        try { off?.(); } catch {}
+      });
+      setTimeout(() => { try { off?.(); } catch {} }, 1200);
+    }
+  } catch {}
   _setJumpPipVisible(false);
 }
 
