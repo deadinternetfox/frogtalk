@@ -6389,8 +6389,9 @@ def get_dm_channels(user_id: int) -> List[Dict]:
         is_a = d["user_a"] == user_id
         my_read = d["last_read_a"] if is_a else d["last_read_b"]
         peer_read = d["last_read_b"] if is_a else d["last_read_a"]
-        d["my_last_read"] = my_read
-        d["peer_last_read"] = peer_read
+        last_msg_id = int(d.get("last_msg_id") or 0)
+        d["my_last_read"] = _sanitize_dm_read_cursor(my_read, last_msg_id)
+        d["peer_last_read"] = _sanitize_dm_read_cursor(peer_read, last_msg_id)
         d["my_pin_lock"] = bool(int(d["pin_lock_a"] if is_a else d["pin_lock_b"]) or 0)
         d["my_pin_lock_timeout"] = int((d["pin_lock_timeout_a"] if is_a else d["pin_lock_timeout_b"]) or 0)
         # Hide internal fields
@@ -6400,6 +6401,17 @@ def get_dm_channels(user_id: int) -> List[Dict]:
         d.pop("pin_lock_timeout_a", None); d.pop("pin_lock_timeout_b", None)
         result.append(d)
     return result
+
+
+def _sanitize_dm_read_cursor(cursor: int, max_msg_id: int) -> int:
+    """Drop stale read cursors left over from wipes / deleted history."""
+    c = max(0, int(cursor or 0))
+    m = max(0, int(max_msg_id or 0))
+    if m <= 0:
+        return 0 if c > 0 else c
+    if c > m:
+        return 0
+    return c
 
 
 def mark_dm_read(channel_id: int, user_id: int, up_to_msg_id: int) -> Tuple[bool, int, int]:
@@ -6412,6 +6424,15 @@ def mark_dm_read(channel_id: int, user_id: int, up_to_msg_id: int) -> Tuple[bool
         ).fetchone()
         if not row:
             return False, 0, 0
+        max_row = con.execute(
+            "SELECT MAX(id) AS m FROM dm_messages WHERE channel_id=? AND deleted=0",
+            (channel_id,),
+        ).fetchone()
+        max_id = int((max_row["m"] or 0) if max_row else 0)
+        if max_id > 0:
+            up_to_msg_id = min(max(0, int(up_to_msg_id or 0)), max_id)
+        elif int(up_to_msg_id or 0) > 0:
+            up_to_msg_id = 0
         if user_id == row["user_a"]:
             if up_to_msg_id <= row["lra"]:
                 return True, row["user_b"], row["lra"]
@@ -7063,7 +7084,8 @@ def apply_dm_channel_wipe(
             }
         con.execute("DELETE FROM dm_messages WHERE channel_id=?", (cid,))
         con.execute(
-            "UPDATE dm_channels SET wiped_at=datetime('now'), last_wipe_id=? WHERE id=?",
+            "UPDATE dm_channels SET wiped_at=datetime('now'), last_wipe_id=?, "
+            "last_read_a=0, last_read_b=0 WHERE id=?",
             (wid, cid),
         )
         con.commit()
