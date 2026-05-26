@@ -9142,17 +9142,44 @@ function _mentionColorWithAlpha(color, alpha, fallback) {
     } catch { return false; }
   }
 
+  function _hasChannelMessageCache(room) {
+    try {
+      const r = String(room || State?.currentRoom || '').trim().toLowerCase();
+      return !!((State.messages && State.messages[r]) || []).length;
+    } catch { return false; }
+  }
+
+  /** Rare: only voice, CW/mute/ban, or full-screen loader on empty cold channel. */
+  function _composeHardLockRequired() {
+    if (_isDmView()) return false;
+    if (!State?.currentRoom) return true;
+    if (State.currentChannelType === 'voice') return true;
+    if (_isCwLocked() || _isMuteOrBanLocked()) return true;
+    if (_channelShellReady() || _hasChannelMessageCache()) return false;
+    if (_loadingOverlayVisible() && !_chLoad.swr) return true;
+    return false;
+  }
+
+  /** Hold send only when user truly cannot post yet (not during background sync). */
   function _channelComposeSendBlocked() {
     if (!State?.currentRoom) return true;
     if (State.currentChannelType === 'voice') return true;
-    if (_chLoad.active && !_chLoad.soft) return true;
-    if (_channelHistorySyncing()) return true;
-    try {
-      if (State._roomSwitchInProgress && !_chLoad.swr) return true;
-    } catch {}
-    if (_loadingOverlayVisible() && !_chLoad.swr) return true;
     if (_isCwLocked()) return true;
     if (!_roomJoined()) return true;
+    const r = String(State.currentRoom || '').trim().toLowerCase();
+    const hasCache = _hasChannelMessageCache(r);
+    const shellReady = _channelShellReady();
+    if (shellReady || hasCache) {
+      try {
+        if (typeof WS !== 'undefined' && WS.isOpen && !WS.isOpen()) return true;
+      } catch {}
+      return false;
+    }
+    if (_chLoad.active && !_chLoad.soft) return true;
+    if (_loadingOverlayVisible() && !_chLoad.swr) return true;
+    try {
+      if (typeof WS !== 'undefined' && WS.isOpen && !WS.isOpen()) return true;
+    } catch {}
     return false;
   }
 
@@ -9174,11 +9201,10 @@ function _mentionColorWithAlpha(color, alpha, fallback) {
     sendBtn.disabled = sendHeld || sending;
     sendBtn.classList.toggle('ft-send-blocked', sendHeld);
     sendBtn.setAttribute('aria-disabled', sendBtn.disabled ? 'true' : 'false');
-    const softLive = !!(_chLoad.swr && !_chLoad.active);
-    const preType = sendBlocked && _chLoad.swr && !softLive;
+    const bgSync = sendBlocked && !_composeHardLockRequired();
     if (sendHeld) {
-      sendBtn.title = preType
-        ? 'Syncing messages — you can keep drafting'
+      sendBtn.title = bgSync
+        ? 'Connecting — you can keep typing'
         : 'Wait for messages to finish loading';
     } else if (!sending) {
       sendBtn.title = '';
@@ -9201,12 +9227,15 @@ function _mentionColorWithAlpha(color, alpha, fallback) {
   function _composePlaceholder() {
     if (_isDmView()) return null;
     const room = String(State?.currentRoom || '').replace(/^#/, '');
-    const sendBlocked = channelSendBlocked();
-    if (sendBlocked && _chLoad.swr) {
-      return room ? `Draft in #${room} — syncing…` : 'Draft — syncing…';
-    }
-    if (sendBlocked) {
+    if (_composeHardLockRequired()) {
       return room ? `Loading #${room}…` : 'Loading channel…';
+    }
+    const sendBlocked = channelSendBlocked();
+    if (sendBlocked) {
+      return room ? `Message #${room} — connecting…` : 'Connecting…';
+    }
+    if (_chLoad.swr || _channelHistorySyncing()) {
+      return room ? `Message #${room}` : 'Message channel';
     }
     return room ? `Message #${room}` : 'Message channel';
   }
@@ -9220,9 +9249,8 @@ function _mentionColorWithAlpha(color, alpha, fallback) {
     if (_isCwLocked() || _isMuteOrBanLocked()) return;
 
     const sendBlocked = channelSendBlocked();
-    const softLive = !!(_chLoad.swr && !_chLoad.active);
-    const preType = sendBlocked && _chLoad.swr && !softLive;
-    const hardBlock = sendBlocked && !preType && !softLive;
+    const hardBlock = _composeHardLockRequired();
+    const bgSync = !hardBlock && (sendBlocked || _chLoad.swr || _channelHistorySyncing());
     const input = msgInput();
     const sendBtn = document.getElementById('send-btn');
     const inputArea = document.getElementById('input-area');
@@ -9233,10 +9261,9 @@ function _mentionColorWithAlpha(color, alpha, fallback) {
     }
 
     if (inputArea) {
-      const showLoadChrome = sendBlocked && !softLive;
-      inputArea.classList.toggle('ft-compose-loading', showLoadChrome);
-      inputArea.classList.toggle('ft-compose-pending', preType);
-      inputArea.setAttribute('aria-busy', showLoadChrome ? 'true' : 'false');
+      inputArea.classList.toggle('ft-compose-loading', hardBlock);
+      inputArea.classList.toggle('ft-compose-pending', bgSync && !hardBlock);
+      inputArea.setAttribute('aria-busy', hardBlock ? 'true' : 'false');
     }
 
     if (input) {
@@ -9250,12 +9277,11 @@ function _mentionColorWithAlpha(color, alpha, fallback) {
         input.setAttribute('aria-disabled', 'false');
       }
       const ph = _composePlaceholder();
-      const hasDraft = !!String(input.value || '').trim();
-      if (sendBlocked) {
+      if (hardBlock || sendBlocked) {
         if (input.dataset.ftChOrigPh == null) {
           input.dataset.ftChOrigPh = input.placeholder || '';
         }
-        if (ph && (!preType || !hasDraft)) input.placeholder = ph;
+        if (ph) input.placeholder = ph;
       } else {
         _restoreComposePlaceholder(input);
       }
@@ -9342,8 +9368,9 @@ function _mentionColorWithAlpha(color, alpha, fallback) {
   }
 
   function isChannelLoading() {
-    if (_chLoad.active && !_chLoad.soft) return true;
-    return channelLoadBlocked();
+    if (_composeHardLockRequired()) return true;
+    if (_chLoad.active && !_chLoad.soft && !_channelShellReady()) return true;
+    return false;
   }
 
   window.FtCompose = {

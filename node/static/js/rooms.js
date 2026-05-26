@@ -2163,6 +2163,7 @@ const Rooms = (() => {
     let useSwr = useFastSwitch;
     const hasCached = channelHasUsableCache(name);
     const cacheFast = !!(hasCached && useSwr && type !== 'dm');
+    const channelSoft = !!(useSwr && type !== 'dm');
     if (prevType === 'dm' && type !== 'dm') {
       try { clearDmComposeForChannelSwitch?.(); } catch {}
     }
@@ -2251,7 +2252,7 @@ const Rooms = (() => {
 
     if (type !== 'dm') {
       try {
-        window.FtCompose?.beginChannelSwitch?.(nameKey, { swr: useSwr, soft: cacheFast });
+        window.FtCompose?.beginChannelSwitch?.(nameKey, { swr: useSwr, soft: channelSoft });
       } catch {}
     }
     if (hasCached && useFastSwitch && type !== 'dm') {
