@@ -23,6 +23,131 @@ function isLoopingGifVideo (mediaType, name) {
 }
 window.isLoopingGifVideo = isLoopingGifVideo;
 
+/** Safari / iOS WebKit (not Chrome/Firefox-on-iOS). */
+function isSafariLike () {
+  try {
+    const ua = navigator.userAgent || '';
+    if (/Chrome|Chromium|CriOS|Edg|OPR|Firefox|FxiOS/i.test(ua)) return false;
+    return /Safari/i.test(ua) || (/(iPhone|iPad|iPod)/i.test(ua) && /AppleWebKit/i.test(ua));
+  } catch { return false; }
+}
+window.isSafariLike = isSafariLike;
+
+const _playbackBlobUrlCache = new Map();
+
+/** Sync data: → blob: for Safari and oversized WebM/OGG voice notes. */
+function dataUrlToBlobUrl (dataUrl) {
+  try {
+    if (!dataUrl || !dataUrl.startsWith('data:')) return null;
+    let header, payload, isB64;
+    const b64Marker = dataUrl.toLowerCase().indexOf(';base64,');
+    if (b64Marker >= 0) {
+      header = dataUrl.slice(5, b64Marker);
+      payload = dataUrl.slice(b64Marker + 8);
+      isB64 = true;
+    } else {
+      const comma = dataUrl.lastIndexOf(',');
+      if (comma < 0) return null;
+      header = dataUrl.slice(5, comma);
+      payload = dataUrl.slice(comma + 1);
+      isB64 = false;
+    }
+    const mime = (header.split(';')[0] || 'application/octet-stream').trim();
+    let bytes;
+    if (isB64) {
+      const bin = atob(payload);
+      bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    } else {
+      const txt = decodeURIComponent(payload);
+      bytes = new Uint8Array(txt.length);
+      for (let i = 0; i < txt.length; i++) bytes[i] = txt.charCodeAt(i);
+    }
+    return URL.createObjectURL(new Blob([bytes], { type: mime }));
+  } catch { return null; }
+}
+window.dataUrlToBlobUrl = dataUrlToBlobUrl;
+
+function resolveAudioPlaybackSrc (src, cacheKey) {
+  if (!src) return src;
+  const needsBlob = src.startsWith('data:') && (
+    isSafariLike()
+    || /^data:audio\/(?:webm|ogg)/i.test(src)
+    || /^data:video\/(?:webm|ogg)/i.test(src)
+  );
+  if (!needsBlob) return src;
+  const key = cacheKey || src.slice(0, 96);
+  const hit = _playbackBlobUrlCache.get(key);
+  if (hit) return hit;
+  const blobUrl = dataUrlToBlobUrl(src);
+  if (!blobUrl) return src;
+  _playbackBlobUrlCache.set(key, blobUrl);
+  return blobUrl;
+}
+window.resolveAudioPlaybackSrc = resolveAudioPlaybackSrc;
+
+/** play() with Safari autoplay / gesture retry; voice notes must be audible. */
+function playHtmlAudioElement (audio, label) {
+  if (!audio) return Promise.resolve();
+  try { audio.muted = false; } catch {}
+  try { audio.volume = 1; } catch {}
+  const run = () => {
+    const p = audio.play();
+    if (!p || typeof p.catch !== 'function') return Promise.resolve();
+    return p.catch((err) => {
+      console.warn(`[media] ${label || 'audio'} play blocked:`, err?.name || err);
+      return new Promise((resolve) => {
+        const retry = () => {
+          audio.play().then(resolve).catch(resolve);
+          document.removeEventListener('click', retry, true);
+          document.removeEventListener('touchend', retry, true);
+        };
+        document.addEventListener('click', retry, { once: true, capture: true });
+        document.addEventListener('touchend', retry, { once: true, capture: true });
+      });
+    });
+  };
+  return run();
+}
+window.playHtmlAudioElement = playHtmlAudioElement;
+
+function probeAudioDuration (msgId, src) {
+  if (!src) return;
+  const playSrc = resolveAudioPlaybackSrc(src, `dur-${msgId}`);
+  setTimeout(() => {
+    const durEl = document.getElementById(`audio-dur-${msgId}`);
+    if (!durEl) return;
+    const writeDur = (d) => {
+      if (!isFinite(d) || d <= 0) return;
+      const m = Math.floor(d / 60);
+      const s = Math.floor(d % 60).toString().padStart(2, '0');
+      durEl.textContent = `${m}:${s}`;
+    };
+    try {
+      const a = new Audio();
+      a.preload = 'metadata';
+      a.muted = true;
+      a.src = playSrc;
+      a.addEventListener('loadedmetadata', () => {
+        if (isFinite(a.duration) && a.duration > 0) {
+          writeDur(a.duration);
+          return;
+        }
+        const onChange = () => {
+          if (isFinite(a.duration) && a.duration > 0) {
+            a.removeEventListener('durationchange', onChange);
+            writeDur(a.duration);
+            try { a.currentTime = 0; } catch {}
+          }
+        };
+        a.addEventListener('durationchange', onChange);
+        try { a.currentTime = 1e10; } catch {}
+      }, { once: true });
+    } catch {}
+  }, 0);
+}
+window.probeAudioDuration = probeAudioDuration;
+
 /* ── Voice-message recording toggle ─────────────────────────────────────────── */
 async function toggleVoiceRecord () {
   if (document.body.classList.contains('in-music-channel')) {
@@ -246,8 +371,9 @@ function _attPreviewPlayVoice (btn, ev) {
   if (ev) { ev.preventDefault(); ev.stopPropagation(); }
   const wrap = btn.closest('.audio-msg');
   if (!wrap) return;
-  const src = wrap.getAttribute('data-src');
-  if (!src) return;
+  const rawSrc = wrap.getAttribute('data-src');
+  if (!rawSrc) return;
+  const src = resolveAudioPlaybackSrc(rawSrc, 'att-preview-voice');
   if (!_attPreviewAudio) _attPreviewAudio = new Audio();
   // Toggle: same source + currently playing = pause
   if (_attPreviewAudio.src === src && !_attPreviewAudio.paused) {
@@ -258,10 +384,10 @@ function _attPreviewPlayVoice (btn, ev) {
   }
   if (_attPreviewAudio.src !== src) _attPreviewAudio.src = src;
   _attPreviewAudio.currentTime = 0;
-  _attPreviewAudio.play().then(() => {
+  playHtmlAudioElement(_attPreviewAudio, 'voice-preview').then(() => {
     wrap.classList.add('playing');
     btn.textContent = '■';
-  }).catch(() => {});
+  });
   _attPreviewAudio.onended = () => {
     wrap.classList.remove('playing');
     btn.textContent = '▶';
@@ -954,13 +1080,30 @@ function toggleMediaFlag (flag, index) {
 
 /* ── Helpers ─────────────────────────────────────────────────────────────────── */
 function getSupportedAudioMime () {
-  const candidates = ['audio/webm;codecs=opus','audio/webm','audio/ogg;codecs=opus','audio/mp4'];
-  return candidates.find(m => MediaRecorder.isTypeSupported(m)) || 'audio/webm';
+  const safariFirst = isSafariLike();
+  const candidates = safariFirst
+    ? ['audio/mp4', 'audio/mp4;codecs=mp4a', 'audio/aac',
+       'audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus']
+    : ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus',
+       'audio/mp4', 'audio/mp4;codecs=mp4a'];
+  if (typeof MediaRecorder === 'undefined' || !MediaRecorder.isTypeSupported) {
+    return safariFirst ? 'audio/mp4' : 'audio/webm';
+  }
+  return candidates.find(m => MediaRecorder.isTypeSupported(m))
+      || (safariFirst ? 'audio/mp4' : 'audio/webm');
 }
 
 function getSupportedVideoMime () {
-  const candidates = ['video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm','video/mp4'];
-  return candidates.find(m => MediaRecorder.isTypeSupported(m)) || 'video/webm';
+  const safariFirst = isSafariLike();
+  const candidates = safariFirst
+    ? ['video/mp4', 'video/mp4;codecs=h264', 'video/mp4;codecs=avc1',
+       'video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm']
+    : ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm', 'video/mp4'];
+  if (typeof MediaRecorder === 'undefined' || !MediaRecorder.isTypeSupported) {
+    return safariFirst ? 'video/mp4' : 'video/webm';
+  }
+  return candidates.find(m => MediaRecorder.isTypeSupported(m))
+      || (safariFirst ? 'video/mp4' : 'video/webm');
 }
 
 function formatRecDuration (s) {

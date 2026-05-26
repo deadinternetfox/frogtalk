@@ -4046,40 +4046,9 @@ const Messages = (() => {
   // we seek to the very end — so we do the well-known "seek to 1e10, wait
   // for durationchange, then seek back to 0" dance.
   function _probeAudioDuration(msgId, src) {
-    if (!src) return;
-    setTimeout(() => {
-      const durEl = document.getElementById(`audio-dur-${msgId}`);
-      if (!durEl) return;
-      const writeDur = (d) => {
-        if (!isFinite(d) || d <= 0) return;
-        const m = Math.floor(d / 60);
-        const s = Math.floor(d % 60).toString().padStart(2, '0');
-        durEl.textContent = `${m}:${s}`;
-      };
-      try {
-        const a = new Audio();
-        a.preload = 'metadata';
-        a.muted = true;
-        a.src = src;
-        a.addEventListener('loadedmetadata', () => {
-          if (isFinite(a.duration) && a.duration > 0) {
-            writeDur(a.duration);
-            return;
-          }
-          // Force the browser to scan to the end so it discovers the real
-          // duration of the chunked MediaRecorder blob.
-          const onChange = () => {
-            if (isFinite(a.duration) && a.duration > 0) {
-              a.removeEventListener('durationchange', onChange);
-              writeDur(a.duration);
-              try { a.currentTime = 0; } catch {}
-            }
-          };
-          a.addEventListener('durationchange', onChange);
-          try { a.currentTime = 1e10; } catch {}
-        }, { once: true });
-      } catch {}
-    }, 0);
+    if (typeof window.probeAudioDuration === 'function') {
+      window.probeAudioDuration(msgId, src);
+    }
   }
 
   function playInlineAudio(msgId, btn, e) {
@@ -4092,9 +4061,15 @@ const Messages = (() => {
     // If same audio is playing, toggle pause/play
     if (_currentAudioId === msgId && _currentAudio) {
       if (_currentAudio.paused) {
-        _currentAudio.play();
-        btn.textContent = '■';
-        container.classList.add('playing');
+        const resume = () => {
+          btn.textContent = '■';
+          container.classList.add('playing');
+        };
+        if (typeof playHtmlAudioElement === 'function') {
+          playHtmlAudioElement(_currentAudio, 'voice-note-resume').then(resume);
+        } else {
+          _currentAudio.play().then(resume).catch(() => {});
+        }
       } else {
         _currentAudio.pause();
         btn.textContent = '▶';
@@ -4115,7 +4090,17 @@ const Messages = (() => {
       }
     }
 
-    const audio = new Audio(src);
+    const playSrc = (typeof resolveAudioPlaybackSrc === 'function')
+      ? resolveAudioPlaybackSrc(src, `play-${msgId}`)
+      : src;
+    const audio = new Audio(playSrc);
+    audio.addEventListener('error', () => {
+      try { UI.showToast('Could not play this voice note in your browser', 'error'); } catch {}
+      btn.textContent = '▶';
+      container.classList.remove('playing');
+      _currentAudio = null;
+      _currentAudioId = null;
+    }, { once: true });
     _currentAudio = audio;
     _currentAudioId = msgId;
 
@@ -4162,9 +4147,15 @@ const Messages = (() => {
       _currentAudioId = null;
     });
 
-    audio.play();
-    btn.textContent = '■';
-    container.classList.add('playing');
+    const afterPlay = () => {
+      btn.textContent = '■';
+      container.classList.add('playing');
+    };
+    if (typeof playHtmlAudioElement === 'function') {
+      playHtmlAudioElement(audio, 'voice-note').then(afterPlay);
+    } else {
+      audio.play().then(afterPlay).catch(() => {});
+    }
   }
 
   function setReplyTo(id, nickname, content) {
