@@ -168,26 +168,142 @@ const Rooms = (() => {
     return tail.every(_messageSafeForCachePreview);
   }
 
+  function _chatShell(area) {
+    const mount = area || document.getElementById('messages-area');
+    if (!mount) return null;
+    if (window.ContentWarning && typeof ContentWarning.ensureChatShell === 'function') {
+      try {
+        const shell = ContentWarning.ensureChatShell(mount);
+        if (shell) return shell;
+      } catch {}
+    }
+    return mount.querySelector('#cw-chat-content') || mount;
+  }
+
+  function _parseDomMsgId(el) {
+    const m = /^msg-(-?\d+)$/.exec(String(el?.id || ''));
+    return m ? Number(m[1]) : null;
+  }
+
+  function _channelCacheAlreadyPainted(name) {
+    const r = String(name || '').trim().toLowerCase();
+    const cached = (State.messages && State.messages[r]) || [];
+    if (!cached.length || !cached[0]?.id) return false;
+    const shell = _chatShell();
+    if (!shell) return false;
+    const nodes = [...shell.querySelectorAll('[id^="msg-"]')].filter((el) => el.id !== 'msg-empty-state');
+    if (!nodes.length) return false;
+    return Number(_parseDomMsgId(nodes[0])) === Number(cached[0].id);
+  }
+
+  function _paintChannelCacheNow(name, opts) {
+    const r = String(name || '').trim().toLowerCase();
+    const cached = (State.messages && State.messages[r]) || [];
+    if (!cached.length || typeof Messages === 'undefined' || !Messages.loadHistory) return false;
+    const area = document.getElementById('messages-area');
+    if (!area) return false;
+    try {
+      if (window.ContentWarning?.ensureChatShell) ContentWarning.ensureChatShell(area);
+      Messages.loadHistory(r, cached.slice(), {
+        deferFinish: opts?.deferFinish !== false,
+        reveal: false,
+        fromCache: true,
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   function _hideChatSyncStrip() {
     try { document.getElementById(_CHAT_SYNC_STRIP_ID)?.remove(); } catch {}
   }
 
-  function _showChatSyncStrip(name, type) {
+  function _setSyncStripCtx(name, type, dmPeer, stripOpts) {
+    try {
+      State._syncStripCtx = {
+        name: String(name || '').trim().toLowerCase(),
+        type,
+        dmPeer,
+        stripOpts: stripOpts && typeof stripOpts === 'object' ? stripOpts : {},
+      };
+    } catch {}
+  }
+
+  function _clearSyncStripCtx() {
+    try { delete State._syncStripCtx; } catch {}
+  }
+
+  /** Re-append sync strip at bottom of chat after history render (switch in progress). */
+  function restoreSyncStripIfSwitching(room) {
+    const r = String(room || '').trim().toLowerCase();
+    const ctx = State._syncStripCtx;
+    if (!ctx || String(ctx.name || '').trim().toLowerCase() !== r) return;
     const area = document.getElementById('messages-area');
-    if (!area) return;
+    if (!area || !area.classList.contains('chat-switching-swr')) return;
+    _showChatSyncStrip(ctx.name, ctx.type, ctx.dmPeer, ctx.stripOpts);
+    try {
+      requestAnimationFrame(() => {
+        area.scrollTop = area.scrollHeight;
+      });
+    } catch {}
+  }
+
+  function _syncStripIconHtml(name, type, dmPeer, stripOpts) {
+    const o = stripOpts && typeof stripOpts === 'object' ? stripOpts : {};
+    const room = o.room || (State.rooms || []).find((r) => r.name === name) || null;
+    const chType = normalizeChannelType(room?.channel_type || o.channelType || 'text');
+    if (type === 'dm') {
+      const nick = String(dmPeer || '').replace(/^@/, '');
+      if (typeof UI !== 'undefined' && UI.avatarEl) {
+        return '<span class="ft-sync-strip-icon ft-sync-strip-icon-dm">'
+          + UI.avatarEl(o.dmAvatar || null, nick, 32) + '</span>';
+      }
+      const av = o.dmAvatar ? _escTransition(String(o.dmAvatar)) : '💬';
+      return '<span class="ft-sync-strip-icon ft-sync-strip-icon-emoji" aria-hidden="true">'
+        + av + '</span>';
+    }
+    return '<span class="ft-sync-strip-icon-wrap" aria-hidden="true">'
+      + roomIconHtml(room?.icon, type, 'ft-sync-strip-icon-inner', chType) + '</span>';
+  }
+
+  function _showChatSyncStrip(name, type, dmPeer, stripOpts) {
+    const area = document.getElementById('messages-area');
+    const shell = _chatShell(area);
+    if (!area || !shell) return;
     _hideChatSyncStrip();
-    const label = type === 'dm'
-      ? 'Updating conversation…'
-      : `Syncing #${String(name || '').replace(/^#/, '')}…`;
+    const o = stripOpts && typeof stripOpts === 'object' ? stripOpts : {};
+    _setSyncStripCtx(name, type, dmPeer, o);
+    const roomKey = String(name || '').replace(/^#/, '').trim();
+    let title = '';
+    let sub = '';
+    if (type === 'dm') {
+      const nick = String(dmPeer || '').replace(/^@/, '');
+      title = nick ? `@${_escTransition(nick)}` : 'Direct message';
+      sub = 'Updating conversation';
+    } else {
+      title = roomKey ? `#${_escTransition(roomKey)}` : 'Channel';
+      sub = 'Syncing messages';
+    }
     const strip = document.createElement('div');
     strip.id = _CHAT_SYNC_STRIP_ID;
     strip.className = 'ft-chat-sync-strip';
     strip.setAttribute('role', 'status');
     strip.setAttribute('aria-live', 'polite');
+    strip.setAttribute('aria-busy', 'true');
     strip.innerHTML =
-      '<span class="ft-chat-sync-strip-bar" aria-hidden="true"></span>' +
-      `<span class="ft-chat-sync-strip-label">${_escTransition(label)}</span>`;
-    area.appendChild(strip);
+      _syncStripIconHtml(name, type, dmPeer, o) +
+      '<span class="ft-sync-strip-copy">' +
+      `<span class="ft-sync-strip-title">${title}</span>` +
+      `<span class="ft-sync-strip-sub">${_escTransition(sub)}…</span>` +
+      '</span>' +
+      '<span class="ft-sync-strip-spinner" aria-hidden="true"></span>';
+    shell.appendChild(strip);
+    try {
+      requestAnimationFrame(() => {
+        area.scrollTop = area.scrollHeight;
+      });
+    } catch {}
   }
 
   /** Paint cached/empty history or dismiss — never leave a blank pane under the overlay. */
@@ -201,7 +317,7 @@ const Rooms = (() => {
     const cached = (State.messages && State.messages[r]) || [];
     if (cached.length && typeof Messages !== 'undefined' && Messages.loadHistory) {
       try {
-        Messages.loadHistory(r, cached.slice(), { reveal: true });
+        Messages.loadHistory(r, cached.slice(), { reveal: false, fromCache: true });
         return;
       } catch {}
     }
@@ -1402,7 +1518,12 @@ const Rooms = (() => {
     ensureLoadingShieldStyle();
 
     if (swr) {
-      _showChatSyncStrip(name, type);
+      const stripOpts = {
+        room,
+        channelType: room?.channel_type || opts.channelType,
+        dmAvatar: opts.dmAvatar,
+      };
+      _showChatSyncStrip(name, type, dmPeer, stripOpts);
       if (opts.beginSwitch !== false && switchKey) {
         try { window.FtCompose?.beginChannelSwitch?.(switchKey, { swr: true }); } catch {}
       }
@@ -1587,6 +1708,7 @@ const Rooms = (() => {
     const finalizeCompose = () => {
       _scrubStaleSwitchChrome(area);
       if (finish) {
+        _clearSyncStripCtx();
         try {
           const r = String(State?.currentRoom || '').trim().toLowerCase();
           if (r && State._roomSwitchInProgress === r) delete State._roomSwitchInProgress;
@@ -1811,7 +1933,7 @@ const Rooms = (() => {
         switchToken,
         swr: useSwr,
       });
-      _clearMessageContent();
+      if (!hasCached) _clearMessageContent();
       try {
         const previewIcon = _roomDataEarly?.icon || null;
         setRoomHeader(name, type, previewIcon, dmPeer, _chTypeEarly);
@@ -1866,6 +1988,10 @@ const Rooms = (() => {
     } catch {}
     if (!State.messages[name]) State.messages[name] = [];
     State.oldestMsgId = State.messages[name].length ? State.messages[name][0].id : null;
+
+    if (hasCached && useFastSwitch && type !== 'dm' && channelHasUsableCache(name)) {
+      _paintChannelCacheNow(name, { deferFinish: true });
+    }
 
     // fc_last_room is persisted after the CW gate (public) or at end of switch (private).
 
@@ -2037,8 +2163,8 @@ const Rooms = (() => {
     if (roomData?.channel_theme) {
       try { applyChannelThemeOverride(JSON.parse(roomData.channel_theme)); } catch {}
     }
-    // Clear messages and reply state (keep transition / gate overlays).
-    _clearMessageContent();
+    // Clear DOM when no local cache (cached rooms keep painted history).
+    if (!hasCached) _clearMessageContent();
     // Hide any lingering "jump to latest" pip from the previous channel.
     try { document.getElementById('jump-to-latest-pip')?.classList.remove('visible'); } catch {}
     if (typeof Messages !== 'undefined' && Messages.clearReply) Messages.clearReply();
@@ -2115,19 +2241,16 @@ const Rooms = (() => {
     if (chType !== 'voice' && msgArea) {
       const cachedMsgs = Array.isArray(State.messages[name]) ? State.messages[name] : [];
       const paintCache = type !== 'dm' && hasCached && cachedMsgs.length > 0;
-      if (paintCache && typeof Messages !== 'undefined' && Messages.loadHistory) {
+      if (paintCache && !_channelCacheAlreadyPainted(name)) {
+        _paintChannelCacheNow(name, { deferFinish: true });
         try {
-          if (window.ContentWarning && typeof ContentWarning.ensureChatShell === 'function') {
-            ContentWarning.ensureChatShell(msgArea);
-          }
-          Messages.loadHistory(name, cachedMsgs.slice(), {
-            deferFinish: true,
-            reveal: true,
-            fromCache: true,
-          });
-          try {
-            window.FtCompose?.beginChannelSwitch?.(nameKey, { swr: useFastSwitch });
-          } catch {}
+          window.FtCompose?.beginChannelSwitch?.(nameKey, { swr: useFastSwitch });
+        } catch {}
+      } else if (paintCache) {
+        try { restoreSyncStripIfSwitching(name); } catch {}
+        try { msgArea.scrollTop = msgArea.scrollHeight; } catch {}
+        try {
+          window.FtCompose?.beginChannelSwitch?.(nameKey, { swr: useFastSwitch });
         } catch {}
       } else if (useFastSwitch) {
         try { window.FtCompose?.beginChannelSwitch?.(nameKey, { swr: true }); } catch {}
@@ -4115,6 +4238,7 @@ const Rooms = (() => {
     finishChannelSwitch,
     recoverChannelSwitch,
     channelHasUsableCache,
+    restoreSyncStripIfSwitching,
     isSwitchOverlayVisible,
     isSwitchOverlayForRoom,
     isChatDomFrozen,
@@ -4127,6 +4251,7 @@ try {
   window.finishChannelSwitch = Rooms.finishChannelSwitch;
   window.recoverChannelSwitch = Rooms.recoverChannelSwitch;
   window.channelHasUsableCache = Rooms.channelHasUsableCache;
+  window.restoreSyncStripIfSwitching = Rooms.restoreSyncStripIfSwitching;
   window.isSwitchOverlayVisible = Rooms.isSwitchOverlayVisible;
   window.isSwitchOverlayForRoom = Rooms.isSwitchOverlayForRoom;
   window.isChatDomFrozen = Rooms.isChatDomFrozen;

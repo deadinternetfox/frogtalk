@@ -58,7 +58,7 @@
       try {
         const cached = (State.messages && State.messages[room]) || [];
         if (cached.length && window.Messages?.loadHistory) {
-          Messages.loadHistory(room, cached.slice(), { deferFinish: true, reveal: true, fromCache: true });
+          Messages.loadHistory(room, cached.slice(), { deferFinish: true, reveal: false, fromCache: true });
         }
       } catch {}
       try {
