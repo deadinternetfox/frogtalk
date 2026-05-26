@@ -1504,14 +1504,14 @@ function resetCall () {
     _mutedAudio = false; _mutedVideo = false; _speakerMuted = false;
     try { _stopVAD(); } catch {}
     const rv = document.getElementById('remote-video');
-    const ra = document.getElementById('remote-audio');
+    const remoteAudio = document.getElementById('remote-audio');
     const lv = document.getElementById('local-video');
     if (rv) {
       rv.srcObject = null;
       rv.style.display = 'none';
       rv.classList.remove('ft-remote-audio-sink');
     }
-    if (ra) ra.srcObject = null;
+    if (remoteAudio) remoteAudio.srcObject = null;
     if (lv) { lv.srcObject = null; lv.style.display = 'none'; }
     // Show avatars again
     const ra = document.getElementById('call-remote-avatar');
