@@ -868,6 +868,16 @@ const GIFs = (() => {
   }
 
   async function showPublicPacks() {
+    try { createPicker(); } catch {}
+    try {
+      const picker = document.getElementById('gif-picker');
+      if (picker && !picker.classList.contains('open')) {
+        picker.classList.add('open');
+        _isOpen = true;
+        try { _attachOutsideClose(); } catch {}
+      }
+      _setActiveTabUI('stickers');
+    } catch {}
     const grid = document.getElementById('gif-grid');
     grid.innerHTML = '<div class="gif-loading">Loading public packs...</div>';
 
