@@ -218,14 +218,16 @@ const Rooms = (() => {
     return variant === 'dm' ? 'dm' : 'channel';
   }
 
-  /** True while SWR switch is active and send is still gated (tail skeleton may show). */
+  /** True while a background history fetch may still deliver new messages. */
   function chatSwitchSyncing() {
     const area = document.getElementById('messages-area');
     if (!area?.classList.contains('chat-switching-swr')) return false;
     try {
-      return !!window.FtCompose?.channelSendBlocked?.();
+      const r = String(State?.currentRoom || '').trim().toLowerCase();
+      if (WS?.isHistorySyncing?.(r)) return true;
+      return !!window.FtCompose?.isChannelLoading?.();
     } catch {
-      return true;
+      return false;
     }
   }
 
@@ -422,7 +424,9 @@ const Rooms = (() => {
     try { window.FtCompose?.refresh?.(); } catch {}
     if (channelHasUsableCache(r)) {
       _paintChannelCacheNow(r, { deferFinish: true });
-      showChatLoadSkeleton('channel', { tail: true });
+      if (WS?.isHistorySyncing?.(r)) {
+        showChatLoadSkeleton('channel', { tail: true });
+      }
     } else {
       showChatLoadSkeleton('channel');
     }
@@ -447,12 +451,16 @@ const Rooms = (() => {
     try { delete State._syncStripCtx; } catch {}
   }
 
-  /** Keep tail skeleton visible while background sync runs (no sync strip). */
+  /** Keep tail skeleton visible only while WS history may still add messages. */
   function restoreSyncStripIfSwitching(room) {
     const r = String(room || '').trim().toLowerCase();
     const area = document.getElementById('messages-area');
     if (!area || !area.classList.contains('chat-switching-swr')) return;
     if (String(State?.currentRoom || '').trim().toLowerCase() !== r) return;
+    if (!WS?.isHistorySyncing?.(r)) {
+      try { hideChatLoadSkeleton(true); } catch {}
+      return;
+    }
     if (_shellHasRealMessages()) {
       showChatLoadSkeleton('channel', { tail: true, noAnim: true });
     } else if (!document.getElementById(_CHAT_SKELETON_ID)) {
@@ -1736,10 +1744,12 @@ const Rooms = (() => {
       try { window.FtCompose?.refresh?.(); } catch {}
       if (!opts.skipSkeleton) {
         const skVar = type === 'dm' ? 'dm' : 'channel';
-        if (_shellHasRealMessages()) {
-          showChatLoadSkeleton(skVar, { tail: true });
-        } else {
+        const r = String(switchKey || name || '').trim().toLowerCase();
+        const awaitingHistory = !!(r && WS?.isHistorySyncing?.(r));
+        if (!_shellHasRealMessages()) {
           showChatLoadSkeleton(skVar);
+        } else if (awaitingHistory) {
+          showChatLoadSkeleton(skVar, { tail: true });
         }
       }
       return;

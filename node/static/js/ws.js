@@ -10,6 +10,7 @@ const WS = (() => {
   let _pingInterval = null;
   let _stableTimer = null;
   const _historyInFlight = new Map();
+  const _historyAwaiting = new Set();
   const _historyLastApplied = new Map();
   const _roomLastVisitAt = new Map();
   const _HISTORY_REVISIT_MS = 45000;
@@ -41,8 +42,25 @@ const WS = (() => {
 
   function resetHistoryCache(room) {
     if (!room) return;
-    _historyInFlight.delete(room);
-    _historyLastApplied.delete(room);
+    const r = String(room).trim().toLowerCase();
+    _historyInFlight.delete(r);
+    _historyAwaiting.delete(r);
+    _historyLastApplied.delete(r);
+  }
+
+  function isHistorySyncing(room) {
+    const r = String(room || _room || '').trim().toLowerCase();
+    if (!r) return false;
+    if (_historyAwaiting.has(r)) return true;
+    for (const k of _historyInFlight.keys()) {
+      if (String(k).trim().toLowerCase() === r) return true;
+    }
+    return false;
+  }
+
+  function _clearHistoryAwait(room) {
+    const r = String(room || '').trim().toLowerCase();
+    if (r) _historyAwaiting.delete(r);
   }
 
   function noteRoomVisit(room) {
@@ -97,6 +115,8 @@ const WS = (() => {
       _ws = null;
     }
     _room = room;
+    const roomKey = String(room || '').trim().toLowerCase();
+    if (roomKey) _historyAwaiting.add(roomKey);
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
     let url = `${proto}://${location.host}/ws/${encodeURIComponent(room)}`;
     // Prefer in-memory token; same-origin WS also sends the HttpOnly
@@ -133,6 +153,7 @@ const WS = (() => {
     ws.onclose = (ev) => {
       // Only reconnect if this is still the current WS
       if (_ws !== ws) return;
+      if (room) _clearHistoryAwait(room);
       if (_pingInterval) { clearInterval(_pingInterval); _pingInterval = null; }
       if (_stableTimer) { clearTimeout(_stableTimer); _stableTimer = null; }
       // Server-issued "do-not-reconnect" close codes. The server uses 4003
@@ -162,8 +183,10 @@ const WS = (() => {
   function disconnect() {
     if (_pingInterval) { clearInterval(_pingInterval); _pingInterval = null; }
     if (_reconnectTimer) clearTimeout(_reconnectTimer);
-    _room = null;
+    const prev = _room;
     if (_ws) { _ws.close(); _ws = null; }
+    if (prev) _clearHistoryAwait(prev);
+    _room = null;
   }
 
   function send(obj) {
@@ -198,6 +221,7 @@ const WS = (() => {
         // decrypted/rendered, and suppress immediate replays of the same
         // history window.
         if (_historyInFlight.get(room) === histSig || prevApplied === histSig) {
+          _clearHistoryAwait(room);
           Users.updateList(data.online || []);
           // Edge case: empty channel revisit. After a fresh-create with no
           // messages the first history packet (sig "0:0:0") is applied and
@@ -217,10 +241,10 @@ const WS = (() => {
                   && (cachedNow.length || !decrypting)) {
                   Messages.loadHistory(room, cachedNow.slice(), { reveal: false, fromCache: true });
                 }
-              } else if (area?.classList.contains('chat-switching-swr') && cachedNow.length) {
+              } else if (area?.classList.contains('chat-switching-swr')) {
+                try { window.hideChatLoadSkeleton?.(true); } catch {}
                 Messages.mergeRoomHistory?.(room, cachedNow.slice(), { fromCache: true });
-                if (typeof finishChannelSwitch === 'function'
-                  && !(window.FtCompose?.isChannelLoading?.())) {
+                if (typeof finishChannelSwitch === 'function') {
                   finishChannelSwitch(room, { finish: true, contentReady: true });
                 }
               }
@@ -254,6 +278,7 @@ const WS = (() => {
             const sameLast = Number(cached[cached.length - 1]?.id || 0) === Number(incoming[incoming.length - 1]?.id || 0);
             if (sameLen && sameFirst && sameLast) {
               _historyLastApplied.set(room, histSig);
+              _clearHistoryAwait(room);
               Users.updateList(data.online || []);
               try {
                 if (State.currentRoom === room) {
@@ -262,12 +287,13 @@ const WS = (() => {
                     reveal: false,
                     fromCache: true,
                     fromServer: true,
+                    noNewMessages: true,
                   });
                   if (!merged && area && _switchUiStillLoading(area)) {
                     Messages.loadHistory(room, cached.slice(), { reveal: false, fromCache: true });
-                  } else if (area?.classList.contains('chat-switching-swr')) {
-                    if (typeof finishChannelSwitch === 'function'
-                      && !(window.FtCompose?.isChannelLoading?.())) {
+                  } else {
+                    try { window.hideChatLoadSkeleton?.(true); } catch {}
+                    if (typeof finishChannelSwitch === 'function') {
                       finishChannelSwitch(room, { finish: true, contentReady: true });
                     }
                   }
@@ -305,6 +331,7 @@ const WS = (() => {
           Users.updateList(data.online || []);
         } finally {
           _historyInFlight.delete(room);
+          _clearHistoryAwait(room);
         }
         break;
       }
@@ -1136,6 +1163,7 @@ const WS = (() => {
     resetHistoryCache,
     noteRoomVisit,
     shouldKeepHistoryCache,
+    isHistorySyncing,
   };
 })();
 

@@ -9073,19 +9073,12 @@ function _mentionColorWithAlpha(color, alpha, fallback) {
     } catch {}
   }
 
-  /** Chat still syncing after compose load finished (SWR tail / history in flight). */
+  /** True only while WS may still deliver new history for the open channel. */
   function _channelHistorySyncing() {
     try {
-      const area = document.getElementById('messages-area');
-      if (!area?.classList.contains('chat-switching-swr')) return false;
-      if (_chLoad.active) return true;
-      try {
-        const r = String(State?._roomSwitchInProgress || '').trim().toLowerCase();
-        const cur = String(State?.currentRoom || '').trim().toLowerCase();
-        if (r && cur && r === cur) return true;
-      } catch {}
-      if (area.classList.contains('ft-chat-skeleton-active')) return true;
-      if (document.getElementById('ft-chat-skeleton')) return true;
+      const r = String(State?.currentRoom || '').trim().toLowerCase();
+      if (!r) return false;
+      if (typeof WS !== 'undefined' && WS.isHistorySyncing?.(r)) return true;
     } catch {}
     return false;
   }
