@@ -1810,62 +1810,75 @@ async def websocket_endpoint(
             # ── Group voice channel signaling ─────────────────────────
             elif msg_type == "voice_join":
                 # User wants to join voice channel in current room
-                existing = voice_manager.join(
-                    room_name, user["id"], user["nickname"], user.get("avatar")
+                user_gid = str(user.get("global_user_id") or "")
+                join_result = voice_manager.join(
+                    room_name,
+                    user["id"],
+                    user["nickname"],
+                    user.get("avatar"),
+                    user_gid,
                 )
-                if existing is None:
+                if join_result is None:
                     await manager.send_personal(websocket, {
                         "type": "voice_error",
                         "error": "Voice channel is full (max 8 users)"
                     })
                     continue
-                try:
-                    import federation_voice as _fv
-                    if _fv.federation_voice_enabled() and not _fv.voice_sfu_enabled():
-                        sid = _fv.federated_voice_registry.session_for_room(room_name)
-                        anchor = _fv.room_anchor_server_id(room_name)
-                        _fv.enqueue_voice_session_join(
-                            user, room_name, session_id=sid, anchor_server_id=anchor,
-                        )
-                except Exception:
-                    logger.exception("federated voice_join enqueue failed")
+                already = bool(join_result.get("already"))
+                if user_gid and not already:
+                    try:
+                        import federation_voice as _fv
+                        _fv.clear_local_remote_voice_duplicate(room_name, user_gid)
+                    except Exception:
+                        logger.exception("clear_local_remote_voice_duplicate failed")
+                if not already:
+                    try:
+                        import federation_voice as _fv
+                        if _fv.federation_voice_enabled() and not _fv.voice_sfu_enabled():
+                            sid = _fv.federated_voice_registry.session_for_room(room_name)
+                            anchor = _fv.room_anchor_server_id(room_name)
+                            _fv.enqueue_voice_session_join(
+                                user, room_name, session_id=sid, anchor_server_id=anchor,
+                            )
+                    except Exception:
+                        logger.exception("federated voice_join enqueue failed")
 
-                # Notify existing participants about new joiner
-                try:
-                    import federation_voice as _fv
-                    joined_parts = _fv.participants_for_room(room_name, voice_manager)
-                except Exception:
-                    joined_parts = voice_manager.participants(room_name)
-                await manager.broadcast_room(room_name, {
-                    "type": "voice_user_joined",
-                    "room": room_name,
-                    "user_id": user["id"],
-                    "global_user_id": str(user.get("global_user_id") or ""),
-                    "nickname": user["nickname"],
-                    "avatar": user.get("avatar"),
-                    "participants": joined_parts,
-                }, exclude=websocket)
-                
+                    # Notify existing participants about new joiner
+                    try:
+                        import federation_voice as _fv
+                        joined_parts = _fv.participants_for_room(room_name, voice_manager)
+                    except Exception:
+                        joined_parts = voice_manager.participants(room_name)
+                    await manager.broadcast_room(room_name, {
+                        "type": "voice_user_joined",
+                        "room": room_name,
+                        "user_id": user["id"],
+                        "global_user_id": user_gid,
+                        "nickname": user["nickname"],
+                        "avatar": user.get("avatar"),
+                        "participants": joined_parts,
+                    }, exclude=websocket)
+
                 # Send joiner the list of existing participants to connect to
                 try:
                     import federation_voice as _fv
                     connect_peers = _fv.peers_for_joiner(room_name, voice_manager, user)
                 except Exception:
                     connect_peers = []
-                    for p in (existing or []):
-                        uid = int(p[0])
+                    for p in (join_result.get("existing") or []):
+                        uid = int(p.get("user_id") or 0)
                         if uid == int(user["id"]):
                             continue
-                        u = db.get_user_by_id(uid) or {}
                         connect_peers.append({
                             "user_id": uid,
-                            "nickname": p[1],
-                            "avatar": p[2],
-                            "global_user_id": str(u.get("global_user_id") or ""),
+                            "nickname": p.get("nickname") or "",
+                            "avatar": p.get("avatar") or "",
+                            "global_user_id": str(p.get("global_user_id") or ""),
                         })
                 await manager.send_personal(websocket, {
                     "type": "voice_joined",
                     "participants": connect_peers,
+                    "already": already,
                 })
 
             elif msg_type == "voice_leave":
@@ -1882,7 +1895,7 @@ async def websocket_endpoint(
                         # roster for everyone in the room.
                 except Exception:
                     logger.exception("federated voice_leave enqueue failed")
-                voice_manager.leave(room_name, user["id"])
+                voice_manager.leave(room_name, user["id"], str(user.get("global_user_id") or ""))
                 try:
                     import federation_voice as _fv
                     left_parts = _fv.participants_for_room(room_name, voice_manager)
@@ -2062,15 +2075,25 @@ async def websocket_endpoint(
         if not isinstance(exc, WebSocketDisconnect):
             import traceback
             traceback.print_exc()
-        # Clean up voice channels first
-        rooms_left = voice_manager.leave_all(user["id"])
+        # Only drop voice when the account has no remaining WS connections
+        rooms_left = []
+        if not manager.is_user_online(user["id"]):
+            rooms_left = voice_manager.leave_all(
+                user["id"], str(user.get("global_user_id") or ""),
+            )
         for vc_room in rooms_left:
+            try:
+                import federation_voice as _fv
+                left_parts = _fv.participants_for_room(vc_room, voice_manager)
+            except Exception:
+                left_parts = voice_manager.participants(vc_room)
             await manager.broadcast_room(vc_room, {
                 "type": "voice_user_left",
                 "room": vc_room,
                 "user_id": user["id"],
+                "global_user_id": str(user.get("global_user_id") or ""),
                 "nickname": user["nickname"],
-                "participants": voice_manager.participants(vc_room)
+                "participants": left_parts,
             })
         
         result = manager.disconnect(websocket)

@@ -283,53 +283,96 @@ class ConnectionManager:
 
 # Voice Channel Tracking (for group calls)
 class VoiceManager:
-    """Track users in voice channels per room. Mesh topology for <=8 users."""
-    
+    """Track users in voice channels per room. One roster row per identity (GID preferred)."""
+
     def __init__(self):
-        # room -> set of (user_id, nickname, avatar)
-        self._voice_rooms: Dict[str, Set[tuple]] = {}
-    
-    def join(self, room: str, user_id: int, nickname: str, avatar: str = None):
-        """User joins voice channel. Returns list of existing participants."""
+        # room -> identity_key -> participant dict
+        self._voice_rooms: Dict[str, Dict[str, dict]] = {}
+
+    @staticmethod
+    def _identity_key(user_id: int, global_user_id: str = "") -> str:
+        gid = (global_user_id or "").strip()
+        if gid:
+            return f"g:{gid}"
+        return f"u:{int(user_id)}"
+
+    def join(
+        self,
+        room: str,
+        user_id: int,
+        nickname: str,
+        avatar: str = None,
+        global_user_id: str = "",
+    ):
+        """Join voice. Returns ``{existing, already}`` or ``None`` if full."""
         if room not in self._voice_rooms:
-            self._voice_rooms[room] = set()
-        
-        # Max 8 users per voice channel
-        if len(self._voice_rooms[room]) >= 8:
-            return None  # Room full
-        
-        existing = list(self._voice_rooms[room])
-        self._voice_rooms[room].add((user_id, nickname, avatar or ""))
-        return existing
-    
-    def leave(self, room: str, user_id: int):
+            self._voice_rooms[room] = {}
+        bucket = self._voice_rooms[room]
+        ik = self._identity_key(user_id, global_user_id)
+        gid = (global_user_id or "").strip()
+        profile = {
+            "user_id": int(user_id),
+            "nickname": nickname,
+            "avatar": avatar or "",
+            "global_user_id": gid,
+        }
+
+        if ik in bucket:
+            bucket[ik].update(profile)
+            existing = [p for k, p in bucket.items() if k != ik]
+            return {"existing": existing, "already": True}
+
+        if len(bucket) >= 8:
+            return None
+
+        existing = list(bucket.values())
+        bucket[ik] = dict(profile)
+        return {"existing": existing, "already": False}
+
+    def leave(self, room: str, user_id: int, global_user_id: str = ""):
         """User leaves voice channel."""
         if room not in self._voice_rooms:
             return
-        self._voice_rooms[room] = {u for u in self._voice_rooms[room] if u[0] != user_id}
-        if not self._voice_rooms[room]:
+        bucket = self._voice_rooms[room]
+        ik = self._identity_key(user_id, global_user_id)
+        if ik in bucket:
+            del bucket[ik]
+        else:
+            for k, p in list(bucket.items()):
+                if int(p.get("user_id") or 0) == int(user_id):
+                    del bucket[k]
+        if not bucket:
             del self._voice_rooms[room]
-    
+
     def participants(self, room: str):
         """Get list of participants in voice channel."""
-        return [
-            {"user_id": u[0], "nickname": u[1], "avatar": u[2]}
-            for u in self._voice_rooms.get(room, set())
-        ]
-    
+        return list(self._voice_rooms.get(room, {}).values())
+
     def is_in_voice(self, room: str, user_id: int) -> bool:
         """Check if user is in voice channel."""
-        return any(u[0] == user_id for u in self._voice_rooms.get(room, set()))
-    
-    def leave_all(self, user_id: int):
-        """Remove user from all voice channels (on disconnect)."""
+        return any(int(p.get("user_id") or 0) == int(user_id) for p in self.participants(room))
+
+    def is_in_voice_by_gid(self, room: str, global_user_id: str) -> bool:
+        gid = (global_user_id or "").strip()
+        if not gid:
+            return False
+        return self._identity_key(0, gid) in self._voice_rooms.get(room, {})
+
+    def leave_all(self, user_id: int, global_user_id: str = ""):
+        """Remove user from all voice channels (when fully offline)."""
+        gid = (global_user_id or "").strip()
         rooms_left = []
         for room in list(self._voice_rooms.keys()):
-            before = len(self._voice_rooms[room])
-            self._voice_rooms[room] = {u for u in self._voice_rooms[room] if u[0] != user_id}
-            if len(self._voice_rooms[room]) < before:
+            bucket = self._voice_rooms[room]
+            before = len(bucket)
+            for k, p in list(bucket.items()):
+                if int(p.get("user_id") or 0) == int(user_id):
+                    del bucket[k]
+                elif gid and str(p.get("global_user_id") or "").strip() == gid:
+                    del bucket[k]
+            if len(bucket) < before:
                 rooms_left.append(room)
-            if not self._voice_rooms[room]:
+            if not bucket:
                 del self._voice_rooms[room]
         return rooms_left
 
