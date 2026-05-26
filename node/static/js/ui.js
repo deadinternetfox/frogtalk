@@ -9174,11 +9174,14 @@ function _mentionColorWithAlpha(color, alpha, fallback) {
     }
 
     if (sendBtn) {
-      sendBtn.disabled = sendBlocked || sendBtn.classList.contains('is-sending');
+      const sending = sendBtn.classList.contains('is-sending');
+      const sendHeld = sendBlocked && !sending;
+      sendBtn.disabled = sendHeld || sending;
+      sendBtn.classList.toggle('ft-send-blocked', sendHeld);
       sendBtn.setAttribute('aria-disabled', sendBtn.disabled ? 'true' : 'false');
-      sendBtn.title = sendBlocked
+      sendBtn.title = sendHeld
         ? (preType ? 'Syncing messages — you can keep drafting' : 'Wait for messages to finish loading')
-        : '';
+        : (sending ? 'Sending…' : '');
     }
 
     const toolsBlocked = hardBlock;

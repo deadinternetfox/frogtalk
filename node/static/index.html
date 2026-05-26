@@ -3104,13 +3104,15 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
 .send-btn:active{transform:translateY(0) scale(.95);filter:saturate(1.08) brightness(.98)}
 .send-btn:focus-visible{outline:2px solid rgba(141,231,176,.8);outline-offset:2px}
 .send-btn:disabled,
+.send-btn.ft-send-blocked,
 .send-btn.is-sending{
   background:linear-gradient(180deg,#2a523b,#1f3f2e);
   border-color:#4c8168;color:#9de1bc;cursor:not-allowed;
   box-shadow:inset 0 1px 0 rgba(255,255,255,.12),0 2px 6px rgba(0,0,0,.25);
-  transform:none
+  transform:none;pointer-events:none
 }
 .send-btn:disabled::after,
+.send-btn.ft-send-blocked::after,
 .send-btn.is-sending::after{display:none}
 .send-btn.is-sending{animation:sendPulse .95s ease-in-out infinite}
 @keyframes sendPulse{
