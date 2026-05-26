@@ -992,6 +992,35 @@ const GIFs = (() => {
       try { loadingToast?.dismiss?.(); } catch {}
       if (input) input.focus();
     } catch (e) {
+      // If the browser blocks the direct fetch (CORS / mixed content),
+      // retry via the authenticated server image proxy. That keeps the
+      // GIF as an attachment instead of dropping the raw URL into the
+      // input box.
+      try {
+        const proxyUrl = `/api/proxy/image?u=${encodeURIComponent(gifUrl)}`;
+        const resp2 = await fetch(proxyUrl, {
+          mode: 'cors',
+          credentials: 'omit',
+          headers: { 'X-Session-Token': State.token || '' },
+        });
+        if (resp2.ok) {
+          const blob2 = await resp2.blob();
+          if (blob2.size <= 20 * 1024 * 1024) {
+            const type2 = blob2.type || (gifUrl.endsWith('.mp4') ? 'video/mp4' : 'image/gif');
+            const ext2  = type2.includes('mp4') ? 'mp4' : 'gif';
+            const name2 = 'gif-' + Date.now() + '.' + ext2;
+            const attachBlob2 = blob2.type ? blob2 : new Blob([blob2], { type: type2 });
+            window._pendingAttachment = { blob: attachBlob2, name: name2, type: type2 };
+            if (typeof _renderAttachmentPreview === 'function') {
+              _renderAttachmentPreview({ blob: attachBlob2, name: name2, type: type2, sizeBytes: attachBlob2.size });
+            }
+            try { loadingToast?.dismiss?.(); } catch {}
+            if (input) input.focus();
+            return;
+          }
+        }
+      } catch {}
+
       try { loadingToast?.dismiss?.(); } catch {}
       console.warn('[GIF] fetch failed, falling back to link', e);
       _sendAsLink(gifUrl);
