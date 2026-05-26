@@ -1380,18 +1380,48 @@ body.cw-composer-locked #msg-input {
   opacity: 0.85;
 }
 
+/* Draft-while-sync: keep input bright; only send + sync chrome look held */
 #input-area.ft-compose-pending.ft-compose-loading {
-  opacity: 0.92;
-  filter: saturate(0.95);
+  opacity: 1;
+  filter: none;
 }
 
 #input-area.ft-compose-pending.ft-compose-loading #msg-input {
   cursor: text;
 }
 
+#input-area.ft-compose-pending.ft-compose-loading .input-wrap {
+  border-color: color-mix(in srgb, var(--accent-color) 22%, var(--border-color)) !important;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent-color) 8%, transparent);
+}
+
 #input-area.ft-compose-loading .input-wrap {
   border-color: color-mix(in srgb, var(--accent-color) 22%, var(--border-color)) !important;
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent-color) 8%, transparent);
+}
+
+/* Match .send-btn:disabled / .is-sending dull state (no pulse while syncing) */
+#input-area .send-btn.ft-send-blocked {
+  background: linear-gradient(180deg, #2a523b, #1f3f2e);
+  border-color: #4c8168;
+  color: #9de1bc;
+  cursor: not-allowed;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12), 0 2px 6px rgba(0, 0, 0, 0.25);
+  transform: none;
+  pointer-events: none;
+  opacity: 0.88;
+}
+
+#input-area .send-btn.ft-send-blocked::after {
+  display: none;
+}
+
+#input-area.ft-compose-pending .send-btn.ft-send-blocked:hover,
+#input-area.ft-compose-pending .send-btn.ft-send-blocked:active {
+  background: linear-gradient(180deg, #2a523b, #1f3f2e);
+  border-color: #4c8168;
+  transform: none;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12), 0 2px 6px rgba(0, 0, 0, 0.25);
 }
 
 /* Sync strip + top message bar retired — compose shows Syncing…; tail skeletons in chat */

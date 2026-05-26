@@ -4520,9 +4520,14 @@ function _updateDmComposeState() {
     }
   }
   if (sendBtn) {
-    sendBtn.disabled = sendBlocked || _dmSending;
+    const sending = sendBtn.classList.contains('is-sending') || _dmSending;
+    const sendHeld = sendBlocked && !sending;
+    sendBtn.disabled = sendHeld || sending;
+    sendBtn.classList.toggle('ft-send-blocked', sendHeld);
     sendBtn.setAttribute('aria-disabled', sendBtn.disabled ? 'true' : 'false');
-    sendBtn.title = sendBlocked ? 'Wait for messages to finish loading' : '';
+    sendBtn.title = sendHeld
+      ? (preType ? 'Syncing messages — you can keep drafting' : 'Wait for messages to finish loading')
+      : (sending ? 'Sending…' : '');
   }
   try {
     document.querySelectorAll(
