@@ -9,7 +9,7 @@ import uuid
 import unicodedata
 from urllib.parse import parse_qs, urlsplit, urlunsplit
 from pathlib import Path
-from fastapi import APIRouter, Request, Depends, UploadFile, File
+from fastapi import APIRouter, Request, Depends, UploadFile, File, Query
 from fastapi.responses import JSONResponse, FileResponse
 from pydantic import BaseModel, Field
 from slowapi import Limiter
@@ -699,7 +699,7 @@ async def list_rooms(current_user: dict = Depends(get_current_user)):
             local_fl = int(r.get("content_warning_flags") or 0) & db.CW_ALL
             fed_en = int(fed.get("content_warning_enabled") or 0)
             fed_fl = int(fed.get("content_warning_flags") or 0) & db.CW_ALL
-            if fed_en and fed_fl and (not local_en or not local_fl):
+            if fed_en and (not local_en or (local_fl == 0 and fed_fl)):
                 r["content_warning_enabled"] = fed_en
                 r["content_warning_flags"] = fed_fl
         visible.append(_room_with_content_warning(r) or r)
@@ -2677,6 +2677,7 @@ async def music_track_art(
 @router.post("/{room_name}/music/sync")
 async def music_sync_from_home(
     room_name: str,
+    force: bool = Query(False),
     current_user: dict = Depends(get_current_user),
 ):
     """Hydrate this node's music mirror from the room's authoritative home node."""
@@ -2684,7 +2685,7 @@ async def music_sync_from_home(
     if err:
         return err
     from routers import federation as federation_mod
-    result = await federation_mod.pull_music_queue_from_home(room_name, force=False)
+    result = await federation_mod.pull_music_queue_from_home(room_name, force=bool(force))
     if result.get("ok"):
         return {"ok": True}
     if result.get("skipped"):

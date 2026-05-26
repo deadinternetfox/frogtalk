@@ -4133,6 +4133,8 @@ def _apply_sync_export_to_user(
         if channel_type not in ("text", "music", "voice"):
             channel_type = "text"
         dir_theme = _sanitize_sync_channel_theme(raw.get("channel_theme"), "public") or ""
+        cw_en = 1 if int(raw.get("content_warning_enabled") or 0) else 0
+        cw_fl = int(raw.get("content_warning_flags") or 0) & db.CW_ALL
         # Directory rows are index-only — do NOT materialise a local shell
         # room for every public channel on the home node. Empty local copies
         # hide the federated index entry and make Discover look solo/empty.
@@ -4198,6 +4200,8 @@ def _apply_sync_export_to_user(
                     owner_nickname=owner_nickname,
                     owner_global_user_id=owner_gid,
                     home_base_url=source_public_url,
+                    content_warning_enabled=cw_en,
+                    content_warning_flags=cw_fl,
                 )
             except Exception:
                 _log.debug("upsert_federation_channel_index failed name=%s", name, exc_info=True)
@@ -5794,10 +5798,10 @@ def materialize_directory_federated_channel(room_name: str) -> tuple[dict | None
         pass
     try:
         cw_en = bool(int(fed.get("content_warning_enabled") or 0))
-        cw_fl = int(fed.get("content_warning_flags") or 0)
-        if cw_en and cw_fl:
+        cw_fl = int(fed.get("content_warning_flags") or 0) & db.CW_ALL
+        if cw_en:
             db.set_room_content_warning(name, enabled=True, flags=cw_fl)
-        elif not cw_en:
+        else:
             db.set_room_content_warning(name, enabled=False, flags=0)
     except Exception:
         pass

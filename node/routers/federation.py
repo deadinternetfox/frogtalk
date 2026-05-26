@@ -707,6 +707,26 @@ def _resolve_room_home_server_id(room_name: str, room: dict | None = None) -> st
     return ""
 
 
+def _music_mirror_needs_resync(room_name: str, home_payload: dict | None) -> bool:
+    """True when local queue head differs from the home node's snapshot."""
+    if not isinstance(home_payload, dict):
+        return False
+    tracks = home_payload.get("tracks") or []
+    if not isinstance(tracks, list) or not tracks:
+        return False
+    local = db.music_get_queue(room_name, limit=1)
+    if not local:
+        return True
+    home_head = tracks[0] if isinstance(tracks[0], dict) else {}
+    loc = local[0] if isinstance(local[0], dict) else {}
+    for key in ("video_id", "url", "provider"):
+        hv = str(home_head.get(key) or "").strip().lower()
+        lv = str(loc.get(key) or "").strip().lower()
+        if hv and lv and hv != lv:
+            return True
+    return False
+
+
 async def _apply_federated_music_snapshot(
     room_name: str,
     payload: dict,
@@ -758,13 +778,20 @@ async def _apply_federated_music_snapshot(
         )
         if head_id is None:
             head_id = int(tid)
-    if head_id and not had_current:
+    anchor_id = head_id
+    try:
+        payload_head = int(payload.get("head_track_id") or 0)
+        if payload_head > 0:
+            anchor_id = payload_head
+    except Exception:
+        pass
+    if anchor_id and (not had_current or force):
         start_unix = payload.get("start_unix")
         try:
             su = int(float(start_unix)) if start_unix is not None else int(time.time())
         except Exception:
             su = int(time.time())
-        _set_music_anchor(name, head_id, su)
+        _set_music_anchor(name, int(anchor_id), su)
     await _broadcast_music_ws(name, {"type": "music_queue_snapshot", "room": name})
     return True
 
@@ -810,8 +837,6 @@ async def pull_music_queue_from_home(room_name: str, *, force: bool = False) -> 
         return {"ok": False, "skipped": True, "reason": "not_music_channel"}
     if _room_snapshot_authoritative(room):
         return {"ok": False, "skipped": True, "reason": "authoritative_local"}
-    if db.music_get_queue(name, limit=1) and not force:
-        return {"ok": False, "skipped": True, "reason": "local_queue_nonempty"}
     home_sid = _resolve_room_home_server_id(name, room)
     if not home_sid:
         return {"ok": False, "error": "no_home_server"}
@@ -823,6 +848,11 @@ async def pull_music_queue_from_home(room_name: str, *, force: bool = False) -> 
     payload = await run_in_threadpool(_fetch_home_music_queue_sync, base, name)
     if not payload or not isinstance(payload.get("tracks"), list):
         return {"ok": False, "error": "pull_failed"}
+    if db.music_get_queue(name, limit=1) and not force:
+        if _music_mirror_needs_resync(name, payload):
+            force = True
+        else:
+            return {"ok": False, "skipped": True, "reason": "local_queue_nonempty"}
     applied = await _apply_federated_music_snapshot(name, payload, force=force)
     return {"ok": bool(applied)}
 
@@ -1001,6 +1031,7 @@ def enqueue_channel_directory_updated(room_name: str) -> dict:
             "owner_global_user_id": str(owner.get("global_user_id") or "")[:64],
             "home_base_url": str((db.get_or_create_local_server_identity() or {}).get("public_url") or "")[:256],
             "tombstone": not listed,
+            "channel_theme": str(room.get("channel_theme") or "")[:20000],
             "content_warning_enabled": int(room.get("content_warning_enabled") or 0),
             "content_warning_flags": int(room.get("content_warning_flags") or 0) & db.CW_ALL,
         },
@@ -5411,12 +5442,13 @@ async def _handle_room_event(event: dict) -> None:
                 category=_fed_clip(payload.get("category"), 32),
                 tags_json=str(tags_raw or "[]")[:2000],
                 channel_type=str(payload.get("channel_type") or "text")[:16],
+                channel_theme=str(payload.get("channel_theme") or "")[:20000],
                 member_count=max(0, int(payload.get("member_count") or 0)),
                 owner_nickname=_fed_nickname(payload.get("owner_nickname")) or "",
                 owner_global_user_id=str(payload.get("owner_global_user_id") or "")[:64],
                 home_base_url=str(payload.get("home_base_url") or "")[:256],
                 content_warning_enabled=int(payload.get("content_warning_enabled") or 0),
-                content_warning_flags=int(payload.get("content_warning_flags") or 0),
+                content_warning_flags=int(payload.get("content_warning_flags") or 0) & db.CW_ALL,
             )
             cw_en = bool(int(payload.get("content_warning_enabled") or 0))
             cw_fl = int(payload.get("content_warning_flags") or 0) & db.CW_ALL
