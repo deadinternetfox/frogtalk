@@ -4500,10 +4500,6 @@ function _updateDmComposeState() {
       input.disabled = true;
       input.removeAttribute('readonly');
       input.setAttribute('aria-disabled', 'true');
-    } else if (preType) {
-      input.disabled = false;
-      input.setAttribute('readonly', '');
-      input.setAttribute('aria-disabled', 'false');
     } else {
       input.disabled = false;
       input.removeAttribute('readonly');

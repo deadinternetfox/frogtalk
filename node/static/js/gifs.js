@@ -787,7 +787,7 @@ const GIFs = (() => {
   function _openStickerItemMenu(stickerId, scope) {
     const items = [];
     if (scope === 'channel') {
-      items.push({ label: 'Add to my stickers', icon: '➕', onclick: () => importStickerToAccount(stickerId) });
+      items.push({ label: 'Add sticker', icon: '➕', onclick: () => importStickerToAccount(stickerId) });
     }
     if (scope === 'mine') {
       items.push({ label: 'Delete sticker', icon: '🗑', danger: true, onclick: () => deleteSticker(stickerId) });

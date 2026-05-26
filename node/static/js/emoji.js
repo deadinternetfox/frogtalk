@@ -129,7 +129,6 @@ function _pickerCategoryKeys() {
 function buildEmojiPicker() {
   const cats = document.getElementById('ep-cats');
   const grid = document.getElementById('ep-grid');
-  const createBtn = document.getElementById('ep-create-btn');
   if (!cats || !grid) return;
 
   const renderCats = () => {
@@ -137,11 +136,24 @@ function buildEmojiPicker() {
     const keys = _pickerCategoryKeys();
     keys.forEach((cat, i) => {
       const btn = document.createElement('div');
-      btn.className = 'ep-cat' + (cat === _epActiveCategory || (i === 0 && !_epActiveCategory) ? ' active' : '');
-      if (i === 0 && !keys.includes(_epActiveCategory)) btn.classList.add('active');
-      btn.textContent = cat.split(' ')[0];
+      const isActive = cat === _epActiveCategory || (i === 0 && !keys.includes(_epActiveCategory));
+      btn.className = 'ep-cat' + (isActive ? ' active' : '');
+      if (cat === CAT_CHANNEL && _canModerateCurrentChannel()) {
+        btn.classList.add('ep-cat-channel-manage');
+      }
       btn.title = cat;
       btn.dataset.cat = cat;
+      const label = document.createElement('span');
+      label.textContent = cat.split(' ')[0];
+      btn.appendChild(label);
+      if (cat === CAT_CHANNEL && _canModerateCurrentChannel()) {
+        const plus = document.createElement('span');
+        plus.className = 'ep-cat-channel-add';
+        plus.setAttribute('aria-hidden', 'true');
+        plus.textContent = '+';
+        btn.appendChild(plus);
+        btn.title = 'Channel emojis — tap + in grid to add';
+      }
       btn.onclick = () => {
         document.querySelectorAll('.ep-cat').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
@@ -158,27 +170,13 @@ function buildEmojiPicker() {
   }
   cats.dataset.built = '1';
 
-  if (createBtn && !createBtn.dataset.bound) {
-    createBtn.dataset.bound = '1';
-    createBtn.addEventListener('click', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      _addEmojiScope = _epActiveCategory === CAT_CHANNEL ? 'channel' : 'mine';
-      openAddEmojiModal();
-    });
-  }
-
   renderCats();
   loadCustomEmojis().then(() => renderCategory(CAT_MY));
 }
 
 function _setCustomEmojiFooterVisible(on) {
   const picker = document.getElementById('emoji-picker');
-  const footer = document.getElementById('ep-footer');
-  const btn = document.getElementById('ep-create-btn');
-  if (footer) footer.hidden = !on;
   if (picker) picker.classList.toggle('ep-custom-tab', !!on);
-  if (btn) btn.disabled = !State?.token;
 }
 
 function _appendEmojiTile(grid, emoji, scope) {
@@ -207,7 +205,7 @@ function _appendEmojiTile(grid, emoji, scope) {
 function _openEmojiTileMenu(emoji, scope) {
   const items = [];
   if (scope === 'channel') {
-    items.push({ label: 'Add to my emojis', icon: '➕', onclick: () => importEmojiToAccount(emoji.id) });
+    items.push({ label: 'Add emoji', icon: '➕', onclick: () => importEmojiToAccount(emoji.id) });
   }
   const canDelete = scope === 'mine' || (scope === 'channel' && _canModerateCurrentChannel());
   if (canDelete) {
@@ -284,8 +282,10 @@ function renderCategory(cat) {
       const empty = document.createElement('div');
       empty.className = 'ep-custom-empty';
       empty.textContent = isMine
-        ? 'No emojis on your account yet — tap Add below'
-        : 'No channel emojis yet' + (_canModerateCurrentChannel() ? ' — mods can add below' : '');
+        ? 'No emojis yet — tap + to add'
+        : (_canModerateCurrentChannel()
+          ? 'No channel emojis yet — tap + to add'
+          : 'No channel emojis in this channel yet');
       grid.appendChild(empty);
     } else {
       list.forEach(emoji => _appendEmojiTile(grid, emoji, scope));
@@ -294,7 +294,7 @@ function renderCategory(cat) {
       const addTile = document.createElement('span');
       addTile.className = 'ep-emoji ep-emoji-add';
       addTile.textContent = '+';
-      addTile.title = isChannel ? 'Add channel emoji' : 'Add to my account';
+      addTile.title = isChannel ? 'Add channel emoji' : 'Add emoji to your account';
       addTile.setAttribute('aria-label', addTile.title);
       addTile.onclick = (e) => {
         e.stopPropagation();

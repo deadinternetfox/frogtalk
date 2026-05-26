@@ -1373,6 +1373,11 @@ body.cw-composer-locked #msg-input {
 #input-area.ft-compose-pending #msg-input {
   cursor: text;
   opacity: 1;
+  color: var(--text-color);
+}
+#input-area.ft-compose-pending #msg-input::placeholder {
+  color: var(--text-muted);
+  opacity: 0.85;
 }
 
 #input-area.ft-compose-pending.ft-compose-loading {
@@ -1389,30 +1394,12 @@ body.cw-composer-locked #msg-input {
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent-color) 8%, transparent);
 }
 
-/* Message pane sync pulse (matches composer top bar while history loads) */
-#main #messages-area.chat-switching-swr.ft-sync-active {
-  position: relative;
+/* Sync strip + top message bar retired — compose shows Syncing…; tail skeletons in chat */
+.ft-chat-sync-strip {
+  display: none !important;
 }
 #main #messages-area.chat-switching-swr.ft-sync-active::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 0;
-  height: 2px;
-  z-index: 40;
-  pointer-events: none;
-  border-radius: 2px 2px 0 0;
-  background: linear-gradient(
-    90deg,
-    transparent 0%,
-    color-mix(in srgb, var(--accent-color) 35%, transparent) 35%,
-    var(--accent-color) 50%,
-    color-mix(in srgb, var(--accent-color) 35%, transparent) 65%,
-    transparent 100%
-  );
-  background-size: 220% 100%;
-  animation: ftComposeLoadBar 2.6s ease-in-out infinite;
+  display: none !important;
 }
 
 /* Discord-style outline skeletons (channels, DMs, member list) */
@@ -1437,6 +1424,15 @@ body.cw-composer-locked #msg-input {
   padding: 10px 14px 4px;
   pointer-events: none;
   animation: ftSkelIn 0.16s ease-out both;
+}
+.ft-chat-skeleton.ft-chat-skeleton-instant {
+  animation: none;
+}
+.ft-chat-skeleton[data-tail="1"] {
+  margin-top: 8px;
+  padding-top: 14px;
+  border-top: 1px solid color-mix(in srgb, var(--border-color) 55%, transparent);
+  opacity: 0.92;
 }
 
 .ft-skel-row {
