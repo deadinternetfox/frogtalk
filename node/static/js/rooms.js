@@ -2155,9 +2155,7 @@ const Rooms = (() => {
     const nameKey = String(name || '').trim().toLowerCase();
     try { State._roomSwitchInProgress = nameKey; } catch {}
     if (type !== 'dm' && typeof Users !== 'undefined' && Users.prepareMembersListLoad) {
-      try {
-        if (!Users.hasMembersCache?.(name)) Users.prepareMembersListLoad(name);
-      } catch {}
+      try { Users.prepareMembersListLoad(name); } catch {}
     }
     // SWR + skeleton for all text channels (including 18+); DMs/voice keep legacy loaders.
     let useFastSwitch = type !== 'dm'
@@ -2240,6 +2238,9 @@ const Rooms = (() => {
     State.currentRoom = name;
     State.currentRoomType = type;
     State.dmPeer = dmPeer;
+    if (type !== 'dm' && typeof Users !== 'undefined' && Users.loadChannelMembers) {
+      try { Users.loadChannelMembers(name); } catch {}
+    }
     try {
       if (typeof refreshEmojiRenderCache === 'function') void refreshEmojiRenderCache();
       else if (typeof loadCustomEmojis === 'function') void loadCustomEmojis();
@@ -2434,12 +2435,6 @@ const Rooms = (() => {
     }
 
     // Connect WebSocket after CW gate — see below (deferred for public channels).
-
-    // Load full channel member list (online + offline) for the sidebar.
-    // DMs don't have this concept, so only fetch for real rooms.
-    if (type !== 'dm' && typeof Users !== 'undefined' && Users.loadChannelMembers) {
-      try { Users.loadChannelMembers(name); } catch {}
-    }
 
     // Apply channel theme if set
     clearChannelThemeOverride();
