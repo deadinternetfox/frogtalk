@@ -4707,10 +4707,11 @@ const Social = (() => {
         return;
       }
     }
-    const loadUi = _beginTabLoadUi('reels', 'Opening reels', 'Checking reel cache…');
-    const loadToken = ++_reelsLoadToken;
     const directLaunchId = _reelsDirectLaunchId;
     _reelsDirectLaunchId = 0; // consume so a re-enter doesn't re-suppress
+    const skipLoadBanner = Number(directLaunchId) > 0;
+    const loadUi = skipLoadBanner ? -1 : _beginTabLoadUi('reels', 'Opening reels', 'Checking reel cache…');
+    const loadToken = ++_reelsLoadToken;
     _teardownReels();
     const smoothStepTimers = [];
 
@@ -4731,8 +4732,9 @@ const Social = (() => {
     const scope = _reelsScope;
     const sort  = _reelsSort;
 
+    const scopeBarHidden = skipLoadBanner ? ' reels-scope-bar--deferred' : '';
     const scopeBar = `
-      <div class="reels-scope-bar">
+      <div class="reels-scope-bar${scopeBarHidden}" id="reels-scope-bar">
         <button class="rsb-pill ${scope==='for_you'?'active':''}" onclick="Social.switchReelsScope('for_you')">✨ For You</button>
         <button class="rsb-pill ${scope==='all'?'active':''}" onclick="Social.switchReelsScope('all')">🌐 All</button>
         <button class="rsb-pill ${scope==='friends'?'active':''}" onclick="Social.switchReelsScope('friends')">👥 Friends</button>
@@ -4823,11 +4825,25 @@ const Social = (() => {
       const snap = document.getElementById('reels-snap');
       if (snap) {
         _initReelCards(snap);
-        _updateTabLoadUi(loadUi, 88, 'Preparing reels stage', 'Binding playback controls');
+        if (loadUi >= 0) {
+          _updateTabLoadUi(loadUi, 88, 'Preparing reels stage', 'Binding playback controls');
+        }
         _armReelsStageReveal(snap, loadToken);
         // Start playback immediately so users transition from loading to motion fast.
         _reelsAutoplayVisible();
-        _updateTabLoadUi(loadUi, 93, 'Loading reel media', 'Priming first playable video');
+        if (directLaunchId) {
+          const target = snap.querySelector(`.reel-card[data-post-id="${directLaunchId}"]`);
+          if (target) {
+            try { target.scrollIntoView({ behavior: 'auto', block: 'start' }); } catch {}
+            setTimeout(() => {
+              try { _reelsActivateCard(target, { reset: true, forcePlay: true }); } catch {}
+            }, 80);
+          }
+          try { document.getElementById('reels-scope-bar')?.classList.remove('reels-scope-bar--deferred'); } catch {}
+        }
+        if (loadUi >= 0) {
+          _updateTabLoadUi(loadUi, 93, 'Loading reel media', 'Priming first playable video');
+        }
       }
 
       // ── Activation: scroll-driven "which card is centered?" check.
@@ -5007,7 +5023,7 @@ const Social = (() => {
     } finally {
       clearQueuedSteps();
       _schedBgPrefetch('reels');
-      _finishTabLoadUi(loadUi);
+      if (loadUi >= 0) _finishTabLoadUi(loadUi);
     }
   }
 

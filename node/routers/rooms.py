@@ -97,6 +97,18 @@ def _maybe_fed_directory_and_snapshot(room_name: str) -> None:
         from routers import federation as federation_mod
         federation_mod.enqueue_channel_directory_updated(room_name)
         federation_mod.maybe_emit_room_members_snapshot(room_name)
+        ctype = str(room.get("channel_type") or "text").strip().lower()
+        if ctype in ("music", "voice"):
+            federation_mod.maybe_emit_music_queue_snapshot(room_name)
+    except Exception:
+        pass
+
+
+def _schedule_music_sync_if_federated_mirror(room_name: str) -> None:
+    """Pull music queue from home when this node only mirrors the channel."""
+    try:
+        from routers import federation as federation_mod
+        federation_mod.schedule_music_sync_from_home(str(room_name or "").lower())
     except Exception:
         pass
 
@@ -1992,6 +2004,9 @@ async def join_room(
         schedule_travel_room_shell_to_home(int(current_user["id"]), name)
     except Exception:
         pass
+    ctype = str(room.get("channel_type") or "text").strip().lower()
+    if ctype in ("music", "voice"):
+        _schedule_music_sync_if_federated_mirror(name)
     return {"ok": True}
 
 
@@ -2657,6 +2672,27 @@ async def music_track_art(
     else:
         title, thumb = await _fetch_oembed_meta(clean_url)
     return {"thumbnail": thumb, "title": (title or "")[:200]}
+
+
+@router.post("/{room_name}/music/sync")
+async def music_sync_from_home(
+    room_name: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """Hydrate this node's music mirror from the room's authoritative home node."""
+    room, err = _music_require_room_access(current_user, room_name)
+    if err:
+        return err
+    from routers import federation as federation_mod
+    result = await federation_mod.pull_music_queue_from_home(room_name, force=False)
+    if result.get("ok"):
+        return {"ok": True}
+    if result.get("skipped"):
+        return {"ok": False, "skipped": True, "reason": result.get("reason") or "skipped"}
+    return JSONResponse(
+        status_code=502,
+        content={"error": result.get("error") or "sync_failed"},
+    )
 
 
 @router.get("/{room_name}/queue")

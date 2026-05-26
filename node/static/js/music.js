@@ -1715,6 +1715,26 @@ const Music = (() => {
     } catch { return null; }
   }
 
+  const _musicSyncAttempted = new Set();
+
+  async function _maybeSyncQueueFromHome(room) {
+    const name = String(room || '').trim().toLowerCase();
+    if (!name || _musicSyncAttempted.has(name)) return null;
+    try {
+      const res = await fetch(`/api/rooms/${encodeURIComponent(name)}/music/sync`, {
+        method: 'POST',
+        headers: { 'X-Session-Token': State.token }
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.ok) {
+        _musicSyncAttempted.add(name);
+        return await _fetchState(name);
+      }
+      if (data && data.skipped) _musicSyncAttempted.add(name);
+    } catch {}
+    return null;
+  }
+
   function _render() {
     const panel = $('music-panel');
     if (!panel || !_room || !_state) return;
@@ -2053,6 +2073,10 @@ const Music = (() => {
     }
     panel.dataset.mountedRoom = roomName;
     _state = await _fetchState(roomName);
+    if (_state && !((_state.queue || []).length)) {
+      const synced = await _maybeSyncQueueFromHome(roomName);
+      if (synced) _state = synced;
+    }
     if (!_state) {
       panel.innerHTML = `<div class="mp-empty">Could not load queue</div>`;
       _emitState();
