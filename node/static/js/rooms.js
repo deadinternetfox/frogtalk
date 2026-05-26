@@ -77,14 +77,22 @@ const FT_LOADING_SHIELD_CSS = `
 #main #messages-area.chat-switching #ft-chat-transition .ch-spin {
   display: block !important;
 }
-#main #messages-area.chat-switching .cw-chat-content,
-#main #messages-area.chat-switching > .msg,
-#main #messages-area.chat-switching > .msg-group,
-#main #messages-area.chat-switching > .msg-date-divider,
-#main #messages-area.chat-switching > .msg-system {
+#main #messages-area.chat-switching:not(.chat-switching-swr) .cw-chat-content,
+#main #messages-area.chat-switching:not(.chat-switching-swr) > .msg,
+#main #messages-area.chat-switching:not(.chat-switching-swr) > .msg-group,
+#main #messages-area.chat-switching:not(.chat-switching-swr) > .msg-date-divider,
+#main #messages-area.chat-switching:not(.chat-switching-swr) > .msg-system {
   visibility: hidden !important;
   opacity: 0 !important;
   pointer-events: none !important;
+}
+#main #messages-area.chat-switching-swr #ft-chat-transition.chat-transition-full {
+  display: none !important;
+}
+#main #messages-area.chat-switching-swr .cw-chat-content {
+  visibility: visible !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
 }
 #main #messages-area.cw-chat-gated .cw-chat-content {
   visibility: hidden !important;
@@ -117,6 +125,8 @@ const Rooms = (() => {
   let _switchWatchdogTimer = null;
   const _SWITCH_WATCHDOG_MS = 8000;
   const _CHAT_TRANSITION_ID = 'ft-chat-transition';
+  const _CHAT_SYNC_STRIP_ID = 'ft-chat-sync-strip';
+  const _ROOM_REVISIT_MS = 45000;
 
   function _isSwitchAlive(token) {
     return token === _switchSeq;
@@ -138,6 +148,48 @@ const Rooms = (() => {
     return !!(shell && shell.children.length);
   }
 
+  function _messageSafeForCachePreview(msg) {
+    if (!msg || typeof msg !== 'object') return false;
+    const c = String(msg.content || '');
+    if (!c) return true;
+    if (msg._decrypted === false) return false;
+    if (msg.system_kind) return true;
+    if (c.startsWith('ftenc:')) return false;
+    if (_looksLikeRoomCiphertext(c)) return false;
+    return true;
+  }
+
+  function channelHasUsableCache(name) {
+    const r = String(name || '').trim().toLowerCase();
+    if (!r) return false;
+    const cached = (State.messages && State.messages[r]) || [];
+    if (!cached.length) return false;
+    const tail = cached.slice(-80);
+    return tail.every(_messageSafeForCachePreview);
+  }
+
+  function _hideChatSyncStrip() {
+    try { document.getElementById(_CHAT_SYNC_STRIP_ID)?.remove(); } catch {}
+  }
+
+  function _showChatSyncStrip(name, type) {
+    const area = document.getElementById('messages-area');
+    if (!area) return;
+    _hideChatSyncStrip();
+    const label = type === 'dm'
+      ? 'Updating conversation…'
+      : `Syncing #${String(name || '').replace(/^#/, '')}…`;
+    const strip = document.createElement('div');
+    strip.id = _CHAT_SYNC_STRIP_ID;
+    strip.className = 'ft-chat-sync-strip';
+    strip.setAttribute('role', 'status');
+    strip.setAttribute('aria-live', 'polite');
+    strip.innerHTML =
+      '<span class="ft-chat-sync-strip-bar" aria-hidden="true"></span>' +
+      `<span class="ft-chat-sync-strip-label">${_escTransition(label)}</span>`;
+    area.appendChild(strip);
+  }
+
   /** Paint cached/empty history or dismiss — never leave a blank pane under the overlay. */
   function recoverChannelSwitch(room) {
     const r = String(room || State?.currentRoom || '').trim().toLowerCase();
@@ -148,7 +200,10 @@ const Rooms = (() => {
     }
     const cached = (State.messages && State.messages[r]) || [];
     if (cached.length && typeof Messages !== 'undefined' && Messages.loadHistory) {
-      try { Messages.loadHistory(r, cached.slice()); return; } catch {}
+      try {
+        Messages.loadHistory(r, cached.slice(), { reveal: true });
+        return;
+      } catch {}
     }
     if (typeof Messages !== 'undefined' && Messages.loadHistory) {
       try { Messages.loadHistory(r, []); return; } catch {}
@@ -1329,7 +1384,7 @@ const Rooms = (() => {
     if (labelEl) labelEl.textContent = label;
   }
 
-  /** Full-area loading overlay — blocks stale messages bleeding through during switch. */
+  /** Loading overlay (full) or sync strip (SWR) while switching channels/DMs. */
   function showChatTransition(name, type, dmPeer, phase, roomOpts) {
     const area = document.getElementById('messages-area');
     if (!area) return;
@@ -1339,10 +1394,24 @@ const Rooms = (() => {
     const switchKey = _chatTransitionSwitchKey(name, type, opts);
     const room = opts.room || (State.rooms || []).find((r) => r.name === name) || null;
     const label = _chatTransitionLabel(name, type, dmPeer, phaseNorm);
+    const swr = !!opts.swr;
     area.classList.add('chat-switching');
-    area.scrollTop = 0;
+    area.classList.toggle('chat-switching-swr', swr);
+    if (!swr) area.scrollTop = 0;
     _scrubStaleSwitchChrome(area);
     ensureLoadingShieldStyle();
+
+    if (swr) {
+      _showChatSyncStrip(name, type);
+      if (opts.beginSwitch !== false && switchKey) {
+        try { window.FtCompose?.beginChannelSwitch?.(switchKey, { swr: true }); } catch {}
+      }
+      try { window.FtCompose?.refresh?.(); } catch {}
+      return;
+    }
+
+    area.classList.remove('chat-switching-swr');
+    _hideChatSyncStrip();
 
     const existing = document.getElementById(_CHAT_TRANSITION_ID);
     if (existing && switchKey && existing.dataset.ftSwitchKey === switchKey) {
@@ -1377,7 +1446,7 @@ const Rooms = (() => {
       });
     } catch {}
     const content = area.querySelector('#cw-chat-content');
-    if (content) content.innerHTML = '';
+    if (content && !opts.keepContent) content.innerHTML = '';
     const chType = normalizeChannelType(room?.channel_type || opts.channelType || 'text');
     let iconBlock;
     if (type === 'dm') {
@@ -1396,7 +1465,7 @@ const Rooms = (() => {
     }
     const overlay = document.createElement('div');
     overlay.id = _CHAT_TRANSITION_ID;
-    overlay.className = 'cw-chat-loading chat-transition-overlay';
+    overlay.className = 'cw-chat-loading chat-transition-overlay chat-transition-full';
     overlay.dataset.ftSwitchKey = switchKey;
     overlay.dataset.ftPhase = phaseNorm;
     if (opts.switchToken != null) overlay.dataset.ftSwitchSeq = String(opts.switchToken);
@@ -1417,7 +1486,7 @@ const Rooms = (() => {
       area.appendChild(overlay);
     }
     if (opts.beginSwitch !== false && switchKey) {
-      try { window.FtCompose?.beginChannelSwitch?.(switchKey); } catch {}
+      try { window.FtCompose?.beginChannelSwitch?.(switchKey, { swr: false }); } catch {}
     }
     try { window.FtCompose?.refresh?.(); } catch {}
   }
@@ -1532,9 +1601,12 @@ const Rooms = (() => {
       } catch {}
     };
 
+    const wasSwr = !!(area && area.classList.contains('chat-switching-swr'));
+
     // Content painted under the shell — reveal chat and cut overlay instantly (no fade gap).
     if (finish && contentReady) {
-      try { area?.classList.remove('chat-switching'); } catch {}
+      try { area?.classList.remove('chat-switching', 'chat-switching-swr'); } catch {}
+      _hideChatSyncStrip();
       try { overlay?.remove(); } catch {}
       finalizeCompose();
       return;
@@ -1542,7 +1614,8 @@ const Rooms = (() => {
 
     const finalize = () => {
       try { document.getElementById(_CHAT_TRANSITION_ID)?.remove(); } catch {}
-      try { area?.classList.remove('chat-switching'); } catch {}
+      try { area?.classList.remove('chat-switching', 'chat-switching-swr'); } catch {}
+      _hideChatSyncStrip();
       finalizeCompose();
     };
 
@@ -1568,6 +1641,11 @@ const Rooms = (() => {
 
     if (overlay.classList.contains('ch-transition-dismiss')) {
       setTimeout(finalize, 120);
+      return;
+    }
+
+    if (wasSwr) {
+      finalize();
       return;
     }
 
@@ -1707,14 +1785,28 @@ const Rooms = (() => {
 
     const switchToken = ++_switchSeq;
     _disarmSwitchWatchdog();
-    try { State._roomSwitchInProgress = String(name || '').toLowerCase(); } catch {}
+    const nameKey = String(name || '').trim().toLowerCase();
+    try { State._roomSwitchInProgress = nameKey; } catch {}
+    const _cwRoomEarly = type !== 'dm' && type !== 'private'
+      && !!(_roomDataEarly?.content_warning?.enabled);
+    let useSwr = type !== 'dm'
+      && normalizeChannelType(_chTypeEarly) !== 'voice'
+      && channelHasUsableCache(name)
+      && !_cwRoomEarly;
     try {
 
-    // Freeze stale WS traffic and paint a full-area overlay while the gate resolves.
+    if (prevRoom && prevRoom !== name) {
+      try { window.FtCompose?.stashDraft?.(prevRoom, prevType); } catch {}
+    }
+
+    // Freeze stale WS traffic; SWR shows cached history under a thin sync strip.
     try { WS?.disconnect?.(); } catch {}
     if (prevRoom !== name || prevType !== type) {
       showChatTransition(name, type, dmPeer, 'open', {
-        room: _roomDataEarly, channelType: _chTypeEarly, switchToken,
+        room: _roomDataEarly,
+        channelType: _chTypeEarly,
+        switchToken,
+        swr: useSwr,
       });
       _clearMessageContent();
       try {
@@ -1942,7 +2034,7 @@ const Rooms = (() => {
     if (roomData?.channel_theme) {
       try { applyChannelThemeOverride(JSON.parse(roomData.channel_theme)); } catch {}
     }
-    // Clear messages and reply state (keep transition / gate overlays)
+    // Clear messages and reply state (keep transition / gate overlays).
     _clearMessageContent();
     // Hide any lingering "jump to latest" pip from the previous channel.
     try { document.getElementById('jump-to-latest-pip')?.classList.remove('visible'); } catch {}
@@ -1964,15 +2056,16 @@ const Rooms = (() => {
           await _handleCwDecline(name, { prevRoom, prevType, leaveChannel: opts.leaveOnCwDecline !== false });
           return;
         }
+        if (channelHasUsableCache(name)) useSwr = true;
       }
       if (!_isSwitchAlive(switchToken)) return;
       showChatTransition(name, type, dmPeer, 'load', {
-        room: roomData, channelType: chType, beginSwitch: false, switchToken,
+        room: roomData, channelType: chType, beginSwitch: false, switchToken, swr: useSwr,
       });
     } else if (type === 'private' && chType !== 'voice') {
       if (!_isSwitchAlive(switchToken)) return;
       showChatTransition(name, type, dmPeer, 'load', {
-        room: roomData, channelType: chType, beginSwitch: false, switchToken,
+        room: roomData, channelType: chType, beginSwitch: false, switchToken, swr: useSwr,
       });
     }
 
@@ -1996,8 +2089,12 @@ const Rooms = (() => {
     // already painted (that race stuck users until refresh).
     if (!_isSwitchAlive(switchToken)) return;
     if (joinedHere) {
-      try { WS?.resetHistoryCache?.(name); } catch {}
-      WS.connect(name);
+      const keepCache = !!(useSwr && WS?.shouldKeepHistoryCache?.(name));
+      if (!keepCache) {
+        try { WS?.resetHistoryCache?.(name); } catch {}
+      }
+      WS.connect(name, { keepHistoryCache: keepCache });
+      try { WS?.noteRoomVisit?.(name); } catch {}
     } else {
       try { WS.disconnect && WS.disconnect(); } catch {}
       if (typeof UI !== 'undefined' && UI.showToast) {
@@ -2010,17 +2107,28 @@ const Rooms = (() => {
     }
 
     if (!_isSwitchAlive(switchToken)) return;
+    try { window.FtCompose?.applyDraft?.(name, type); } catch {}
     if (chType !== 'voice' && msgArea) {
       const cachedMsgs = Array.isArray(State.messages[name]) ? State.messages[name] : [];
-      const hasCached = type !== 'dm' && cachedMsgs.length > 0;
+      const hasCached = type !== 'dm' && useSwr && cachedMsgs.length > 0;
       if (hasCached && typeof Messages !== 'undefined' && Messages.loadHistory) {
         try {
-          Messages.loadHistory(name, cachedMsgs.slice(), { deferFinish: true });
+          if (window.ContentWarning && typeof ContentWarning.ensureChatShell === 'function') {
+            ContentWarning.ensureChatShell(msgArea);
+          }
+          Messages.loadHistory(name, cachedMsgs.slice(), {
+            deferFinish: true,
+            reveal: true,
+            fromCache: true,
+          });
+          try {
+            window.FtCompose?.beginChannelSwitch?.(nameKey, { swr: true });
+          } catch {}
         } catch {}
       }
       const shell = msgArea.querySelector('#cw-chat-content');
       const hasRendered = !!(shell && shell.children.length);
-      if (!hasRendered && !document.getElementById(_CHAT_TRANSITION_ID)) {
+      if (!hasRendered && !document.getElementById(_CHAT_TRANSITION_ID) && !useSwr) {
         showChatTransition(name, type, dmPeer, 'load', {
           room: roomData, channelType: chType, beginSwitch: false, switchToken,
         });
@@ -4000,6 +4108,7 @@ const Rooms = (() => {
     clearChatTransition,
     finishChannelSwitch,
     recoverChannelSwitch,
+    channelHasUsableCache,
     isSwitchOverlayVisible,
     isSwitchOverlayForRoom,
     isChatDomFrozen,
@@ -4011,6 +4120,7 @@ try {
   window.clearChatTransition = Rooms.clearChatTransition;
   window.finishChannelSwitch = Rooms.finishChannelSwitch;
   window.recoverChannelSwitch = Rooms.recoverChannelSwitch;
+  window.channelHasUsableCache = Rooms.channelHasUsableCache;
   window.isSwitchOverlayVisible = Rooms.isSwitchOverlayVisible;
   window.isSwitchOverlayForRoom = Rooms.isSwitchOverlayForRoom;
   window.isChatDomFrozen = Rooms.isChatDomFrozen;

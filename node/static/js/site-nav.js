@@ -11,7 +11,7 @@
   'use strict';
 
   const MOUNT_ID = 'ft-site-nav-mount';
-  const VER = '5';
+  const VER = '6';
 
   function assetUrl(path) {
     const base = path + '?v=' + VER;
@@ -58,15 +58,22 @@
     });
   }
 
-  function fallbackNav() {
+  function fallbackNav(devHome) {
+    const links = devHome
+      ? '<a href="/privacy">Privacy</a>' +
+        '<a href="/security">Security</a>' +
+        '<a href="/docs/api">API</a>' +
+        '<a href="/docs/node">Run Node</a>'
+      : '<a href="/#features">Features</a>' +
+        '<a href="/#how">How it works</a>' +
+        '<a href="/security">Security</a>' +
+        '<a href="/docs/api">API</a>' +
+        '<a href="/docs/node">Run Node</a>';
     return (
       '<nav class="ft-site-nav" aria-label="Primary">' +
       '<a href="/" class="nav-logo"><span class="frog">🐸</span>FrogTalk</a>' +
       '<div class="nav-links">' +
-      '<a href="/#features">Features</a>' +
-      '<a href="/security">Security</a>' +
-      '<a href="/docs/api">API</a>' +
-      '<a href="/docs/node">Run Node</a>' +
+      links +
       '<a href="/app" class="btn btn-primary">Open App</a>' +
       '</div>' +
       '</nav>'
@@ -95,14 +102,19 @@
 
     ensureStyles();
 
+    const devHome = document.body.classList.contains('home-node-dev');
+    const partialPath = String(
+      mount.getAttribute('data-ft-nav-partial') || '/static/partials/site-nav.html'
+    ).trim() || '/static/partials/site-nav.html';
+
     let html = '';
     try {
-      const res = await fetch(assetUrl('/static/partials/site-nav.html'), { credentials: 'same-origin' });
+      const res = await fetch(assetUrl(partialPath), { credentials: 'same-origin' });
       if (!res.ok) throw new Error('site-nav partial ' + res.status);
       html = await res.text();
     } catch (e) {
       console.warn('[site-nav] load failed, using fallback', e);
-      html = fallbackNav();
+      html = fallbackNav(devHome);
     }
 
     mount.outerHTML = html;

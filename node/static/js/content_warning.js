@@ -53,11 +53,27 @@
     if (!room || !window.State) return;
     if (String(State.currentRoom || '').toLowerCase() !== room) return;
     if (State.currentRoomType === 'dm') return;
-    try { window.FtCompose?.beginChannelSwitch?.(room); } catch {}
+    const useSwr = typeof channelHasUsableCache === 'function' && channelHasUsableCache(room);
+    if (useSwr) {
+      try {
+        const cached = (State.messages && State.messages[room]) || [];
+        if (cached.length && window.Messages?.loadHistory) {
+          Messages.loadHistory(room, cached.slice(), { deferFinish: true, reveal: true, fromCache: true });
+        }
+      } catch {}
+      try {
+        if (typeof showChatTransition === 'function') {
+          showChatTransition(room, State.currentRoomType, null, 'load', { swr: true, beginSwitch: false });
+        }
+      } catch {}
+    }
+    try { window.FtCompose?.beginChannelSwitch?.(room, { swr: useSwr }); } catch {}
     try {
       if (typeof WS !== 'undefined' && WS.connect) {
-        WS.resetHistoryCache?.(room);
-        WS.connect(room, { force: true });
+        const keepCache = !!(useSwr && WS.shouldKeepHistoryCache?.(room));
+        if (!keepCache) WS.resetHistoryCache?.(room);
+        WS.connect(room, { force: true, keepHistoryCache: keepCache });
+        WS.noteRoomVisit?.(room);
       }
     } catch {}
   }

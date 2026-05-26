@@ -11,6 +11,9 @@ const WS = (() => {
   let _stableTimer = null;
   const _historyInFlight = new Map();
   const _historyLastApplied = new Map();
+  const _roomLastVisitAt = new Map();
+  const _HISTORY_REVISIT_MS = 45000;
+  const _HISTORY_TAIL_FAST = 56;
 
   function _switchUiStillLoading(area) {
     if (!area) return false;
@@ -38,6 +41,34 @@ const WS = (() => {
     if (!room) return;
     _historyInFlight.delete(room);
     _historyLastApplied.delete(room);
+  }
+
+  function noteRoomVisit(room) {
+    const r = String(room || '').trim().toLowerCase();
+    if (!r) return;
+    _roomLastVisitAt.set(r, Date.now());
+  }
+
+  function shouldKeepHistoryCache(room) {
+    const r = String(room || '').trim().toLowerCase();
+    if (!r) return false;
+    const at = _roomLastVisitAt.get(r);
+    if (!at) return false;
+    return (Date.now() - at) < _HISTORY_REVISIT_MS;
+  }
+
+  async function _decryptHistoryWindow(incoming, room) {
+    const list = incoming || [];
+    const n = list.length;
+    if (n <= _HISTORY_TAIL_FAST) {
+      return Promise.all(list.map((m) => decryptMsg(m, room)));
+    }
+    const split = n - _HISTORY_TAIL_FAST;
+    const head = list.slice(0, split);
+    const tail = list.slice(split);
+    const tailDec = await Promise.all(tail.map((m) => decryptMsg(m, room)));
+    const headDec = await Promise.all(head.map((m) => decryptMsg(m, room)));
+    return headDec.concat(tailDec);
   }
 
   function connect(room, opts) {
@@ -181,7 +212,7 @@ const WS = (() => {
                 const cachedNow = (State.messages && State.messages[room]) || [];
                 const decrypting = _historyInFlight.get(room) != null;
                 if (cachedNow.length || !decrypting) {
-                  Messages.loadHistory(room, cachedNow.slice());
+                  Messages.loadHistory(room, cachedNow.slice(), { reveal: true, fromCache: true });
                 }
               }
             }
@@ -200,7 +231,7 @@ const WS = (() => {
               if (State.currentRoom === room) {
                 const area = document.getElementById('messages-area');
                 if (area && (_switchUiStillLoading(area) || !area.children.length)) {
-                  Messages.loadHistory(room, cached.slice());
+                  Messages.loadHistory(room, cached.slice(), { reveal: true, fromCache: true });
                 }
               }
             } catch {}
@@ -221,17 +252,20 @@ const WS = (() => {
                 if (State.currentRoom === room) {
                   const area = document.getElementById('messages-area');
                   if (area && _switchUiStillLoading(area)) {
-                    Messages.loadHistory(room, cached.slice());
+                    Messages.loadHistory(room, cached.slice(), { reveal: true, fromCache: true });
                   }
                 }
               } catch {}
               break;
             }
           }
-          const decrypted = await Promise.all(
-            incoming.map(m => decryptMsg(m, room))
-          );
-          Messages.loadHistory(room, decrypted);
+          const hadVisibleCache = !!(cached.length && State.currentRoom === room
+            && document.getElementById('messages-area')?.classList.contains('chat-switching-swr'));
+          const decrypted = await _decryptHistoryWindow(incoming, room);
+          Messages.loadHistory(room, decrypted, {
+            reveal: !hadVisibleCache,
+            fromCache: false,
+          });
           try {
             if (State.currentRoom === room && State.currentChannelType !== 'voice') {
               const inputArea = document.getElementById('input-area');
@@ -1064,7 +1098,16 @@ const WS = (() => {
     if (_room) connect(_room);
   }
 
-  return { connect, disconnect, send, reconnectNow, isOpen, resetHistoryCache };
+  return {
+    connect,
+    disconnect,
+    send,
+    reconnectNow,
+    isOpen,
+    resetHistoryCache,
+    noteRoomVisit,
+    shouldKeepHistoryCache,
+  };
 })();
 
 // ─── Per-room mute UI helper ──────────────────────────────────────────────

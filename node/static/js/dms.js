@@ -2553,6 +2553,16 @@ async function openDMChannel (id, nickname, avatar) {
     if (typingBar) typingBar.textContent = '';
   } catch {}
 
+  const _prevDmId = _activeDM?.id;
+  if (_prevDmId && _prevDmId !== id) {
+    try { window.FtCompose?.stashDraft?.(`dm:${_prevDmId}`, 'dm'); } catch {}
+  }
+  try {
+    if (State.currentRoom && State.currentRoomType !== 'dm') {
+      window.FtCompose?.stashDraft?.(State.currentRoom, State.currentRoomType);
+    }
+  } catch {}
+
   try { WS?.disconnect?.(); } catch {}
   try { State._roomSwitchInProgress = `dm:${id}`; } catch {}
   try { if (typeof clearChannelThemeOverride === 'function') clearChannelThemeOverride(); } catch {}
@@ -2578,9 +2588,14 @@ async function openDMChannel (id, nickname, avatar) {
   // Blank chat area up-front to prevent stale-message flash, but drop in a
   // spinner right away so the user always sees *something* while we derive the
   // ECDH shared secret + fetch messages.
+  const _dmHasCache = !!(_dmHistoryCache.get(id)?.length);
   const area0 = document.getElementById('messages-area');
   if (area0 && typeof showChatTransition === 'function') {
-    showChatTransition('', 'dm', nickname, 'open', { dmAvatar: avatar, switchKey: `dm:${id}` });
+    showChatTransition('', 'dm', nickname, 'open', {
+      dmAvatar: avatar,
+      switchKey: `dm:${id}`,
+      swr: _dmHasCache,
+    });
   }
   // DMs have no voice channel — always hide the presence bar.
   const vpb = document.getElementById('voice-presence-bar');
@@ -2625,9 +2640,11 @@ async function openDMChannel (id, nickname, avatar) {
   if (_dmMessages.length) {
     renderDMChat();
     scrollChatBottom();
+    try { window.FtCompose?.beginChannelSwitch?.(`dm:${id}`, { swr: true }); } catch {}
     if (!_dmSkipHistoricalDecrypt()) void _redecryptStaleDMMessages();
     else void _redecryptTravelDMMessages();
   }
+  try { window.FtCompose?.applyDraft?.(`dm:${id}`, 'dm'); } catch {}
 
   // Switch app to DM view
   selectServer('dms');
@@ -2979,10 +2996,12 @@ function _dmShowChatTransition(phase) {
   if (!_activeDM) return;
   const nick = _activeDM.nickname || '';
   if (typeof showChatTransition !== 'function') return;
+  const swr = !!(_dmMessages && _dmMessages.length);
   showChatTransition('', 'dm', nick, phase || 'load', {
     dmAvatar: _activeDM.avatar || null,
     switchKey: `dm:${_activeDM.id}`,
     beginSwitch: !_dmHasTransitionOverlay(),
+    swr,
   });
 }
 
@@ -2993,9 +3012,10 @@ function _dmEnsureLoadingOverlay() {
 
 function _dmFinishLoadUi() {
   try {
-    if (typeof clearChatTransition === 'function') clearChatTransition({ finish: true });
+    if (typeof clearChatTransition === 'function') clearChatTransition({ finish: true, contentReady: true });
   } catch {}
   try { delete State._roomSwitchInProgress; } catch {}
+  try { window.FtCompose?.finishChannelLoad?.(`dm:${_activeDM?.id || ''}`); } catch {}
 }
 
 function _dmClearTransitionForError() {
@@ -3201,10 +3221,19 @@ function renderDMChat () {
   if (!area || !_activeDM) return;
   _dmPurgeStrayLoading(area);
   const stillLoading = _dmComposeBlocked();
+  const hasCache = !!_dmMessages.length;
   const mount = _dmEnsureChatShell(area);
   if (!mount) return;
-  if (stillLoading) {
+  if (stillLoading && !hasCache) {
     _dmShowChatTransition(_dmHasTransitionOverlay() ? 'load' : 'open');
+  } else if (stillLoading && hasCache) {
+    if (typeof showChatTransition === 'function') {
+      showChatTransition('', 'dm', _activeDM.nickname, 'load', {
+        dmAvatar: _activeDM.avatar,
+        switchKey: `dm:${_activeDM.id}`,
+        swr: true,
+      });
+    }
   } else {
     _dmFinishLoadUi();
   }
@@ -3224,6 +3253,9 @@ function renderDMChat () {
   }
   _dmMessages = _dmDedupeMessagesById(_dmMessages.map(m => _normalizeDMMessage(m)));
   mount.innerHTML = _dmMessages.map(m => renderDMMessage(m)).join('');
+  if (stillLoading && hasCache && window.Messages?.applyMessageReveal) {
+    try { Messages.applyMessageReveal(mount, { reveal: true }); } catch {}
+  }
   if (window.Messages && Messages.hydrateStickers) Messages.hydrateStickers(mount);
   // One-shot dialog per DM session if any message body is still cipher-shaped
   // after every decrypt path AND has no plaintext cached locally. Cache
@@ -4444,26 +4476,47 @@ function _dmComposeBlocked() {
     && (_dmMessagesLoading || !_dmMessagesReady);
 }
 
+function _dmComposePreType() {
+  return _dmComposeBlocked() && !!(_dmMessages && _dmMessages.length);
+}
+
 function _updateDmComposeState() {
-  const blocked = _dmComposeBlocked();
+  const sendBlocked = _dmComposeBlocked();
+  const preType = _dmComposePreType();
+  const hardBlock = sendBlocked && !preType;
+  try { State._dmSendPending = sendBlocked; } catch {}
   const input = document.getElementById('msg-input');
   const sendBtn = document.getElementById('send-btn');
   const inputArea = document.getElementById('input-area');
-  const wasBlocked = !!(input && (input.disabled || input.getAttribute('aria-disabled') === 'true'));
-  if (blocked && !wasBlocked) {
+  const wasHardBlocked = !!(input && input.disabled);
+  if (hardBlock && !wasHardBlocked) {
     try { window.FtCompose?.captureFocus?.(); } catch {}
   }
   if (inputArea) {
-    inputArea.classList.toggle('ft-compose-loading', blocked);
+    inputArea.classList.toggle('ft-compose-loading', sendBlocked);
+    inputArea.classList.toggle('ft-compose-pending', preType);
     inputArea.classList.remove('ft-dm-loading');
-    inputArea.setAttribute('aria-busy', blocked ? 'true' : 'false');
+    inputArea.setAttribute('aria-busy', sendBlocked ? 'true' : 'false');
   }
   if (input) {
-    input.disabled = blocked;
-    input.setAttribute('aria-disabled', blocked ? 'true' : 'false');
+    if (hardBlock) {
+      input.disabled = true;
+      input.removeAttribute('readonly');
+      input.setAttribute('aria-disabled', 'true');
+    } else if (preType) {
+      input.disabled = false;
+      input.setAttribute('readonly', '');
+      input.setAttribute('aria-disabled', 'false');
+    } else {
+      input.disabled = false;
+      input.removeAttribute('readonly');
+      input.setAttribute('aria-disabled', 'false');
+    }
     const nick = _activeDM?.nickname || '';
-    const ph = nick ? ('Message ' + nick + '…') : '';
-    if (blocked) {
+    const ph = nick
+      ? (preType ? `Draft to ${nick} — syncing…` : (`Message ${nick}…`))
+      : '';
+    if (sendBlocked) {
       if (input.dataset.ftDmOrigPh == null) {
         input.dataset.ftDmOrigPh = input.placeholder || '';
       }
@@ -4473,15 +4526,20 @@ function _updateDmComposeState() {
       delete input.dataset.ftDmOrigPh;
     }
   }
-  if (sendBtn) sendBtn.disabled = blocked || _dmSending;
+  if (sendBtn) {
+    sendBtn.disabled = sendBlocked || _dmSending;
+    sendBtn.setAttribute('aria-disabled', sendBtn.disabled ? 'true' : 'false');
+    sendBtn.title = sendBlocked ? 'Wait for messages to finish loading' : '';
+  }
   try {
     document.querySelectorAll(
       '#input-area .input-tools button, #input-area .attach-btn, #input-area .icon-btn, #input-area .gif-btn, #input-area .emoji-btn',
-    ).forEach((btn) => { btn.disabled = blocked; });
+    ).forEach((btn) => { btn.disabled = sendBlocked; });
   } catch {}
-  if (!blocked && wasBlocked) {
+  if (!sendBlocked && wasHardBlocked) {
     try { window.FtCompose?.restoreFocus?.(); } catch {}
   }
+  try { window.FtCompose?.refresh?.(); } catch {}
 }
 
 async function sendDMMessage () {
