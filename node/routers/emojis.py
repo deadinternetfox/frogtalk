@@ -149,18 +149,32 @@ async def add_emoji(body: AddEmojiRequest, current_user: dict = Depends(get_curr
         return JSONResponse(status_code=400, content={"error": img_err})
 
     room_id = body.room_id
+    is_global = False
     if room_id is not None:
-        if not _room_mod_ok(int(room_id), current_user):
+        try:
+            rid = int(room_id)
+        except (TypeError, ValueError):
+            return JSONResponse(status_code=400, content={"error": "Invalid channel"})
+        if rid <= 0:
+            return JSONResponse(status_code=400, content={"error": "Invalid channel"})
+        if not db.is_room_member(current_user["id"], rid):
+            return JSONResponse(status_code=403, content={"error": "Not a member of this channel"})
+        if not _room_mod_ok(rid, current_user):
             return JSONResponse(status_code=403, content={"error": "Only channel mods can add channel emojis"})
-    elif body.is_global and bool(current_user.get("is_admin")):
-        pass  # legacy server flag — prefer room_id
+        room_id = rid
+    else:
+        room_id = None
+        if body.is_global:
+            if not bool(current_user.get("is_admin")):
+                return JSONResponse(status_code=403, content={"error": "Admin only"})
+            is_global = True
 
     emoji_id = db.add_custom_emoji(
         name,
         image_data,
         current_user["id"],
-        room_id=int(room_id) if room_id is not None else None,
-        is_global=bool(body.is_global) and room_id is None,
+        room_id=room_id,
+        is_global=is_global,
     )
     if emoji_id is None:
         return JSONResponse(status_code=409, content={"error": "Emoji name already exists in this collection"})
@@ -170,7 +184,23 @@ async def add_emoji(body: AddEmojiRequest, current_user: dict = Depends(get_curr
 
 @router.post("/import")
 async def import_emoji(body: ImportEmojiRequest, current_user: dict = Depends(get_current_user)):
-    result = db.import_custom_emoji_to_user(current_user["id"], int(body.emoji_id))
+    try:
+        eid = int(body.emoji_id)
+    except (TypeError, ValueError):
+        return JSONResponse(status_code=400, content={"error": "Invalid emoji"})
+    if eid <= 0:
+        return JSONResponse(status_code=400, content={"error": "Invalid emoji"})
+    src = db.get_custom_emoji_by_id(eid)
+    if not src:
+        return JSONResponse(status_code=404, content={"error": "Emoji not found"})
+    src_data, src_err = _validate_emoji_image_data(src.get("image_data") or "")
+    if src_err or not src_data:
+        return JSONResponse(status_code=400, content={"error": "Emoji image is not safe to import"})
+    rid = src.get("room_id")
+    if rid is not None:
+        if not db.is_room_member(current_user["id"], int(rid)):
+            return JSONResponse(status_code=403, content={"error": "Not allowed to import this channel emoji"})
+    result = db.import_custom_emoji_to_user(current_user["id"], eid)
     if not result.get("ok"):
         err = result.get("error") or "import_failed"
         code = 404 if err == "not_found" else 409
