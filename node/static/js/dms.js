@@ -25,6 +25,7 @@ const _dmHistoryCache = new Map();
 const _dmHistoryMeta = new Map();
 let _dmCatchUpTimer = null;
 let _dmCatchUpInflight = false;
+let _dmSilentFetch = false;
 
 // In-memory per-message plaintext cache. Once a message has been
 // successfully decrypted on this device we remember it so re-renders
@@ -1070,7 +1071,7 @@ async function _dmCatchUpOpenChatIfStale(chOrData, opts = {}) {
   _dmCatchUpInflight = true;
   try {
     console.info('[DM] catch-up delta', _activeDM.id, 'after', localMax, lastId ? ('want ' + lastId) : '');
-    await loadDMMessages(0, { afterId: localMax });
+    await loadDMMessages(0, { afterId: localMax, silent: true });
   } catch (e) {
     console.warn('[DM] catch-up failed', e);
   } finally {
@@ -1083,7 +1084,13 @@ function _dmStartCatchUpPoll() {
   if (!_activeDM) return;
   _dmCatchUpTimer = setInterval(() => {
     if (!_activeDM || State.currentRoomType !== 'dm' || _dmMessagesLoading) return;
-    void _dmCatchUpOpenChatIfStale({ channel_id: _activeDM.id }, { force: true });
+    const ch = _dmChannels.find((c) => c.id === _activeDM.id);
+    const lastId = Number(ch?.last_msg_id || _activeDM.last_msg_id || 0);
+    if (lastId > 0 && lastId <= _dmOpenChatMaxMsgId()) return;
+    void _dmCatchUpOpenChatIfStale({
+      channel_id: _activeDM.id,
+      last_msg_id: lastId,
+    });
   }, 10000);
 }
 
@@ -2375,7 +2382,10 @@ async function loadDMChannels () {
         syncHint = FtSync.renderInline(FtSync.state(), { compact: true, fallback: 'Syncing DMs…' });
       }
     } catch {}
-    sidebarEl.innerHTML = `<div style="padding:6px 8px"><span class="skel-line" style="width:70%;height:10px;display:block;margin-bottom:6px"></span><span class="skel-line" style="width:50%;height:10px;display:block"></span></div>${syncHint}`;
+    const skel = (typeof sidebarListSkeletonHtml === 'function')
+      ? sidebarListSkeletonHtml(4, 'dm')
+      : '<div style="padding:6px 8px"><span class="skel-line" style="width:70%;height:10px;display:block;margin-bottom:6px"></span></div>';
+    sidebarEl.innerHTML = skel + syncHint;
   }
   try {
     const r = await apiFetch('/api/dms');
@@ -3028,6 +3038,7 @@ async function loadDMMessages (pageOffset = 0, options = {}) {
   if (!_activeDM) return;
   const afterId = Number(options?.afterId || 0);
   const uiRetry = Number(options?.uiRetry || 0);
+  const silent = !!options?.silent;
   const isDelta = pageOffset === 0 && afterId > 0;
   const _reqRoomId = _activeDM.id;
   const _reqSeq = ++_dmLoadReqSeq;
@@ -3046,13 +3057,17 @@ async function loadDMMessages (pageOffset = 0, options = {}) {
       }
     }
   };
-  if (pageOffset === 0 && !isDelta) {
+  if (!silent && pageOffset === 0 && !isDelta) {
     _dmMessagesLoading = true;
     _dmMessagesReady = false;
     _updateDmComposeState();
   }
+  if (silent) {
+    _dmSilentFetch = true;
+    try { window._ftSuppressChatSkeleton = true; } catch {}
+  }
   try {
-  if (pageOffset === 0 && !isDelta) {
+  if (!silent && pageOffset === 0 && !isDelta) {
     _dmEnsureSyncStrip();
   }
   const url = isDelta
@@ -3211,6 +3226,10 @@ async function loadDMMessages (pageOffset = 0, options = {}) {
   if (ch) { ch.unread = 0; renderDMChannels(); }
   loadSuccess = true;
   } finally {
+    if (silent) {
+      _dmSilentFetch = false;
+      try { delete window._ftSuppressChatSkeleton; } catch {}
+    }
     _finishLoad();
   }
 }
@@ -3224,14 +3243,14 @@ function renderDMChat () {
   const hasCache = !!_dmMessages.length;
   const mount = _dmEnsureChatShell(area);
   if (!mount) return;
-  if (stillLoading) {
+  if (stillLoading && !_dmSilentFetch && !_dmCatchUpInflight) {
     _dmEnsureSyncStrip();
     if (!hasCache) {
       try { window.showChatLoadSkeleton?.('dm'); } catch {}
     }
-  } else {
+  } else if (!stillLoading) {
     try { window.hideChatLoadSkeleton?.(); } catch {}
-    _dmFinishLoadUi();
+    if (!_dmSilentFetch && !_dmCatchUpInflight) _dmFinishLoadUi();
   }
   if (!_dmMessages.length) {
     if (stillLoading) return;

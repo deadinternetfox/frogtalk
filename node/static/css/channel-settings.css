@@ -1465,24 +1465,46 @@ body.cw-composer-locked #msg-input {
   opacity: 0.92;
 }
 
+/* Mirrors .msg-group: left-aligned avatar slot + body (no right-side ghost bubbles). */
 .ft-skel-row {
   display: flex;
   align-items: flex-start;
-  gap: 11px;
-  max-width: min(88%, 520px);
+  gap: 12px;
+  padding: 3px 0;
+  max-width: 100%;
   animation: ftSkelIn 0.2s ease-out both;
   animation-delay: calc(var(--ft-skel-i, 0) * 35ms);
 }
-.ft-skel-row.is-self {
-  flex-direction: row-reverse;
-  margin-left: auto;
-  max-width: min(78%, 440px);
+
+.ft-skel-avatar-slot {
+  flex: 0 0 42px;
+  width: 42px;
+  display: flex;
+  justify-content: center;
+  align-self: flex-start;
+}
+
+.ft-skel-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ft-skel-meta {
+  display: block;
+  max-width: 220px;
+}
+.ft-skel-meta .ft-skel-line {
+  height: 9px;
+  border-radius: 5px;
 }
 
 .ft-skel-avatar {
-  flex: 0 0 34px;
-  width: 34px;
-  height: 34px;
+  flex: 0 0 38px;
+  width: 38px;
+  height: 38px;
   border-radius: 50%;
   position: relative;
   overflow: hidden;
@@ -1497,24 +1519,18 @@ body.cw-composer-locked #msg-input {
 }
 
 .ft-skel-bubble {
-  flex: 1;
   display: flex;
   flex-direction: column;
   gap: 7px;
   min-width: 72px;
+  max-width: min(92%, 480px);
   padding: 9px 11px;
-  border-radius: 12px;
+  border-radius: 4px 10px 10px 10px;
   position: relative;
   overflow: hidden;
   background: color-mix(in srgb, var(--surface-color) 90%, var(--accent-color) 10%);
   border: 1px solid color-mix(in srgb, var(--border-color) 72%, var(--accent-color) 10%);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text-color) 3%, transparent);
-}
-.ft-skel-row.is-self .ft-skel-bubble {
-  border-radius: 12px 12px 4px 12px;
-}
-.ft-skel-row:not(.is-self) .ft-skel-bubble {
-  border-radius: 4px 12px 12px 12px;
 }
 
 .ft-skel-line {
@@ -1544,20 +1560,38 @@ body.cw-composer-locked #msg-input {
   animation-delay: calc(var(--ft-skel-i, 0) * 45ms);
 }
 
-.users-skeleton {
+.users-skeleton,
+.ft-sidebar-skeleton {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 10px 8px 14px;
+  gap: 6px;
+  padding: 6px 8px 10px;
 }
-.ft-skel-user-row {
+.ft-skel-user-row,
+.ft-skel-sidebar-row {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 4px 6px;
+  padding: 7px 10px;
   border-radius: 8px;
   animation: ftSkelIn 0.18s ease-out both;
   animation-delay: calc(var(--ft-skel-i, 0) * 40ms);
+}
+.ft-skel-sidebar-lines {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.ft-skel-sidebar-lines .ft-skel-line {
+  display: block;
+  height: 11px;
+  max-width: 100%;
+}
+.ft-skel-sidebar-lines .ft-skel-line-sub {
+  height: 9px;
+  opacity: 0.88;
 }
 .ft-skel-user-row .ft-skel-line {
   flex: 1;

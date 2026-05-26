@@ -156,37 +156,41 @@ const Rooms = (() => {
     return !!shell.querySelector('[id^="msg-"]:not(#msg-empty-state)');
   }
 
+  /** Outline matches .msg-group: 42px avatar slot + meta bar + body lines (all left-aligned). */
   function _chatSkeletonRowHtml(row, i) {
-    const self = !!row.self;
     const lines = (row.w || [70]).map((pct) => {
       const p = Math.max(28, Math.min(96, Number(pct) || 70));
       return `<span class="ft-skel-line" style="width:${p}%"></span>`;
     }).join('');
-    return `<div class="ft-skel-row${self ? ' is-self' : ''}" style="--ft-skel-i:${i}">`
-      + '<span class="ft-skel-avatar" aria-hidden="true"></span>'
+    const metaW = Math.max(36, Math.min(58, Number(row.metaW) || 44));
+    return `<div class="ft-skel-row" style="--ft-skel-i:${i}">`
+      + '<span class="ft-skel-avatar-slot" aria-hidden="true">'
+      + '<span class="ft-skel-avatar"></span></span>'
+      + '<span class="ft-skel-body">'
+      + `<span class="ft-skel-meta"><span class="ft-skel-line" style="width:${metaW}%"></span></span>`
       + `<span class="ft-skel-bubble">${lines}</span>`
-      + '</div>';
+      + '</span></div>';
   }
 
   function _chatSkeletonMarkup(variant, tail) {
     const channelRows = [
-      { self: false, w: [88, 58] },
-      { self: false, w: [76, 48, 32] },
-      { self: false, w: [64] },
-      { self: false, w: [82, 44] },
-      { self: false, w: [70, 38] },
+      { metaW: 42, w: [88, 58] },
+      { metaW: 38, w: [76, 48, 32] },
+      { metaW: 36, w: [64] },
+      { metaW: 44, w: [82, 44] },
+      { metaW: 40, w: [70, 38] },
     ];
     const channelTailRows = [
-      { self: false, w: [78, 52] },
-      { self: false, w: [66, 40] },
-      { self: false, w: [54] },
+      { metaW: 40, w: [78, 52] },
+      { metaW: 36, w: [66, 40] },
+      { metaW: 34, w: [54] },
     ];
     const dmRows = [
-      { self: false, w: [74, 48] },
-      { self: true, w: [58, 36] },
-      { self: false, w: [82, 54, 32] },
-      { self: true, w: [48] },
-      { self: false, w: [70, 42] },
+      { metaW: 46, w: [74, 48] },
+      { metaW: 38, w: [82, 54, 32] },
+      { metaW: 42, w: [68, 40] },
+      { metaW: 36, w: [58] },
+      { metaW: 44, w: [76, 44] },
     ];
     const rows = variant === 'dm'
       ? dmRows
@@ -212,10 +216,29 @@ const Rooms = (() => {
     }
   }
 
+  function sidebarListSkeletonHtml(count, kind) {
+    const n = Math.max(3, Math.min(8, Number(count) || 5));
+    const rows = Array.from({ length: n }, (_, i) => {
+      const w1 = 52 + (i % 3) * 10;
+      const w2 = 32 + (i % 2) * 8;
+      return `<div class="ft-skel-sidebar-row" style="--ft-skel-i:${i}">`
+        + '<span class="ft-skel-avatar sm" aria-hidden="true"></span>'
+        + '<span class="ft-skel-sidebar-lines">'
+        + `<span class="ft-skel-line" style="width:${w1}%"></span>`
+        + (kind === 'channel'
+          ? `<span class="ft-skel-line ft-skel-line-sub" style="width:${w2}%"></span>`
+          : '')
+        + '</span></div>';
+    }).join('');
+    return `<div class="ft-sidebar-skeleton" data-kind="${kind === 'dm' ? 'dm' : 'channel'}">${rows}</div>`;
+  }
+
   function showChatLoadSkeleton(variant, opts) {
     const area = document.getElementById('messages-area');
     if (!area || !area.classList.contains('chat-switching-swr')) return;
     const o = opts && typeof opts === 'object' ? opts : {};
+    if (o.silent) return;
+    try { if (window._ftSuppressChatSkeleton) return; } catch {}
     const tail = !!o.tail;
     if (!tail && _shellHasRealMessages()) return;
     const shell = _chatShell(area);
@@ -1335,14 +1358,7 @@ const Rooms = (() => {
           syncHint = FtSync.renderInline(FtSync.state(), { compact: true, fallback: 'Syncing channel directory…' });
         }
       } catch {}
-      container.innerHTML = Array(5).fill(0).map(() => `
-        <div class="channel-item skel-row" style="display:flex;align-items:center;gap:10px;padding:8px 10px">
-          <div class="skel-circle" style="width:32px;height:32px;flex-shrink:0"></div>
-          <div style="flex:1;display:flex;flex-direction:column;gap:4px">
-            <div class="skel-line" style="height:11px;width:70%"></div>
-            <div class="skel-line" style="height:9px;width:40%"></div>
-          </div>
-        </div>`).join('') + syncHint;
+      container.innerHTML = sidebarListSkeletonHtml(5, 'channel') + syncHint;
     }
     try {
       const res = await apiFetch('/api/rooms');
@@ -1663,10 +1679,13 @@ const Rooms = (() => {
         try { window.FtCompose?.beginChannelSwitch?.(switchKey, { swr: true }); } catch {}
       }
       try { window.FtCompose?.refresh?.(); } catch {}
-      if (_shellHasRealMessages()) {
-        showChatLoadSkeleton(type === 'dm' ? 'dm' : 'channel', { tail: true });
-      } else {
-        showChatLoadSkeleton(type === 'dm' ? 'dm' : 'channel');
+      if (!opts.skipSkeleton) {
+        const skVar = type === 'dm' ? 'dm' : 'channel';
+        if (_shellHasRealMessages()) {
+          showChatLoadSkeleton(skVar, { tail: true });
+        } else {
+          showChatLoadSkeleton(skVar);
+        }
       }
       return;
     }
@@ -1866,7 +1885,15 @@ const Rooms = (() => {
       }
       try {
         if (finish && window.FtCompose?.finishChannelLoad) {
-          FtCompose.finishChannelLoad(State?.currentRoom);
+          const loadKey = (() => {
+            try {
+              if (State?.currentRoomType === 'dm' && State._roomSwitchInProgress) {
+                return String(State._roomSwitchInProgress);
+              }
+            } catch {}
+            return State?.currentRoom;
+          })();
+          FtCompose.finishChannelLoad(loadKey);
         } else {
           window.FtCompose?.refresh?.();
         }
@@ -4386,6 +4413,7 @@ const Rooms = (() => {
     refreshSyncStripChrome,
     showChatLoadSkeleton,
     hideChatLoadSkeleton,
+    sidebarListSkeletonHtml,
     chatSwitchSyncing,
     clearChatTransition,
     finishChannelSwitch,
@@ -4404,6 +4432,7 @@ try {
   window.refreshSyncStripChrome = Rooms.refreshSyncStripChrome;
   window.showChatLoadSkeleton = Rooms.showChatLoadSkeleton;
   window.hideChatLoadSkeleton = Rooms.hideChatLoadSkeleton;
+  window.sidebarListSkeletonHtml = Rooms.sidebarListSkeletonHtml;
   window.chatSwitchSyncing = Rooms.chatSwitchSyncing;
   window.clearChatTransition = Rooms.clearChatTransition;
   window.finishChannelSwitch = Rooms.finishChannelSwitch;
