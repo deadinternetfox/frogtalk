@@ -149,6 +149,11 @@ const Users = (() => {
     return String(room || '').trim().toLowerCase();
   }
 
+  function _roomNamesMatch(a, b) {
+    if (!a || !b) return false;
+    return _membersCacheKey(a) === _membersCacheKey(b);
+  }
+
   function _getCachedMembers(room) {
     const entry = _membersRoomCache.get(_membersCacheKey(room));
     if (!entry || !Array.isArray(entry.members) || !entry.members.length) return null;
@@ -196,7 +201,12 @@ const Users = (() => {
     const cur = (State.currentRoom && State.currentRoomType !== 'dm')
       ? String(State.currentRoom)
       : '';
-    return !!(cur && _channelRoom === cur && !_channelMembers.length && !_getCachedMembers(cur));
+    return !!(
+      cur
+      && _roomNamesMatch(_channelRoom, cur)
+      && !_channelMembers.length
+      && !_getCachedMembers(cur)
+    );
   }
 
   function _paintMembersSkeleton(list, opts = {}) {
@@ -277,21 +287,29 @@ const Users = (() => {
     const count = document.getElementById('online-count');
     if (!list) return;
 
-    const onRoom = _channelRoom && State.currentRoom === _channelRoom;
     const curRoom = (State.currentRoom && State.currentRoomType !== 'dm')
       ? String(State.currentRoom)
       : '';
-    const roomAhead = curRoom && _channelRoom && _channelRoom !== curRoom;
+    const roomAhead = !!(curRoom && _channelRoom && !_roomNamesMatch(_channelRoom, curRoom));
+    const onRoom = !!(
+      _channelRoom
+      && _channelMembers.length
+      && (_roomNamesMatch(_channelRoom, curRoom) || _roomNamesMatch(_channelRoom, _membersLoadRoom))
+    );
 
     if (roomAhead) {
       if (_applyCachedMembers(_channelRoom)) {
         _membersLoading = false;
-        if (list) list.classList.add('users-list-refreshing');
+        list.classList.add('users-list-refreshing');
       } else {
         _paintMembersSkeleton(list, { instant: true });
+        if (count) count.textContent = '…';
+        return;
       }
-      if (count) count.textContent = '…';
-      return;
+    } else if (curRoom && !_channelMembers.length && _applyCachedMembers(curRoom)) {
+      _channelRoom = curRoom;
+      _membersLoading = false;
+      list.classList.remove('users-list-refreshing');
     }
 
     if (_membersPanelShouldSkeleton()) {
@@ -456,6 +474,10 @@ const Users = (() => {
         : 'No members yet';
       list.appendChild(empty);
     }
+
+    if (_roomNamesMatch(_channelRoom, curRoom)) {
+      list.classList.remove('users-list-refreshing');
+    }
   }
 
   function _effectivePresence(u, isOnline) {
@@ -580,15 +602,12 @@ const Users = (() => {
       _membersLoadRoom = room;
       _membersLoading = false;
       _membersBootPending = false;
-      if (list) {
-        list.classList.add('users-list-refreshing');
-        list.classList.remove('users-skeleton');
-      }
+      if (list) list.classList.add('users-list-refreshing');
       _renderFiltered();
     } else {
       prepareMembersListLoad(room);
     }
-    if (_membersLoadInflight && _membersLoadRoom === room) return _membersLoadInflight;
+    if (_membersLoadInflight && _roomNamesMatch(_membersLoadRoom, room)) return _membersLoadInflight;
     _membersLoadInflight = (async () => {
       try {
         const res = await fetch(`/api/rooms/${encodeURIComponent(room)}/members`, {
@@ -596,7 +615,7 @@ const Users = (() => {
         });
         if (!res.ok) return;
         const data = await res.json();
-        if (_channelRoom !== room || State.currentRoom !== room) return;
+        if (!_roomNamesMatch(_channelRoom, room) || !_roomNamesMatch(State.currentRoom, room)) return;
         const prevSig = _memberListSignature(_channelMembers, _channelBots);
         const nextMembers = _mergeLocalSelfIntoList(data.members || []);
         const nextBots = Array.isArray(data.bots) ? data.bots : [];
@@ -615,16 +634,16 @@ const Users = (() => {
         }
         void _hydrateDisplayNames(_channelMembers)
           .then(() => {
-            if (_channelRoom === room && State.currentRoom === room) {
+            if (_roomNamesMatch(_channelRoom, room) && _roomNamesMatch(State.currentRoom, room)) {
               _renderFiltered();
             }
           })
           .catch(() => {});
-        if (prevSig !== nextSig && _channelRoom === room && State.currentRoom === room) {
+        if (prevSig !== nextSig && _roomNamesMatch(_channelRoom, room) && _roomNamesMatch(State.currentRoom, room)) {
           _renderFiltered();
         }
       } catch {} finally {
-        if (_channelRoom === room) {
+        if (_roomNamesMatch(_channelRoom, room)) {
           _membersLoading = false;
           _membersBootPending = false;
           if (list) list.classList.remove('users-list-refreshing');
@@ -635,7 +654,7 @@ const Users = (() => {
     try {
       await _membersLoadInflight;
     } finally {
-      if (_membersLoadRoom === room) {
+      if (_roomNamesMatch(_membersLoadRoom, room)) {
         _membersLoadInflight = null;
         _membersLoadRoom = null;
       }
