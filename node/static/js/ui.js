@@ -1943,8 +1943,16 @@ function bindLongPress(el, handler, ms = 500) {
 }
 
 function autoResize(el) {
+  if (!el) return;
   el.style.height = 'auto';
-  el.style.height = Math.min(el.scrollHeight, 160) + 'px';
+  let maxH = 160;
+  try {
+    const vv = window.visualViewport;
+    if (vv && window.innerWidth <= 768) {
+      maxH = Math.min(160, Math.max(72, Math.round(vv.height * 0.38)));
+    }
+  } catch {}
+  el.style.height = Math.min(el.scrollHeight, maxH) + 'px';
 }
 
 function toggleUsersPanel() {

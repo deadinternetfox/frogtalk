@@ -3,63 +3,111 @@
  */
 
 // ─── Mobile keyboard / visual-viewport sync ───────────────────────────────
-// When the on-screen keyboard opens in a DM or channel composer, the
-// browser's "layout viewport" doesn't change height — so anything sized
-// to 100vh stays the same and gets pushed up by the focused input, which
-// drags the top of the app off-screen and hides the channel header.
+// Android Chrome: viewport meta `interactive-widget=resizes-content` shrinks
+// the layout viewport. iOS Safari keeps layout viewport full-size and moves
+// visualViewport instead — we mirror vv metrics into CSS and pin #app.
 //
-// We solve this two ways:
-//  1. The viewport <meta> uses interactive-widget=resizes-content so
-//     Android Chrome shrinks the layout viewport itself when the keyboard
-//     opens (no JS needed there).
-//  2. For iOS Safari (and older Android WebViews that ignore that hint)
-//     we mirror window.visualViewport.height into the --vvh CSS variable,
-//     which `body` and `#app` use for their height. As the keyboard
-//     comes up, --vvh shrinks → the app shell shrinks → composer stays
-//     visible above the keyboard → header stays glued to the top of the
-//     visible area instead of being scrolled off.
-//
-// We also pin window.scrollTo(0,0) so iOS can't sneak in its automatic
-// "scroll the focused input into view" behaviour that re-creates the
-// "top of app off-screen" symptom.
+// Important: do NOT call window.scrollTo on visualViewport *scroll* events.
+// That fights Safari's keyboard animation and causes chat/input jitter.
 (function _ftViewportSync() {
   try {
     const vv = window.visualViewport;
-    if (!vv) {
-      // No visualViewport API → just leave CSS fallbacks (100svh) in place.
-      return;
-    }
+    if (!vv) return;
+
     const root = document.documentElement;
     let _raf = 0;
+    let _scrollPinRaf = 0;
+
+    const _isIOS = () => {
+      const ua = navigator.userAgent || '';
+      return /iPad|iPhone|iPod/.test(ua)
+        || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    };
+
+    const _isTextField = (el) => {
+      if (!el || el === document.body) return false;
+      const tag = (el.tagName || '').toLowerCase();
+      if (tag === 'textarea') return true;
+      if (tag === 'input') {
+        const t = (el.type || 'text').toLowerCase();
+        return t !== 'button' && t !== 'checkbox' && t !== 'radio' && t !== 'file'
+          && t !== 'submit' && t !== 'reset' && t !== 'hidden' && t !== 'range';
+      }
+      return !!el.isContentEditable;
+    };
+
+    const _editing = () => _isTextField(document.activeElement);
+
+    const _pinWindowScroll = () => {
+      if (!_isIOS()) return;
+      if (_scrollPinRaf) return;
+      _scrollPinRaf = requestAnimationFrame(() => {
+        _scrollPinRaf = 0;
+        if (window.scrollY !== 0 || vv.offsetTop > 0) {
+          try { window.scrollTo(0, 0); } catch {}
+        }
+      });
+    };
+
     const apply = () => {
       _raf = 0;
-      // vv.height is the height of the visible area excluding the
-      // keyboard / browser chrome. innerHeight on iOS keeps the full
-      // window height even with keyboard up, which is the bug.
       const h = Math.max(0, Math.round(vv.height));
-      root.style.setProperty('--vvh', h + 'px');
-      // Keep the page glued to the top so the header never scrolls off.
-      // visualViewport.offsetTop > 0 means the page was scrolled up by
-      // iOS to make the focused input visible — undo that immediately.
-      if (vv.offsetTop > 0 || window.scrollY !== 0) {
-        try { window.scrollTo(0, 0); } catch {}
-      }
+      const top = Math.max(0, Math.round(vv.offsetTop));
+      root.style.setProperty('--vvh', `${h}px`);
+      root.style.setProperty('--vv-top', `${top}px`);
+
+      const layoutH = window.innerHeight || h;
+      const kbOpen = h < layoutH * 0.82;
+      root.classList.toggle('ft-kb-open', kbOpen && _editing());
+      root.classList.toggle('ft-vv-ios', _isIOS());
+
+      // Pin #app to the visible viewport on iOS (see index.html CSS).
+      if (_isIOS()) _pinWindowScroll();
     };
+
     const schedule = () => {
       if (_raf) return;
       _raf = requestAnimationFrame(apply);
     };
+
+    const onVVScroll = () => {
+      // Only sync metrics — never scrollTo here (causes Safari keyboard jank).
+      const top = Math.max(0, Math.round(vv.offsetTop));
+      root.style.setProperty('--vv-top', `${top}px`);
+      if (_isIOS() && _editing()) _pinWindowScroll();
+    };
+
     apply();
     vv.addEventListener('resize', schedule);
-    vv.addEventListener('scroll', schedule);
-    // Some browsers don't fire visualViewport events on orientation
-    // change reliably; belt-and-braces.
-    window.addEventListener('orientationchange', () => setTimeout(apply, 120));
+    vv.addEventListener('scroll', onVVScroll);
+    window.addEventListener('orientationchange', () => setTimeout(apply, 150));
     window.addEventListener('resize', schedule);
-    // When an input gains focus on iOS the scroll-into-view kicks in
-    // before visualViewport reports the new height. Re-run on focus.
-    document.addEventListener('focusin', () => setTimeout(apply, 60), true);
-    document.addEventListener('focusout', () => setTimeout(apply, 60), true);
+
+    document.addEventListener('focusin', (e) => {
+      if (!_isTextField(e.target)) return;
+      schedule();
+      setTimeout(apply, 80);
+      setTimeout(apply, 220);
+    }, true);
+
+    document.addEventListener('focusout', () => {
+      setTimeout(() => {
+        apply();
+        if (!_editing()) root.classList.remove('ft-kb-open');
+      }, 120);
+    }, true);
+
+    window.FtViewport = {
+      apply,
+      schedule,
+      keyboardLikelyOpen: () => root.classList.contains('ft-kb-open'),
+      onVisibleResize(fn) {
+        if (typeof fn !== 'function') return () => {};
+        const handler = () => fn(vv.height);
+        vv.addEventListener('resize', handler);
+        return () => vv.removeEventListener('resize', handler);
+      },
+    };
   } catch {}
 })();
 
