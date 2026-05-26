@@ -6439,7 +6439,15 @@ body.in-welcome #ch-title .room-title-icon{display:none !important}
 .sp-channel-desc{font-size:13px;color:#999;line-height:1.4}
 .sp-channel-tags{display:flex;gap:4px;flex-wrap:wrap;margin-top:4px}
 
-#social-content{flex:1;overflow-y:auto;padding:0;scroll-behavior:smooth;-webkit-overflow-scrolling:touch}
+#social-content{flex:1;overflow-y:auto;padding:0;scroll-behavior:smooth;-webkit-overflow-scrolling:touch;min-height:0}
+/* Reels: fill remaining overlay height (topbar + scope bar vary by breakpoint). */
+#social-content:has(> .reels-scope-bar){
+  display:flex;flex-direction:column;overflow:hidden;min-height:0
+}
+#social-content:has(> .reels-scope-bar) > .reels-scope-bar{flex-shrink:0}
+#social-content:has(> .reels-scope-bar) > .reels-stage{
+  flex:1;min-height:0;height:auto !important;max-height:none !important
+}
 
 .social-loading{text-align:center;color:#9ab4a2;padding:42px 0 30px;font-size:13px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;position:relative;isolation:isolate;letter-spacing:.02em}
 .social-loading::after{content:'';display:block;width:34px;height:34px;border:3px solid #2a2a2a;border-top-color:#4caf50;border-right-color:#81c784;border-radius:50%;animation:spin .8s linear infinite;box-shadow:0 0 0 1px rgba(255,255,255,.03) inset}
@@ -6483,6 +6491,12 @@ body.in-welcome #ch-title .room-title-icon{display:none !important}
 }
 #social-load-banner.show{opacity:1;transform:translate(-50%,0)}
 #social-load-banner.done{opacity:0;transform:translate(-50%,6px)}
+/* Reels/deeplink: keep load banner off the share / action column at the bottom. */
+#social-load-banner[data-tab="reels"]{
+  top:calc(var(--safe-top) + 64px);
+  bottom:auto;
+  z-index:4
+}
 #social-load-banner .slb-head{display:flex;align-items:center;justify-content:space-between;gap:10px}
 #social-load-banner .slb-title{font-size:12px;font-weight:600;color:#d5f3dc}
 #social-load-banner .slb-pct{font-size:12px;font-weight:700;color:#9be2ad;min-width:38px;text-align:right}
@@ -7674,6 +7688,10 @@ a.status-music-link:hover *{
   display:flex;align-items:center;gap:8px;padding:10px 14px 6px;
   border-bottom:1px solid #1e1e1e;background:#0a0a0a;position:sticky;top:0;z-index:24
 }
+.reels-scope-bar.reels-scope-bar--deferred{
+  position:absolute;width:1px;height:1px;padding:0;margin:-1px;
+  overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0
+}
 .rsb-pill{
   padding:5px 16px;border-radius:999px;font-size:13px;font-weight:600;border:none;
   background:#1a1a1a;color:#888;cursor:pointer;transition:background .15s,color .15s;
@@ -7698,8 +7716,8 @@ a.status-music-link:hover *{
 .reels-snap{
   display:flex;flex-direction:column;
   overflow-y:scroll;scroll-snap-type:y mandatory;
-  height:calc(100svh - 108px - var(--safe-bottom));
-  max-height:calc(100svh - 108px - var(--safe-bottom));
+  height:100%;
+  max-height:100%;
   scrollbar-width:none;-ms-overflow-style:none
 }
 .reels-snap::-webkit-scrollbar{display:none}
@@ -7708,6 +7726,10 @@ a.status-music-link:hover *{
   height:calc(100svh - 108px - var(--safe-bottom));
   min-height:calc(100svh - 108px - var(--safe-bottom));
   overflow:hidden;
+}
+#social-content:has(> .reels-scope-bar) .reels-stage{
+  height:100%;
+  min-height:0
 }
 .reels-stage-loading{
   position:absolute;
@@ -7729,7 +7751,8 @@ a.status-music-link:hover *{
 .reel-card{
   position:relative;flex:0 0 100%;scroll-snap-align:start;scroll-snap-stop:always;
   display:flex;align-items:center;justify-content:center;
-  background:#000;min-height:calc(100svh - 108px - var(--safe-bottom));overflow:hidden
+  background:#000;min-height:100%;height:100%;overflow:hidden;box-sizing:border-box;
+  padding-bottom:var(--safe-bottom)
 }
 .reel-video-poster{
   position:absolute;inset:0;background:#070707 center/cover no-repeat;
@@ -7737,7 +7760,7 @@ a.status-music-link:hover *{
   transition:opacity .2s ease;pointer-events:none
 }
 .reel-card video{
-  width:100%;height:100%;object-fit:contain;max-height:calc(100svh - 108px - var(--safe-bottom));
+  width:100%;height:100%;object-fit:contain;max-height:100%;
   z-index:1;background:transparent;outline:none;
   transition:opacity .18s ease
 }
@@ -7847,7 +7870,7 @@ a.status-music-link:hover *{
 }
 /* Author info (bottom-left) */
 .reel-author{
-  position:absolute;bottom:68px;left:14px;display:flex;align-items:center;gap:9px;
+  position:absolute;bottom:calc(68px + var(--safe-bottom));left:14px;display:flex;align-items:center;gap:9px;
   max-width:calc(100% - 92px);cursor:pointer;
   padding:6px 10px 6px 6px;
   border-radius:16px;
@@ -7855,7 +7878,7 @@ a.status-music-link:hover *{
   backdrop-filter:none;
   z-index:3
 }
-.reel-card:has(.reel-caption) .reel-author{bottom:78px}
+.reel-card:has(.reel-caption) .reel-author{bottom:calc(78px + var(--safe-bottom))}
 .reel-author-avatar{
   width:40px;height:40px;border-radius:50%;object-fit:cover;flex-shrink:0;
   border:2px solid #fff;background:#1a2a1a
@@ -7893,7 +7916,7 @@ a.status-music-link:hover *{
   border-radius:999px;line-height:1.4
 }
 .reel-caption{
-  position:absolute;bottom:38px;left:14px;right:78px;
+  position:absolute;bottom:calc(38px + var(--safe-bottom));left:14px;right:78px;
   font-size:13px;color:#e8e8e8;line-height:1.42;
   text-shadow:0 1px 5px rgba(0,0,0,.7);
   display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;
@@ -7901,9 +7924,9 @@ a.status-music-link:hover *{
 }
 /* Action bar (right side, Instagram-style) */
 .reel-actions{
-  position:absolute;bottom:60px;right:12px;
+  position:absolute;bottom:calc(60px + var(--safe-bottom));right:12px;
   display:flex;flex-direction:column;align-items:center;gap:18px;
-  z-index:3
+  z-index:6
 }
 .reel-act-btn{
   display:flex;flex-direction:column;align-items:center;gap:3px;
@@ -8089,10 +8112,10 @@ body[data-social-nowplaying="1"] .reel-mute-btn{top:78px}
   .rsb-pill{padding:5px 12px;font-size:12.5px}
   .rsb-sort{gap:4px}
   .rsb-sort-chip{padding:4px 9px;font-size:11.5px}
-  .reel-author{bottom:62px;left:12px;max-width:calc(100% - 86px)}
-  .reel-card:has(.reel-caption) .reel-author{bottom:70px}
-  .reel-caption{left:12px;bottom:34px;right:74px}
-  .reel-actions{right:8px;gap:14px}
+  .reel-author{bottom:calc(62px + var(--safe-bottom));left:12px;max-width:calc(100% - 86px)}
+  .reel-card:has(.reel-caption) .reel-author{bottom:calc(70px + var(--safe-bottom))}
+  .reel-caption{left:12px;bottom:calc(34px + var(--safe-bottom));right:74px}
+  .reel-actions{right:8px;gap:14px;bottom:calc(56px + var(--safe-bottom))}
 }
 /* End-of-reels sentinel card */
 .reel-end-card{

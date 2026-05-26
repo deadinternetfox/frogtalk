@@ -2155,6 +2155,34 @@ class FederationDirectoryJoinApiTests(unittest.TestCase):
         self.assertEqual(payload.get("channel_type"), "music")
         self.assertEqual(payload.get("dj_only_queue"), 1)
 
+    def test_music_queue_snapshot_payload_and_apply(self):
+        import asyncio
+        import routers.federation as fed_mod
+
+        db = self.db
+        uid = int(db.create_user("music_payload_owner", "secret12"))
+        rid = int(db.create_room("music-payload", "m", "public", uid, None, channel_type="music"))
+        db.join_room(uid, rid)
+        db.music_add_track(
+            room_name="music-payload",
+            submitter_id=uid,
+            submitter_nick="music_payload_owner",
+            provider="youtube",
+            video_id="dQw4w9WgXcQ",
+            url="https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            title="local",
+            thumbnail="",
+        )
+        payload = fed_mod._music_queue_snapshot_payload("music-payload")
+        self.assertIsNotNone(payload)
+        self.assertEqual(len(payload.get("tracks") or []), 1)
+        asyncio.run(
+            fed_mod._apply_federated_music_snapshot("music-payload", payload, force=True)
+        )
+        queue = db.music_get_queue("music-payload")
+        self.assertEqual(len(queue), 1)
+        self.assertEqual(str(queue[0].get("video_id") or ""), "dQw4w9WgXcQ")
+
     def test_music_queue_snapshot_skips_when_local_queue_nonempty(self):
         import asyncio
         import routers.federation as fed_mod

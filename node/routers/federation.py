@@ -619,15 +619,26 @@ def emit_music_queue_snapshot(room_name: str) -> dict:
     name = str(room_name or "").strip().lower()
     if not name:
         return {"ok": False, "error": "no_room"}
+    payload = _music_queue_snapshot_payload(name)
+    if not payload:
+        return {"ok": False, "skipped": True}
+    return enqueue_server_event("room.music.queue.snapshot", payload)
+
+
+def _music_queue_snapshot_payload(room_name: str) -> dict | None:
+    """Build a portable music-queue snapshot for federation pull/push."""
+    name = str(room_name or "").strip().lower()
+    if not name:
+        return None
     room = db.get_room_by_name(name)
     if not room:
-        return {"ok": False, "error": "no_room"}
+        return None
     ctype = str(room.get("channel_type") or "text").strip().lower()
     if ctype not in ("music", "voice"):
-        return {"ok": False, "skipped": True}
+        return None
     tracks = db.music_get_queue(name, limit=_MUSIC_QUEUE_SNAPSHOT_MAX)
     if not tracks:
-        return {"ok": False, "skipped": True}
+        return None
     anchor = db.get_music_room_anchor(name) or {}
     safe: list[dict] = []
     for t in tracks:
@@ -648,17 +659,191 @@ def emit_music_queue_snapshot(room_name: str) -> dict:
             "duration": int(t.get("duration") or 0),
         })
     if not safe:
-        return {"ok": False, "skipped": True}
-    return enqueue_server_event(
-        "room.music.queue.snapshot",
-        {
-            "room_name": name,
-            "tracks": safe,
-            "head_track_id": int(anchor.get("track_id") or 0) or None,
-            "start_unix": int(float(anchor.get("started_unix") or 0)) or None,
-            "snapshot_at": int(time.time()),
-        },
-    )
+        return None
+    return {
+        "room_name": name,
+        "tracks": safe,
+        "head_track_id": int(anchor.get("track_id") or 0) or None,
+        "start_unix": int(float(anchor.get("started_unix") or 0)) or None,
+        "snapshot_at": int(time.time()),
+    }
+
+
+def maybe_emit_music_queue_snapshot(room_name: str) -> dict:
+    """Push current music queue + playhead to peer nodes (home node only)."""
+    name = str(room_name or "").strip().lower()
+    if not name:
+        return {"ok": False, "error": "no_room"}
+    now = time.time()
+    last = _music_snapshot_last_sent.get(name, 0.0)
+    if now - last < _MUSIC_SNAPSHOT_THROTTLE_SEC:
+        return {"ok": False, "error": "throttled"}
+    try:
+        room = db.get_room_by_name(name)
+    except Exception:
+        return {"ok": False, "error": "lookup_failed"}
+    if not room:
+        return {"ok": False, "error": "no_room"}
+    if not _room_snapshot_authoritative(room):
+        return {"ok": False, "error": "not_authoritative"}
+    payload = _music_queue_snapshot_payload(name)
+    if not payload:
+        return {"ok": False, "error": "empty_queue"}
+    _music_snapshot_last_sent[name] = now
+    return enqueue_server_event("room.music.queue.snapshot", payload)
+
+
+def _resolve_room_home_server_id(room_name: str, room: dict | None = None) -> str:
+    row = room if isinstance(room, dict) else db.get_room_by_name(room_name)
+    home = str((row or {}).get("home_server_id") or "").strip()
+    if home:
+        return home
+    try:
+        fed = db.get_federation_channel_index_entry(str(room_name or "").strip().lower())
+    except Exception:
+        fed = None
+    if fed:
+        return str(fed.get("home_server_id") or "").strip()
+    return ""
+
+
+async def _apply_federated_music_snapshot(
+    room_name: str,
+    payload: dict,
+    *,
+    force: bool = False,
+) -> bool:
+    """Import a federated music queue snapshot into the local room mirror."""
+    from routers import rooms as rooms_router
+
+    name = str(room_name or "").strip().lower()
+    if not name or not isinstance(payload, dict):
+        return False
+    if not db.get_room_by_name(name):
+        return False
+    tracks_in = payload.get("tracks") or []
+    if not isinstance(tracks_in, list) or not tracks_in:
+        return False
+    if db.music_get_queue(name, limit=1) and not force:
+        return False
+    if force:
+        try:
+            db.music_clear_queue(name)
+            _clear_music_anchor(name)
+        except Exception:
+            pass
+    had_current = db.music_get_current(name)
+    head_id = None
+    for raw in tracks_in[:_MUSIC_QUEUE_SNAPSHOT_MAX]:
+        if not isinstance(raw, dict):
+            continue
+        url = str(raw.get("url") or "").strip()
+        provider, video_id, _embed = rooms_router._parse_track_url(url)
+        if not provider:
+            continue
+        submitter_nick = _fed_nickname(raw.get("submitter_nick")) or "federation_sync"
+        submitter = _ensure_local_user_by_nickname(submitter_nick)
+        submitter_id = int(submitter["id"]) if submitter else int(db.get_or_create_federation_system_user())
+        thumb = rooms_router._sanitize_artwork_url(str(raw.get("thumbnail") or ""))
+        tid = db.music_add_track(
+            room_name=name,
+            submitter_id=submitter_id,
+            submitter_nick=submitter_nick,
+            provider=provider,
+            video_id=video_id,
+            url=url[:2048],
+            title=str(raw.get("title") or "")[:200],
+            thumbnail=thumb or "",
+            duration=int(raw.get("duration") or 0),
+        )
+        if head_id is None:
+            head_id = int(tid)
+    if head_id and not had_current:
+        start_unix = payload.get("start_unix")
+        try:
+            su = int(float(start_unix)) if start_unix is not None else int(time.time())
+        except Exception:
+            su = int(time.time())
+        _set_music_anchor(name, head_id, su)
+    await _broadcast_music_ws(name, {"type": "music_queue_snapshot", "room": name})
+    return True
+
+
+def _fetch_home_music_queue_sync(base_url: str, room_name: str) -> dict | None:
+    """HTTP pull of music queue state from a room's home node."""
+    fed = (os.getenv("FROGTALK_FEDERATION_TOKEN", "") or "").strip()
+    name = str(room_name or "").strip().lower()
+    if not fed or not name:
+        return None
+    from routers.auth import _norm_base
+
+    source = _norm_base(base_url)
+    if not source:
+        return None
+    path = f"/api/federation/rooms/{urllib.parse.quote(name, safe='')}/music-queue"
+    url = f"{source}{path}"
+    headers = {
+        "Accept": "application/json",
+        "User-Agent": "FrogTalk-MusicSync/1.0",
+        "X-Federation-Token": fed,
+    }
+    try:
+        req = urllib.request.Request(url, headers=headers, method="GET")
+        with urllib.request.urlopen(req, timeout=6.0) as resp:
+            raw = resp.read()
+        data = json.loads(raw.decode("utf-8", errors="replace"))
+        return data if isinstance(data, dict) else None
+    except Exception:
+        return None
+
+
+async def pull_music_queue_from_home(room_name: str, *, force: bool = False) -> dict:
+    """Best-effort: hydrate local music mirror from the room's home node."""
+    name = str(room_name or "").strip().lower()
+    if not name:
+        return {"ok": False, "error": "no_room"}
+    room = db.get_room_by_name(name)
+    if not room:
+        return {"ok": False, "error": "no_room"}
+    ctype = str(room.get("channel_type") or "text").strip().lower()
+    if ctype not in ("music", "voice"):
+        return {"ok": False, "skipped": True, "reason": "not_music_channel"}
+    if _room_snapshot_authoritative(room):
+        return {"ok": False, "skipped": True, "reason": "authoritative_local"}
+    if db.music_get_queue(name, limit=1) and not force:
+        return {"ok": False, "skipped": True, "reason": "local_queue_nonempty"}
+    home_sid = _resolve_room_home_server_id(name, room)
+    if not home_sid:
+        return {"ok": False, "error": "no_home_server"}
+    from routers.auth import resolve_server_base_url
+
+    base = resolve_server_base_url(home_sid)
+    if not base:
+        return {"ok": False, "error": "home_unreachable"}
+    payload = await run_in_threadpool(_fetch_home_music_queue_sync, base, name)
+    if not payload or not isinstance(payload.get("tracks"), list):
+        return {"ok": False, "error": "pull_failed"}
+    applied = await _apply_federated_music_snapshot(name, payload, force=force)
+    return {"ok": bool(applied)}
+
+
+def schedule_music_sync_from_home(room_name: str, *, force: bool = False) -> None:
+    """Fire-and-forget music queue pull for federated room mirrors."""
+    name = str(room_name or "").strip().lower()
+    if not name:
+        return
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+
+    async def _run() -> None:
+        try:
+            await pull_music_queue_from_home(name, force=force)
+        except Exception:
+            _log.exception("federation: music sync from home failed room=%s", name)
+
+    loop.create_task(_run())
 
 
 def enqueue_room_message_created(
@@ -728,7 +913,9 @@ def enqueue_room_message_deleted(
 
 
 _members_snapshot_last_sent: dict[str, float] = {}
+_music_snapshot_last_sent: dict[str, float] = {}
 _MEMBERS_SNAPSHOT_THROTTLE_SEC = 60
+_MUSIC_SNAPSHOT_THROTTLE_SEC = 45
 
 
 def _local_server_id() -> str:
@@ -3169,6 +3356,28 @@ async def sync_official_directory(
     return result
 
 
+@router.get("/federation/rooms/{room_name}/music-queue")
+async def federation_room_music_queue(
+    room_name: str,
+    x_federation_token: str | None = Header(default=None),
+):
+    """Inter-node pull: current music queue + shared playhead for a room."""
+    if not _fed_token_ok(x_federation_token):
+        return JSONResponse(status_code=401, content={"error": "Invalid federation auth"})
+    name = str(room_name or "").strip().lower()
+    if not name:
+        return JSONResponse(status_code=400, content={"error": "bad_room_name"})
+    room = db.get_room_by_name(name)
+    if not room:
+        return JSONResponse(status_code=404, content={"error": "room_not_found"})
+    if not _room_snapshot_authoritative(room):
+        return JSONResponse(status_code=403, content={"error": "not_authoritative"})
+    payload = _music_queue_snapshot_payload(name)
+    if not payload:
+        return JSONResponse(status_code=404, content={"error": "empty_queue"})
+    return payload
+
+
 @router.get("/federation/signal/bundle/{global_user_id}")
 async def federation_signal_bundle_by_gid(
     global_user_id: str,
@@ -5414,6 +5623,11 @@ async def _handle_room_event(event: dict) -> None:
             })
         except Exception:
             pass
+        if _room_snapshot_authoritative(room):
+            try:
+                maybe_emit_music_queue_snapshot(room["name"])
+            except Exception:
+                pass
     elif event_type == "room.member.left":
         if not is_mirror:
             with db._conn() as con:
@@ -5565,47 +5779,7 @@ async def _handle_room_music_event(room_name: str, event_type: str, payload: dic
     from routers import rooms as rooms_router
 
     if event_type == "room.music.queue.snapshot":
-        if not db.get_room_by_name(room_name):
-            return
-        if db.music_get_queue(room_name, limit=1):
-            return
-        tracks_in = payload.get("tracks") or []
-        if not isinstance(tracks_in, list):
-            return
-        had_current = db.music_get_current(room_name)
-        first_id = None
-        for raw in tracks_in[:_MUSIC_QUEUE_SNAPSHOT_MAX]:
-            if not isinstance(raw, dict):
-                continue
-            url = str(raw.get("url") or "").strip()
-            provider, video_id, _embed = rooms_router._parse_track_url(url)
-            if not provider:
-                continue
-            submitter_nick = _fed_nickname(raw.get("submitter_nick")) or "federation_sync"
-            submitter = _ensure_local_user_by_nickname(submitter_nick)
-            submitter_id = int(submitter["id"]) if submitter else int(db.get_or_create_federation_system_user())
-            thumb = rooms_router._sanitize_artwork_url(str(raw.get("thumbnail") or ""))
-            tid = db.music_add_track(
-                room_name=room_name,
-                submitter_id=submitter_id,
-                submitter_nick=submitter_nick,
-                provider=provider,
-                video_id=video_id,
-                url=url[:2048],
-                title=str(raw.get("title") or "")[:200],
-                thumbnail=thumb or "",
-                duration=int(raw.get("duration") or 0),
-            )
-            if first_id is None:
-                first_id = int(tid)
-        if first_id and not had_current:
-            start_unix = payload.get("start_unix")
-            try:
-                su = int(float(start_unix)) if start_unix is not None else int(time.time())
-            except Exception:
-                su = int(time.time())
-            _set_music_anchor(room_name, first_id, su)
-        await _broadcast_music_ws(room_name, {"type": "music_queue_snapshot", "room": room_name})
+        await _apply_federated_music_snapshot(room_name, payload, force=False)
         return
 
     if event_type == "room.music.track.added":
