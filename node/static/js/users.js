@@ -139,6 +139,55 @@ const Users = (() => {
   }
 
   let _membersLoading = false;
+  let _membersLoadInflight = null;
+  let _membersLoadRoom = null;
+
+  function _paintMembersSkeleton(list, opts = {}) {
+    if (!list) return;
+    const o = opts && typeof opts === 'object' ? opts : {};
+    const existing = list.querySelector('.users-skeleton');
+    if (existing) {
+      if (o.instant) existing.classList.add('ft-skel-instant');
+      return;
+    }
+    const rows = [68, 82, 58, 74, 64].map((w, i) =>
+      `<div class="ft-skel-user-row" style="--ft-skel-i:${i}">`
+      + '<span class="ft-skel-avatar sm" aria-hidden="true"></span>'
+      + `<span class="ft-skel-line" style="width:${w}%"></span></div>`,
+    ).join('');
+    const instantCls = o.instant ? ' ft-skel-instant' : '';
+    list.innerHTML =
+      `<div class="users-skeleton${instantCls}" role="status" aria-live="polite" aria-busy="true">${rows}</div>`;
+  }
+
+  function resetMembersListLoad() {
+    _membersLoading = false;
+    _membersLoadInflight = null;
+    _membersLoadRoom = null;
+  }
+
+  /** Sync paint before fetch — keeps members panel from sitting blank during switch/boot. */
+  function prepareMembersListLoad(roomName, opts = {}) {
+    if (!roomName || !State.token) return;
+    const room = String(roomName);
+    const o = opts && typeof opts === 'object' ? opts : {};
+    const panel = document.getElementById('users-panel');
+    if (panel) panel.classList.remove('hidden');
+    const list = document.getElementById('users-list');
+    if (!list) return;
+    const roomChanged = _channelRoom !== room;
+    _channelRoom = room;
+    _membersLoadRoom = room;
+    _membersLoading = true;
+    if (roomChanged) {
+      _channelMembers = [];
+      _channelBots = [];
+    }
+    const instant = !!(o.instant || list.querySelector('.users-skeleton'));
+    _paintMembersSkeleton(list, { instant });
+    const count = document.getElementById('online-count');
+    if (count) count.textContent = '…';
+  }
 
   function _renderFiltered() {
     const list = document.getElementById('users-list');
@@ -146,15 +195,18 @@ const Users = (() => {
     if (!list) return;
 
     const onRoom = _channelRoom && State.currentRoom === _channelRoom;
+    const curRoom = (State.currentRoom && State.currentRoomType !== 'dm')
+      ? String(State.currentRoom)
+      : '';
+    const roomAhead = curRoom && _channelRoom && _channelRoom !== curRoom;
 
-    if (onRoom && _membersLoading) {
-      const rows = [68, 82, 58, 74, 64].map((w, i) =>
-        `<div class="ft-skel-user-row" style="--ft-skel-i:${i}">`
-        + '<span class="ft-skel-avatar sm" aria-hidden="true"></span>'
-        + `<span class="ft-skel-line" style="width:${w}%"></span></div>`,
-      ).join('');
-      list.innerHTML =
-        `<div class="users-skeleton" role="status" aria-live="polite" aria-busy="true">${rows}</div>`;
+    if (roomAhead) {
+      prepareMembersListLoad(curRoom, { instant: true });
+      return;
+    }
+
+    if (_membersLoading && State.currentRoomType !== 'dm') {
+      _paintMembersSkeleton(list, { instant: true });
       if (count) count.textContent = '…';
       return;
     }
@@ -430,31 +482,49 @@ const Users = (() => {
 
   async function loadChannelMembers(roomName) {
     if (!roomName || !State.token) return;
-    _channelRoom = roomName;
-    _membersLoading = true;
-    _renderFiltered();
-    try {
-      const res = await fetch(`/api/rooms/${encodeURIComponent(roomName)}/members`, {
-        headers: { 'X-Session-Token': State.token }
-      });
-      if (!res.ok) return;
-      const data = await res.json();
-      _channelMembers = _mergeLocalSelfIntoList(data.members || []);
-      _channelBots = Array.isArray(data.bots) ? data.bots : [];
-      // Backfill display_name into any online users that the WS sent without it
-      for (const u of _allUsers) {
-        if (!u.display_name) {
-          const cm = _channelMembers.find(m =>
-            (m.user_id && m.user_id === u.user_id) || m.nickname === u.nickname
-          );
-          if (cm && cm.display_name) u.display_name = cm.display_name;
+    const room = String(roomName);
+    prepareMembersListLoad(room);
+    if (_membersLoadInflight && _membersLoadRoom === room) return _membersLoadInflight;
+    _membersLoadInflight = (async () => {
+      try {
+        const res = await fetch(`/api/rooms/${encodeURIComponent(room)}/members`, {
+          headers: { 'X-Session-Token': State.token }
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (_channelRoom !== room || State.currentRoom !== room) return;
+        _channelMembers = _mergeLocalSelfIntoList(data.members || []);
+        _channelBots = Array.isArray(data.bots) ? data.bots : [];
+        // Backfill display_name into any online users that the WS sent without it
+        for (const u of _allUsers) {
+          if (!u.display_name) {
+            const cm = _channelMembers.find(m =>
+              (m.user_id && m.user_id === u.user_id) || m.nickname === u.nickname
+            );
+            if (cm && cm.display_name) u.display_name = cm.display_name;
+          }
+        }
+        void _hydrateDisplayNames(_channelMembers)
+          .then(() => {
+            if (!_membersLoading && _channelRoom === room && State.currentRoom === room) {
+              _renderFiltered();
+            }
+          })
+          .catch(() => {});
+      } catch {} finally {
+        if (_channelRoom === room) {
+          _membersLoading = false;
+          _renderFiltered();
         }
       }
-      _renderFiltered();
-      _hydrateDisplayNames(_channelMembers).then(() => _renderFiltered()).catch(() => {});
-    } catch {} finally {
-      _membersLoading = false;
-      _renderFiltered();
+    })();
+    try {
+      await _membersLoadInflight;
+    } finally {
+      if (_membersLoadRoom === room) {
+        _membersLoadInflight = null;
+        _membersLoadRoom = null;
+      }
     }
   }
 
@@ -630,5 +700,20 @@ const Users = (() => {
     return 'online';
   }
 
-  return { updateList, updateAvatar, updateDisplayName, updatePresence, loadChannelMembers, getPresenceByNickname, removeMember };
+  return {
+    updateList,
+    updateAvatar,
+    updateDisplayName,
+    updatePresence,
+    prepareMembersListLoad,
+    resetMembersListLoad,
+    loadChannelMembers,
+    getPresenceByNickname,
+    removeMember,
+  };
 })();
+try {
+  if (typeof window !== 'undefined' && window.Users) {
+    window.Users.prepareMembersListLoad = Users.prepareMembersListLoad;
+  }
+} catch {}

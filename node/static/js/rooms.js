@@ -128,6 +128,19 @@ const Rooms = (() => {
   const _CHAT_SYNC_STRIP_ID = 'ft-chat-sync-strip';
   const _CHAT_SKELETON_ID = 'ft-chat-skeleton';
   const _ROOM_REVISIT_MS = 45000;
+  let _roomsSidebarLoading = false;
+  let _roomsLoadInflight = null;
+
+  function _joinedRoomsRenderKey() {
+    const joined = (State.rooms || []).filter((r) => r.joined);
+    const q = String(State._channelSearchQuery || '').trim();
+    const showUnjoined = !!(State._showAllChannels && q);
+    const muted = (typeof Mute !== 'undefined' && Mute.isRoomMuted)
+      ? joined.map((r) => (Mute.isRoomMuted(r.name) ? '1' : '0')).join('')
+      : '';
+    return joined.map((r) => `${r.name}\x1f${r.channel_type || 'text'}`).join('\x1e')
+      + `\x1d${showUnjoined ? '1' : '0'}\x1d${q}\x1d${muted}`;
+  }
 
   function _isSwitchAlive(token) {
     return token === _switchSeq;
@@ -254,7 +267,9 @@ const Rooms = (() => {
 
   /** Channels + DMs in the left sidebar load together — paint both skeletons at once. */
   function paintSidebarSkeletonsIfEmpty() {
-    paintSidebarListSkeleton('public-channels', 'channel');
+    if (paintSidebarListSkeleton('public-channels', 'channel')) {
+      _roomsSidebarLoading = true;
+    }
     paintSidebarListSkeleton('dm-channels', 'dm');
   }
 
@@ -1374,28 +1389,43 @@ const Rooms = (() => {
   }
 
   async function loadRooms() {
-    paintSidebarSkeletonsIfEmpty();
-    try {
-      const res = await apiFetch('/api/rooms');
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        // apiFetch prompts for PIN on 423 and retries; if we still get 423,
-        // keep the last good channel list instead of painting a blank shell.
-        if (res.status === 423 && data?.pin_required) {
-          console.warn('[rooms] loadRooms PIN locked');
-          return;
-        }
-        console.warn('[rooms] loadRooms failed', res.status, data?.error || data);
-        if (res.status === 401 || res.status === 403) State.rooms = [];
-      } else {
-        State.rooms = data.rooms || [];
-      }
-      try { State._showAllChannels = false; } catch {}
-    } catch (e) {
-      console.warn('[rooms] loadRooms error', e);
-      // Network/abort — preserve cached channels (common after idle/tab return).
+    if (_roomsLoadInflight) return _roomsLoadInflight;
+    const pub = document.getElementById('public-channels');
+    if (pub && !pub.querySelector('.channel-item') && !pub.querySelector('.ft-sidebar-skeleton')) {
+      paintSidebarSkeletonsIfEmpty();
+    } else if (pub && !pub.querySelector('.channel-item')) {
+      _roomsSidebarLoading = true;
     }
-    renderRooms();
+    _roomsLoadInflight = (async () => {
+      try {
+        const res = await apiFetch('/api/rooms');
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          // apiFetch prompts for PIN on 423 and retries; if we still get 423,
+          // keep the last good channel list instead of painting a blank shell.
+          if (res.status === 423 && data?.pin_required) {
+            console.warn('[rooms] loadRooms PIN locked');
+            return;
+          }
+          console.warn('[rooms] loadRooms failed', res.status, data?.error || data);
+          if (res.status === 401 || res.status === 403) State.rooms = [];
+        } else {
+          State.rooms = data.rooms || [];
+        }
+        try { State._showAllChannels = false; } catch {}
+      } catch (e) {
+        console.warn('[rooms] loadRooms error', e);
+        // Network/abort — preserve cached channels (common after idle/tab return).
+      } finally {
+        _roomsSidebarLoading = false;
+        renderRooms();
+      }
+    })();
+    try {
+      await _roomsLoadInflight;
+    } finally {
+      _roomsLoadInflight = null;
+    }
   }
 
   // ── Discord-style drag-to-reorder for joined channels ────────────────────
@@ -1546,8 +1576,15 @@ const Rooms = (() => {
 
   function renderRooms() {
     const container = document.getElementById('public-channels');
+    if (!container) return;
+    const joinedRooms = (State.rooms || []).filter((r) => r.joined);
+    if (!joinedRooms.length) {
+      if (_roomsSidebarLoading || container.querySelector('.ft-sidebar-skeleton')) return;
+    }
+    const renderKey = _joinedRoomsRenderKey();
+    if (container.dataset.ftRoomsKey === renderKey && container.querySelector('.channel-item')) return;
+    container.dataset.ftRoomsKey = renderKey;
     container.innerHTML = '';
-    const joinedRooms = State.rooms.filter(r => r.joined);
     const unjoinedRooms = State.rooms.filter(r => !r.joined);
 
     // Always show joined first, then unjoined (when toggled visible)
@@ -2104,6 +2141,9 @@ const Rooms = (() => {
     _disarmSwitchWatchdog();
     const nameKey = String(name || '').trim().toLowerCase();
     try { State._roomSwitchInProgress = nameKey; } catch {}
+    if (type !== 'dm' && typeof Users !== 'undefined' && Users.prepareMembersListLoad) {
+      try { Users.prepareMembersListLoad(name); } catch {}
+    }
     // SWR + skeleton for all text channels (including 18+); DMs/voice keep legacy loaders.
     let useFastSwitch = type !== 'dm'
       && normalizeChannelType(_chTypeEarly) !== 'voice';
@@ -2338,8 +2378,14 @@ const Rooms = (() => {
     // Hide members list in DMs — only two people anyway, frees up space for the conversation
     const usersPanel = document.getElementById('users-panel');
     if (usersPanel) {
-      if (type === 'dm') usersPanel.classList.add('hidden');
-      else usersPanel.classList.remove('hidden');
+      if (type === 'dm') {
+        usersPanel.classList.add('hidden');
+        if (typeof Users !== 'undefined' && Users.resetMembersListLoad) {
+          try { Users.resetMembersListLoad(); } catch {}
+        }
+      } else {
+        usersPanel.classList.remove('hidden');
+      }
     }
     const chatHeader = document.getElementById('chat-header');
     if (chatHeader) {

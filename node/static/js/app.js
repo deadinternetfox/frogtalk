@@ -1506,6 +1506,19 @@ const App = {
     App.showChannelLoading();
     try { window.paintSidebarSkeletonsIfEmpty?.(); } catch {}
     try {
+      let bootMembersRoom = null;
+      try {
+        const lastRaw = localStorage.getItem('fc_last_room');
+        if (lastRaw) {
+          const last = JSON.parse(lastRaw);
+          if (last?.name && last.type !== 'dm') bootMembersRoom = last.name;
+        }
+      } catch {}
+      if (bootMembersRoom && typeof Users !== 'undefined' && Users.prepareMembersListLoad) {
+        Users.prepareMembersListLoad(bootMembersRoom);
+      }
+    } catch {}
+    try {
       if (typeof ConnErr !== 'undefined' && ConnErr.armBootGrace) {
         ConnErr.armBootGrace(18000);
       }
