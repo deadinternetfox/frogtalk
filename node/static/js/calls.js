@@ -66,6 +66,45 @@ function _requireWebRtc() {
   return false;
 }
 
+/** Play remote media; Safari often blocks autoplay until play() + user gesture retry. */
+function _ensureMediaPlayback(el, label) {
+  if (!el) return;
+  try { el.muted = false; } catch {}
+  try { el.volume = 1; } catch {}
+  try {
+    el.playsInline = true;
+    el.setAttribute('playsinline', '');
+    el.setAttribute('webkit-playsinline', '');
+  } catch {}
+  const run = () => {
+    const p = el.play();
+    if (p && typeof p.catch === 'function') {
+      p.catch((err) => {
+        console.warn(`[calls] ${label || 'media'} play() blocked:`, err?.name || err);
+        const retry = () => {
+          el.play().catch(() => {});
+          document.removeEventListener('click', retry, true);
+          document.removeEventListener('touchend', retry, true);
+        };
+        document.addEventListener('click', retry, { once: true, capture: true });
+        document.addEventListener('touchend', retry, { once: true, capture: true });
+      });
+    }
+  };
+  run();
+}
+
+function _mediaStreamFromTrackEvent(e, existing) {
+  if (e?.streams?.[0]) return e.streams[0];
+  const track = e?.track;
+  if (!track) return existing || null;
+  const base = (existing && typeof existing.getTracks === 'function') ? existing : new MediaStream();
+  if (![...base.getTracks()].some(t => t.id === track.id)) {
+    try { base.addTrack(track); } catch {}
+  }
+  return base;
+}
+
 function _formatCallSetupError(e) {
   const msg = String(e?.message || e || '');
   if (/RTCPeerConnection/i.test(msg) && /not allowed|disabled|blocked/i.test(msg)) {
@@ -1465,8 +1504,14 @@ function resetCall () {
     _mutedAudio = false; _mutedVideo = false; _speakerMuted = false;
     try { _stopVAD(); } catch {}
     const rv = document.getElementById('remote-video');
+    const ra = document.getElementById('remote-audio');
     const lv = document.getElementById('local-video');
-    if (rv) { rv.srcObject = null; rv.style.display = 'none'; }
+    if (rv) {
+      rv.srcObject = null;
+      rv.style.display = 'none';
+      rv.classList.remove('ft-remote-audio-sink');
+    }
+    if (ra) ra.srcObject = null;
     if (lv) { lv.srcObject = null; lv.style.display = 'none'; }
     // Show avatars again
     const ra = document.getElementById('call-remote-avatar');
@@ -1514,41 +1559,34 @@ async function createPC () {
   pc.ontrack = e => {
     try {
       const rv = document.getElementById('remote-video');
-      if (!rv) return;
-      if (!rv.srcObject) rv.srcObject = new MediaStream();
-      rv.srcObject.addTrack(e.track);
-      // Reveal remote video element whenever ANY video track arrives —
-      // covers voice calls that get upgraded mid-stream via screen share
-      // or camera-on renegotiation (peer must see it regardless of initial type).
-      if (e.track.kind === 'video') {
-        rv.style.display = '';
-        const ra = document.getElementById('call-remote-avatar');
-        if (ra) ra.style.display = 'none';
-      }
-      // Force a play() — Android Chrome / iOS Safari sometimes don't start
-      // playback automatically when srcObject mutates after element is in
-      // the DOM, leaving a "connected" call with no audio output.
-      try {
-        const p = rv.play();
-        if (p && typeof p.catch === 'function') {
-          p.catch(err => {
-            // Autoplay rejected (rare since accept-tap is a user gesture).
-            // Try once more on next user interaction as a safety net.
-            console.warn('remote rv.play() rejected, will retry on interaction', err?.name || err);
-            const retry = () => {
-              rv.play().catch(() => {});
-              document.removeEventListener('click', retry);
-              document.removeEventListener('touchend', retry);
-            };
-            document.addEventListener('click', retry, { once: true });
-            document.addEventListener('touchend', retry, { once: true });
-          });
+      const ra = document.getElementById('call-remote-avatar');
+      const raSink = document.getElementById('remote-audio');
+      if (!rv && !raSink) return;
+
+      const stream = _mediaStreamFromTrackEvent(e, rv?.srcObject || null);
+      if (rv && stream) rv.srcObject = stream;
+
+      if (e.track?.kind === 'video') {
+        if (rv) {
+          rv.classList.remove('ft-remote-audio-sink');
+          rv.style.display = '';
         }
-      } catch {}
-      // Start remote voice activity detection
-      if (e.track.kind === 'audio' && rv.srcObject) {
-        _startRemoteVAD(rv.srcObject);
+        if (ra) ra.style.display = 'none';
+        _ensureMediaPlayback(rv, 'call-remote-video');
+      } else if (e.track?.kind === 'audio') {
+        // WebKit won't play audio through display:none <video> (voice calls).
+        if (rv) {
+          rv.classList.add('ft-remote-audio-sink');
+          rv.style.removeProperty('display');
+        }
+        if (raSink) {
+          raSink.srcObject = stream;
+          _ensureMediaPlayback(raSink, 'call-remote-audio');
+        }
+        _ensureMediaPlayback(rv, 'call-remote-video-audio');
       }
+
+      if (e.track?.kind === 'audio' && stream) _startRemoteVAD(stream);
     } catch (err) {
       console.warn('ontrack failed', err);
     }
@@ -1563,6 +1601,8 @@ async function createPC () {
         _ensureCallPeerAvatar(true).catch(() => {});
         startCallTimer();
         if (st) st.textContent = 'Connected';
+        _ensureMediaPlayback(document.getElementById('remote-video'), 'call-connected');
+        _ensureMediaPlayback(document.getElementById('remote-audio'), 'call-connected-audio');
         // Clear any pending reconnect timer — we're back.
         clearTimeout(_reconnectTimer); _reconnectTimer = null;
         // Always show cam/screen buttons — user can enable mid-call
@@ -1753,9 +1793,11 @@ async function toggleScreenShare () {
 
 function toggleCallSpeaker () {
   const rv = document.getElementById('remote-video');
-  if (!rv) return;
+  const ra = document.getElementById('remote-audio');
+  if (!rv && !ra) return;
   _speakerMuted = !_speakerMuted;
-  rv.muted = _speakerMuted;
+  if (rv) rv.muted = _speakerMuted;
+  if (ra) ra.muted = _speakerMuted;
   document.getElementById('btn-call-speaker').textContent = _speakerMuted ? '🔈' : '🔊';
 }
 
@@ -2393,7 +2435,13 @@ async function joinVoiceChannel() {
   if (!_requireWebRtc()) return;
 
   try {
-    _voiceStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    _voiceStream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      },
+    });
   } catch (e) {
     toast('Microphone permission denied', 'error');
     return;
@@ -2521,6 +2569,29 @@ function handleVoiceMute(data) {
   _updateVoiceBarParticipants();
 }
 
+function _bindVoicePeerRemoteTrack(peerKey, e) {
+  const peer = _voicePeers.get(peerKey);
+  if (!peer) return;
+  const stream = _mediaStreamFromTrackEvent(e, peer.stream);
+  if (!stream) return;
+  peer.stream = stream;
+
+  const aid = `voice-audio-${peerKey}`;
+  let audio = document.getElementById(aid);
+  if (!audio) {
+    audio = document.createElement('audio');
+    audio.id = aid;
+    audio.autoplay = true;
+    audio.setAttribute('playsinline', '');
+    audio.setAttribute('webkit-playsinline', '');
+    document.body.appendChild(audio);
+  }
+  audio.srcObject = stream;
+  audio.muted = !!peer.muted;
+  _ensureMediaPlayback(audio, `voice-${peerKey}`);
+  _updateVoiceBarParticipants();
+}
+
 /**
  * Create a peer connection for a specific user in the voice channel.
  */
@@ -2528,29 +2599,21 @@ async function _createVoicePeer(userId, nickname, avatar, isOfferer, globalUserI
   const ice = await buildIceServers(homeServerId || '');
   const pc = new RTCPeerConnection({ iceServers: ice });
   const peerKey = globalUserId ? `g:${globalUserId}` : (userId ? `u:${userId}` : `n:${nickname}`);
-  
-  // Add local audio track
+
+  _voicePeers.set(peerKey, {
+    pc, nickname, avatar, stream: null, pendingIce: [], remoteDescApplied: false,
+    userId, globalUserId: globalUserId || '', muted: !!_voicePeerMuted.get(peerKey),
+  });
+  _enrichPeerFromRoster(peerKey);
+
+  pc.ontrack = (e) => {
+    if (e.track?.kind !== 'audio') return;
+    _bindVoicePeerRemoteTrack(peerKey, e);
+  };
+
   if (_voiceStream) {
     _voiceStream.getTracks().forEach(t => pc.addTrack(t, _voiceStream));
   }
-
-  // Handle incoming remote audio
-  pc.ontrack = (e) => {
-    const existing = _voicePeers.get(peerKey);
-    if (existing) {
-      existing.stream = e.streams[0];
-      const aid = `voice-audio-${peerKey}`;
-      let audio = document.getElementById(aid);
-      if (!audio) {
-        audio = document.createElement('audio');
-        audio.id = aid;
-        audio.autoplay = true;
-        document.body.appendChild(audio);
-      }
-      audio.srcObject = e.streams[0];
-      _updateVoiceBarParticipants();
-    }
-  };
 
   pc.onicecandidate = (e) => {
     if (e.candidate) {
@@ -2566,14 +2629,11 @@ async function _createVoicePeer(userId, nickname, avatar, isOfferer, globalUserI
   pc.onconnectionstatechange = () => {
     if (pc.connectionState === 'connected') {
       _updateVoiceBarParticipants();
+      const peer = _voicePeers.get(peerKey);
+      const audio = document.getElementById(`voice-audio-${peerKey}`);
+      if (peer?.stream && audio) _ensureMediaPlayback(audio, `voice-${peerKey}-connected`);
     }
   };
-
-  _voicePeers.set(peerKey, {
-    pc, nickname, avatar, stream: null, pendingIce: [], remoteDescApplied: false,
-    userId, globalUserId: globalUserId || '', muted: !!_voicePeerMuted.get(peerKey),
-  });
-  _enrichPeerFromRoster(peerKey);
 
   return pc;
 }
