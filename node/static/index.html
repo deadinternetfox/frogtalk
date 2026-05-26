@@ -2853,6 +2853,33 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
   background:color-mix(in srgb, var(--accent-color) 14%, var(--surface-color));border:1px solid color-mix(in srgb, var(--accent-color) 30%, var(--border-color));border-radius:10px;
   transition:background .14s ease,transform .15s ease,border-color .14s ease
 }
+.action-sheet .as-btn .as-ic .as-emoji-plus{
+  position:relative;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  width:22px;
+  height:22px;
+}
+.action-sheet .as-btn .as-ic .as-emoji-plus .as-emoji{line-height:1}
+.action-sheet .as-btn .as-ic .as-emoji-plus .as-plus{
+  position:absolute;
+  right:-6px;
+  bottom:-6px;
+  width:14px;
+  height:14px;
+  border-radius:50%;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-size:11px;
+  font-weight:900;
+  line-height:1;
+  color:#06200f;
+  background:linear-gradient(155deg,#9ef6c2 0%,#61d989 26%,#3aa95a 58%,#2a8647 100%);
+  border:1px solid color-mix(in srgb, var(--accent-color) 55%, var(--border-color));
+  box-shadow:0 2px 8px rgba(0,0,0,.35);
+}
 .action-sheet .as-btn:hover .as-ic{background:color-mix(in srgb, var(--accent-color) 22%, var(--surface-color));border-color:color-mix(in srgb, var(--accent-color) 44%, var(--border-color))}
 .action-sheet .as-cancel{
   margin-top:8px;text-align:center;color:color-mix(in srgb, var(--accent-color) 50%, var(--text-muted));padding:14px;

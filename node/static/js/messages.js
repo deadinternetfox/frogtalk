@@ -4288,7 +4288,7 @@ const Messages = (() => {
       if (eid) {
         menuItems.push({
           rank: _actionSheetRank('add emoji'),
-          icon: '😀',
+          icon: '<span class="as-emoji-plus" aria-hidden="true"><span class="as-emoji">😀</span><span class="as-plus">＋</span></span>',
           label: 'Add emoji',
           onClick: (e) => {
             e.stopPropagation();
