@@ -2543,7 +2543,7 @@ function renderDMChannels () {
           { icon: '✉️', label: 'Open conversation', onclick: () => openDMChannel(ch.id, ch.nickname, ch.avatar || '🐸') },
           { icon: '👁️', label: 'Mark as read', onclick: () => {
             if (_activeDM?.id !== ch.id) openDMChannel(ch.id, ch.nickname, ch.avatar || '🐸');
-            else if (typeof markDMRead === 'function') markDMRead();
+            else if (typeof markDMRead === 'function') markDMRead({ all: true });
           }},
           { icon: '🧹', label: 'Wipe all messages', danger: true, onclick: async () => {
             if (_activeDM?.id !== ch.id) openDMChannel(ch.id, ch.nickname, ch.avatar || '🐸');
@@ -2559,6 +2559,7 @@ function renderDMChannels () {
 
 /* ── Open / navigate ─────────────────────────────────────────────────────────── */
 async function openDMChannel (id, nickname, avatar) {
+  _dmTeardownReadReceiptUi();
   // If user lands in DMs from the empty-state welcome screen, clear the
   // welcome-mode body flag first. That mode intentionally hides #input-area
   // (display:none !important), which otherwise makes the composer vanish.
@@ -2833,12 +2834,12 @@ async function openDMChannel (id, nickname, avatar) {
   // Only mark as read when the app is actually visible + focused. If the user
   // tapped a notification or we're restoring state in the background, defer
   // until the tab becomes visible so peers don't get a false ✓✓ read receipt.
-  if (!document.hidden && document.hasFocus()) {
-    markDMRead();
+  if (_dmIsChatFocused()) {
+    _dmScheduleReadFlush();
   } else {
     const onVisible = () => {
-      if (!document.hidden && document.hasFocus() && _activeDM && _activeDM.id === id) {
-        markDMRead();
+      if (_dmIsChatFocused() && _activeDM && _activeDM.id === id) {
+        _dmScheduleReadFlush();
         document.removeEventListener('visibilitychange', onVisible);
         window.removeEventListener('focus', onVisible);
       }
@@ -2871,23 +2872,98 @@ function _formatLastSeen (ts) {
   } catch { return 'Direct message'; }
 }
 
+/* ── Read receipts: only advance for messages visible in the chat pane ─────── */
+let _dmReadObserver = null;
+let _dmReadFlushTimer = null;
+let _dmReadScrollArea = null;
+
+function _dmIsChatFocused() {
+  return !document.hidden && document.hasFocus();
+}
+
+function _dmScanVisibleReadUpTo() {
+  const area = document.getElementById('messages-area');
+  if (!area || !_activeDM) return 0;
+  const already = _activeDM.my_last_read | 0;
+  const areaRect = area.getBoundingClientRect();
+  let maxId = already;
+  for (const el of area.querySelectorAll('[data-dmid]')) {
+    const mid = el.getAttribute('data-dmid') | 0;
+    if (!mid || mid <= already) continue;
+    const r = el.getBoundingClientRect();
+    if (r.bottom > areaRect.top + 6 && r.top < areaRect.bottom - 6) {
+      if (mid > maxId) maxId = mid;
+    }
+  }
+  return maxId;
+}
+
+function _dmScheduleReadFlush() {
+  clearTimeout(_dmReadFlushTimer);
+  _dmReadFlushTimer = setTimeout(() => { void markDMRead(); }, 300);
+}
+
+function _dmOnReadFocusOrVisible() {
+  if (_activeDM && _dmIsChatFocused()) _dmScheduleReadFlush();
+}
+
+function _dmTeardownReadReceiptUi() {
+  clearTimeout(_dmReadFlushTimer);
+  try { _dmReadObserver?.disconnect(); } catch {}
+  _dmReadObserver = null;
+  if (_dmReadScrollArea) {
+    _dmReadScrollArea.removeEventListener('scroll', _dmScheduleReadFlush);
+    _dmReadScrollArea = null;
+  }
+  window.removeEventListener('focus', _dmOnReadFocusOrVisible);
+  document.removeEventListener('visibilitychange', _dmOnReadFocusOrVisible);
+}
+
+function _dmObserveReadMessageEl(el) {
+  if (_dmReadObserver && el) {
+    try { _dmReadObserver.observe(el); } catch {}
+  }
+}
+
+function _dmSetupReadReceiptUi() {
+  _dmTeardownReadReceiptUi();
+  const area = document.getElementById('messages-area');
+  if (!area || !_activeDM) return;
+  _dmReadScrollArea = area;
+  area.addEventListener('scroll', _dmScheduleReadFlush, { passive: true });
+  if (typeof IntersectionObserver !== 'undefined') {
+    _dmReadObserver = new IntersectionObserver(
+      () => { if (_dmIsChatFocused()) _dmScheduleReadFlush(); },
+      { root: area, threshold: [0.2, 0.55, 0.9] },
+    );
+    area.querySelectorAll('[data-dmid]').forEach((el) => _dmObserveReadMessageEl(el));
+  }
+  window.addEventListener('focus', _dmOnReadFocusOrVisible, { passive: true });
+  document.addEventListener('visibilitychange', _dmOnReadFocusOrVisible, { passive: true });
+}
+
 /* ── Mark active DM as read on server ──────────────────────────────────────── */
-async function markDMRead () {
+async function markDMRead (opts) {
   if (!_activeDM) return;
-  // Guard against marking-read while the app is backgrounded/unfocused — that
-  // was leaking ✓✓ to peers for messages the user hadn't actually seen.
-  if (document.hidden || !document.hasFocus()) return;
+  const forceAll = !!(opts && opts.all);
+  if (!forceAll && !_dmIsChatFocused()) return;
   let top = 0;
-  for (const m of _dmMessages) { if ((m.id|0) > top) top = m.id|0; }
-  if (!top) return;
-  if (_activeDM.my_last_read >= top) return;
+  if (forceAll) {
+    for (const m of _dmMessages) { if ((m.id | 0) > top) top = m.id | 0; }
+  } else {
+    top = _dmScanVisibleReadUpTo();
+  }
+  if (!top || top <= (_activeDM.my_last_read | 0)) return;
   _activeDM.my_last_read = top;
   try {
     await apiFetch(`/api/dms/${_activeDM.id}/read`, 'POST', { up_to: top });
   } catch {}
-  // Clear unread badge in sidebar
   const ch = _dmChannels.find(c => c.id === _activeDM.id);
-  if (ch) { ch.unread = 0; ch.my_last_read = top; renderDMChannels(); }
+  if (ch) {
+    ch.my_last_read = top;
+    if (top >= (ch.last_msg_id | 0)) ch.unread = 0;
+    renderDMChannels();
+  }
 }
 
 /* ── WS: peer read receipt ─────────────────────────────────────────────────── */
@@ -2896,9 +2972,14 @@ function handleWSDMRead (data) {
   // Server broadcasts "last_read"; accept "up_to" as a fallback for forward-compat.
   const upTo = (data.last_read|0) || (data.up_to|0);
   if (!chId || !upTo) return;
+  const readerId = Number(data.reader_id) || 0;
+  const myId = Number(STATE?.user?.id) || 0;
+  if (readerId && myId && readerId === myId) return;
   const ch = _dmChannels.find(c => c.id === chId);
   if (ch) ch.peer_last_read = Math.max(ch.peer_last_read||0, upTo);
   if (_activeDM && _activeDM.id === chId) {
+    const peerId = Number(_activeDM.user_id) || 0;
+    if (readerId && peerId && readerId !== peerId) return;
     _activeDM.peer_last_read = Math.max(_activeDM.peer_last_read||0, upTo);
     // Only upgrade to ✓✓ (read) when BOTH users have read-receipts on.
     const myShowReceipts   = STATE.user?.show_read_receipts !== 0;
@@ -3378,6 +3459,8 @@ function renderDMChat () {
     area.removeEventListener('wheel', onUserScroll);
     area.removeEventListener('touchmove', onUserScroll);
   }, WINDOW_MS + 200);
+  _dmSetupReadReceiptUi();
+  if (_dmIsChatFocused()) _dmScheduleReadFlush();
 }
 
 function _scrollDMToBottomStable() {
@@ -5174,7 +5257,12 @@ function handleWSDMMessage (data) {
     msg = _dmAttachLockPlaceholder(msg, rawCipher, _peerForDecrypt, true);
   }
   appendDMMessage(msg);
-  if (!document.hidden) markDMRead();
+  if (!mine && _dmIsChatFocused()) {
+    const area2 = document.getElementById('messages-area');
+    const nearBottom = area2
+      && (area2.scrollHeight - area2.scrollTop - area2.clientHeight) < 120;
+    if (nearBottom) _dmScheduleReadFlush();
+  }
 }
 
 /* ── Server rejected a WS dm_message — currently the only reason is a
@@ -5251,6 +5339,7 @@ function appendDMMessage (m) {
   const el = tmp.firstElementChild;
   // reaction buttons now use inline onclick → showDMReactMenu
   area.appendChild(el);
+  _dmObserveReadMessageEl(el);
   if (!mine && (_looksEncryptedBlob(m.content) || _dmCipherRaw(m))) {
     if (m._decryptPending) _dmScheduleDecryptStaleCheck(m);
     void _retryDecryptDMMessageInPlace(m);
