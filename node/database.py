@@ -10247,7 +10247,7 @@ def get_public_channels(category: str = None, search: str = None,
             SELECT r.id, r.name, r.description, r.directory_description,
                    r.icon, r.category, r.tags,
                    CASE
-                     WHEN LOWER(u.nickname) = 'federation_sync'
+                     WHEN COALESCE(r.home_server_id, '') <> ''
                           AND COALESCE(fci.member_count, 0) > 0
                        THEN fci.member_count
                      ELSE (SELECT COUNT(*) FROM room_members WHERE room_id=r.id)
@@ -10339,6 +10339,38 @@ def get_public_channels(category: str = None, search: str = None,
                 "content_warning_flags": int(row.get("content_warning_flags") or 0),
             })
     return local_rows + fed_rows
+
+
+def get_local_homed_public_channels(local_server_id: str = "") -> List[Dict]:
+    """Public channels this node is *authoritative* for (locally homed).
+
+    Used by the federation channel pull endpoint so peers can mirror our
+    directory with live member counts. Excludes federated mirrors (rooms whose
+    ``home_server_id`` points at another server). ``member_count`` is the live
+    ``room_members`` count, never the stale ``rooms.member_count`` column.
+    """
+    sid = (local_server_id or "").strip()
+    with _conn() as con:
+        rows = con.execute(
+            """
+            SELECT r.name, r.description, r.directory_description, r.icon,
+                   r.category, r.tags, r.channel_type,
+                   COALESCE(r.channel_theme, '') AS channel_theme,
+                   (SELECT COUNT(*) FROM room_members rm WHERE rm.room_id = r.id) AS member_count,
+                   COALESCE(r.content_warning_enabled, 0) AS content_warning_enabled,
+                   COALESCE(r.content_warning_flags, 0) AS content_warning_flags,
+                   u.nickname AS owner_nickname,
+                   COALESCE(NULLIF(r.owner_global_user_id, ''), u.global_user_id, '') AS owner_global_user_id
+            FROM rooms r
+            JOIN users u ON r.owner_id = u.id
+            WHERE r.is_public = 1
+              AND r.type = 'public'
+              AND (r.home_server_id IS NULL OR r.home_server_id = '' OR r.home_server_id = ?)
+            ORDER BY member_count DESC
+            """,
+            (sid,),
+        ).fetchall()
+    return [dict(r) for r in rows]
 
 
 def set_room_public(room_name: str, is_public: int, category: str = '',

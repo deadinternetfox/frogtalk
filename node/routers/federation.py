@@ -2995,6 +2995,108 @@ async def sync_official_directory_once(directory_url: str | None = None) -> dict
     }
 
 
+async def sync_peer_channels_once() -> dict:
+    """Pull each enabled peer's authoritative channel directory into our index.
+
+    Push delivery (outbox) is best-effort and can stall between specific peer
+    pairs (e.g. a Tor mirror that never sends, or a failing clearnet link). This
+    pull makes the federated channel directory *converge*: every node fetches
+    every peer's locally-homed public channels and mirrors them — including live
+    member counts from the home node — regardless of push health.
+    """
+    local = db.get_or_create_local_server_identity() or {}
+    local_sid = str(local.get("server_id") or "").strip()
+    imported = 0
+    peers = 0
+    errors = 0
+    for srv in db.list_federation_servers():
+        sid = str(srv.get("server_id") or "").strip()
+        if not sid or sid == local_sid:
+            continue
+        if not int(srv.get("enabled") or 0):
+            continue
+        target = _public_server_target(_public_server_view(srv))
+        if not target:
+            continue
+        peers += 1
+        try:
+            raw = await asyncio.to_thread(
+                _fetch_url_bytes,
+                f"{target}/api/network/channels",
+                timeout_s=8.0,
+            )
+            payload = json.loads(raw.decode("utf-8", errors="replace"))
+        except Exception as e:
+            errors += 1
+            _log.debug("federation: channel pull from %s failed: %s", sid, e)
+            continue
+        # Trust the peer's own declaration of which server homes the channel,
+        # but never let a peer claim to home a channel we are authoritative for.
+        peer_base = _normalize_base_url(str(srv.get("base_url") or "")) or target
+        for ch in (payload.get("channels") or [])[:500]:
+            if not isinstance(ch, dict):
+                continue
+            name = _fed_room_name(ch.get("name"))
+            if not name:
+                continue
+            home_sid = str(ch.get("home_server_id") or sid).strip() or sid
+            if home_sid == local_sid:
+                continue
+            tags_raw = ch.get("tags_json")
+            if tags_raw is None:
+                tags_raw = ch.get("tags")
+            if isinstance(tags_raw, list):
+                tags_raw = json.dumps(tags_raw)
+            ok = db.upsert_federation_channel_index(
+                name,
+                home_sid,
+                description=_fed_clip(ch.get("description"), 512),
+                directory_description=_fed_clip(ch.get("directory_description"), 1200),
+                icon=_fed_clip(ch.get("icon"), _FED_AVATAR_MAX) or None,
+                category=_fed_clip(ch.get("category"), 32),
+                tags_json=str(tags_raw or "[]")[:2000],
+                channel_type=str(ch.get("channel_type") or "text")[:16],
+                channel_theme=str(ch.get("channel_theme") or "")[:20000],
+                member_count=max(0, int(ch.get("member_count") or 0)),
+                owner_nickname=_fed_nickname(ch.get("owner_nickname")) or "",
+                owner_global_user_id=str(ch.get("owner_global_user_id") or "")[:64],
+                home_base_url=str(ch.get("home_base_url") or peer_base)[:256],
+                content_warning_enabled=int(ch.get("content_warning_enabled") or 0),
+                content_warning_flags=int(ch.get("content_warning_flags") or 0) & db.CW_ALL,
+            )
+            if ok:
+                imported += 1
+    return {"ok": True, "peers": peers, "imported": imported, "errors": errors}
+
+
+@router.get("/network/channels")
+async def list_network_channels():
+    """Authoritative public channels homed on this node (for peer pull sync)."""
+    local = db.get_or_create_local_server_identity() or {}
+    local_sid = str(local.get("server_id") or "").strip()
+    base_url = _normalize_base_url(str(local.get("base_url") or ""))
+    channels = []
+    for c in db.get_local_homed_public_channels(local_sid):
+        channels.append({
+            "name": c.get("name"),
+            "description": c.get("description") or "",
+            "directory_description": c.get("directory_description") or "",
+            "icon": c.get("icon") or "",
+            "category": c.get("category") or "",
+            "tags_json": c.get("tags") or "[]",
+            "channel_type": c.get("channel_type") or "text",
+            "channel_theme": c.get("channel_theme") or "",
+            "member_count": int(c.get("member_count") or 0),
+            "owner_nickname": c.get("owner_nickname") or "",
+            "owner_global_user_id": c.get("owner_global_user_id") or "",
+            "home_server_id": local_sid,
+            "home_base_url": base_url,
+            "content_warning_enabled": int(c.get("content_warning_enabled") or 0),
+            "content_warning_flags": int(c.get("content_warning_flags") or 0),
+        })
+    return {"server_id": local_sid, "channels": channels}
+
+
 @router.get("/network/status")
 async def network_status():
     from fed_turn import federation_calls_enabled, local_turn_public_view

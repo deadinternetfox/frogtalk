@@ -204,6 +204,12 @@ async def official_directory_sync_task():
                 _log.warning("Federation directory sync failed: %s", result.get("error"))
         except Exception:
             _log.exception("Federation sync task error")
+        try:
+            ch = await federation_mod.sync_peer_channels_once()
+            _log.info("Federation channel pull peers=%s imported=%s errors=%s",
+                      ch.get("peers", 0), ch.get("imported", 0), ch.get("errors", 0))
+        except Exception:
+            _log.exception("Federation channel pull task error")
 
 
 async def federation_inbox_processor_task():
@@ -293,6 +299,14 @@ async def _run_boot_sync_nonblocking():
         _log.warning("Federation boot sync timed out; continuing startup")
     except Exception:
         _log.exception("Federation boot sync error")
+    try:
+        ch = await asyncio.wait_for(federation_mod.sync_peer_channels_once(), timeout=20)
+        _log.info("Federation boot channel pull peers=%s imported=%s errors=%s",
+                  ch.get("peers", 0), ch.get("imported", 0), ch.get("errors", 0))
+    except asyncio.TimeoutError:
+        _log.warning("Federation boot channel pull timed out; continuing startup")
+    except Exception:
+        _log.exception("Federation boot channel pull error")
 
 
 async def _start_discord_bridge_nonblocking():
