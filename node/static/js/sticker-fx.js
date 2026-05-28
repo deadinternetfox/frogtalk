@@ -234,7 +234,12 @@
     if (!n) return null;
     const filterStr = _filterCss(n.filter);
     const shadowStr = _shadowCss(n.shadow);
-    const transformStr = _transformCss(n.transform) || 'none';
+    // Important: keyframe animations concatenate extra transform functions
+    // (e.g. `var(--fx-base) rotate(…)`). The keyword `none` cannot be
+    // combined with other transform functions, so it would invalidate the
+    // whole declaration and make animations appear to "do nothing".
+    // Use an identity transform instead.
+    const transformStr = _transformCss(n.transform) || 'translate(0px, 0px)';
 
     let combinedFilter = filterStr;
     if (shadowStr) combinedFilter = combinedFilter ? `${filterStr} ${shadowStr}` : shadowStr;
