@@ -1364,7 +1364,10 @@ const GIFs = (() => {
       if (m && m[1]) mediaType = m[1].toLowerCase();
     } catch {}
     const fxNorm = _parseStickerEffects(effects);
-    if (fxNorm && window.StickerFX && !StickerFX.isDefault(fxNorm)) {
+    // Always encode if a layer timeline exists, even if some older/default
+    // fields make isDefault() return true for edge cases.
+    const hasLayers = !!(fxNorm && Array.isArray(fxNorm.layers) && fxNorm.layers.length);
+    if (fxNorm && window.StickerFX && (hasLayers || !StickerFX.isDefault(fxNorm))) {
       mediaType = StickerFX.encodeForMediaType(mediaType, fxNorm);
     }
     State.pendingAttachment = {
