@@ -2074,14 +2074,18 @@ const GIFs = (() => {
           const row = document.createElement('div');
           row.draggable = true;
           row.dataset.fxIdx = String(idx);
-          row.style.cssText = 'display:grid;grid-template-columns:86px 1fr 78px 28px;gap:6px;align-items:center;border:1px solid var(--border-color);border-radius:10px;padding:8px;background:color-mix(in srgb, var(--surface-color) 85%, transparent)';
+          row.style.cssText = 'display:grid;grid-template-columns:86px 1fr 62px 62px 28px;gap:6px;align-items:center;border:1px solid var(--border-color);border-radius:10px;padding:8px;background:color-mix(in srgb, var(--surface-color) 85%, transparent)';
           const kind = l.kind === 'filter' ? 'Filter' : 'Transform';
           const opts = (l.kind === 'filter' ? FILTER_OPTS : TRANSFORM_OPTS)
             .map(a => `<option value="${a}" ${a===l.animation?'selected':''}>${a}</option>`).join('');
           row.innerHTML = `
             <div style="font-size:11px;color:var(--text-muted);font-weight:700">${kind}</div>
             <select data-fx-layer-anim style="background:var(--surface-color);color:var(--text-color);border:1px solid var(--border-color);border-radius:8px;padding:6px 8px;font-size:12px">${opts}</select>
-            <input data-fx-layer-dur type="number" min="0.3" max="10" step="0.1" value="${Number(l.duration||2).toFixed(1)}"
+            <input data-fx-layer-start type="number" min="0" max="20" step="0.1" value="${Number(l.start||0).toFixed(1)}"
+              title="Start (s)" aria-label="Start seconds"
+              style="background:var(--surface-color);color:var(--text-color);border:1px solid var(--border-color);border-radius:8px;padding:6px 8px;font-size:12px;width:100%">
+            <input data-fx-layer-dur type="number" min="0.3" max="10" step="0.1" value="${Number(l.duration||1.5).toFixed(1)}"
+              title="Duration (s)" aria-label="Duration seconds"
               style="background:var(--surface-color);color:var(--text-color);border:1px solid var(--border-color);border-radius:8px;padding:6px 8px;font-size:12px;width:100%">
             <button type="button" data-fx-layer-del title="Remove" style="border:1px solid var(--border-color);background:transparent;color:var(--text-muted);border-radius:8px;height:30px;cursor:pointer">✕</button>
           `;
@@ -2103,6 +2107,12 @@ const GIFs = (() => {
           });
           row.querySelector('[data-fx-layer-anim]').addEventListener('change', (e) => {
             l.animation = e.target.value;
+            renderPreview();
+          });
+          row.querySelector('[data-fx-layer-start]').addEventListener('change', (e) => {
+            const v = Math.max(0, Math.min(20, parseFloat(e.target.value || '0') || 0));
+            l.start = v;
+            e.target.value = v.toFixed(1);
             renderPreview();
           });
           row.querySelector('[data-fx-layer-dur]').addEventListener('change', (e) => {
@@ -2128,8 +2138,8 @@ const GIFs = (() => {
       ctr.querySelectorAll('button[data-fx-add]').forEach(b => b.addEventListener('click', () => {
         const k = b.dataset.fxAdd;
         const layer = k === 'filter'
-          ? { kind: 'filter', animation: FILTER_OPTS[0], duration: 2 }
-          : { kind: 'transform', animation: TRANSFORM_OPTS[0], duration: 2 };
+          ? { kind: 'filter', animation: FILTER_OPTS[0], start: 0, duration: 2 }
+          : { kind: 'transform', animation: TRANSFORM_OPTS[0], start: 0, duration: 1.5 };
         fx.layers = fx.layers || [];
         fx.layers.push(layer);
         renderLayers();

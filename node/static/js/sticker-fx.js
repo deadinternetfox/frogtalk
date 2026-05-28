@@ -139,13 +139,108 @@
         if (!ANIMATIONS.has(anim) || anim === 'none') continue;
         if (kind === 'transform' && !TRANSFORM_ANIMS.has(anim)) continue;
         if (kind === 'filter' && !FILTER_ANIMS.has(anim)) continue;
+        const start = _clamp(it.start, 0, 20, 0);
         const dur = _clamp(it.duration, 0.3, 10, 2);
-        layers.push({ kind, animation: anim, duration: dur });
+        layers.push({ kind, animation: anim, start, duration: dur });
         if (layers.length >= 6) break;
       }
       out.layers = layers;
     }
     return out;
+  }
+
+  function _timelineDurationSec(nfx) {
+    try {
+      const layers = Array.isArray(nfx?.layers) ? nfx.layers : [];
+      let end = 0;
+      for (const l of layers) {
+        const s = Number(l.start) || 0;
+        const d = Number(l.duration) || 0;
+        end = Math.max(end, s + d);
+      }
+      // Keep a sane loop window even for single clips.
+      return Math.max(0.6, Math.min(12, end || 2));
+    } catch {
+      return 2;
+    }
+  }
+
+  function _pct(t, total) {
+    if (!total) return 0;
+    return Math.max(0, Math.min(100, (t / total) * 100));
+  }
+
+  function _kf(name, body) {
+    return `@keyframes ${name}{${body}}`;
+  }
+
+  function _makeTransformTimelineKeyframes(name, anim, sPct, ePct) {
+    // We keep base transform via var(--fx-base) and animate only inside the window.
+    const hold = `0%,${sPct}%{transform:var(--fx-base);opacity:1;}`;
+    const endHold = `${ePct}%,100%{transform:var(--fx-base);opacity:1;}`;
+    if (anim === 'spin') {
+      return _kf(name, `${hold}${sPct}%{transform:var(--fx-base) rotate(0deg);} ${ePct}%{transform:var(--fx-base) rotate(360deg);} ${endHold}`);
+    }
+    if (anim === 'pulse') {
+      const mid = (sPct + ePct) / 2;
+      return _kf(name, `${hold}${sPct}%{transform:var(--fx-base) scale(1);} ${mid}%{transform:var(--fx-base) scale(1.12);} ${ePct}%{transform:var(--fx-base) scale(1);} ${endHold}`);
+    }
+    if (anim === 'bounce') {
+      const mid = (sPct + ePct) / 2;
+      return _kf(name, `${hold}${sPct}%{transform:var(--fx-base) translateY(0);} ${mid}%{transform:var(--fx-base) translateY(-8%);} ${ePct}%{transform:var(--fx-base) translateY(0);} ${endHold}`);
+    }
+    if (anim === 'shake') {
+      const q1 = sPct + (ePct - sPct) * 0.25;
+      const q3 = sPct + (ePct - sPct) * 0.75;
+      return _kf(name, `${hold}${sPct}%{transform:var(--fx-base) translateX(0);} ${q1}%{transform:var(--fx-base) translateX(-4%);} ${q3}%{transform:var(--fx-base) translateX(4%);} ${ePct}%{transform:var(--fx-base) translateX(0);} ${endHold}`);
+    }
+    if (anim === 'wobble') {
+      const mid = (sPct + ePct) / 2;
+      return _kf(name, `${hold}${sPct}%{transform:var(--fx-base) rotate(-4deg);} ${mid}%{transform:var(--fx-base) rotate(4deg);} ${ePct}%{transform:var(--fx-base) rotate(-4deg);} ${endHold}`);
+    }
+    if (anim === 'float') {
+      const mid = (sPct + ePct) / 2;
+      return _kf(name, `${hold}${sPct}%{transform:var(--fx-base) translateY(0);} ${mid}%{transform:var(--fx-base) translateY(-6%);} ${ePct}%{transform:var(--fx-base) translateY(0);} ${endHold}`);
+    }
+    if (anim === 'flip') {
+      const mid = (sPct + ePct) / 2;
+      return _kf(name, `${hold}${sPct}%{transform:var(--fx-base) rotateY(0);} ${mid}%{transform:var(--fx-base) rotateY(180deg);} ${ePct}%{transform:var(--fx-base) rotateY(0);} ${endHold}`);
+    }
+    if (anim === 'swing') {
+      const mid = (sPct + ePct) / 2;
+      return _kf(name, `${hold}${sPct}%{transform:var(--fx-base) rotate(-8deg);} ${mid}%{transform:var(--fx-base) rotate(8deg);} ${ePct}%{transform:var(--fx-base) rotate(-8deg);} ${endHold}`);
+    }
+    if (anim === 'sparkle') {
+      const a = sPct + (ePct - sPct) * 0.35;
+      const b = sPct + (ePct - sPct) * 0.70;
+      return _kf(name, `${hold}${sPct}%{transform:var(--fx-base) scale(1);opacity:1;} ${a}%{transform:var(--fx-base) scale(1.06);opacity:.88;} ${b}%{transform:var(--fx-base) scale(0.98);opacity:1;} ${ePct}%{transform:var(--fx-base) scale(1);opacity:1;} ${endHold}`);
+    }
+    if (anim === 'pop') {
+      const mid = sPct + (ePct - sPct) * 0.45;
+      return _kf(name, `${hold}${sPct}%{transform:var(--fx-base) scale(0.92);opacity:.85;} ${mid}%{transform:var(--fx-base) scale(1.12);opacity:1;} ${ePct}%{transform:var(--fx-base) scale(1);opacity:1;} ${endHold}`);
+    }
+    // Fallback: no-op
+    return _kf(name, `${hold}${endHold}`);
+  }
+
+  function _makeFilterTimelineKeyframes(name, anim, sPct, ePct) {
+    const hold = `0%,${sPct}%{filter:var(--fx-filter);}`;
+    const endHold = `${ePct}%,100%{filter:var(--fx-filter);}`;
+    if (anim === 'rainbow') {
+      return _kf(name, `${hold}${sPct}%{filter:var(--fx-filter) hue-rotate(0deg);} ${ePct}%{filter:var(--fx-filter) hue-rotate(360deg);} ${endHold}`);
+    }
+    if (anim === 'rainbow_tint') {
+      return _kf(name, `${hold}${sPct}%{filter:var(--fx-filter) sepia(1) saturate(3) hue-rotate(0deg);} ${ePct}%{filter:var(--fx-filter) sepia(1) saturate(3) hue-rotate(360deg);} ${endHold}`);
+    }
+    if (anim === 'glow') {
+      const mid = (sPct + ePct) / 2;
+      return _kf(name, `${hold}${sPct}%{filter:var(--fx-filter) drop-shadow(0 0 4px var(--fx-glow));} ${mid}%{filter:var(--fx-filter) drop-shadow(0 0 14px var(--fx-glow));} ${ePct}%{filter:var(--fx-filter) drop-shadow(0 0 4px var(--fx-glow));} ${endHold}`);
+    }
+    if (anim === 'rainbow_glow') {
+      const mid = (sPct + ePct) / 2;
+      return _kf(name, `${hold}${sPct}%{filter:var(--fx-filter) drop-shadow(0 0 6px var(--fx-glow));} ${mid}%{filter:var(--fx-filter) drop-shadow(0 0 18px var(--fx-glow));} ${ePct}%{filter:var(--fx-filter) drop-shadow(0 0 6px var(--fx-glow));} ${endHold}`);
+    }
+    return _kf(name, `${hold}${endHold}`);
   }
 
   function isDefault(fx) {
@@ -439,6 +534,30 @@
     const nfx = normalize(effects);
     const layers = (nfx && Array.isArray(nfx.layers) && nfx.layers.length) ? nfx.layers : null;
 
+    let dynKeyframes = '';
+    let tLayerAnims = [];
+    let fAnim = 'none';
+    if (layers && (forceAnimation || !_prefersReducedMotion())) {
+      const total = _timelineDurationSec(nfx);
+      const tLayers = layers.filter(l => l.kind === 'transform').slice(0, 3);
+      const fLayer = layers.find(l => l.kind === 'filter') || null;
+      let i = 0;
+      for (const tl of tLayers) {
+        const sPct = _pct(tl.start || 0, total);
+        const ePct = _pct((tl.start || 0) + (tl.duration || 0), total);
+        const kfName = `fxT_${Math.random().toString(36).slice(2, 8)}_${i++}`;
+        dynKeyframes += _makeTransformTimelineKeyframes(kfName, tl.animation, sPct, ePct);
+        tLayerAnims.push({ name: kfName, total });
+      }
+      if (fLayer) {
+        const sPct = _pct(fLayer.start || 0, total);
+        const ePct = _pct((fLayer.start || 0) + (fLayer.duration || 0), total);
+        const kfName = `fxF_${Math.random().toString(36).slice(2, 8)}`;
+        dynKeyframes += _makeFilterTimelineKeyframes(kfName, fLayer.animation, sPct, ePct);
+        fAnim = `${kfName} ${total}s linear infinite`;
+      }
+    }
+
     const styleHtml = `
       :host { all: initial; display: block; width: 100%; height: 100%; }
       .wrap {
@@ -448,6 +567,7 @@
         border-radius: ${css ? css.borderRadius : '0'};
         overflow: hidden;
       }
+      .fx-anim { width: 100%; height: 100%; display:flex; align-items:center; justify-content:center; }
       img {
         max-width: 100%; max-height: 100%;
         width: auto; height: auto;
@@ -457,11 +577,12 @@
         --fx-glow: ${css ? css.glow : 'rgba(255,255,255,0.6)'};
         filter: var(--fx-filter);
         transform: var(--fx-base);
-        animation: ${css ? css.animation : 'none'};
+        animation: ${layers ? (fAnim || 'none') : (css ? css.animation : 'none')};
         animation-play-state: running;
         will-change: transform, filter;
       }
       ${KEYFRAMES}
+      ${dynKeyframes}
     `;
 
     if (root) {
@@ -477,30 +598,18 @@
       // a single layer on the <img> itself (filter animations conflict if stacked).
       let parent = wrap;
       const replayEls = [];
-      let filterAnim = '';
-      // If we have a layer stack, the legacy single-animation field is ignored.
-      // (We no longer support legacy fallback; stack is the source of truth.)
-      let imgAnim = layers ? 'none' : (css ? css.animation : 'none');
-      if (layers && (forceAnimation || !_prefersReducedMotion())) {
-        const tLayers = layers.filter(l => l.kind === 'transform').slice(0, 3);
-        const fLayer = layers.find(l => l.kind === 'filter') || null;
-        if (fLayer) {
-          filterAnim = _animationCss(fLayer.animation, fLayer.duration, playOnce);
-        }
-        // Build transform wrappers from outer->inner in order.
-        for (const tl of tLayers) {
+      if (tLayerAnims.length) {
+        for (const it of tLayerAnims) {
           const d = document.createElement('div');
           d.className = 'fx-anim';
-          const a = _animationCss(tl.animation, tl.duration, playOnce);
-          d.style.animation = a || 'none';
-          d.dataset.fxAnim = a || 'none';
+          const a = `${it.name} ${it.total}s linear infinite`;
+          d.style.animation = a;
+          d.dataset.fxAnim = a;
           d.style.willChange = 'transform';
           parent.appendChild(d);
           parent = d;
           replayEls.push(d);
         }
-        // Apply the filter animation (if any) on the img.
-        if (filterAnim) imgAnim = filterAnim;
       }
 
       const img = document.createElement('img');
@@ -509,9 +618,8 @@
       img.setAttribute('decoding', 'async');
       img.setAttribute('loading', 'lazy');
       if (safeSrc) img.src = safeSrc;
-      // Apply filter animation (if any) on the img.
-      if (imgAnim) img.style.animation = imgAnim;
-      img.dataset.fxAnim = imgAnim || 'none';
+      // Store for replayAnimation()
+      img.dataset.fxAnim = img.style.animation || 'none';
       replayEls.push(img);
       host._fxReplayEls = replayEls;
       // Stash the internal <img> reference for other code paths.

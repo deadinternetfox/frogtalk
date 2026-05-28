@@ -136,8 +136,9 @@ def validate_sticker_effects(raw: Any) -> Optional[Dict[str, Any]]:
                 continue
             if kind == "filter" and an not in {"glow","rainbow","rainbow_tint","rainbow_glow"}:
                 continue
+            start = _clamp(it.get("start"), 0.0, 20.0, 0.0)
             dur = _clamp(it.get("duration"), 0.3, 10.0, 2.0)
-            layers_out.append({"kind": kind, "animation": an, "duration": dur})
+            layers_out.append({"kind": kind, "animation": an, "start": start, "duration": dur})
             if len(layers_out) >= 6:
                 break
 
