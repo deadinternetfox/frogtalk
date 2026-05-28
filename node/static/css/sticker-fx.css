@@ -120,6 +120,52 @@
   min-width: 0;
 }
 
+/* FX timeline lane */
+.fx-timeline {
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--bg-color) 65%, transparent);
+  padding: 10px;
+}
+.fx-timeline-lane {
+  position: relative;
+  height: 44px;
+  border-radius: 10px;
+  background: repeating-linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--accent-color) 10%, transparent) 0 1px,
+    transparent 1px 40px
+  );
+  overflow: hidden;
+}
+.fx-clip {
+  position: absolute;
+  top: 7px;
+  height: 30px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--accent-color) 35%, var(--border-color));
+  background: color-mix(in srgb, var(--accent-color) 16%, var(--surface-color));
+  color: var(--text-color);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 10px;
+  font-size: 12px;
+  cursor: grab;
+  user-select: none;
+  white-space: nowrap;
+}
+.fx-clip[data-kind="filter"] {
+  background: color-mix(in srgb, #ffcc66 18%, var(--surface-color));
+}
+.fx-clip:active { cursor: grabbing; }
+.fx-timeline-hint {
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.35;
+}
+
 .sticker-fx-dialog-foot {
   padding: 10px 14px;
   border-top: 1px solid var(--border-color);

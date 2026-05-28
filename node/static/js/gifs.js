@@ -1926,7 +1926,7 @@ const GIFs = (() => {
       }
     };
 
-    // Preset buttons set animation only (leave filters as-is).
+    // Preset buttons: click to quick-set legacy animation; drag onto timeline to add a clip.
     modal.querySelectorAll('.fx-preset-btn').forEach(btn => {
       btn.style.cssText = 'background:color-mix(in srgb, var(--accent-color) 10%, transparent);border:1px solid var(--border-color);color:var(--text-color);padding:5px 9px;border-radius:6px;cursor:pointer;font-size:11px';
       btn.onclick = () => {
@@ -1934,6 +1934,19 @@ const GIFs = (() => {
         renderControls();
         renderPreview();
       };
+      const p = (btn.dataset.fxPreset || '').trim();
+      if (p && p !== 'none') {
+        // Infer kind: filter-style vs transform-style.
+        const kind = (p === 'glow' || p === 'rainbow' || p === 'rainbow_tint' || p === 'rainbow_glow') ? 'filter' : 'transform';
+        btn.draggable = true;
+        btn.addEventListener('dragstart', (e) => {
+          try {
+            e.dataTransfer.setData('application/x-fx-kind', kind);
+            e.dataTransfer.setData('application/x-fx-anim', p);
+            e.dataTransfer.effectAllowed = 'copy';
+          } catch {}
+        });
+      }
     });
 
     // ── Controls — sliders built from StickerFX.*_RANGES whitelist ───
@@ -1994,20 +2007,16 @@ const GIFs = (() => {
         </details>
 
         <details style="border:1px solid color-mix(in srgb, var(--accent-color) 22%, var(--border-color));border-radius:10px;padding:10px 12px;background:color-mix(in srgb, var(--bg-color) 55%, transparent)">
-          <summary style="cursor:pointer;font-weight:700;color:var(--accent-color);font-size:12px;text-transform:uppercase;letter-spacing:.4px">FX Timeline (stack)</summary>
-          <div style="display:flex;flex-direction:column;gap:8px;margin-top:8px">
-            <div style="font-size:11px;color:var(--text-muted);line-height:1.4">
-              Stack multiple effects and drag to reorder. (Safe whitelist only.)
+          <summary style="cursor:pointer;font-weight:700;color:var(--accent-color);font-size:12px;text-transform:uppercase;letter-spacing:.4px">FX Timeline</summary>
+          <div style="display:flex;flex-direction:column;gap:10px;margin-top:8px">
+            <div class="fx-timeline">
+              <div id="fx-timeline-lane" class="fx-timeline-lane" aria-label="FX timeline lane"></div>
+              <div class="fx-timeline-hint">Drag effects from the buttons above into the lane. Drag clips to retime. Use the list below for precise numbers.</div>
             </div>
             <div style="display:flex;gap:6px;flex-wrap:wrap">
-              <button type="button" data-fx-add="transform" class="fx-preset-btn">+ Transform</button>
-              <button type="button" data-fx-add="filter" class="fx-preset-btn">+ Filter/Glow</button>
-              <button type="button" data-fx-clear-layers class="fx-preset-btn">Clear stack</button>
+              <button type="button" data-fx-clear-layers class="fx-preset-btn">Clear timeline</button>
             </div>
             <div id="fx-layer-list" style="display:flex;flex-direction:column;gap:6px"></div>
-            <div style="font-size:11px;color:var(--text-muted)">
-              The layer stack is the source of truth.
-            </div>
           </div>
         </details>
 
@@ -2107,6 +2116,89 @@ const GIFs = (() => {
       const TRANSFORM_OPTS = ['spin','pulse','bounce','shake','wobble','float','flip','swing','sparkle','pop'];
       const FILTER_OPTS = ['glow','rainbow','rainbow_tint','rainbow_glow'];
       const _syncLegacy = () => {};
+
+      const _timelineTotal = () => {
+        let end = 0;
+        for (const l of (fx.layers || [])) {
+          end = Math.max(end, (Number(l.start)||0) + (Number(l.duration)||0));
+        }
+        return Math.max(2, Math.min(12, end || 2));
+      };
+      const lane = ctr.querySelector('#fx-timeline-lane');
+      const _laneXToStart = (clientX) => {
+        if (!lane) return 0;
+        const r = lane.getBoundingClientRect();
+        const x = Math.max(0, Math.min(r.width, clientX - r.left));
+        const t = (x / Math.max(1, r.width)) * _timelineTotal();
+        return Math.round(t * 10) / 10;
+      };
+      const _renderTimeline = () => {
+        if (!lane) return;
+        lane.innerHTML = '';
+        const total = _timelineTotal();
+        for (let i = 0; i < (fx.layers || []).length; i++) {
+          const l = fx.layers[i];
+          const s = Math.max(0, Number(l.start) || 0);
+          const d = Math.max(0.3, Number(l.duration) || 1.5);
+          const leftPct = (s / total) * 100;
+          const wPct = (d / total) * 100;
+          const clip = document.createElement('div');
+          clip.className = 'fx-clip';
+          clip.dataset.idx = String(i);
+          clip.dataset.kind = l.kind || '';
+          clip.style.left = `${leftPct}%`;
+          clip.style.width = `${Math.max(6, wPct)}%`;
+          clip.textContent = `${l.animation}`;
+          lane.appendChild(clip);
+
+          // Drag clip to retime.
+          let dragging = false;
+          let baseX = 0;
+          let baseStart = 0;
+          const onMove = (ev) => {
+            if (!dragging) return;
+            const dx = (ev.clientX - baseX);
+            const r = lane.getBoundingClientRect();
+            const dt = (dx / Math.max(1, r.width)) * total;
+            l.start = Math.max(0, Math.round((baseStart + dt) * 10) / 10);
+            _renderTimeline();
+            renderLayers();
+            renderPreview();
+          };
+          const onUp = () => {
+            if (!dragging) return;
+            dragging = false;
+            window.removeEventListener('mousemove', onMove);
+            window.removeEventListener('mouseup', onUp);
+          };
+          clip.addEventListener('mousedown', (ev) => {
+            ev.preventDefault();
+            dragging = true;
+            baseX = ev.clientX;
+            baseStart = Number(l.start) || 0;
+            window.addEventListener('mousemove', onMove);
+            window.addEventListener('mouseup', onUp);
+          });
+        }
+      };
+
+      // Enable dropping effect chips onto the timeline lane.
+      if (lane) {
+        lane.addEventListener('dragover', (e) => { e.preventDefault(); });
+        lane.addEventListener('drop', (e) => {
+          e.preventDefault();
+          const kind = (e.dataTransfer.getData('application/x-fx-kind') || '').trim();
+          const anim = (e.dataTransfer.getData('application/x-fx-anim') || '').trim();
+          if (!kind || !anim || anim === 'none') return;
+          const start = _laneXToStart(e.clientX);
+          const layer = { kind, animation: anim, start, duration: (kind === 'filter' ? 2 : 1.5) };
+          fx.layers = fx.layers || [];
+          fx.layers.push(layer);
+          _renderTimeline();
+          renderLayers();
+          renderPreview();
+        });
+      }
       const renderLayers = () => {
         if (!list) return;
         list.innerHTML = '';
@@ -2174,17 +2266,8 @@ const GIFs = (() => {
           empty.textContent = 'No stacked layers. Add Transform and/or Filter layers above.';
           list.appendChild(empty);
         }
+        _renderTimeline();
       };
-      ctr.querySelectorAll('button[data-fx-add]').forEach(b => b.addEventListener('click', () => {
-        const k = b.dataset.fxAdd;
-        const layer = k === 'filter'
-          ? { kind: 'filter', animation: FILTER_OPTS[0], start: 0, duration: 2 }
-          : { kind: 'transform', animation: TRANSFORM_OPTS[0], start: 0, duration: 1.5 };
-        fx.layers = fx.layers || [];
-        fx.layers.push(layer);
-        renderLayers();
-        renderPreview();
-      }));
       const clearBtn = ctr.querySelector('button[data-fx-clear-layers]');
       if (clearBtn) clearBtn.addEventListener('click', () => {
         fx.layers = [];
