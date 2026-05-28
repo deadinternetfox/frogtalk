@@ -578,7 +578,14 @@
         border-radius: ${css ? css.borderRadius : '0'};
         overflow: hidden;
       }
-      .fx-anim { width: 100%; height: 100%; display:flex; align-items:center; justify-content:center; }
+      .fx-anim {
+        width: 100%; height: 100%;
+        display:flex; align-items:center; justify-content:center;
+        /* Transform timeline keyframes reference var(--fx-base). */
+        --fx-base: ${css ? css.transform : 'translate(0px,0px)'};
+        transform: var(--fx-base);
+        will-change: transform;
+      }
       .fx-media {
         max-width: 100%; max-height: 100%;
         width: auto; height: auto;
