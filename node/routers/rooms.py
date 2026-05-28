@@ -1107,7 +1107,16 @@ async def update_room(request: Request, room_name: str, body: UpdateRoomRequest,
                     "updated_by_nickname": actor_nick,
                 })
 
-    if fed_any or renamed_to:
+    # Appearance edits (icon/banner/about/description/theme) must reach viewers
+    # live. `fed_any` already covers icon/description/about/channel_type, but
+    # banner-only and theme-only edits would otherwise broadcast nothing, so the
+    # channel profile/header stayed stale until a manual refresh.
+    appearance_changed = (
+        fed_any
+        or body.banner is not None
+        or body.channel_theme is not None
+    )
+    if appearance_changed or renamed_to:
         try:
             room_row = db.get_room_by_name(effective_name) or {}
             ws_evt = {
@@ -1115,6 +1124,13 @@ async def update_room(request: Request, room_name: str, body: UpdateRoomRequest,
                 "room": effective_name,
                 "channel_type": room_row.get("channel_type") or "text",
                 "dj_only": bool(room_row.get("dj_only_queue")),
+                # Small fields ride along so the header/about update without a
+                # round trip; the (potentially multi-MB) banner is signalled by
+                # `banner_changed` and the client re-fetches the profile card.
+                "icon": room_row.get("icon") or "",
+                "description": room_row.get("description") or "",
+                "about": room_row.get("about") or "",
+                "banner_changed": body.banner is not None,
             }
             if renamed_to:
                 ws_evt["renamed_from"] = room_name

@@ -1387,6 +1387,36 @@ const Rooms = (() => {
       ? normalizeChannelType(State.currentChannelType)
       : null;
     try { await loadRooms(); } catch {}
+    // Merge the appearance fields the server sent so the header / channel-info
+    // reflect the edit immediately (about + banner aren't in /api/rooms).
+    try {
+      const rd = (State.rooms || []).find(r => r.name === roomName);
+      if (rd && evt) {
+        if (evt.icon != null) rd.icon = evt.icon;
+        if (evt.description != null) rd.description = evt.description;
+        if (evt.about != null) rd.about = evt.about;
+        // Re-render the sidebar so the channel's icon/avatar swaps live.
+        try { renderRooms(); } catch {}
+      }
+    } catch {}
+    // If the channel profile card for this room is open, re-fetch it so the new
+    // banner/icon/about appear live (the banner is fetched, never broadcast).
+    try {
+      const ov = document.getElementById('channel-profile-overlay');
+      if (ov && !ov.classList.contains('hidden') && ov.dataset.room === roomName
+          && typeof viewChannelProfile === 'function') {
+        viewChannelProfile(roomName);
+      }
+    } catch {}
+    // Refresh the lightweight channel-info modal if it's open for this room.
+    try {
+      const aboutModal = document.getElementById('modal-channel-about');
+      const aboutTitle = document.getElementById('channel-about-title');
+      if (aboutModal && !aboutModal.classList.contains('hidden')
+          && aboutTitle && aboutTitle.textContent === `#${roomName}`) {
+        showChannelAbout(roomName);
+      }
+    } catch {}
     if (State.currentRoom !== roomName) return;
     const newCh = evt?.channel_type != null
       ? normalizeChannelType(evt.channel_type)
@@ -5636,6 +5666,7 @@ async function viewChannelProfile(channelName) {
     } else {
       overlay.classList.remove('hidden');
     }
+    try { overlay.dataset.room = ch.name || channelName || ''; } catch {}
 
     overlay.innerHTML = `
       <div class="modal ch-prof-modal">
