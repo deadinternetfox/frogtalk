@@ -118,7 +118,6 @@ Wall helpers used from handlers live in `database.py` (`apply_federated_wall_*`,
 
 Federated WebRTC signaling: `federation_calls.py`, `federation_voice.py`, `fed_turn.py`;
 inbox handlers for `call.*` and `voice.*` in `federation.py`; WS routing in `ws.py`.
-Spec: [docs/FEDERATED_CALLS.md](../../docs/FEDERATED_CALLS.md).
 
 ## WebSocket (`ws.py`)
 

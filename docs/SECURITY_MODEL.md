@@ -226,8 +226,7 @@ When `FROGTALK_FEDERATION_CALLS_ENABLED=1`, signed `call.*` events carry WebRTC
 signaling (offer/answer/ICE, including mid-call `call.offer` with `renegotiate` for screen share / camera-on) to a peer’s **home server**; media remains P2P or
 TURN. DM calls keep **Signal-signed DTLS fingerprints** (`fp_sig`). Channel voice
 uses federated `voice.session.*` / `voice.signal` mesh v1 (no `fp_sig` on group
-audio). Per-node TURN is published via `/api/network/ice-config`. Full spec:
-[FEDERATED_CALLS.md](FEDERATED_CALLS.md).
+audio). Per-node TURN is published via `/api/network/ice-config`.
 
 ---
 

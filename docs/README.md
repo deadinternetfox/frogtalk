@@ -8,9 +8,6 @@ Operator and security documentation published with the repository.
 | -------- | -------- |
 | [NODE_INSTALL.md](NODE_INSTALL.md) | VPS install, nginx, Cloudflare tunnel, federation join |
 | [SECURITY_MODEL.md](SECURITY_MODEL.md) | Encryption, federation trust, account sync, content warnings |
-| [FEDERATED_CALLS.md](FEDERATED_CALLS.md) | Cross-node WebRTC / TURN |
-| [TOR_VANITY_ONION.md](TOR_VANITY_ONION.md) | `mkp224o` vanity `.onion` search on a Tor VPS |
-| [DOMAIN_INFRA_TODO.md](DOMAIN_INFRA_TODO.md) | Fleet / DNS / App Links checklist |
 
 **Branches**
 

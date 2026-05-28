@@ -166,7 +166,6 @@ FROGTALK_TURN_CREDENTIAL=your_turn_secret
 
 Clients fetch merged ICE via `GET /api/network/ice-config?peer_server_id=<uuid>` (session auth required).
 Install [coturn](https://github.com/coturn/coturn) on each node that relays media.
-Spec: [docs/FEDERATED_CALLS.md](../../docs/FEDERATED_CALLS.md).
 
 **Tor Browser:** WebRTC is blocked in Tor tabs (and some strict privacy extensions). Voice/video calls need a normal browser window or the FrogTalk mobile app — not a server misconfiguration.
 

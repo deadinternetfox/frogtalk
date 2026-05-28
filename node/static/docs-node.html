@@ -188,7 +188,7 @@ FROGTALK_SYNC_REQUIRE_EXPORT_SIG=1
 FROGTALK_SYNC_LOGIN_RESUME=1
 FROGTALK_SYNC_PAGINATION=1
 # FROGTALK_SYNC_STALE_HOURS=24</code></pre>
-      <p class="hint"><strong>Calls:</strong> DM voice/video between nodes uses home-server signaling. Travelers <em>currently connected</em> to your node are rung locally even when homed elsewhere. Enable <code>FROGTALK_FEDERATION_CALLS_ENABLED=1</code> and publish TURN URLs. See <a href="/docs/api">API docs</a> (Federation) and operator guide in the repo <code>docs/FEDERATED_CALLS.md</code>.</p>
+      <p class="hint"><strong>Calls:</strong> DM voice/video between nodes uses home-server signaling. Travelers <em>currently connected</em> to your node are rung locally even when homed elsewhere. Enable <code>FROGTALK_FEDERATION_CALLS_ENABLED=1</code> and publish TURN URLs. See <a href="/docs/api">API docs</a> (Federation).</p>
       <p class="hint"><strong>Preferred node (app):</strong> users save their network choice with
       <code>PATCH /api/auth/client-prefs</code> (<code>preferred_node_url</code>, optional
       <code>prefer_onion</code>) — included when they re-sync from home. See

@@ -126,7 +126,7 @@ node/
 | `node_update_check.sh` | Git update check / `--apply` (commits preview, symlinks, pip, restart) |
 | `install_board_nginx.sh` | nginx + php-fpm routes for `/board/` (`install.sh board-nginx`) |
 | `configure_board_identity.sh` | Board title/subtitle from `FROGTALK_HOME_PAGE` / env |
-| `tor_vanity_onion.sh` | Generate `frogtalk*.onion` v3 hostname + optional tor install ([docs/TOR_VANITY_ONION.md](../docs/TOR_VANITY_ONION.md)) |
+| `tor_vanity_onion.sh` | Generate `frogtalk*.onion` v3 hostname + optional tor install |
 | `deploy.sh` | Full rsync deploy to one server (see `node/scripts/.env`) |
 
 - **Idempotent** — safe to re-run; missing symlinks are created.

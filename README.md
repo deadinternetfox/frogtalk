@@ -80,7 +80,7 @@ and private channels (AES-GCM) before data reaches your disk.
 |--------|---------------------|-----------|------|
 | **`master`** | `frogtalk.app` | [frogtalk.app](https://frogtalk.app) | Pre-alpha **production hub** — official directory, stable line for operators |
 | **`dev`** | `dev branch` | `dev` branch docs | **Active development** — features land here first; may break without notice |
-| **Tor** (any branch) | varies | `.onion` | Hidden service; `FROGTALK_HOME_PAGE=tor` — vanity search: [docs/TOR_VANITY_ONION.md](docs/TOR_VANITY_ONION.md) |
+| **Tor** (any branch) | varies | `.onion` | Hidden service; `FROGTALK_HOME_PAGE=tor` — vanity search via `node/scripts/tor_vanity_onion.sh` |
 
 **Workflow:** fork and PR into **`dev`**. After testing, maintainers merge **`dev` → `master`** for production deploys. The only intentional code diff between branches in git is usually `client/official-node.json` (see [client/README.md](client/README.md)); **`dev`** also carries a contributor-focused root README.
 
@@ -477,8 +477,7 @@ frogtalk/
 ├── docs/
 │   ├── README.md                 # index of public operator docs
 │   ├── NODE_INSTALL.md           # VPS install + federation (start here for ops)
-│   ├── SECURITY_MODEL.md         # encryption + threat model
-│   └── FEDERATED_CALLS.md        # cross-node WebRTC / TURN
+│   └── SECURITY_MODEL.md         # encryption + threat model
 ├── README.md / SECURITY.md / CONTRIBUTING.md / CONTRIBUTORS.md / LICENSE
 └── .gitignore / .dockerignore / .fallowrc.json
 ```

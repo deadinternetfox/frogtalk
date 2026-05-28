@@ -557,7 +557,7 @@ Use `bash node/scripts/install.sh update-apply` (or `node_update_check.sh --appl
 | CORS errors in browser | `ALLOWED_ORIGINS` | Add your public URL |
 | Board step fails on `curl_init` | Missing PHP curl extension | `sudo apt install php-curl` and re-run federation |
 | `systemd` step permission denied | Not root | `sudo bash node/scripts/install.sh systemd -y` |
-| WebRTC calls fail cross-node | No TURN | Set `FROGTALK_FEDERATION_CALLS_ENABLED=1` + coturn — [`FEDERATED_CALLS.md`](FEDERATED_CALLS.md) |
+| WebRTC calls fail cross-node | No TURN | Set `FROGTALK_FEDERATION_CALLS_ENABLED=1` + run coturn |
 
 Logs: `journalctl -u frogtalk -n 100 --no-pager`, nginx `error.log`.
 
@@ -585,4 +585,3 @@ Report issues: [frogtalk.app/security](https://frogtalk.app/security)
 - [Deploy templates](../node/deploy/README.md)
 - [API docs](https://frogtalk.app/docs/api)
 - [Security model](SECURITY_MODEL.md)
-- [Federated calls](FEDERATED_CALLS.md)
