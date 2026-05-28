@@ -200,19 +200,35 @@
   `;
 
   const ANIM_MAP = {
-    spin:    'fxSpin 4s linear infinite',
-    pulse:   'fxPulse  __D__ ease-in-out infinite',
-    bounce:  'fxBounce __D__ ease-in-out infinite',
-    shake:   'fxShake  __D__ ease-in-out infinite',
-    wobble:  'fxWobble __D__ ease-in-out infinite',
-    float:   'fxFloat  __D__ ease-in-out infinite',
-    glow:    'fxGlow   __D__ ease-in-out infinite',
-    rainbow: 'fxRainbow __D__ linear infinite',
-    flip:    'fxFlip __D__ ease-in-out infinite',
-    swing:   'fxSwing __D__ ease-in-out infinite',
+    spin:    'fxSpin 4s linear __ITER__',
+    pulse:   'fxPulse  __D__ ease-in-out __ITER__',
+    bounce:  'fxBounce __D__ ease-in-out __ITER__',
+    shake:   'fxShake  __D__ ease-in-out __ITER__',
+    wobble:  'fxWobble __D__ ease-in-out __ITER__',
+    float:   'fxFloat  __D__ ease-in-out __ITER__',
+    glow:    'fxGlow   __D__ ease-in-out __ITER__',
+    rainbow: 'fxRainbow __D__ linear __ITER__',
+    flip:    'fxFlip __D__ ease-in-out __ITER__',
+    swing:   'fxSwing __D__ ease-in-out __ITER__',
   };
 
-  function toCss(rawEffects) {
+  function _prefersReducedMotion() {
+    try {
+      return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+    } catch {
+      return false;
+    }
+  }
+
+  function _animationCss(animKey, durationSec, playOnce) {
+    const tpl = ANIM_MAP[animKey];
+    if (!tpl) return '';
+    const iters = playOnce ? '1' : 'infinite';
+    return tpl.replace('__D__', `${durationSec}s`).replace('__ITER__', iters);
+  }
+
+  function toCss(rawEffects, opts) {
+    const playOnce = !!(opts && opts.playOnce);
     const n = normalize(rawEffects);
     if (!n) return null;
     const filterStr = _filterCss(n.filter);
@@ -223,8 +239,9 @@
     if (shadowStr) combinedFilter = combinedFilter ? `${filterStr} ${shadowStr}` : shadowStr;
 
     let animation = '';
-    const animName = ANIM_MAP[n.animation];
-    if (animName) animation = animName.replace('__D__', `${n.animation_duration}s`);
+    if (n.animation && n.animation !== 'none' && !_prefersReducedMotion()) {
+      animation = _animationCss(n.animation, n.animation_duration, playOnce);
+    }
 
     // Use the shadow color also as the "glow" color for the glow keyframes.
     const glow = _hexToRgba(n.shadow.color || '#ffffff', 0.8);
@@ -283,6 +300,40 @@
     return mediaType.replace(/;\s*fx=[A-Za-z0-9_-]+/g, '');
   }
 
+  /** Restart CSS animation on an existing .frog-sticker host (shadow DOM). */
+  function replayAnimation(host) {
+    if (!host) return;
+    const anim = host.dataset.fxAnimation || '';
+    if (!anim || anim === 'none') return;
+    const root = host.shadowRoot;
+    if (!root) return;
+    const img = root.querySelector('img');
+    if (!img) return;
+    img.style.animation = 'none';
+    void img.offsetWidth;
+    img.style.animation = anim;
+  }
+
+  function describeEffects(rawEffects) {
+    const n = normalize(rawEffects);
+    if (!n || isDefault(n)) return { hasFx: false, summary: 'No effects (plain image/GIF)' };
+    const parts = [];
+    if (n.animation && n.animation !== 'none') {
+      parts.push(`Animation: ${n.animation} (${n.animation_duration}s)`);
+    }
+    const f = n.filter;
+    if (f.blur) parts.push(`Blur ${f.blur}px`);
+    if (f.brightness !== 1) parts.push(`Brightness ${f.brightness}×`);
+    if (f.hue) parts.push(`Hue ${f.hue}°`);
+    if (n.transform.scale !== 1) parts.push(`Scale ${n.transform.scale}×`);
+    if (n.shadow.blur || n.shadow.x || n.shadow.y) parts.push('Shadow/glow');
+    return {
+      hasFx: true,
+      summary: parts.length ? parts.join(' · ') : 'Custom filters',
+      normalized: n,
+    };
+  }
+
   // ── Rendering ────────────────────────────────────────────────────────
   // Build a fully-isolated sticker DOM node. The outer host gets a closed
   // shadow root containing a <style> + <img>. Everything inside is scoped
@@ -294,6 +345,7 @@
       size,               // box dimensions ('contain' clipping)
       alt,
       onClick,
+      playOnce,           // chat: play once; picker/editor: loop
     } = opts || {};
 
     const safeSrc = _safeImageSrc(src);
@@ -322,7 +374,10 @@
 
     // Closed shadow — outside JS can't reach in and tamper with the styles.
     const root = host.attachShadow ? host.attachShadow({ mode: 'closed' }) : null;
-    const css  = toCss(effects);
+    const css  = toCss(effects, { playOnce: !!playOnce });
+    if (css && css.animation && css.animation !== 'none') {
+      host.dataset.fxAnimation = css.animation;
+    }
 
     const styleHtml = `
       :host { all: initial; display: block; width: 100%; height: 100%; }
@@ -409,6 +464,8 @@
     stripFx,
     buildHost,
     renderInto,
+    replayAnimation,
+    describeEffects,
     safeImageSrc: _safeImageSrc,
     defaults,
     ANIMATIONS: Array.from(ANIMATIONS),

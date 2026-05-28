@@ -71,6 +71,16 @@ const GIFs = (() => {
   }
   let _gifAbortController = null;
 
+  function _parseStickerEffects(raw) {
+    if (raw == null || raw === '') return null;
+    let o = raw;
+    if (typeof o === 'string') {
+      try { o = JSON.parse(o); } catch { return null; }
+    }
+    if (window.StickerFX) return StickerFX.normalize(o);
+    return o;
+  }
+
   async function _fetchGifApi(url, timeoutMs = 8000) {
     if (_gifAbortController) _gifAbortController.abort();
     const controller = new AbortController();
@@ -831,14 +841,15 @@ const GIFs = (() => {
       html += `<div class="sticker-pack-header">${UI.escHtml(pack.name)}${ownerHint}</div>`;
       html += stickers.map(s => {
         const sid = String(s.id);
+        const parsedFx = _parseStickerEffects(s.effects);
         _stickersById.set(sid, {
           image_data: s.image_data,
           name: s.name,
-          effects: s.effects || null,
+          effects: parsedFx,
           pack_id: pack.id,
           can_manage: !!pack.can_manage,
         });
-        const hasFx = s.effects && window.StickerFX && !StickerFX.isDefault(s.effects);
+        const hasFx = parsedFx && window.StickerFX && !StickerFX.isDefault(parsedFx);
         if (hasFx) _toHydrate.push(sid);
         return `
           <div class="sticker-item" data-sticker-id="${UI.escHtml(sid)}" title="${UI.escHtml(s.name)}">
@@ -857,7 +868,9 @@ const GIFs = (() => {
           const rec = _stickersById.get(sid);
           const slot = grid.querySelector(`.sticker-host[data-sticker-id="${CSS.escape(sid)}"]`);
           if (!rec || !slot) continue;
-          StickerFX.renderInto(slot, { src: rec.image_data, effects: rec.effects, alt: rec.name, size: 96 });
+          StickerFX.renderInto(slot, {
+            src: rec.image_data, effects: rec.effects, alt: rec.name, size: 96, playOnce: false,
+          });
         }
       });
     }
@@ -1338,8 +1351,9 @@ const GIFs = (() => {
       const m = (imageData || '').match(/^data:([^;]+);/);
       if (m && m[1]) mediaType = m[1].toLowerCase();
     } catch {}
-    if (effects && window.StickerFX && !StickerFX.isDefault(effects)) {
-      mediaType = StickerFX.encodeForMediaType(mediaType, effects);
+    const fxNorm = _parseStickerEffects(effects);
+    if (fxNorm && window.StickerFX && !StickerFX.isDefault(fxNorm)) {
+      mediaType = StickerFX.encodeForMediaType(mediaType, fxNorm);
     }
     State.pendingAttachment = {
       data: imageData,
@@ -1769,41 +1783,28 @@ const GIFs = (() => {
   }
 
   function _openFxEditor(sticker) {
-    let fx = StickerFX.normalize(sticker.effects) || StickerFX.defaults();
+    let fx = _parseStickerEffects(sticker.effects) || StickerFX.defaults();
+    let _fxPreviewHost = null;
     const close = () => { const m = document.getElementById('sticker-fx-modal'); if (m) m.remove(); };
 
     const modal = document.createElement('div');
     modal.id = 'sticker-fx-modal';
-    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.78);z-index:2100;display:flex;align-items:center;justify-content:center;padding:16px';
+    modal.className = 'sticker-fx-overlay';
     modal.innerHTML = `
-      <div role="dialog" aria-modal="true" style="
-        background:linear-gradient(180deg,
-          color-mix(in srgb, var(--accent-color) 18%, var(--surface-color)) 0%,
-          var(--surface-color) 60%,
-          color-mix(in srgb, var(--bg-color) 70%, var(--surface-color)) 100%);
-        border:1px solid color-mix(in srgb, var(--accent-color) 40%, var(--border-color));
-        box-shadow:0 24px 60px rgba(0,0,0,.65), 0 0 0 1px color-mix(in srgb, var(--accent-color) 15%, transparent);
-        border-radius:16px;width:760px;max-width:100%;max-height:92vh;display:flex;flex-direction:column;color:var(--text-color)">
+      <div class="sticker-fx-dialog" role="dialog" aria-modal="true">
 
-        <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 18px;border-bottom:1px solid var(--border-color)">
-          <div style="font-weight:700;font-size:15px">✨ Sticker Effects — <span style="color:var(--accent-color)">${UI.escHtml(sticker.name || '')}</span></div>
-          <button id="fx-close" style="background:none;border:none;color:var(--text-muted);font-size:18px;cursor:pointer;width:28px;height:28px;border-radius:6px">✕</button>
+        <div class="sticker-fx-dialog-head">
+          <div class="sticker-fx-dialog-title">✨ Sticker Effects — <span>${UI.escHtml(sticker.name || '')}</span></div>
+          <button type="button" id="fx-close" class="sticker-fx-close" aria-label="Close">✕</button>
         </div>
 
-        <div style="flex:1;overflow:auto;display:grid;grid-template-columns: minmax(220px, 1fr) minmax(280px, 1.6fr);gap:14px;padding:14px 18px">
+        <div class="sticker-fx-dialog-body">
 
-          <!-- Live preview ─ rendered through StickerFX (Shadow-DOM isolated) -->
-          <div>
-            <div style="font-size:11px;color:var(--accent-color);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;font-weight:700">Preview</div>
-            <div style="background:
-              repeating-conic-gradient(color-mix(in srgb, var(--bg-color) 75%, transparent) 0% 25%, transparent 0% 50%) 50% / 16px 16px;
-              border:1px solid var(--border-color);
-              border-radius:12px;
-              padding:16px;
-              display:flex;align-items:center;justify-content:center;
-              min-height:220px;
-              overflow:hidden;">
-              <div id="fx-preview" style="display:inline-flex"></div>
+          <div class="sticker-fx-preview-col">
+            <div class="sticker-fx-section-label">Preview</div>
+            <div id="fx-preview-wrap" class="sticker-fx-preview-wrap" title="Tap to replay animation">
+              <div id="fx-preview" class="sticker-fx-preview-host"></div>
+              <span class="sticker-fx-preview-hint">Tap to preview</span>
             </div>
             <div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap">
               <button data-fx-preset="none"    class="fx-preset-btn">Plain</button>
@@ -1820,16 +1821,15 @@ const GIFs = (() => {
             </div>
           </div>
 
-          <!-- Controls -->
-          <div id="fx-controls" style="display:flex;flex-direction:column;gap:14px;min-width:0"></div>
+          <div id="fx-controls" class="sticker-fx-controls"></div>
 
         </div>
 
-        <div style="padding:12px 18px;border-top:1px solid var(--border-color);display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">
-          <button id="fx-reset" style="background:color-mix(in srgb, var(--bg-color) 60%, transparent);border:1px solid var(--border-color);color:var(--text-color);padding:8px 14px;border-radius:8px;cursor:pointer">Reset</button>
-          <button id="fx-clear" style="background:rgba(180,40,40,.18);border:1px solid #6b2a2a;color:#f0a0a0;padding:8px 14px;border-radius:8px;cursor:pointer">Clear effects</button>
-          <button id="fx-cancel" style="background:color-mix(in srgb, var(--bg-color) 60%, transparent);border:1px solid var(--border-color);color:var(--text-color);padding:8px 14px;border-radius:8px;cursor:pointer">Cancel</button>
-          <button id="fx-save" style="background:var(--accent-color);border:1px solid var(--accent-color);color:color-mix(in srgb, var(--accent-color) 12%, #000);padding:8px 14px;border-radius:8px;cursor:pointer;font-weight:700">Save</button>
+        <div class="sticker-fx-dialog-foot">
+          <button type="button" id="fx-reset" class="sticker-fx-btn">Reset</button>
+          <button type="button" id="fx-clear" class="sticker-fx-btn sticker-fx-btn-danger">Clear effects</button>
+          <button type="button" id="fx-cancel" class="sticker-fx-btn">Cancel</button>
+          <button type="button" id="fx-save" class="sticker-fx-btn sticker-fx-btn-primary">Save</button>
         </div>
       </div>`;
 
@@ -1856,6 +1856,18 @@ const GIFs = (() => {
         UI.showToast('Failed to clear', 'error');
       }
     };
+    const previewWrap = document.getElementById('fx-preview-wrap');
+    if (previewWrap) {
+      previewWrap.addEventListener('click', () => {
+        if (_fxPreviewHost && StickerFX.replayAnimation) {
+          StickerFX.replayAnimation(_fxPreviewHost);
+        } else {
+          renderPreview();
+        }
+        try { navigator.vibrate?.(6); } catch {}
+      });
+    }
+
     document.getElementById('fx-save').onclick = async () => {
       const r = await apiFetch(`/api/media/stickers/${sticker.id}`, 'PATCH', { effects: fx });
       if (r.ok) {
@@ -2011,13 +2023,14 @@ const GIFs = (() => {
     }
 
     function renderPreview() {
-      const host = document.getElementById('fx-preview');
-      if (!host) return;
-      StickerFX.renderInto(host, {
+      const slot = document.getElementById('fx-preview');
+      if (!slot) return;
+      _fxPreviewHost = StickerFX.renderInto(slot, {
         src: sticker.image_data,
         effects: fx,
         alt: sticker.name,
-        size: 180,
+        size: 160,
+        playOnce: false,
       });
     }
 

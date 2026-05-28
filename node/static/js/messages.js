@@ -3806,6 +3806,23 @@ const Messages = (() => {
   // replace it with a Shadow-DOM-isolated sticker host. We use a
   // [data-fx-rendered] flag so the same node is never hydrated twice
   // (cheap to call after every appendMessage / loadHistory).
+  function _replayStickersInMessage(msgEl) {
+    if (!msgEl || !window.StickerFX) return;
+    msgEl.querySelectorAll('.frog-sticker-mount .frog-sticker').forEach(host => {
+      try { StickerFX.replayAnimation(host); } catch {}
+    });
+  }
+
+  function replaySticker(mountEl) {
+    if (!mountEl) return;
+    const host = mountEl.classList.contains('frog-sticker')
+      ? mountEl
+      : mountEl.querySelector('.frog-sticker');
+    if (host && window.StickerFX) {
+      try { StickerFX.replayAnimation(host); } catch {}
+    }
+  }
+
   function _hydrateStickers(root) {
     if (!window.StickerFX) return;
     const scope = root || document;
@@ -3815,7 +3832,9 @@ const Messages = (() => {
       const mt  = node.getAttribute('data-fx-mt') || '';
       const fx  = StickerFX.decodeFromMediaType(mt);
       try {
-        const host = StickerFX.buildHost({ src, effects: fx, size: 160, alt: 'sticker' });
+        const host = StickerFX.buildHost({
+          src, effects: fx, size: 160, alt: 'sticker', playOnce: true,
+        });
         node.appendChild(host);
         node.setAttribute('data-fx-rendered', '1');
       } catch (e) {
@@ -4224,6 +4243,11 @@ const Messages = (() => {
     document.querySelectorAll('.action-sheet').forEach(el => el.remove());
     const msgEl = document.getElementById(`msg-${msgId}`);
     if (!msgEl) return;
+    _replayStickersInMessage(msgEl);
+    if (msgEl.querySelector('.frog-sticker-mount')) {
+      msgEl.classList.add('msg-sticker-selected');
+      setTimeout(() => msgEl.classList.remove('msg-sticker-selected'), 1400);
+    }
     const actionsRow = msgEl.querySelector('.msg-actions');
     if (!actionsRow) return;
 
@@ -4276,23 +4300,64 @@ const Messages = (() => {
     });
 
     const stickerEl = msgEl.querySelector('.frog-sticker-mount[data-fx-src]');
-    if (stickerEl && window.GIFs && typeof GIFs.importStickerImageToAccount === 'function') {
-      menuItems.push({
-        rank: _actionSheetRank('add sticker'),
-        icon: '🎴',
-        label: 'Add sticker',
-        onClick: (e) => {
-          e.stopPropagation();
-          try { navigator.vibrate?.(8); } catch {}
-          close(true);
-          setTimeout(() => {
-            GIFs.importStickerImageToAccount(
-              stickerEl.getAttribute('data-fx-src'),
-              stickerEl.getAttribute('data-fx-mt') || ''
-            );
-          }, 80);
-        },
-      });
+    if (stickerEl) {
+      const stickerMt = stickerEl.getAttribute('data-fx-mt') || '';
+      const stickerFx = window.StickerFX && StickerFX.decodeFromMediaType(stickerMt);
+      const hasAnim = stickerFx && stickerFx.animation && stickerFx.animation !== 'none';
+
+      if (hasAnim) {
+        menuItems.push({
+          rank: _actionSheetRank('replay animation'),
+          icon: '▶️',
+          label: 'Replay animation',
+          onClick: (e) => {
+            e.stopPropagation();
+            try { navigator.vibrate?.(8); } catch {}
+            _replayStickersInMessage(msgEl);
+            close(true);
+          },
+        });
+      }
+
+      if (window.StickerFX && typeof StickerFX.describeEffects === 'function') {
+        menuItems.push({
+          rank: _actionSheetRank('sticker info'),
+          icon: 'ℹ️',
+          label: 'Sticker info',
+          onClick: (e) => {
+            e.stopPropagation();
+            try { navigator.vibrate?.(8); } catch {}
+            close(true);
+            const info = StickerFX.describeEffects(stickerFx);
+            const base = StickerFX.stripFx(stickerMt) || 'image';
+            const msg = `${info.summary}\nType: ${base.split(';')[0]}`;
+            if (typeof UI !== 'undefined' && UI.notice) {
+              UI.notice({ icon: '🎴', title: 'Sticker', message: msg, primaryLabel: 'OK' });
+            } else {
+              UI.showToast(info.summary, 'info');
+            }
+          },
+        });
+      }
+
+      if (window.GIFs && typeof GIFs.importStickerImageToAccount === 'function') {
+        menuItems.push({
+          rank: _actionSheetRank('add sticker'),
+          icon: '🎴',
+          label: 'Add sticker',
+          onClick: (e) => {
+            e.stopPropagation();
+            try { navigator.vibrate?.(8); } catch {}
+            close(true);
+            setTimeout(() => {
+              GIFs.importStickerImageToAccount(
+                stickerEl.getAttribute('data-fx-src'),
+                stickerMt
+              );
+            }, 80);
+          },
+        });
+      }
     }
 
     const customEmojiImg = msgEl.querySelector('.custom-emoji-inline[data-emoji-id]');
@@ -4528,7 +4593,7 @@ const Messages = (() => {
 
   _ensureSystemEmbedStyleGuard();
 
-  return { loadHistory, mergeRoomHistory, applyMessageReveal: _applyMessageReveal, appendMessage, updateEdited, removeMessage, updateReactions, startEdit, submitEdit, cancelEdit, deleteMsg, showReactMenu, toggleReaction, openMedia, openSticker, hydrateStickers: _hydrateStickers, revealSpoiler, hideSpoiler, revealViewOnce, loadMedia, observeLazyMedia, playInlineAudio, setReplyTo, clearReply, getReplyToId, getReplyTo, openModMenu, openActionSheet, bindLongPress, copyMessage, copyEmbedLink, toggleProfileFollow, scrollToBottom, joinViaInvite, openSocialProfile, openSocialPost, openSocialReel, _toggleChatVideo, forwardMessage, openForwardPicker: _openForwardPicker, forwardedBadgeHtml: _forwardedBadgeHtml, _renderRichShareEmbed, suppressPreview, applyPreviewSuppress, toggleSpoiler, applyMediaBlur, _loadInviteCard, _loadSocialProfileCard, _loadSocialPostCard, _loadSocialReelCard, _hydrateSpecialCards, _scrollIfNearBottom, refreshSystemEmbedGuard: _ensureSystemEmbedStyleGuard };
+  return { loadHistory, mergeRoomHistory, applyMessageReveal: _applyMessageReveal, appendMessage, updateEdited, removeMessage, updateReactions, startEdit, submitEdit, cancelEdit, deleteMsg, showReactMenu, toggleReaction, openMedia, openSticker, replaySticker, hydrateStickers: _hydrateStickers, revealSpoiler, hideSpoiler, revealViewOnce, loadMedia, observeLazyMedia, playInlineAudio, setReplyTo, clearReply, getReplyToId, getReplyTo, openModMenu, openActionSheet, bindLongPress, copyMessage, copyEmbedLink, toggleProfileFollow, scrollToBottom, joinViaInvite, openSocialProfile, openSocialPost, openSocialReel, _toggleChatVideo, forwardMessage, openForwardPicker: _openForwardPicker, forwardedBadgeHtml: _forwardedBadgeHtml, _renderRichShareEmbed, suppressPreview, applyPreviewSuppress, toggleSpoiler, applyMediaBlur, _loadInviteCard, _loadSocialProfileCard, _loadSocialPostCard, _loadSocialReelCard, _hydrateSpecialCards, _scrollIfNearBottom, refreshSystemEmbedGuard: _ensureSystemEmbedStyleGuard };
 })();
 
 // ── Scroll-to-bottom + "jump to latest" pip ─────────────────────────────────
