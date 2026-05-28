@@ -18,6 +18,10 @@ This is a living report — not a promise that everything below is finished.
 | **1:1 calls** | **Partial** | Federation signalling exists; connect quality depends on TURN/home routing; missed-call dedupe fixed |
 | **Private / “secret” rooms** | **Partial** | Per-room AES-GCM is local to room membership; federation mirrors **messages** for rooms that exist on both nodes — not full automatic cross-node room key transfer |
 | **Home node down** | **Partial** | Travel node + WS works if user is connected there; home unreachable blocks home-originated bundle proxy until circuit/backoff |
+| **Channel owner display** | **Fixed (deploy pending)** | Directory/room header resolve the real owner via `owner_global_user_id` → `federation_user_profiles`; `federation_sync` only as a true last resort |
+| **Channel editing (owner away from home)** | **Fixed (deploy pending)** | PATCH on a mirror relays a signed `channel.owner.edit.request` to the channel home, which verifies owner-gid + owner-home and re-broadcasts authoritatively |
+| **Profile editing (user away from home)** | **Fixed (deploy pending)** | Edits relay to the account home (`/api/auth/federation-sync-merge-gid` → `profile_fields`) which re-federates as the authoritative origin; a visit-signed `user.profile.updated` is dropped by the cross-origin pin |
+| **Members sidebar count** | **Fixed (deploy pending)** | Header counts online + offline + federated members (was online-only) |
 
 ---
 
