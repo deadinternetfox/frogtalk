@@ -166,6 +166,39 @@
   line-height: 1.35;
 }
 
+/* FX layer list rows (avoid inline overflow issues) */
+.fx-layer-row {
+  display: grid;
+  grid-template-columns: 86px 1fr 62px 62px 28px;
+  gap: 6px;
+  align-items: center;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  padding: 8px;
+  background: color-mix(in srgb, var(--surface-color) 85%, transparent);
+  box-sizing: border-box;
+  min-width: 0;
+  overflow: hidden;
+}
+.fx-layer-row select,
+.fx-layer-row input {
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+.fx-layer-del {
+  justify-self: end;
+  width: 28px;
+  height: 30px;
+  border: 1px solid var(--border-color);
+  background: transparent;
+  color: var(--text-muted);
+  border-radius: 8px;
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+}
+
 .sticker-fx-dialog-foot {
   padding: 10px 14px;
   border-top: 1px solid var(--border-color);

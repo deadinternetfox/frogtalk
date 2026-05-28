@@ -40,15 +40,20 @@
     spread: [0,   1,    0],
   };
   const ANIMATIONS = new Set([
-    'none', 'spin', 'pulse', 'bounce', 'shake', 'wobble',
-    'float', 'glow', 'rainbow', 'rainbow_tint', 'rainbow_glow',
-    'flip', 'swing', 'sparkle', 'pop',
+    // Minimal, always-compatible set.
+    'none',
+    // movement
+    'spin', 'pulse', 'bounce', 'shake', 'wobble', 'float', 'flip', 'swing', 'sparkle', 'pop',
+    // color
+    'rainbow_tint',
+    // glow track (overlay)
+    'glow', 'rainbow_glow',
   ]);
   const TRANSFORM_ANIMS = new Set([
     'spin', 'pulse', 'bounce', 'shake', 'wobble', 'float', 'flip', 'swing', 'sparkle', 'pop',
   ]);
   const FILTER_ANIMS = new Set([
-    'rainbow', 'rainbow_tint',
+    'rainbow_tint',
   ]);
   const GLOW_ANIMS = new Set([
     'glow', 'rainbow_glow',
@@ -234,11 +239,6 @@
   function _makeFilterTimelineKeyframes(name, anim, sPct, ePct) {
     const hold = `0%,${sPct}%{filter:var(--fx-filter);}`;
     const endHold = `${ePct}%,100%{filter:var(--fx-filter);}`;
-    if (anim === 'rainbow') {
-      // Hue-rotate alone can look subtle on flat-color stickers; force a visible
-      // rainbow by adding sepia+saturate (still safe, fixed functions only).
-      return _kf(name, `${hold}${sPct}%{filter:var(--fx-filter) sepia(1) saturate(3.2) hue-rotate(0deg);} ${ePct}%{filter:var(--fx-filter) sepia(1) saturate(3.2) hue-rotate(360deg);} ${endHold}`);
-    }
     if (anim === 'rainbow_tint') {
       return _kf(name, `${hold}${sPct}%{filter:var(--fx-filter) sepia(1) saturate(3) hue-rotate(0deg);} ${ePct}%{filter:var(--fx-filter) sepia(1) saturate(3) hue-rotate(360deg);} ${endHold}`);
     }
@@ -331,8 +331,6 @@
     @keyframes fxWobble { 0%,100% { transform: var(--fx-base) rotate(-4deg); } 50% { transform: var(--fx-base) rotate(4deg); } }
     @keyframes fxFloat  { 0%,100% { transform: var(--fx-base) translateY(0); } 50% { transform: var(--fx-base) translateY(-6%); } }
     @keyframes fxGlow   { 0%,100% { filter: var(--fx-filter) drop-shadow(0 0 4px var(--fx-glow)); } 50% { filter: var(--fx-filter) drop-shadow(0 0 14px var(--fx-glow)); } }
-    @keyframes fxRainbow{ 0%   { filter: var(--fx-filter) sepia(1) saturate(3.2) hue-rotate(0deg); }
-                          100% { filter: var(--fx-filter) sepia(1) saturate(3.2) hue-rotate(360deg); } }
     @keyframes fxRainbowTint { 0%   { filter: var(--fx-filter) sepia(1) saturate(3) hue-rotate(0deg); }
                                100% { filter: var(--fx-filter) sepia(1) saturate(3) hue-rotate(360deg); } }
     @keyframes fxRainbowGlow { 0%,100% { filter: var(--fx-filter) drop-shadow(0 0 6px var(--fx-glow)); }
@@ -356,7 +354,6 @@
     wobble:  'fxWobble __D__ ease-in-out __ITER__',
     float:   'fxFloat  __D__ ease-in-out __ITER__',
     glow:    'fxGlow   __D__ ease-in-out __ITER__',
-    rainbow: 'fxRainbow __D__ linear __ITER__',
     rainbow_tint: 'fxRainbowTint __D__ linear __ITER__',
     rainbow_glow: 'fxRainbowGlow __D__ ease-in-out __ITER__',
     flip:    'fxFlip __D__ ease-in-out __ITER__',

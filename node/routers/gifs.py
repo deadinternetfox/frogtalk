@@ -41,9 +41,14 @@ _STICKER_FX_SHADOW_RANGES = {
     "spread":      (0.0,   1.0,  0.0),   # alpha 0..1
 }
 _STICKER_FX_ANIMATIONS = {
-    "none", "spin", "pulse", "bounce", "shake", "wobble",
-    "float", "glow", "rainbow", "rainbow_tint", "rainbow_glow",
-    "flip", "swing", "sparkle", "pop",
+    # Minimal, always-compatible set.
+    "none",
+    # movement
+    "spin", "pulse", "bounce", "shake", "wobble", "float", "flip", "swing", "sparkle", "pop",
+    # color
+    "rainbow_tint",
+    # glow (separate track)
+    "glow", "rainbow_glow",
 }
 _STICKER_FX_HEX_COLOR = (
     # simple #rgb / #rgba / #rrggbb / #rrggbbaa whitelist
@@ -142,7 +147,7 @@ def validate_sticker_effects(raw: Any) -> Optional[Dict[str, Any]]:
             # Keep this tight: only specific animations are allowed per kind.
             if kind == "transform" and an not in {"spin","pulse","bounce","shake","wobble","float","flip","swing","sparkle","pop"}:
                 continue
-            if kind == "filter" and an not in {"rainbow","rainbow_tint"}:
+            if kind == "filter" and an not in {"rainbow_tint"}:
                 continue
             if kind == "glow" and an not in {"glow","rainbow_glow"}:
                 continue

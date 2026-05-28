@@ -1829,6 +1829,14 @@ const GIFs = (() => {
   function _openFxEditor(sticker) {
     let fx = _parseStickerEffects(sticker.effects) || StickerFX.defaults();
     let _fxPreviewHost = null;
+    const isGif = (() => {
+      try {
+        const s = String(sticker?.image_data || '').slice(0, 64).toLowerCase();
+        if (s.startsWith('data:image/gif')) return true;
+        // If we ever support non-data URLs for stickers, keep a fallback.
+        return /\.gif(\?|#|$)/i.test(String(sticker?.image_data || ''));
+      } catch { return false; }
+    })();
     const close = () => { const m = document.getElementById('sticker-fx-modal'); if (m) m.remove(); };
 
     const modal = document.createElement('div');
@@ -1858,10 +1866,13 @@ const GIFs = (() => {
               <button data-fx-preset="shake"   class="fx-preset-btn">📳 Shake</button>
               <button data-fx-preset="wobble"  class="fx-preset-btn">🌊 Wobble</button>
               <button data-fx-preset="float"   class="fx-preset-btn">🎈 Float</button>
-              <button data-fx-preset="glow"    class="fx-preset-btn">🔆 Glow</button>
-              <button data-fx-preset="rainbow" class="fx-preset-btn">🌈 Rainbow</button>
               <button data-fx-preset="flip"    class="fx-preset-btn">🔄 Flip</button>
               <button data-fx-preset="swing"   class="fx-preset-btn">🪀 Swing</button>
+              <button data-fx-preset="sparkle" class="fx-preset-btn">✨ Sparkle</button>
+              <button data-fx-preset="pop"     class="fx-preset-btn">💥 Pop</button>
+              <button data-fx-preset="rainbow_tint" class="fx-preset-btn">🌈 Color</button>
+              <button data-fx-preset="glow"    class="fx-preset-btn">🔆 Glow</button>
+              <button data-fx-preset="rainbow_glow" class="fx-preset-btn">🔆🌈 Glow+</button>
             </div>
           </div>
 
@@ -1936,10 +1947,14 @@ const GIFs = (() => {
       const addClip = (start) => {
         const anim = (p || '').trim();
         if (!anim || anim === 'none') return;
+        if ((fx.layers || []).length >= 6) { UI.showToast('FX timeline full (max 6 clips)', 'error'); return; }
         const kind =
-          (anim === 'rainbow' || anim === 'rainbow_tint') ? 'filter' :
+          (anim === 'rainbow_tint') ? 'filter' :
           (anim === 'glow' || anim === 'rainbow_glow') ? 'glow' :
           'transform';
+        // Enforce one filter track + one glow track for "always works together".
+        if (kind === 'filter') fx.layers = (fx.layers || []).filter(l => l.kind !== 'filter');
+        if (kind === 'glow')   fx.layers = (fx.layers || []).filter(l => l.kind !== 'glow');
         fx.layers = fx.layers || [];
         fx.layers.push({ kind, animation: anim, start: start || 0, duration: (kind === 'filter' ? 2 : 1.5) });
         renderControls();
@@ -1948,7 +1963,7 @@ const GIFs = (() => {
       btn.onclick = () => addClip(0);
       if (p && p !== 'none') {
         const kind =
-          (p === 'rainbow' || p === 'rainbow_tint') ? 'filter' :
+          (p === 'rainbow_tint') ? 'filter' :
           (p === 'glow' || p === 'rainbow_glow') ? 'glow' :
           'transform';
         btn.draggable = true;
@@ -1978,6 +1993,31 @@ const GIFs = (() => {
                  style="width:100%;accent-color:var(--accent-color)">
           <span class="fx-num" data-fx-show="${group}.${key}" style="text-align:right;font-variant-numeric:tabular-nums;color:var(--text-color)">${value}${suffix || ''}</span>
         </label>`;
+
+      const gifHtml = isGif ? `
+        <details style="border:1px solid color-mix(in srgb, var(--accent-color) 22%, var(--border-color));border-radius:10px;padding:10px 12px;background:color-mix(in srgb, var(--bg-color) 55%, transparent)">
+          <summary style="cursor:pointer;font-weight:700;color:var(--accent-color);font-size:12px;text-transform:uppercase;letter-spacing:.4px">GIF Playback</summary>
+          <div style="display:flex;flex-direction:column;gap:8px;margin-top:8px">
+            <label style="display:grid;grid-template-columns:90px 1fr;align-items:center;gap:8px;font-size:12px">
+              <span style="color:var(--text-muted)">Mode</span>
+              <select data-fx-gif-mode style="background:var(--surface-color);color:var(--text-color);border:1px solid var(--border-color);border-radius:6px;padding:5px 7px">
+                <option value="loop">Loop</option>
+                <option value="once">Play once</option>
+                <option value="paused">Paused</option>
+              </select>
+            </label>
+            <label style="display:grid;grid-template-columns:90px 1fr 56px;align-items:center;gap:8px;font-size:12px">
+              <span style="color:var(--text-muted)">Play time</span>
+              <input type="range" min="0.3" max="10" step="0.1" value="${Number(fx.gif_play_seconds||2.5).toFixed(1)}"
+                data-fx-gif-seconds style="width:100%;accent-color:var(--accent-color)">
+              <span class="fx-num" data-fx-show="_root.gif_play_seconds" style="text-align:right;font-variant-numeric:tabular-nums;color:var(--text-color)">${Number(fx.gif_play_seconds||2.5).toFixed(1)}s</span>
+            </label>
+            <div style="font-size:11px;color:var(--text-muted);line-height:1.35">
+              “Play once” and “Paused” freeze the GIF by snapshotting to a canvas.
+            </div>
+          </div>
+        </details>
+      ` : '';
 
       ctr.innerHTML = `
         <details open style="border:1px solid color-mix(in srgb, var(--accent-color) 22%, var(--border-color));border-radius:10px;padding:10px 12px;background:color-mix(in srgb, var(--bg-color) 55%, transparent)">
@@ -2048,28 +2088,7 @@ const GIFs = (() => {
           </div>
         </details>
 
-        <details style="border:1px solid color-mix(in srgb, var(--accent-color) 22%, var(--border-color));border-radius:10px;padding:10px 12px;background:color-mix(in srgb, var(--bg-color) 55%, transparent)">
-          <summary style="cursor:pointer;font-weight:700;color:var(--accent-color);font-size:12px;text-transform:uppercase;letter-spacing:.4px">GIF Playback</summary>
-          <div style="display:flex;flex-direction:column;gap:8px;margin-top:8px">
-            <label style="display:grid;grid-template-columns:90px 1fr;align-items:center;gap:8px;font-size:12px">
-              <span style="color:var(--text-muted)">Mode</span>
-              <select data-fx-gif-mode style="background:var(--surface-color);color:var(--text-color);border:1px solid var(--border-color);border-radius:6px;padding:5px 7px">
-                <option value="loop">Loop</option>
-                <option value="once">Play once</option>
-                <option value="paused">Paused</option>
-              </select>
-            </label>
-            <label style="display:grid;grid-template-columns:90px 1fr 56px;align-items:center;gap:8px;font-size:12px">
-              <span style="color:var(--text-muted)">Play time</span>
-              <input type="range" min="0.3" max="10" step="0.1" value="${Number(fx.gif_play_seconds||2.5).toFixed(1)}"
-                data-fx-gif-seconds style="width:100%;accent-color:var(--accent-color)">
-              <span class="fx-num" data-fx-show="_root.gif_play_seconds" style="text-align:right;font-variant-numeric:tabular-nums;color:var(--text-color)">${Number(fx.gif_play_seconds||2.5).toFixed(1)}s</span>
-            </label>
-            <div style="font-size:11px;color:var(--text-muted);line-height:1.35">
-              “Play once” and “Paused” freeze the GIF by snapshotting to a canvas (safe; no raw CSS).
-            </div>
-          </div>
-        </details>
+        ${gifHtml}
       `;
 
       // Wire sliders / inputs.
@@ -2128,6 +2147,9 @@ const GIFs = (() => {
       if (!Array.isArray(fx.layers)) fx.layers = [];
       const TRANSFORM_OPTS = ['spin','pulse','bounce','shake','wobble','float','flip','swing','sparkle','pop'];
       const FILTER_OPTS = ['glow','rainbow','rainbow_tint','rainbow_glow'];
+      // Minimal set: one color (rainbow_tint) and glow variants on glow track.
+      const FILTER_OK = ['rainbow_tint'];
+      const GLOW_OK = ['glow', 'rainbow_glow'];
       const _syncLegacy = () => {};
 
       const _timelineTotal = () => {
@@ -2203,8 +2225,13 @@ const GIFs = (() => {
           const kind = (e.dataTransfer.getData('application/x-fx-kind') || '').trim();
           const anim = (e.dataTransfer.getData('application/x-fx-anim') || '').trim();
           if (!kind || !anim || anim === 'none') return;
+          if ((fx.layers || []).length >= 6) { UI.showToast('FX timeline full (max 6 clips)', 'error'); return; }
           const start = _laneXToStart(e.clientX);
           const layer = { kind, animation: anim, start, duration: (kind === 'filter' ? 2 : 1.5) };
+          if (kind === 'filter' && !FILTER_OK.includes(anim)) return;
+          if (kind === 'glow' && !GLOW_OK.includes(anim)) return;
+          if (kind === 'filter') fx.layers = (fx.layers || []).filter(l => l.kind !== 'filter');
+          if (kind === 'glow')   fx.layers = (fx.layers || []).filter(l => l.kind !== 'glow');
           fx.layers = fx.layers || [];
           fx.layers.push(layer);
           _renderTimeline();
@@ -2219,9 +2246,9 @@ const GIFs = (() => {
           const row = document.createElement('div');
           row.draggable = true;
           row.dataset.fxIdx = String(idx);
-          row.style.cssText = 'display:grid;grid-template-columns:86px 1fr 62px 62px 28px;gap:6px;align-items:center;border:1px solid var(--border-color);border-radius:10px;padding:8px;background:color-mix(in srgb, var(--surface-color) 85%, transparent)';
-          const kind = l.kind === 'filter' ? 'Filter' : 'Transform';
-          const opts = (l.kind === 'filter' ? FILTER_OPTS : TRANSFORM_OPTS)
+          row.className = 'fx-layer-row';
+          const kind = l.kind === 'filter' ? 'Color' : (l.kind === 'glow' ? 'Glow' : 'Move');
+          const opts = (l.kind === 'filter' ? FILTER_OK : (l.kind === 'glow' ? GLOW_OK : TRANSFORM_OPTS))
             .map(a => `<option value="${a}" ${a===l.animation?'selected':''}>${a}</option>`).join('');
           row.innerHTML = `
             <div style="font-size:11px;color:var(--text-muted);font-weight:700">${kind}</div>
@@ -2232,7 +2259,7 @@ const GIFs = (() => {
             <input data-fx-layer-dur type="number" min="0.3" max="10" step="0.1" value="${Number(l.duration||1.5).toFixed(1)}"
               title="Duration (s)" aria-label="Duration seconds"
               style="background:var(--surface-color);color:var(--text-color);border:1px solid var(--border-color);border-radius:8px;padding:6px 8px;font-size:12px;width:100%">
-            <button type="button" data-fx-layer-del title="Remove" style="border:1px solid var(--border-color);background:transparent;color:var(--text-muted);border-radius:8px;height:30px;cursor:pointer">✕</button>
+            <button type="button" data-fx-layer-del class="fx-layer-del" title="Remove">✕</button>
           `;
           // drag reorder
           row.addEventListener('dragstart', (e) => { try { e.dataTransfer.setData('text/plain', row.dataset.fxIdx); } catch {} });
