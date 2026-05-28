@@ -1619,9 +1619,11 @@ const Rooms = (() => {
     const container = document.getElementById('public-channels');
     if (!container) return;
     const joinedRooms = (State.rooms || []).filter((r) => r.joined);
-    if (!joinedRooms.length) {
-      if (_roomsSidebarLoading || container.querySelector('.ft-sidebar-skeleton')) return;
-    }
+    // Keep the skeleton up only while a load is genuinely in flight. Do NOT also
+    // bail on a lingering skeleton node: innerHTML='' below is the only thing
+    // that clears it, so bailing on its presence would leave it up forever once
+    // a load completes with zero joined channels.
+    if (!joinedRooms.length && _roomsSidebarLoading) return;
     const renderKey = _joinedRoomsRenderKey();
     if (container.dataset.ftRoomsKey === renderKey && container.querySelector('.channel-item')) return;
     container.dataset.ftRoomsKey = renderKey;
