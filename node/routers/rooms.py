@@ -903,10 +903,26 @@ async def get_room(room_name: str, current_user: dict = Depends(get_current_user
 @router.patch("/{room_name}")
 async def update_room(request: Request, room_name: str, body: UpdateRoomRequest,
                       current_user: dict = Depends(get_current_user)):
-    """Update room settings. Only owner, mods, or admin can update."""
-    if not db.can_moderate_room(room_name, current_user["id"], bool(current_user.get("is_admin"))):
+    """Update room settings. Only owner, mods, or admin can update.
+
+    For a federated channel whose home is a *different* node, the local row is
+    a read-only mirror — the owner (matched by global_user_id) edits it by
+    relaying a signed request to the channel's home node, which validates and
+    re-broadcasts. Local/home channels keep the normal moderator authz.
+    """
+    from routers import federation as federation_mod
+    _room = db.get_room_by_name(room_name)
+    _local_sid = federation_mod._local_server_id()
+    _home = str((_room or {}).get("home_server_id") or "").strip()
+    _is_remote_home = bool(_home) and bool(_local_sid) and _home != _local_sid
+    actor_gid = str(current_user.get("global_user_id") or "").strip()
+    owner_gid = str((_room or {}).get("owner_global_user_id") or "").strip()
+    if _is_remote_home:
+        if not actor_gid or not owner_gid or actor_gid != owner_gid:
+            return JSONResponse(status_code=403, content={"error": "Only the channel owner can edit a federated channel"})
+    elif not db.can_moderate_room(room_name, current_user["id"], bool(current_user.get("is_admin"))):
         return JSONResponse(status_code=403, content={"error": "Not authorised"})
-    
+
     # Validate new name if provided
     if body.name and not ROOM_NAME_RE.match(body.name):
         return JSONResponse(status_code=400, content={
@@ -987,6 +1003,41 @@ async def update_room(request: Request, room_name: str, body: UpdateRoomRequest,
             body.forwarding_disabled,
         )
     )
+    if _is_remote_home:
+        # Federated mirror: do not mutate the local row. Relay a signed edit
+        # request to the channel's home node, which re-validates by owner gid
+        # and re-broadcasts the authoritative state back to us.
+        if renamed_to:
+            return JSONResponse(status_code=400, content={"error": "Cross-node rename is not supported"})
+        if not has_settings_update:
+            return JSONResponse(status_code=400, content={"error": "No settings to update"})
+        edit_payload = {"target_origin": _home, "room_name": room_name, "owner_global_user_id": owner_gid}
+        if body.description is not None:
+            edit_payload["description"] = clean_desc if clean_desc is not None else ""
+        if body.about is not None:
+            edit_payload["about"] = clean_about if clean_about is not None else ""
+        if body.icon is not None:
+            edit_payload["icon"] = icon if icon is not None else ""
+        if body.banner is not None:
+            edit_payload["banner"] = banner if banner is not None else ""
+        if body.channel_theme is not None:
+            edit_payload["channel_theme"] = sanitized_theme if sanitized_theme is not None else ""
+        if body.channel_type is not None:
+            edit_payload["channel_type"] = body.channel_type
+        if body.slowmode is not None:
+            edit_payload["slowmode"] = body.slowmode
+        if body.invite_only is not None:
+            edit_payload["invite_only"] = body.invite_only
+        if body.who_can_invite is not None:
+            edit_payload["who_can_invite"] = effective_who_can_invite
+        if body.forwarding_disabled is not None:
+            edit_payload["forwarding_disabled"] = body.forwarding_disabled
+        federation_mod.enqueue_server_event(
+            "channel.owner.edit.request", edit_payload,
+            target_server_ids=[_home], actor_global_user_id=actor_gid,
+        )
+        return {"ok": True, "pending": True}
+
     if has_settings_update:
         ok = db.update_room_settings(
             room_name,

@@ -2502,6 +2502,15 @@ def _migrate():
                 con.execute("ALTER TABLE rooms ADD COLUMN home_server_id TEXT DEFAULT ''")
             except Exception:
                 pass
+        # Global owner id for federated mirror rooms. Lets the directory show
+        # the real owner (resolved via federation_user_profiles) instead of the
+        # local federation_sync system user, and lets the home node authorise
+        # cross-node owner edits by gid match.
+        if "owner_global_user_id" not in room_cols_pre:
+            try:
+                con.execute("ALTER TABLE rooms ADD COLUMN owner_global_user_id TEXT DEFAULT ''")
+            except Exception:
+                pass
         con.execute(
             """
             CREATE TABLE IF NOT EXISTS official_build_manifests (
@@ -3193,6 +3202,50 @@ def _migrate():
             con.execute("ALTER TABLE federation_channel_index ADD COLUMN content_warning_enabled INTEGER DEFAULT 0")
         if fci_cols and "content_warning_flags" not in fci_cols:
             con.execute("ALTER TABLE federation_channel_index ADD COLUMN content_warning_flags INTEGER DEFAULT 0")
+
+        # ── One-time repair: rooms owned by the federation_sync system user ──
+        # Historic/legacy rooms got owner_id pointing at the federation_sync
+        # system account, so the directory rendered "federation_sync" as the
+        # owner. Repair existing rows once (display logic also covers any future
+        # such rows). Idempotent via the config sentinel + the COALESCE guards.
+        _owner_mig = con.execute(
+            "SELECT 1 FROM config WHERE key='migrate.room_owner_fed_sync.v2'"
+        ).fetchone()
+        if not _owner_mig:
+            _fed_row = con.execute(
+                "SELECT id FROM users WHERE nickname='federation_sync' COLLATE NOCASE"
+            ).fetchone()
+            if _fed_row:
+                _fed_uid = int(_fed_row["id"])
+                # (a) federated mirror rooms: backfill the real owner gid from
+                #     the directory index so display resolves the real nickname.
+                con.execute(
+                    """
+                    UPDATE rooms SET owner_global_user_id = (
+                        SELECT f.owner_global_user_id FROM federation_channel_index f
+                         WHERE f.room_name=rooms.name AND f.tombstoned=0
+                           AND COALESCE(f.owner_global_user_id,'')<>''
+                         ORDER BY f.last_seen_at DESC LIMIT 1)
+                     WHERE owner_id=? AND COALESCE(owner_global_user_id,'')=''
+                       AND EXISTS (SELECT 1 FROM federation_channel_index f2
+                                    WHERE f2.room_name=rooms.name AND f2.tombstoned=0
+                                      AND COALESCE(f2.owner_global_user_id,'')<>'')
+                    """,
+                    (_fed_uid,),
+                )
+                # (b) locally-homed orphan rooms: hand ownership back to 'frog'
+                #     (skip silently if no such user exists on this node).
+                _frog_row = con.execute(
+                    "SELECT id FROM users WHERE nickname='frog' COLLATE NOCASE"
+                ).fetchone()
+                if _frog_row:
+                    con.execute(
+                        "UPDATE rooms SET owner_id=? WHERE owner_id=? AND COALESCE(home_server_id,'')=''",
+                        (int(_frog_row["id"]), _fed_uid),
+                    )
+            con.execute(
+                "INSERT OR REPLACE INTO config(key,value) VALUES('migrate.room_owner_fed_sync.v2','1')"
+            )
 
         # ── Denormalized engagement counters on wall_posts ──
         # The /feed, /explore and /reels endpoints used to evaluate three
@@ -7969,8 +8022,23 @@ def get_room_by_name(room_name: str) -> Optional[Dict]:
                    r.vanity,
                    COALESCE(r.content_warning_enabled, 0) AS content_warning_enabled,
                    COALESCE(r.content_warning_flags, 0) AS content_warning_flags,
-                   u.nickname AS owner_nickname
-            FROM rooms r LEFT JOIN users u ON r.owner_id = u.id
+                   CASE
+                     WHEN LOWER(u.nickname) <> 'federation_sync' THEN u.nickname
+                     WHEN COALESCE(fci.owner_nickname,'') <> '' THEN fci.owner_nickname
+                     WHEN COALESCE(fup.nickname,'')       <> '' THEN fup.nickname
+                     WHEN COALESCE(NULLIF(r.owner_global_user_id,''), fci.owner_global_user_id) <> '' THEN ''
+                     ELSE 'federation_sync'
+                   END AS owner_nickname,
+                   COALESCE(NULLIF(r.owner_global_user_id,''), fci.owner_global_user_id, u.global_user_id, '') AS owner_global_user_id
+            FROM rooms r
+            LEFT JOIN users u ON r.owner_id = u.id
+            LEFT JOIN federation_channel_index fci
+                   ON fci.room_name = r.name AND fci.tombstoned = 0
+                  AND fci.last_seen_at = (
+                        SELECT MAX(f2.last_seen_at) FROM federation_channel_index f2
+                         WHERE f2.room_name = r.name AND f2.tombstoned = 0)
+            LEFT JOIN federation_user_profiles fup
+                   ON fup.global_user_id = COALESCE(NULLIF(r.owner_global_user_id,''), fci.owner_global_user_id)
             WHERE r.name = ?
         """, (room_name,)).fetchone()
     return dict(row) if row else None
@@ -10185,7 +10253,18 @@ def get_public_channels(category: str = None, search: str = None,
                      ELSE (SELECT COUNT(*) FROM room_members WHERE room_id=r.id)
                    END AS member_count,
                    r.channel_type,
-                   u.nickname as owner_name, u.avatar as owner_avatar,
+                   CASE
+                     WHEN LOWER(u.nickname) <> 'federation_sync' THEN u.nickname
+                     WHEN COALESCE(fci.owner_nickname,'') <> '' THEN fci.owner_nickname
+                     WHEN COALESCE(fup.nickname,'')       <> '' THEN fup.nickname
+                     WHEN COALESCE(fci.owner_global_user_id,'') <> '' THEN ''
+                     ELSE 'federation_sync'
+                   END AS owner_name,
+                   CASE
+                     WHEN LOWER(u.nickname) <> 'federation_sync' THEN u.avatar
+                     WHEN COALESCE(fup.avatar,'') <> '' THEN fup.avatar
+                     ELSE NULL
+                   END AS owner_avatar,
                    COALESCE(r.home_server_id, fci.home_server_id, '') AS home_server_id,
                    COALESCE(fci.home_base_url, '') AS home_base_url,
                    COALESCE(r.content_warning_enabled, fci.content_warning_enabled, 0) AS content_warning_enabled,
@@ -10200,6 +10279,11 @@ def get_public_channels(category: str = None, search: str = None,
             JOIN users u ON r.owner_id = u.id
             LEFT JOIN federation_channel_index fci
                    ON fci.room_name = r.name AND fci.tombstoned = 0
+                  AND fci.last_seen_at = (
+                        SELECT MAX(f2.last_seen_at) FROM federation_channel_index f2
+                         WHERE f2.room_name = r.name AND f2.tombstoned = 0)
+            LEFT JOIN federation_user_profiles fup
+                   ON fup.global_user_id = fci.owner_global_user_id
             WHERE r.is_public=1
               AND r.type='public'
               AND (

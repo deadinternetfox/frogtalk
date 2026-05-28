@@ -1048,6 +1048,15 @@ def enqueue_channel_directory_updated(room_name: str) -> dict:
     if not local_sid:
         return {"ok": False, "error": "no_server_id"}
     owner = db.get_user_by_id(int(room.get("owner_id") or 0)) or {}
+    owner_nick = str(owner.get("nickname") or "")
+    owner_gid = str(owner.get("global_user_id") or "")
+    if owner_nick.lower() == "federation_sync":
+        # Never assert the system user as the owner over the wire — peers would
+        # cache "federation_sync" as the displayed owner. Fall back to whatever
+        # real owner we already know for this channel.
+        fci = db.get_federation_channel_index_entry(name) or {}
+        owner_nick = str(fci.get("owner_nickname") or "")
+        owner_gid = str(fci.get("owner_global_user_id") or "")
     member_count = int(room.get("member_count") or 0)
     listed = bool(int(room.get("is_public") or 0))
     return enqueue_server_event(
@@ -1064,8 +1073,8 @@ def enqueue_channel_directory_updated(room_name: str) -> dict:
             "tags_json": str(room.get("tags") or "[]")[:2000],
             "channel_type": str(room.get("channel_type") or "text")[:16],
             "member_count": member_count,
-            "owner_nickname": str(owner.get("nickname") or "")[:64],
-            "owner_global_user_id": str(owner.get("global_user_id") or "")[:64],
+            "owner_nickname": owner_nick[:64],
+            "owner_global_user_id": owner_gid[:64],
             "home_base_url": str((db.get_or_create_local_server_identity() or {}).get("public_url") or "")[:256],
             "tombstone": not listed,
             "channel_theme": str(room.get("channel_theme") or "")[:20000],
@@ -3804,6 +3813,10 @@ def _insert_inbox_events_sync(events: list[dict]) -> tuple[int, int]:
         "channel.directory.updated",
         # Cross-node owner relay must be signed; nickname alone is not proof.
         "sticker.pack.owner.request",
+        # A channel owner editing from a non-home node: the home node only
+        # acts on it after verifying signature + owner-home + owner-gid, so it
+        # must always carry a valid signature.
+        "channel.owner.edit.request",
     }
     now = datetime.now(tz=timezone.utc)
     # Tightened from ±1h to ±5min after audit: an attacker who captures a
@@ -4652,7 +4665,7 @@ async def federation_inbox_processor() -> int:
                 await _handle_message_event(event)
             elif event_type.startswith("dm."):
                 await _handle_dm_event(event)
-            elif event_type.startswith("room."):
+            elif event_type.startswith("room.") or event_type.startswith("channel."):
                 await _handle_room_event(event)
             elif event_type.startswith("user."):
                 await _handle_user_event(event)
@@ -5328,7 +5341,7 @@ async def _broadcast_room_settings_ws(room_name: str) -> None:
         pass
 
 
-async def _apply_federated_room_settings(room_name: str, payload: dict) -> None:
+async def _apply_federated_room_settings(room_name: str, payload: dict, origin: str = "") -> None:
     """Apply channel metadata from a trusted federated peer (icon, desc, type)."""
     # Name changes are only accepted via room.renamed (with FK cascade).
     if payload.get("old_name") or payload.get("new_name") or payload.get("name"):
@@ -5337,13 +5350,20 @@ async def _apply_federated_room_settings(room_name: str, payload: dict) -> None:
             room_name,
         )
         return
-    if not _fed_room_moderator(room_name, payload.get("updated_by_nickname")):
-        _log.warning(
-            "federation: dropping room.settings.updated (unauthorised) room=%s",
-            room_name,
-        )
+    room_row = db.get_room_by_name(room_name)
+    if not room_row:
         return
-    if not db.get_room_by_name(room_name):
+    # Accept only when the event came from the channel's authoritative home, or
+    # (legacy) when the named actor is a local moderator. Without the home check
+    # any peer holding a moderator account could push settings for a channel it
+    # does not home.
+    room_home = str(room_row.get("home_server_id") or "").strip()
+    if not ((origin and room_home and origin == room_home)
+            or _fed_room_moderator(room_name, payload.get("updated_by_nickname"))):
+        _log.warning(
+            "federation: dropping room.settings.updated (unauthorised) room=%s origin=%s home=%s",
+            room_name, origin, room_home,
+        )
         return
     from routers import rooms as rooms_router
 
@@ -5417,7 +5437,111 @@ async def _handle_room_event(event: dict) -> None:
         room_name = _fed_room_name(payload.get("room_name"))
         if not room_name:
             return
-        await _apply_federated_room_settings(room_name.lower(), payload)
+        await _apply_federated_room_settings(
+            room_name.lower(), payload,
+            origin=str(event.get("origin_server_id") or "").strip(),
+        )
+        return
+
+    if event_type == "channel.owner.edit.request":
+        # A channel owner edited from a non-home node and relayed the change to
+        # us (the home node). The inbox already verified the Ed25519 signature,
+        # so origin_server_id and actor_global_user_id are trustworthy. We still
+        # enforce: (1) we are the addressed home, (2) the actor is homed on the
+        # signing node, (3) the actor IS this channel's owner. Then we apply
+        # locally and re-broadcast the authoritative state to all peers.
+        origin = str(event.get("origin_server_id") or "").strip()
+        actor_gid = str(event.get("actor_global_user_id") or "").strip()
+        room_name = _fed_room_name(payload.get("room_name"))
+        if not room_name or not actor_gid or actor_gid == "server-admin":
+            return
+        room_name = room_name.lower()
+        local_sid = _local_server_id()
+        if not local_sid or str(payload.get("target_origin") or "").strip() != local_sid:
+            return  # (1) not addressed to us as home
+        room = db.get_room_by_name(room_name)
+        if not room or not _room_snapshot_authoritative(room):
+            return  # we are not the authoritative home for this channel
+        if str(db.resolve_global_user_home_server_id(actor_gid) or "").strip() != origin:
+            _log.warning(
+                "federation: drop channel.owner.edit.request — actor %s not homed on origin %s room=%s",
+                actor_gid, origin, room_name,
+            )
+            return  # (2) signer does not authoritatively home the actor
+        owner_gid = str(room.get("owner_global_user_id") or "").strip() or \
+            str((db.get_user_by_id(int(room.get("owner_id") or 0)) or {}).get("global_user_id") or "").strip()
+        if not owner_gid or actor_gid != owner_gid:
+            _log.warning(
+                "federation: drop channel.owner.edit.request — actor %s is not owner of %s",
+                actor_gid, room_name,
+            )
+            return  # (3) actor is not the owner
+        if payload.get("name") or payload.get("new_name") or payload.get("old_name"):
+            return  # cross-node rename is not supported
+        from routers import rooms as rooms_router
+        room_type = str(room.get("type") or "public").lower()
+        kwargs: dict = {}
+        if "description" in payload:
+            kwargs["description"] = rooms_router._sanitize_room_text(payload.get("description"), max_len=256)
+        if "about" in payload:
+            kwargs["about"] = rooms_router._sanitize_room_text(payload.get("about"), max_len=2000, multiline=True)
+        if "icon" in payload:
+            try:
+                kwargs["icon"] = rooms_router._normalize_room_icon(payload.get("icon"))
+            except ValueError:
+                return
+        if "banner" in payload:
+            try:
+                kwargs["banner"] = rooms_router._normalize_room_banner(payload.get("banner"))
+            except ValueError:
+                return
+        if "channel_theme" in payload:
+            try:
+                kwargs["channel_theme"] = rooms_router._sanitize_channel_theme(payload.get("channel_theme"), room_type=room_type)
+            except ValueError:
+                return
+        if "channel_type" in payload:
+            ct = str(payload.get("channel_type") or "").strip().lower()
+            if ct in ("text", "music", "voice"):
+                kwargs["channel_type"] = ct
+        if "slowmode" in payload:
+            try:
+                sm = int(payload.get("slowmode"))
+                if 0 <= sm <= 3600:
+                    kwargs["slowmode"] = sm
+            except (TypeError, ValueError):
+                pass
+        if "invite_only" in payload:
+            iv = payload.get("invite_only")
+            # HIGH-13: private rooms must stay invite-only.
+            if iv in (0, 1) and not (iv == 0 and room_type == "private"):
+                kwargs["invite_only"] = iv
+        if "who_can_invite" in payload:
+            wci = str(payload.get("who_can_invite") or "").strip().lower()
+            if wci in ("everyone", "mods", "owner"):
+                if room_type == "private" and wci == "everyone":
+                    wci = "mods"
+                kwargs["who_can_invite"] = wci
+        if "forwarding_disabled" in payload:
+            fd = payload.get("forwarding_disabled")
+            if fd in (0, 1):
+                kwargs["forwarding_disabled"] = fd
+        if not kwargs or not db.update_room_settings(room_name, **kwargs):
+            return
+        await _broadcast_room_settings_ws(room_name)
+        # Re-broadcast authoritative state to all peers (including the editor's
+        # node) so every mirror converges on what the home node accepted.
+        try:
+            enqueue_channel_directory_updated(room_name)
+        except Exception:
+            pass
+        owner_nick = str((db.get_user_by_id(int(room.get("owner_id") or 0)) or {}).get("nickname") or "")
+        fed_settings: dict = {"room_name": room_name, "updated_by_nickname": owner_nick}
+        for _k in ("description", "about", "icon", "channel_type", "slowmode"):
+            if _k in kwargs:
+                fed_settings[_k] = kwargs[_k]
+        if len(fed_settings) > 2:
+            rooms_router._emit_federation_room_event("room.settings.updated", fed_settings)
         return
 
     if event_type == "room.presence.updated":
@@ -5523,6 +5647,19 @@ async def _handle_room_event(event: dict) -> None:
             if room_row:
                 try:
                     db.set_room_content_warning(room_name, enabled=cw_en, flags=cw_fl)
+                except Exception:
+                    pass
+            # Reconcile the real owner onto a local mirror so the directory and
+            # the cross-node edit authz resolve by gid (never the system user).
+            owner_gid = str(payload.get("owner_global_user_id") or "").strip()
+            if owner_gid and room_row and _room_is_federated_mirror(room_row):
+                try:
+                    with db._conn() as con:
+                        con.execute(
+                            "UPDATE rooms SET owner_global_user_id=? WHERE name=?",
+                            (owner_gid[:64], room_name),
+                        )
+                        con.commit()
                 except Exception:
                     pass
         try:
@@ -5705,12 +5842,24 @@ async def _handle_room_event(event: dict) -> None:
             db.join_room(user["id"], room["id"])
         gid = str(user.get("global_user_id") or gid or "").strip()
         if gid:
+            # Derive ownership by global_user_id (works for mirrors, where the
+            # local owner_id is the federation_sync system user); fall back to
+            # the local-id check only when no owner gid is known.
+            chan_owner_gid = str(room.get("owner_global_user_id") or "").strip()
+            if not chan_owner_gid:
+                chan_owner_gid = str(
+                    (db.get_federation_channel_index_entry(room["name"]) or {}).get("owner_global_user_id") or ""
+                ).strip()
+            is_owner = (
+                (bool(chan_owner_gid) and gid == chan_owner_gid)
+                or (not chan_owner_gid and int(user.get("id") or 0) == int(room.get("owner_id") or 0))
+            )
             db.upsert_federation_room_member(
                 room["name"], gid, user.get("nickname") or nickname,
                 display_name=user.get("display_name") or "",
                 avatar=user.get("avatar") or "",
                 home_server_id=str(payload.get("home_server_id") or event.get("origin_server_id") or "").strip(),
-                role="owner" if int(user.get("id") or 0) == int(room.get("owner_id") or 0) else "member",
+                role="owner" if is_owner else "member",
             )
         try:
             from ws_manager import manager
