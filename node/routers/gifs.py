@@ -114,6 +114,33 @@ def validate_sticker_effects(raw: Any) -> Optional[Dict[str, Any]]:
     bg = _safe_hex(raw.get("background"), "")  # "" → transparent
     border_radius = _clamp(raw.get("border_radius"), 0.0, 50.0, 0.0)
 
+    # Optional v2: chained effect layers (animation stack).
+    layers_out = []
+    layers_in = raw.get("layers")
+    if isinstance(layers_in, list):
+        for it in layers_in:
+            if not isinstance(it, dict):
+                continue
+            kind = it.get("kind")
+            if isinstance(kind, str):
+                kind = kind.strip()
+            if kind not in ("transform", "filter"):
+                continue
+            an = it.get("animation")
+            if isinstance(an, str):
+                an = an.strip()
+            if not isinstance(an, str) or an not in _STICKER_FX_ANIMATIONS or an == "none":
+                continue
+            # Keep this tight: only specific animations are allowed per kind.
+            if kind == "transform" and an not in {"spin","pulse","bounce","shake","wobble","float","flip","swing","sparkle","pop"}:
+                continue
+            if kind == "filter" and an not in {"glow","rainbow","rainbow_tint","rainbow_glow"}:
+                continue
+            dur = _clamp(it.get("duration"), 0.3, 10.0, 2.0)
+            layers_out.append({"kind": kind, "animation": an, "duration": dur})
+            if len(layers_out) >= 6:
+                break
+
     out: Dict[str, Any] = {
         "filter": filt,
         "transform": tfm,
@@ -123,6 +150,8 @@ def validate_sticker_effects(raw: Any) -> Optional[Dict[str, Any]]:
         "background": bg,
         "border_radius": border_radius,
     }
+    if layers_out:
+        out["layers"] = layers_out
     return out
 from deps import get_current_user
 

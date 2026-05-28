@@ -44,6 +44,12 @@
     'float', 'glow', 'rainbow', 'rainbow_tint', 'rainbow_glow',
     'flip', 'swing', 'sparkle', 'pop',
   ]);
+  const TRANSFORM_ANIMS = new Set([
+    'spin', 'pulse', 'bounce', 'shake', 'wobble', 'float', 'flip', 'swing', 'sparkle', 'pop',
+  ]);
+  const FILTER_ANIMS = new Set([
+    'glow', 'rainbow', 'rainbow_tint', 'rainbow_glow',
+  ]);
   const HEX_CHARS = '0123456789abcdef';
   const FX_B64_MAX_LEN = 1500;
   const FX_ALT_MAX_LEN = 120;
@@ -120,12 +126,32 @@
     out.animation_duration = _clamp(raw.animation_duration, 0.3, 10, 2);
     out.background = _hex(raw.background, '');
     out.border_radius = _clamp(raw.border_radius, 0, 50, 0);
+    // Optional v2: effect layers (animation stack). Each layer is whitelisted.
+    // This enables chaining multiple effects while keeping strict validation.
+    const layersIn = raw.layers;
+    if (Array.isArray(layersIn)) {
+      const layers = [];
+      for (const it of layersIn) {
+        if (!it || typeof it !== 'object') continue;
+        const kind = (typeof it.kind === 'string') ? it.kind.trim() : '';
+        const anim = (typeof it.animation === 'string') ? it.animation.trim() : '';
+        if (kind !== 'transform' && kind !== 'filter') continue;
+        if (!ANIMATIONS.has(anim) || anim === 'none') continue;
+        if (kind === 'transform' && !TRANSFORM_ANIMS.has(anim)) continue;
+        if (kind === 'filter' && !FILTER_ANIMS.has(anim)) continue;
+        const dur = _clamp(it.duration, 0.3, 10, 2);
+        layers.push({ kind, animation: anim, duration: dur });
+        if (layers.length >= 6) break;
+      }
+      out.layers = layers;
+    }
     return out;
   }
 
   function isDefault(fx) {
     const n = normalize(fx);
     if (!n) return true;
+    if (Array.isArray(n.layers) && n.layers.length) return false;
     if (n.animation !== 'none') return false;
     if (n.background) return false;
     if (n.border_radius) return false;
@@ -334,15 +360,18 @@
   /** Restart CSS animation on an existing .frog-sticker host (shadow DOM). */
   function replayAnimation(host) {
     if (!host) return;
-    const anim = host.dataset.fxAnimation || '';
-    if (!anim || anim === 'none') return;
-    // Keep shadow root closed for isolation. We stash a handle to the <img>
-    // on the host at build time so replay works without `host.shadowRoot`.
-    const img = host._fxImg || null;
-    if (!img) return;
-    img.style.animation = 'none';
-    void img.offsetWidth;
-    img.style.animation = anim;
+    // Restart CSS animations on any registered replay elements.
+    const els = host._fxReplayEls || [];
+    if (!els.length) return;
+    for (const el of els) {
+      const anim = el && el.dataset ? (el.dataset.fxAnim || '') : '';
+      if (!anim || anim === 'none') continue;
+      try {
+        el.style.animation = 'none';
+        void el.offsetWidth;
+        el.style.animation = anim;
+      } catch {}
+    }
   }
 
   function describeEffects(rawEffects) {
@@ -407,9 +436,8 @@
     // Closed shadow — outside JS can't reach in and tamper with the styles.
     const root = host.attachShadow ? host.attachShadow({ mode: 'closed' }) : null;
     const css  = toCss(effects, { playOnce: !!playOnce, forceAnimation: !!forceAnimation });
-    if (css && css.animation && css.animation !== 'none') {
-      host.dataset.fxAnimation = css.animation;
-    }
+    const nfx = normalize(effects);
+    const layers = (nfx && Array.isArray(nfx.layers)) ? nfx.layers : null;
 
     const styleHtml = `
       :host { all: initial; display: block; width: 100%; height: 100%; }
@@ -425,7 +453,7 @@
         width: auto; height: auto;
         object-fit: contain;
         --fx-base: ${css ? css.transform : 'none'};
-        --fx-filter: ${css ? css.filter : 'none'};
+        --fx-filter: ${css ? css.filter : 'brightness(1)'};
         --fx-glow: ${css ? css.glow : 'rgba(255,255,255,0.6)'};
         filter: var(--fx-filter);
         transform: var(--fx-base);
@@ -444,15 +472,52 @@
       style.textContent = styleHtml;
       const wrap = document.createElement('div');
       wrap.className = 'wrap';
+      // Nested wrappers let us "chain" multiple transform animations safely
+      // (each wrapper owns one animation). For filter animations we allow
+      // a single layer on the <img> itself (filter animations conflict if stacked).
+      let parent = wrap;
+      const replayEls = [];
+      let filterAnim = '';
+      let imgAnim = css ? css.animation : 'none';
+      if (layers && layers.length && (forceAnimation || !_prefersReducedMotion())) {
+        const tLayers = layers.filter(l => l.kind === 'transform').slice(0, 3);
+        const fLayer = layers.find(l => l.kind === 'filter') || null;
+        if (fLayer) {
+          filterAnim = _animationCss(fLayer.animation, fLayer.duration, playOnce);
+        }
+        // Build transform wrappers from outer->inner in order.
+        for (const tl of tLayers) {
+          const d = document.createElement('div');
+          d.className = 'fx-anim';
+          const a = _animationCss(tl.animation, tl.duration, playOnce);
+          d.style.animation = a || 'none';
+          d.dataset.fxAnim = a || 'none';
+          d.style.willChange = 'transform';
+          parent.appendChild(d);
+          parent = d;
+          replayEls.push(d);
+        }
+        // If we have a stacked filter animation, prefer it over legacy single animation
+        // when the legacy animation is a filter-type.
+        if (filterAnim) {
+          imgAnim = filterAnim;
+        }
+      }
+
       const img = document.createElement('img');
       img.setAttribute('alt', safeAlt);
       img.setAttribute('draggable', 'false');
       img.setAttribute('decoding', 'async');
       img.setAttribute('loading', 'lazy');
       if (safeSrc) img.src = safeSrc;
-      // Stash the internal <img> reference for replayAnimation().
+      // Apply filter animation (if any) on the img.
+      if (imgAnim) img.style.animation = imgAnim;
+      img.dataset.fxAnim = imgAnim || 'none';
+      replayEls.push(img);
+      host._fxReplayEls = replayEls;
+      // Stash the internal <img> reference for other code paths.
       host._fxImg = img;
-      wrap.appendChild(img);
+      parent.appendChild(img);
       root.appendChild(style);
       root.appendChild(wrap);
     } else {
@@ -464,6 +529,7 @@
       img.style.cssText = 'max-width:100%;max-height:100%;object-fit:contain';
       if (safeAlt) img.alt = safeAlt;
       host._fxImg = img;
+      host._fxReplayEls = [img];
       host.appendChild(img);
     }
     return host;

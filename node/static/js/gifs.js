@@ -1994,15 +1994,20 @@ const GIFs = (() => {
         </details>
 
         <details style="border:1px solid color-mix(in srgb, var(--accent-color) 22%, var(--border-color));border-radius:10px;padding:10px 12px;background:color-mix(in srgb, var(--bg-color) 55%, transparent)">
-          <summary style="cursor:pointer;font-weight:700;color:var(--accent-color);font-size:12px;text-transform:uppercase;letter-spacing:.4px">Animation</summary>
+          <summary style="cursor:pointer;font-weight:700;color:var(--accent-color);font-size:12px;text-transform:uppercase;letter-spacing:.4px">FX Timeline (stack)</summary>
           <div style="display:flex;flex-direction:column;gap:8px;margin-top:8px">
-            <label style="display:grid;grid-template-columns:90px 1fr;align-items:center;gap:8px;font-size:12px">
-              <span style="color:var(--text-muted)">Style</span>
-              <select data-fx-anim style="background:var(--surface-color);color:var(--text-color);border:1px solid var(--border-color);border-radius:6px;padding:5px 7px">
-                ${StickerFX.ANIMATIONS.map(a => `<option value="${a}" ${a === fx.animation ? 'selected' : ''}>${a}</option>`).join('')}
-              </select>
-            </label>
-            ${sliderHtml('Duration', '_root', 'animation_duration', 0.3, 10, 0.1, fx.animation_duration, 's')}
+            <div style="font-size:11px;color:var(--text-muted);line-height:1.4">
+              Stack multiple effects and drag to reorder. (Safe whitelist only.)
+            </div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap">
+              <button type="button" data-fx-add="transform" class="fx-preset-btn">+ Transform</button>
+              <button type="button" data-fx-add="filter" class="fx-preset-btn">+ Filter/Glow</button>
+              <button type="button" data-fx-clear-layers class="fx-preset-btn">Clear stack</button>
+            </div>
+            <div id="fx-layer-list" style="display:flex;flex-direction:column;gap:6px"></div>
+            <div style="font-size:11px;color:var(--text-muted)">
+              Legacy: the first Transform layer is also used as the old single-animation value for older clients.
+            </div>
           </div>
         </details>
 
@@ -2056,11 +2061,101 @@ const GIFs = (() => {
         fx.background = e.target.checked ? (bgColor && bgColor.value) || '#000000' : '';
         renderPreview();
       });
-      const animSel = ctr.querySelector('select[data-fx-anim]');
-      if (animSel) animSel.addEventListener('change', e => {
-        fx.animation = e.target.value;
+      // ── Layer stack UI ─────────────────────────────────────────────
+      const list = ctr.querySelector('#fx-layer-list');
+      if (!Array.isArray(fx.layers)) fx.layers = [];
+      const TRANSFORM_OPTS = ['spin','pulse','bounce','shake','wobble','float','flip','swing','sparkle','pop'];
+      const FILTER_OPTS = ['glow','rainbow','rainbow_tint','rainbow_glow'];
+      const _syncLegacy = () => {
+        const firstT = (fx.layers || []).find(l => l.kind === 'transform');
+        if (firstT) {
+          fx.animation = firstT.animation;
+          fx.animation_duration = firstT.duration;
+        } else {
+          fx.animation = 'none';
+        }
+      };
+      const renderLayers = () => {
+        if (!list) return;
+        list.innerHTML = '';
+        (fx.layers || []).forEach((l, idx) => {
+          const row = document.createElement('div');
+          row.draggable = true;
+          row.dataset.fxIdx = String(idx);
+          row.style.cssText = 'display:grid;grid-template-columns:86px 1fr 78px 28px;gap:6px;align-items:center;border:1px solid var(--border-color);border-radius:10px;padding:8px;background:color-mix(in srgb, var(--surface-color) 85%, transparent)';
+          const kind = l.kind === 'filter' ? 'Filter' : 'Transform';
+          const opts = (l.kind === 'filter' ? FILTER_OPTS : TRANSFORM_OPTS)
+            .map(a => `<option value="${a}" ${a===l.animation?'selected':''}>${a}</option>`).join('');
+          row.innerHTML = `
+            <div style="font-size:11px;color:var(--text-muted);font-weight:700">${kind}</div>
+            <select data-fx-layer-anim style="background:var(--surface-color);color:var(--text-color);border:1px solid var(--border-color);border-radius:8px;padding:6px 8px;font-size:12px">${opts}</select>
+            <input data-fx-layer-dur type="number" min="0.3" max="10" step="0.1" value="${Number(l.duration||2).toFixed(1)}"
+              style="background:var(--surface-color);color:var(--text-color);border:1px solid var(--border-color);border-radius:8px;padding:6px 8px;font-size:12px;width:100%">
+            <button type="button" data-fx-layer-del title="Remove" style="border:1px solid var(--border-color);background:transparent;color:var(--text-muted);border-radius:8px;height:30px;cursor:pointer">✕</button>
+          `;
+          // drag reorder
+          row.addEventListener('dragstart', (e) => { try { e.dataTransfer.setData('text/plain', row.dataset.fxIdx); } catch {} });
+          row.addEventListener('dragover', (e) => { e.preventDefault(); });
+          row.addEventListener('drop', (e) => {
+            e.preventDefault();
+            const a = parseInt(e.dataTransfer.getData('text/plain') || '-1', 10);
+            const b = parseInt(row.dataset.fxIdx || '-1', 10);
+            if (!Number.isFinite(a) || !Number.isFinite(b) || a<0 || b<0 || a===b) return;
+            const arr = fx.layers || [];
+            const item = arr.splice(a, 1)[0];
+            arr.splice(b, 0, item);
+            fx.layers = arr;
+            _syncLegacy();
+            renderLayers();
+            renderPreview();
+          });
+          row.querySelector('[data-fx-layer-anim]').addEventListener('change', (e) => {
+            l.animation = e.target.value;
+            _syncLegacy();
+            renderPreview();
+          });
+          row.querySelector('[data-fx-layer-dur]').addEventListener('change', (e) => {
+            const v = Math.max(0.3, Math.min(10, parseFloat(e.target.value || '2') || 2));
+            l.duration = v;
+            e.target.value = v.toFixed(1);
+            _syncLegacy();
+            renderPreview();
+          });
+          row.querySelector('[data-fx-layer-del]').addEventListener('click', () => {
+            fx.layers.splice(idx, 1);
+            _syncLegacy();
+            renderLayers();
+            renderPreview();
+          });
+          list.appendChild(row);
+        });
+        if (!(fx.layers||[]).length) {
+          const empty = document.createElement('div');
+          empty.style.cssText = 'font-size:12px;color:var(--text-muted);padding:6px 2px';
+          empty.textContent = 'No stacked layers. Add Transform and/or Filter layers above.';
+          list.appendChild(empty);
+        }
+      };
+      ctr.querySelectorAll('button[data-fx-add]').forEach(b => b.addEventListener('click', () => {
+        const k = b.dataset.fxAdd;
+        const layer = k === 'filter'
+          ? { kind: 'filter', animation: FILTER_OPTS[0], duration: 2 }
+          : { kind: 'transform', animation: TRANSFORM_OPTS[0], duration: 2 };
+        fx.layers = fx.layers || [];
+        fx.layers.push(layer);
+        _syncLegacy();
+        renderLayers();
+        renderPreview();
+      }));
+      const clearBtn = ctr.querySelector('button[data-fx-clear-layers]');
+      if (clearBtn) clearBtn.addEventListener('click', () => {
+        fx.layers = [];
+        _syncLegacy();
+        renderLayers();
         renderPreview();
       });
+      _syncLegacy();
+      renderLayers();
     }
 
     function renderPreview() {
