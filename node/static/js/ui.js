@@ -2895,6 +2895,96 @@ function _preferredNetworkUrl(server) {
   return (_isTorPreferred() && onion) ? onion : (base || onion);
 }
 
+function _isIpHost(host) {
+  const h = String(host || '').trim();
+  if (!h) return false;
+  // IPv4 only; IPv6 is unlikely to show up here and would be bracketed in URLs.
+  return /^\d{1,3}(\.\d{1,3}){3}$/.test(h);
+}
+
+function _serverChoiceScore(s) {
+  // Higher is better.
+  const server = s && typeof s === 'object' ? s : {};
+  const baseRaw = String(server.base_url || '').trim();
+  const base = _normalizeNetworkUrl(baseRaw);
+  const onion = _normalizeNetworkUrl(server.onion_url || '');
+  let host = '';
+  try { host = base ? new URL(base).hostname.toLowerCase() : ''; } catch { host = ''; }
+  const isHttpOnly = /^http:\/\//i.test(baseRaw) && !/^https:\/\//i.test(baseRaw);
+  const official = Number(server.official || 0) || (String(server.trust_tier || '').toLowerCase() === 'official' ? 1 : 0);
+  const healthy = server.healthy ? 1 : 0;
+  const hasHttps = base.startsWith('https://') ? 1 : 0;
+  const hasOnion = onion ? 1 : 0;
+  const ipPenalty = _isIpHost(host) ? 1 : 0;
+  const latency = Number(server.latency_ms || 999999);
+  // Weighting:
+  // - prefer official + healthy
+  // - prefer https over http-only
+  // - prefer non-IP hostnames (canonical domains) over raw IP entries
+  // - prefer lower latency
+  let score = 0;
+  score += official ? 5000 : 0;
+  score += healthy ? 2000 : 0;
+  score += hasHttps ? 800 : 0;
+  score -= isHttpOnly ? 600 : 0;
+  score += hasOnion ? 50 : 0;
+  score -= ipPenalty ? 200 : 0;
+  if (Number.isFinite(latency) && latency > 0) score -= Math.min(1500, Math.round(latency));
+  return score;
+}
+
+function _dedupeNetworkServers(list) {
+  const rows = Array.isArray(list) ? list.filter(Boolean) : [];
+  const byId = new Map();
+  const byBase = new Map();
+
+  for (const s of rows) {
+    const sid = String(s.server_id || '').trim().toLowerCase();
+    const base = _normalizeNetworkUrl(s.base_url || '');
+    const key = sid || base;
+    if (!key) continue;
+    const prev = (sid && byId.get(sid)) || (!sid && byBase.get(base)) || null;
+    if (!prev) {
+      if (sid) byId.set(sid, s);
+      else if (base) byBase.set(base, s);
+      continue;
+    }
+    const keep = _serverChoiceScore(s) >= _serverChoiceScore(prev) ? s : prev;
+    if (sid) byId.set(sid, keep);
+    else if (base) byBase.set(base, keep);
+  }
+
+  const out = [...byId.values()];
+  for (const s of byBase.values()) {
+    const sid = String(s.server_id || '').trim().toLowerCase();
+    if (sid && byId.has(sid)) continue;
+    out.push(s);
+  }
+  // Stable ordering: keep originals first when possible.
+  const seen = new Set();
+  const ordered = [];
+  for (const s of rows) {
+    const sid = String(s.server_id || '').trim().toLowerCase();
+    const base = _normalizeNetworkUrl(s.base_url || '');
+    const key = sid || base;
+    if (!key || seen.has(key)) continue;
+    const picked = sid ? byId.get(sid) : (byBase.get(base) || null);
+    if (picked) {
+      ordered.push(picked);
+      seen.add(key);
+    }
+  }
+  for (const s of out) {
+    const sid = String(s.server_id || '').trim().toLowerCase();
+    const base = _normalizeNetworkUrl(s.base_url || '');
+    const key = sid || base;
+    if (!key || seen.has(key)) continue;
+    ordered.push(s);
+    seen.add(key);
+  }
+  return ordered;
+}
+
 function _networkCurrentServerEntry() {
   const connectedBase = _normalizeNetworkUrl(window.location.origin || '');
   const onion = _normalizeNetworkUrl(_networkCurrentServerInfo?.onion_url || '');
@@ -3896,7 +3986,7 @@ function _networkHydrateProbeFromCache() {
   if (age == null || age > _NETWORK_PROBE_CACHE_MS) return false;
   try {
     const o = JSON.parse(localStorage.getItem('ft_network_probe_cache') || '{}');
-    _networkProbeResults = Array.isArray(o.servers) ? o.servers : [];
+    _networkProbeResults = _dedupeNetworkServers(Array.isArray(o.servers) ? o.servers : []);
     return _networkProbeResults.length > 0;
   } catch {
     return false;
@@ -3987,7 +4077,7 @@ async function refreshNetworkServers(opts) {
       _updateNetworkProbeHint('Probe failed — try again in a few seconds.');
       return;
     }
-    _networkProbeResults = data.servers || [];
+    _networkProbeResults = _dedupeNetworkServers(data.servers || []);
     try {
       localStorage.setItem('ft_network_probe_cache', JSON.stringify({
         ts: Date.now(),
@@ -4106,7 +4196,7 @@ async function switchToBestNetworkNode(reason = 'fallback') {
       if (res.ok) {
         const cands = Array.isArray(data.candidates) ? data.candidates : [];
         best = _pickBestHealthyNode(cands, here) || data.selected || null;
-        if (cands.length) _networkProbeResults = cands;
+        if (cands.length) _networkProbeResults = _dedupeNetworkServers(cands);
       }
     } catch {}
   }
@@ -4142,7 +4232,7 @@ async function runAutoNetworkSelect() {
       UI.showToast(data.error || 'Auto selection failed', 'error');
       return;
     }
-    _networkProbeResults = data.candidates || [];
+    _networkProbeResults = _dedupeNetworkServers(data.candidates || []);
     const connectedBase = _getConnectedServerBaseUrl();
     const currentServer = _networkCurrentServerEntry();
     if (connectedBase && currentServer && !_networkProbeResults.some(s => _preferredNetworkUrl(s) === connectedBase)) {
@@ -4515,7 +4605,7 @@ async function _loadNetworkSettingsAsync(seq) {
   if (seq !== _networkTabLoadSeq) return;
   const currentServer = _networkCurrentServerEntry();
   if (!_networkHydrateProbeFromCache()) {
-    _networkProbeResults = currentServer ? [currentServer] : [];
+    _networkProbeResults = _dedupeNetworkServers(currentServer ? [currentServer] : []);
     _networkSelectedServer = _pickDefaultNetworkServer();
     _renderNetworkServersList();
     _renderNetworkSelection();
