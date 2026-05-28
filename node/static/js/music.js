@@ -565,8 +565,24 @@ const Music = (() => {
           if ((fresh.queue || []).length > 0) { try { _render(); } catch {} return; }
         }
         if (_room !== fillRoom) return;
-        try { UI.showToast && UI.showToast('Auto-fill: queued a Discover pick 🎵', 'info', 1800); } catch {}
         try { await _withTimeout(submit(next.url), 10000); } catch {}
+        // Self-heal the "says auto-queuing but hangs until I switch
+        // channels" case: if submit()'s POST response stalls past the
+        // timeout above, its own _state refresh + repaint never runs, so
+        // the just-added track sits invisible until a manual channel
+        // switch re-fetches. Do a safe local re-fetch (the add was written
+        // to this node's db, so it's readable here) and repaint. We do NOT
+        // force a home re-sync here — that would clear the local queue and
+        // could clobber our pick if the home node hasn't applied the
+        // federated add yet.
+        if (_room === fillRoom) {
+          let surfaced = null;
+          try { surfaced = await _withTimeout(_fetchState(fillRoom), 5000); } catch {}
+          if (surfaced && _room === fillRoom) { _state = surfaced; try { _render(); } catch {} }
+        }
+        if (_state && (_state.queue || []).length > 0) {
+          try { UI.showToast && UI.showToast('Auto-fill: queued a Discover pick 🎵', 'info', 1800); } catch {}
+        }
       }
     } finally {
       clearTimeout(_autoFillWatchdog);

@@ -7094,16 +7094,8 @@ const Social = (() => {
       if (!list.length) return null;
       _autoNextSeen = _autoNextSeen || new Set();
       if (currentUrl) _autoNextSeen.add(String(currentUrl));
-      // Find the index of the current track so we walk forward from it.
-      let startIdx = 0;
-      const curIdx = list.findIndex(p => String(p.media_data || '') === String(currentUrl || ''));
-      if (curIdx >= 0) startIdx = curIdx + 1;
       const len = list.length;
-      for (let off = 0; off < len; off++) {
-        const p = list[(startIdx + off) % len];
-        const url = String(p.media_data || '').trim();
-        if (!url) continue;
-        if (_autoNextSeen.has(url)) continue;
+      const _mkResult = (p, url) => {
         const provider = (p.media_type || '').split('/')[1] || '';
         const t = _parseMusicTrack(url, provider);
         const title = String(p.track_title || '').trim()
@@ -7117,27 +7109,48 @@ const Social = (() => {
           thumbnail: t.thumb || '',
           postId: p.id || null,
         };
+      };
+      // Sequential (solo auto-next): when we know the current track, walk
+      // forward from it so the feed plays in order. Auto-fill passes an
+      // empty currentUrl — there's no "next in sequence", and always
+      // starting at index 0 made every refill queue the same top track,
+      // so pick a RANDOM unseen entry instead.
+      const curIdx = currentUrl
+        ? list.findIndex(p => String(p.media_data || '') === String(currentUrl))
+        : -1;
+      if (curIdx >= 0) {
+        for (let off = 0; off < len; off++) {
+          const p = list[(curIdx + 1 + off) % len];
+          const url = String(p.media_data || '').trim();
+          if (!url || _autoNextSeen.has(url)) continue;
+          return _mkResult(p, url);
+        }
+      } else {
+        const pool = [];
+        for (const p of list) {
+          const url = String(p.media_data || '').trim();
+          if (!url || _autoNextSeen.has(url)) continue;
+          pool.push({ p, url });
+        }
+        if (pool.length) {
+          const pick = pool[Math.floor(Math.random() * pool.length)];
+          return _mkResult(pick.p, pick.url);
+        }
       }
-      // Every track in the cached feed has played — reset the seen set
-      // and pick the first one (so a small feed keeps looping rather than
-      // dying silently). Skip the URL we just played so we don't restart it.
+      // Every track in the cached feed has played — reset the seen set and
+      // pick a fresh one (so a small feed keeps looping rather than dying
+      // silently). Skip the URL we just played so we don't restart it, and
+      // pick at random so a looping feed doesn't replay in lockstep.
       _autoNextSeen = new Set(currentUrl ? [String(currentUrl)] : []);
+      const pool2 = [];
       for (const p of list) {
         const url = String(p.media_data || '').trim();
         if (!url || url === String(currentUrl || '')) continue;
-        const provider = (p.media_type || '').split('/')[1] || '';
-        const t = _parseMusicTrack(url, provider);
-        const title = String(p.track_title || '').trim()
-          || _prettyMusicFallbackTitle(url, provider);
-        _autoNextSeen.add(url);
-        return {
-          url,
-          provider: t.provider || provider,
-          title,
-          sharer: p.nickname || p.author_nick || p.author || '',
-          thumbnail: t.thumb || '',
-          postId: p.id || null,
-        };
+        pool2.push({ p, url });
+      }
+      if (pool2.length) {
+        const pick = pool2[Math.floor(Math.random() * pool2.length)];
+        return _mkResult(pick.p, pick.url);
       }
     } catch {}
     return null;
@@ -7172,6 +7185,11 @@ const Social = (() => {
         let body = null;
         try { body = await res.json(); } catch {}
         const list = (body && Array.isArray(body.posts)) ? body.posts : [];
+        // Gather every eligible (unseen, music) candidate from this page,
+        // then pick one at RANDOM. Returning the first match always queued
+        // the #1 trending track on quiet instances — the "always the same
+        // song" complaint. Random keeps refills varied.
+        const pool = [];
         for (const p of list) {
           const mt = String(p.media_type || '').toLowerCase();
           const url = String(p.media_data || '').trim();
@@ -7181,22 +7199,26 @@ const Social = (() => {
           // Don't bounce back to the very track that just finished even
           // if the user hasn't otherwise heard it this session.
           if (currentUrl && url === String(currentUrl)) continue;
-          const provider = mt.startsWith('music/')
-            ? mt.split('/')[1] || ''
-            : (isMusicUrl(url) ? '' : '');
-          const t = _parseMusicTrack(url, provider);
-          const title = String(p.track_title || '').trim()
-            || _prettyMusicFallbackTitle(url, t.provider || provider);
-          _autoNextSeen.add(url);
-          return {
-            url,
-            provider: t.provider || provider,
-            title,
-            sharer: p.nickname || p.author_nick || p.author || '',
-            thumbnail: t.thumb || '',
-            postId: p.id || null,
-          };
+          pool.push({ p, mt, url });
         }
+        if (!pool.length) continue;
+        const chosen = pool[Math.floor(Math.random() * pool.length)];
+        const { p, mt, url } = chosen;
+        const provider = mt.startsWith('music/')
+          ? mt.split('/')[1] || ''
+          : (isMusicUrl(url) ? '' : '');
+        const t = _parseMusicTrack(url, provider);
+        const title = String(p.track_title || '').trim()
+          || _prettyMusicFallbackTitle(url, t.provider || provider);
+        _autoNextSeen.add(url);
+        return {
+          url,
+          provider: t.provider || provider,
+          title,
+          sharer: p.nickname || p.author_nick || p.author || '',
+          thumbnail: t.thumb || '',
+          postId: p.id || null,
+        };
       }
     } catch {}
     return null;
