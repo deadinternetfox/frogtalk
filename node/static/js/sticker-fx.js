@@ -258,6 +258,11 @@
 
     let combinedFilter = filterStr;
     if (shadowStr) combinedFilter = combinedFilter ? `${filterStr} ${shadowStr}` : shadowStr;
+    // IMPORTANT: keyframe animations concatenate extra filter functions
+    // (e.g. `var(--fx-filter) hue-rotate(...)`). The keyword `none` cannot be
+    // combined with other filter functions, which would make rainbow/glow
+    // appear to do nothing. Use an identity filter instead.
+    if (!combinedFilter) combinedFilter = 'brightness(1)';
 
     let animation = '';
     // Default: honor reduced-motion. Editor preview can explicitly override
@@ -267,10 +272,13 @@
     }
 
     // Use the shadow color also as the "glow" color for the glow keyframes.
-    const glow = _hexToRgba(n.shadow.color || '#ffffff', 0.8);
+    // Default shadow color is black; when users haven't chosen a glow color
+    // yet a black glow can be effectively invisible on dark themes.
+    const glowHex = (String(n.shadow.color || '').toLowerCase() === '#000000') ? '#ffffff' : (n.shadow.color || '#ffffff');
+    const glow = _hexToRgba(glowHex, 0.8);
 
     return {
-      filter:     combinedFilter || 'none',
+      filter:     combinedFilter,
       transform:  transformStr,
       animation:  animation || 'none',
       background: n.background || 'transparent',
