@@ -15,3 +15,10 @@ contextBridge.exposeInMainWorld('desktopApp', {
   getLaunchOnStartup: () => ipcRenderer.invoke('desktop:get-launch-on-startup'),
   setLaunchOnStartup: (enabled) => ipcRenderer.invoke('desktop:set-launch-on-startup', !!enabled)
 });
+
+// Minimal API used by the offline/disconnected fallback page (data-URL).
+contextBridge.exposeInMainWorld('desktopOffline', {
+  retry: () => ipcRenderer.invoke('desktop:offline-retry'),
+  reload: () => ipcRenderer.invoke('desktop:offline-reload'),
+  switchNode: () => ipcRenderer.invoke('desktop:offline-switch-node'),
+});

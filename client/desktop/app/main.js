@@ -43,6 +43,7 @@ let mainWindow = null;
 let tray = null;
 let _creatingTray = false;
 let _isClosingWindow = false;
+let _lastAppTargetUrl = '';
 let _desktopSettings = {
   closeToTrayOnX: true,
   // 10.5: anti-screenshot. Default on for new installs (privacy-first);
@@ -71,6 +72,118 @@ function normalizeServerBaseUrl(raw) {
 function getAppUrl() {
   const base = normalizeServerBaseUrl(_desktopSettings.serverBaseUrl || '');
   return base ? `${base}/app` : '';
+}
+
+function _offlineFallbackHtml(params) {
+  const p = params && typeof params === 'object' ? params : {};
+  const reason = String(p.reason || '').trim().toLowerCase();
+  const detail = String(p.detail || '').trim();
+  const offline = p.offline === true;
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>FrogTalk — Disconnected</title>
+  <style>
+    :root{--line:#2f5548;--text:#dff5e8;--muted:#85a89a;--accent:#7fd2a7;}
+    *{box-sizing:border-box}
+    html,body{height:100%;margin:0;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:
+      radial-gradient(900px 380px at 10% 0%, rgba(76,175,80,.14), transparent 60%),
+      radial-gradient(900px 420px at 110% 110%, rgba(111,199,150,.10), transparent 60%),
+      linear-gradient(180deg, #12231e 0%, #0a1411 60%, #08110e 100%);color:var(--text)}
+    body{display:flex;align-items:center;justify-content:center;padding:22px}
+    .wrap{width:100%;max-width:420px;border-radius:20px;border:1px solid var(--line);
+      background:linear-gradient(180deg, rgba(24,40,33,.92), rgba(14,24,19,.92));
+      box-shadow:0 20px 56px rgba(0,0,0,.55), 0 0 0 1px rgba(76,175,80,.06);
+      padding:22px 18px 18px;text-align:center}
+    .icon{font-size:64px;line-height:1;margin-bottom:12px;filter:drop-shadow(0 6px 18px rgba(127,210,167,.22))}
+    h1{margin:0;font-size:20px;letter-spacing:.2px}
+    .msg{margin:10px auto 0;max-width:340px;color:var(--muted);font-size:13px;line-height:1.45}
+    .sub{margin:10px auto 0;max-width:340px;color:#9bbab0;font-size:12px;min-height:18px}
+    .actions{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;margin-top:16px}
+    button{appearance:none;border:1px solid #2f5548;border-radius:12px;
+      background:linear-gradient(180deg, rgba(127,210,167,.08), rgba(76,175,80,.05));
+      color:var(--accent);padding:12px 14px;min-width:120px;font-weight:700;cursor:pointer;
+      box-shadow:0 10px 28px rgba(0,0,0,.28)}
+    button.secondary{background:linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.02));
+      color:#b7d9cb;border-color:#2a4038}
+    button:active{transform:scale(.99)}
+    .pill{display:inline-flex;align-items:center;gap:8px;margin-top:14px;padding:7px 10px;border-radius:999px;
+      border:1px solid rgba(127,210,167,.18);background:rgba(12,20,16,.55);color:#a6c9bb;font-size:12px}
+    .dot{width:8px;height:8px;border-radius:50%;background:#f85149;box-shadow:0 0 0 4px rgba(248,81,73,.10)}
+    .spin{width:14px;height:14px;border-radius:50%;border:2px solid rgba(255,255,255,.22);border-top-color:#fff;
+      animation:spin 1s linear infinite;display:none;vertical-align:middle}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    @media (max-width:420px){.icon{font-size:54px}h1{font-size:19px}button{flex:1}}
+  </style>
+</head>
+<body>
+  <div class="wrap" role="alertdialog" aria-live="assertive">
+    <div class="icon" id="icon">📡</div>
+    <h1 id="title">Connection lost</h1>
+    <div class="msg" id="msg">FrogTalk can’t reach the server. Check your internet connection.</div>
+    <div class="sub" id="sub"></div>
+    <div class="actions">
+      <button id="btnRetry"><span class="spin" id="spin"></span><span id="retryText">Retry now</span></button>
+      <button class="secondary" id="btnSwitch">Switch node</button>
+      <button class="secondary" id="btnReload">Reload app</button>
+    </div>
+    <div class="pill"><span class="dot"></span><span id="pillText">Disconnected</span></div>
+  </div>
+  <script>
+  (function(){
+    const reason = ${JSON.stringify(reason)};
+    const detail = ${JSON.stringify(detail)};
+    const forceOffline = ${offline ? 'true' : 'false'};
+    const $ = (id) => document.getElementById(id);
+    const set = (id, text) => { const el=$(id); if (el) el.textContent = text; };
+    function applyState(kind){
+      const isOffline = forceOffline || (typeof navigator !== 'undefined' && navigator.onLine === false);
+      if (kind === 'offline' || isOffline){
+        set('icon','📡'); set('title','You are offline');
+        set('msg','Check your internet connection. FrogTalk will reconnect automatically.');
+        set('pillText','Offline'); set('sub', detail || 'Waiting for network…');
+        return;
+      }
+      if (kind === 'crash'){
+        set('icon','⚠️'); set('title','App needs a refresh');
+        set('msg','The renderer crashed or got stuck. Reloading usually fixes it.');
+        set('pillText','Needs reload'); set('sub', detail || '');
+        return;
+      }
+      set('icon','⚠️'); set('title','Can’t reach FrogTalk');
+      set('msg','The server is unreachable. This usually means your connection dropped or the server is restarting.');
+      set('pillText','Disconnected'); set('sub', detail || 'Try again, or switch to another node.');
+    }
+    function setBusy(busy){
+      const sp=$('spin'); const btn=$('btnRetry'); const txt=$('retryText');
+      if (sp) sp.style.display = busy ? 'inline-block' : 'none';
+      if (btn) btn.disabled = !!busy;
+      if (txt) txt.textContent = busy ? 'Connecting…' : 'Retry now';
+    }
+    applyState(reason || 'server');
+    $('btnRetry')?.addEventListener('click', async () => {
+      setBusy(true);
+      try { await window.desktopOffline?.retry?.(); } catch {}
+      setTimeout(() => setBusy(false), 4500);
+    });
+    $('btnSwitch')?.addEventListener('click', async () => { try { await window.desktopOffline?.switchNode?.(); } catch {} });
+    $('btnReload')?.addEventListener('click', async () => { try { await window.desktopOffline?.reload?.(); } catch {} });
+    window.addEventListener('online', () => { set('sub','Back online — retrying…'); try { window.desktopOffline?.retry?.(); } catch {} });
+    window.addEventListener('offline', () => applyState('offline'));
+  })();
+  </script>
+</body>
+</html>`;
+}
+
+function _loadOfflineFallback(win, params) {
+  if (!win || win.isDestroyed()) return;
+  try {
+    const html = _offlineFallbackHtml(params);
+    win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+  } catch {}
 }
 
 function isAppNavigationUrl(url) {
@@ -497,8 +610,45 @@ async function createWindow() {
 
   setTimeout(() => {
     const target = getAppUrl() || APP_URL_FALLBACK;
+    _lastAppTargetUrl = target;
     mainWindow.loadURL(target);
   }, 500);
+
+  // Prevent white/blank screens if /app fails to load (offline, DNS, TLS, etc).
+  const showOfflineForMainFrameFail = (url, errorCode, errorDescription) => {
+    try {
+      if (!mainWindow || mainWindow.isDestroyed()) return;
+      const failing = String(url || '');
+      if (!failing) return;
+      // Only handle our app navigations; ignore external links and our data: fallback.
+      if (failing.startsWith('data:') || failing.startsWith('about:')) return;
+      if (!isAppNavigationUrl(failing)) return;
+      const code = Number(errorCode || 0);
+      const desc = String(errorDescription || '').trim();
+      // Rough offline-ish classification using common Chromium net error codes:
+      // -105 NAME_NOT_RESOLVED, -106 INTERNET_DISCONNECTED, -102 CONNECTION_REFUSED, -2 FAILED
+      const offline = code === -106 || code === -105 || code === -102 || code === -2;
+      const reason = offline ? 'offline' : 'server';
+      const detail = desc ? `${desc}${code ? ` (code ${code})` : ''}` : '';
+      _loadOfflineFallback(mainWindow, { reason, detail, offline });
+    } catch {}
+  };
+  mainWindow.webContents.on('did-fail-provisional-load', (_e, errorCode, errorDescription, validatedURL, isMainFrame) => {
+    if (!isMainFrame) return;
+    showOfflineForMainFrameFail(validatedURL, errorCode, errorDescription);
+  });
+  mainWindow.webContents.on('did-fail-load', (_e, errorCode, errorDescription, validatedURL, isMainFrame) => {
+    if (!isMainFrame) return;
+    showOfflineForMainFrameFail(validatedURL, errorCode, errorDescription);
+  });
+  mainWindow.webContents.on('render-process-gone', (_e, details) => {
+    try {
+      const why = details && details.reason ? String(details.reason) : '';
+      _loadOfflineFallback(mainWindow, { reason: 'crash', detail: why ? `Renderer exited: ${why}` : 'Renderer exited.' });
+    } catch {
+      _loadOfflineFallback(mainWindow, { reason: 'crash', detail: 'Renderer exited.' });
+    }
+  });
 
   // Open external links in system browser
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -657,6 +807,43 @@ ipcMain.handle('desktop:get-settings', () => {
 ipcMain.handle('desktop:get-server-base-url', () => {
   readDesktopSettings();
   return normalizeServerBaseUrl(_desktopSettings.serverBaseUrl || '');
+});
+
+// Offline/disconnected fallback actions (used by preload-exposed desktopOffline).
+ipcMain.handle('desktop:offline-retry', async () => {
+  try {
+    if (!mainWindow || mainWindow.isDestroyed()) return { ok: false };
+    readDesktopSettings();
+    const target = getAppUrl() || _lastAppTargetUrl || APP_URL_FALLBACK;
+    _lastAppTargetUrl = target;
+    await mainWindow.loadURL(target);
+    return { ok: true };
+  } catch {
+    return { ok: false };
+  }
+});
+ipcMain.handle('desktop:offline-reload', async () => {
+  try {
+    if (!mainWindow || mainWindow.isDestroyed()) return { ok: false };
+    try { mainWindow.webContents.reloadIgnoringCache(); } catch { mainWindow.webContents.reload(); }
+    return { ok: true };
+  } catch {
+    return { ok: false };
+  }
+});
+ipcMain.handle('desktop:offline-switch-node', async () => {
+  try {
+    if (!mainWindow || mainWindow.isDestroyed()) return { ok: false };
+    const ok = await ensureServerUrlConfigured(mainWindow);
+    if (!ok) return { ok: false };
+    readDesktopSettings();
+    const target = getAppUrl() || APP_URL_FALLBACK;
+    _lastAppTargetUrl = target;
+    await mainWindow.loadURL(target);
+    return { ok: true };
+  } catch {
+    return { ok: false };
+  }
 });
 
 ipcMain.handle('desktop:set-server-base-url', (_event, url) => {

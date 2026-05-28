@@ -8,6 +8,8 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.graphics.Bitmap
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.os.Build
 import android.os.Bundle
 import android.os.Message
@@ -19,6 +21,7 @@ import android.view.ViewGroup
 import android.view.WindowInsetsController
 import android.view.WindowManager
 import android.webkit.*
+import android.net.http.SslError
 import android.widget.FrameLayout
 import android.widget.TextView
 import android.content.BroadcastReceiver
@@ -157,6 +160,30 @@ class MainActivity : AppCompatActivity() {
     private var pendingIncomingCallPeer: String? = null
     private var incomingCallRecoveryToken: Long = 0L
     private var incomingCallRecoveryRetries: Int = 0
+
+    private fun isNetworkOnline(): Boolean {
+        return try {
+            val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return false
+            val net = cm.activeNetwork ?: return false
+            val caps = cm.getNetworkCapabilities(net) ?: return false
+            caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+        } catch (_: Throwable) {
+            false
+        }
+    }
+
+    private fun showOfflinePage(reason: String, detail: String? = null) {
+        try {
+            val offline = if (isNetworkOnline()) 0 else 1
+            val safeReason = Uri.encode(reason)
+            val safeDetail = Uri.encode(detail ?: "")
+            val url = "file:///android_asset/offline.html?reason=$safeReason&offline=$offline&detail=$safeDetail"
+            webView?.loadUrl(url)
+        } catch (t: Throwable) {
+            Log.w(TAG, "showOfflinePage failed", t)
+            showErrorScreen("Connection error.\nCheck your internet connection.")
+        }
+    }
 
     private fun normalizeServerBaseUrl(raw: String?): String? {
         if (raw.isNullOrBlank()) return null
@@ -662,7 +689,7 @@ class MainActivity : AppCompatActivity() {
         container.addView(wv)
         webView = wv
 
-        // Add JavaScript bridge for native call notifications
+        // Add JavaScript bridge for native call notifications + offline recovery actions.
         wv.addJavascriptInterface(CallBridge(this), "Android")
 
         wv.settings.apply {
@@ -738,7 +765,10 @@ class MainActivity : AppCompatActivity() {
                 Log.e(TAG, "Render process gone; didCrash=${detail.didCrash()}")
                 webView = null
                 try { container.removeView(view); view.destroy() } catch (_: Throwable) {}
-                showErrorScreen("WebView crashed. Tap Retry to reload.")
+                // Show the polished offline page (crash variant) instead of a blank view.
+                initWebView(null)
+                webViewInitialized = true
+                showOfflinePage("crash", "WebView crashed.")
                 return true
             }
 
@@ -746,8 +776,31 @@ class MainActivity : AppCompatActivity() {
                 view: WebView, request: WebResourceRequest, error: WebResourceError
             ) {
                 if (request.isForMainFrame) {
-                    showErrorScreen("Connection error.\nCheck your internet connection.")
+                    val msg = try { error.description?.toString() } catch (_: Throwable) { null }
+                    showOfflinePage(if (isNetworkOnline()) "server" else "offline", msg)
                 }
+            }
+
+            override fun onReceivedHttpError(
+                view: WebView,
+                request: WebResourceRequest,
+                errorResponse: WebResourceResponse
+            ) {
+                if (!request.isForMainFrame) return
+                val code = try { errorResponse.statusCode } catch (_: Throwable) { 0 }
+                val reason = try { errorResponse.reasonPhrase } catch (_: Throwable) { "" }
+                val detail = if (code != 0) "HTTP $code ${reason ?: ""}".trim() else null
+                showOfflinePage(if (isNetworkOnline()) "server" else "offline", detail)
+            }
+
+            override fun onReceivedSslError(
+                view: WebView,
+                handler: SslErrorHandler,
+                error: SslError
+            ) {
+                try { handler.cancel() } catch (_: Throwable) {}
+                val detail = try { error.toString() } catch (_: Throwable) { "SSL error" }
+                showOfflinePage("server", detail)
             }
         }
 
@@ -1222,6 +1275,45 @@ class MainActivity : AppCompatActivity() {
     // ── JS Bridge for call notifications ─────────────────────────────
 
     class CallBridge(private val activity: MainActivity) {
+        @android.webkit.JavascriptInterface
+        fun offlineRetry() {
+            activity.runOnUiThread {
+                try {
+                    activity.showLoadingScreen("Reconnecting…")
+                    val entry = try { activity.getConfiguredAppEntryUrl() } catch (_: Throwable) { activity.defaultAppUrl() }
+                    activity.webView?.loadUrl(activity.buildAppUrl(entry))
+                } catch (t: Throwable) {
+                    Log.w(TAG, "offlineRetry failed", t)
+                    activity.showOfflinePage(if (activity.isNetworkOnline()) "server" else "offline", t.message)
+                }
+            }
+        }
+
+        @android.webkit.JavascriptInterface
+        fun offlineReloadApp() {
+            activity.runOnUiThread {
+                try {
+                    activity.webView?.reload()
+                } catch (t: Throwable) {
+                    Log.w(TAG, "offlineReloadApp failed", t)
+                    activity.showOfflinePage("server", t.message)
+                }
+            }
+        }
+
+        @android.webkit.JavascriptInterface
+        fun offlineSwitchNode() {
+            activity.runOnUiThread {
+                try {
+                    activity.showLoadingScreen("Switching node…")
+                    activity.webView?.loadUrl(SETUP_ASSET_URL)
+                } catch (t: Throwable) {
+                    Log.w(TAG, "offlineSwitchNode failed", t)
+                    activity.showOfflinePage("server", t.message)
+                }
+            }
+        }
+
         @android.webkit.JavascriptInterface
         fun connectToServer(url: String) {
             try {
