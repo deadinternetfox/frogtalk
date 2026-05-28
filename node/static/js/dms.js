@@ -2491,7 +2491,7 @@ function renderDMChannels () {
     // loading is done, replace it (or any leftover skeleton) with a placeholder
     // so an empty inbox doesn't keep showing the loading skeleton forever.
     if (_dmSidebarLoading) return;
-    el.innerHTML = '<div style="font-size:12px;color:#777;padding:10px 8px;line-height:1.4">No DMs yet</div>';
+    el.innerHTML = '<div style="font-size:12px;color:#777;padding:10px 8px;line-height:1.4">No direct messages</div>';
     return;
   }
   el.innerHTML = _dmChannels.map(ch => {
