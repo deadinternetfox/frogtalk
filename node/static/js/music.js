@@ -512,8 +512,17 @@ const Music = (() => {
     try { _render(); } catch {}
     if (next) { try { _maybeAutoFillEmptyQueue(); } catch {} }
   }
+  // Reject a promise after `ms` so a hung fetch (flaky mobile / Tor links
+  // have no native timeout) can't wedge an in-flight guard forever.
+  function _withTimeout(promise, ms) {
+    return Promise.race([
+      Promise.resolve(promise),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), ms)),
+    ]);
+  }
   let _autoFillLastAt = 0;
   let _autoFillInFlight = false;
+  let _autoFillWatchdog = 0;
   async function _maybeAutoFillEmptyQueue() {
     if (!_room || !_state || !_state.can_control) return;
     if (!_autoFillEnabled(_room)) return;
@@ -524,6 +533,14 @@ const Music = (() => {
     if ((now - _autoFillLastAt) < 8000) return;  // debounce churn
     _autoFillLastAt = now;
     _autoFillInFlight = true;
+    // Hard watchdog: guarantee the in-flight guard clears even if every
+    // await below hangs (submit() / _fetchState() / discover all use fetch
+    // with no timeout). Without this, one stalled request would silently
+    // kill auto-fill for the rest of the session — the queue would sit
+    // empty forever with no way to recover short of a reload.
+    const fillRoom = _room;
+    clearTimeout(_autoFillWatchdog);
+    _autoFillWatchdog = setTimeout(() => { _autoFillInFlight = false; }, 15000);
     try {
       const S = window.Social;
       let next = null;
@@ -531,13 +548,28 @@ const Music = (() => {
         try { next = S.getNextMusicTrack('', {}); } catch {}
       }
       if ((!next || !next.url) && S && typeof S.fetchDiscoverMusicTrack === 'function') {
-        try { next = await S.fetchDiscoverMusicTrack(''); } catch {}
+        try { next = await _withTimeout(S.fetchDiscoverMusicTrack(''), 8000); } catch {}
       }
       if (next && next.url) {
+        // Re-check freshness right before submitting: another DJ (possibly
+        // on a different federated node, propagated via WS) may have queued
+        // a track while Discover was thinking. Skip our pick if so to avoid
+        // a double-fill. A failed/slow re-check shouldn't block auto-fill —
+        // better to risk one extra track than to never refill — so we only
+        // abort on a positive "queue non-empty" reading.
+        if (_room !== fillRoom) return;
+        let fresh = null;
+        try { fresh = await _withTimeout(_fetchState(fillRoom), 5000); } catch {}
+        if (fresh) {
+          _state = fresh;
+          if ((fresh.queue || []).length > 0) { try { _render(); } catch {} return; }
+        }
+        if (_room !== fillRoom) return;
         try { UI.showToast && UI.showToast('Auto-fill: queued a Discover pick 🎵', 'info', 1800); } catch {}
-        try { await submit(next.url); } catch {}
+        try { await _withTimeout(submit(next.url), 10000); } catch {}
       }
     } finally {
+      clearTimeout(_autoFillWatchdog);
       _autoFillInFlight = false;
     }
   }
