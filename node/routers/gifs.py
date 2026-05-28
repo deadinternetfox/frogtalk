@@ -934,7 +934,7 @@ async def list_sticker_packs(current_user: dict = Depends(get_current_user)):
 @router.get("/stickers/room/{room_id}")
 async def list_room_sticker_packs(room_id: int, current_user: dict = Depends(get_current_user)):
     """Channel sticker packs (visible only in that channel unless saved to account)."""
-    if not db.is_room_member(current_user["id"], room_id):
+    if not db.is_room_member(current_user["id"], room_id) and not bool(current_user.get("is_admin")):
         return JSONResponse(status_code=403, content={"error": "Not a member of this channel"})
     with db._conn() as con:
         _ensure_sticker_schema(con)
@@ -974,7 +974,7 @@ async def get_sticker_grid(
             rid = int(room_id or 0)
             if not rid:
                 return JSONResponse(status_code=400, content={"error": "room_id required"})
-            if not db.is_room_member(uid, rid):
+            if not db.is_room_member(uid, rid) and not bool(current_user.get("is_admin")):
                 return JSONResponse(status_code=403, content={"error": "Not a member of this channel"})
             pack_rows = con.execute(f"""
                 SELECT sp.*, {_STICKER_OWNER_NAME_SQL}
@@ -1065,7 +1065,7 @@ async def create_sticker_pack(body: CreateStickerPackRequest, current_user: dict
     
     room_id = body.room_id
     if room_id is not None:
-        if not db.is_room_member(current_user["id"], int(room_id)):
+        if not db.is_room_member(current_user["id"], int(room_id)) and not bool(current_user.get("is_admin")):
             return JSONResponse(status_code=403, content={"error": "Not a channel member"})
         with db._conn() as con:
             room = con.execute("SELECT name FROM rooms WHERE id=?", (int(room_id),)).fetchone()
@@ -1241,7 +1241,7 @@ async def add_sticker_to_channel(
 ):
     """Copy a sticker into a channel pack (channel mods / node admins)."""
     rid = int(body.room_id)
-    if not db.is_room_member(current_user["id"], rid):
+    if not db.is_room_member(current_user["id"], rid) and not bool(current_user.get("is_admin")):
         return JSONResponse(status_code=403, content={"error": "Not a member of this channel"})
     with db._conn() as con:
         _ensure_sticker_schema(con)
