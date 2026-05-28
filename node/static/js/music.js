@@ -1837,6 +1837,19 @@ const Music = (() => {
             const stillEmpty = !((_state && _state.queue && _state.queue[0]));
             if (stillEmpty) {
               delete p.dataset.emptySince;
+              // Break the "Advancing…" re-arm loop: the branch above only
+              // rewrote mp-meta-wrap, so mp-player-wrap still carries the
+              // old track key and hadTrack stays true — re-rendering would
+              // just re-arm emptySince and show "Advancing…" forever (the
+              // login-into-empty-media-channel hang). Clear the stale key
+              // so _render() falls through to the real empty-queue UI.
+              const w = document.getElementById('mp-player-wrap');
+              if (w) { delete w.dataset.curKey; w.removeAttribute('data-cur-key'); }
+              // Give auto-fill another shot before settling on "empty" —
+              // the first attempt on mount may have lost a race or hit a
+              // slow pick. Debounce (8s) has elapsed by now, so this is
+              // allowed to run.
+              try { _maybeAutoFillEmptyQueue(); } catch {}
               _render();
             }
           } catch {}
