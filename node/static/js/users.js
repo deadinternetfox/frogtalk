@@ -142,7 +142,38 @@ const Users = (() => {
   let _membersBootPending = false;
   let _membersLoadInflight = null;
   let _membersLoadRoom = null;
+  let _membersRetryTimer = 0;
+  let _membersRetryAttempts = 0;
+  let _membersRetryRoom = null;
   const _membersRoomCache = new Map();
+
+  // Self-heal a failed/stalled member-snapshot fetch. Without this, a
+  // single timed-out or non-OK /members request leaves the panel on the
+  // skeleton forever (_membersPanelShouldSkeleton stays true with no
+  // members + no cache and nothing else re-fetches the snapshot — only a
+  // manual channel switch recovers). Retry on a bounded backoff while the
+  // user is still sitting on the room.
+  function _scheduleMembersRetry(room) {
+    if (!_roomNamesMatch(_membersRetryRoom, room)) {
+      _membersRetryRoom = room;
+      _membersRetryAttempts = 0;
+    }
+    if (_membersRetryTimer) return;          // one pending retry at a time
+    if (_membersRetryAttempts >= 6) return;  // give up after ~45s of tries
+    const delay = Math.min(2000 * Math.pow(1.7, _membersRetryAttempts), 15000);
+    _membersRetryAttempts++;
+    _membersRetryTimer = setTimeout(() => {
+      _membersRetryTimer = 0;
+      if (_roomNamesMatch(State.currentRoom, room) && State.currentRoomType !== 'dm') {
+        try { loadChannelMembers(room); } catch {}
+      }
+    }, delay);
+  }
+  function _clearMembersRetry() {
+    _membersRetryAttempts = 0;
+    _membersRetryRoom = null;
+    if (_membersRetryTimer) { clearTimeout(_membersRetryTimer); _membersRetryTimer = 0; }
+  }
   const _MEMBERS_CACHE_MAX = 40;
 
   function _membersCacheKey(room) {
@@ -232,6 +263,7 @@ const Users = (() => {
     _membersBootPending = false;
     _membersLoadInflight = null;
     _membersLoadRoom = null;
+    _clearMembersRetry();
   }
 
   /** Paint members skeleton at login boot (before rooms list / last-room are known). */
@@ -610,10 +642,18 @@ const Users = (() => {
       prepareMembersListLoad(room);
     }
     if (_membersLoadInflight && _roomNamesMatch(_membersLoadRoom, room)) return _membersLoadInflight;
+    let _loadOk = false;
     _membersLoadInflight = (async () => {
+      // Bound the request: /members has no native timeout, so on a flaky
+      // mobile/Tor link a stalled fetch would never settle — leaving
+      // _membersLoading true, the skeleton spinning, and _membersLoadInflight
+      // wedged so no later call ever retries.
+      const ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+      const to = ctrl ? setTimeout(() => { try { ctrl.abort(); } catch {} }, 12000) : 0;
       try {
         const res = await fetch(`/api/rooms/${encodeURIComponent(room)}/members`, {
-          headers: { 'X-Session-Token': State.token }
+          headers: { 'X-Session-Token': State.token },
+          signal: ctrl ? ctrl.signal : undefined,
         });
         if (!res.ok) return;
         const data = await res.json();
@@ -624,6 +664,7 @@ const Users = (() => {
         const nextSig = _memberListSignature(nextMembers, nextBots);
         _channelMembers = nextMembers;
         _channelBots = nextBots;
+        _loadOk = true;
         _putCachedMembers(room, _channelMembers, _channelBots);
         // Backfill display_name into any online users that the WS sent without it
         for (const u of _allUsers) {
@@ -645,6 +686,7 @@ const Users = (() => {
           _renderFiltered();
         }
       } catch {} finally {
+        clearTimeout(to);
         if (_roomNamesMatch(_channelRoom, room)) {
           _membersLoading = false;
           _membersBootPending = false;
@@ -660,6 +702,17 @@ const Users = (() => {
         _membersLoadInflight = null;
         _membersLoadRoom = null;
       }
+    }
+    // The snapshot didn't load (timeout / transient non-OK) and we're still
+    // on this room with nothing cached — retry on a backoff so the skeleton
+    // self-heals instead of hanging until a manual channel switch.
+    if (!_loadOk
+        && _roomNamesMatch(State.currentRoom, room)
+        && State.currentRoomType !== 'dm'
+        && !hasMembersCache(room)) {
+      _scheduleMembersRetry(room);
+    } else if (_loadOk) {
+      _clearMembersRetry();
     }
   }
 

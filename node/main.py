@@ -1248,6 +1248,7 @@ _CALLS_JS_PATH = "static/js/calls.js"
 _SOCIAL_JS_PATH = "static/js/social.js"
 _NOTIFICATIONS_JS_PATH = "static/js/notifications.js"
 _MUSIC_JS_PATH = "static/js/music.js"
+_USERS_JS_PATH = "static/js/users.js"
 _CONTENT_WARNING_JS_PATH = "static/js/content_warning.js"
 
 # Cached app shell. The shell is ~300 KB and was previously read from disk
@@ -1262,7 +1263,7 @@ def _shell_asset_paths() -> tuple:
         _FRIENDS_JS_PATH, _DMS_JS_PATH, _MEDIA_JS_PATH,
         _ROOMS_JS_PATH, _CRYPTO_JS_PATH, _STATE_JS_PATH, _WS_JS_PATH,
         _CALLS_JS_PATH, _SOCIAL_JS_PATH, _NOTIFICATIONS_JS_PATH,
-        _MUSIC_JS_PATH, _CHANNEL_SETTINGS_CSS_PATH,
+        _MUSIC_JS_PATH, _USERS_JS_PATH, _CHANNEL_SETTINGS_CSS_PATH,
         _CONTENT_WARNING_JS_PATH,
     )
 
