@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Remove public sticker catalog rows (federated mirrors, @federated, all public).
 
-Run on each node after deploying sticker federation fixes:
+Run on each node after deploying sticker federation fixes (use the service venv):
 
-  cd /opt/frogtalk/node && python3 scripts/cleanup_public_stickers.py
+  cd /opt/frogtalk/node && /opt/frogtalk/venv/bin/python scripts/cleanup_public_stickers.py
 
 Emits sticker.pack.delete for native public packs so peers drop mirrors.
 """
