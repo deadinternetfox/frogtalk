@@ -437,7 +437,7 @@
     const root = host.attachShadow ? host.attachShadow({ mode: 'closed' }) : null;
     const css  = toCss(effects, { playOnce: !!playOnce, forceAnimation: !!forceAnimation });
     const nfx = normalize(effects);
-    const layers = (nfx && Array.isArray(nfx.layers)) ? nfx.layers : null;
+    const layers = (nfx && Array.isArray(nfx.layers) && nfx.layers.length) ? nfx.layers : null;
 
     const styleHtml = `
       :host { all: initial; display: block; width: 100%; height: 100%; }
@@ -478,8 +478,10 @@
       let parent = wrap;
       const replayEls = [];
       let filterAnim = '';
-      let imgAnim = css ? css.animation : 'none';
-      if (layers && layers.length && (forceAnimation || !_prefersReducedMotion())) {
+      // If we have a layer stack, the legacy single-animation field is ignored.
+      // (We no longer support legacy fallback; stack is the source of truth.)
+      let imgAnim = layers ? 'none' : (css ? css.animation : 'none');
+      if (layers && (forceAnimation || !_prefersReducedMotion())) {
         const tLayers = layers.filter(l => l.kind === 'transform').slice(0, 3);
         const fLayer = layers.find(l => l.kind === 'filter') || null;
         if (fLayer) {
@@ -497,11 +499,8 @@
           parent = d;
           replayEls.push(d);
         }
-        // If we have a stacked filter animation, prefer it over legacy single animation
-        // when the legacy animation is a filter-type.
-        if (filterAnim) {
-          imgAnim = filterAnim;
-        }
+        // Apply the filter animation (if any) on the img.
+        if (filterAnim) imgAnim = filterAnim;
       }
 
       const img = document.createElement('img');

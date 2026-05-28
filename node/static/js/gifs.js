@@ -2006,7 +2006,7 @@ const GIFs = (() => {
             </div>
             <div id="fx-layer-list" style="display:flex;flex-direction:column;gap:6px"></div>
             <div style="font-size:11px;color:var(--text-muted)">
-              Legacy: the first Transform layer is also used as the old single-animation value for older clients.
+              The layer stack is the source of truth.
             </div>
           </div>
         </details>
@@ -2066,15 +2066,7 @@ const GIFs = (() => {
       if (!Array.isArray(fx.layers)) fx.layers = [];
       const TRANSFORM_OPTS = ['spin','pulse','bounce','shake','wobble','float','flip','swing','sparkle','pop'];
       const FILTER_OPTS = ['glow','rainbow','rainbow_tint','rainbow_glow'];
-      const _syncLegacy = () => {
-        const firstT = (fx.layers || []).find(l => l.kind === 'transform');
-        if (firstT) {
-          fx.animation = firstT.animation;
-          fx.animation_duration = firstT.duration;
-        } else {
-          fx.animation = 'none';
-        }
-      };
+      const _syncLegacy = () => {};
       const renderLayers = () => {
         if (!list) return;
         list.innerHTML = '';
@@ -2111,19 +2103,16 @@ const GIFs = (() => {
           });
           row.querySelector('[data-fx-layer-anim]').addEventListener('change', (e) => {
             l.animation = e.target.value;
-            _syncLegacy();
             renderPreview();
           });
           row.querySelector('[data-fx-layer-dur]').addEventListener('change', (e) => {
             const v = Math.max(0.3, Math.min(10, parseFloat(e.target.value || '2') || 2));
             l.duration = v;
             e.target.value = v.toFixed(1);
-            _syncLegacy();
             renderPreview();
           });
           row.querySelector('[data-fx-layer-del]').addEventListener('click', () => {
             fx.layers.splice(idx, 1);
-            _syncLegacy();
             renderLayers();
             renderPreview();
           });
@@ -2143,18 +2132,15 @@ const GIFs = (() => {
           : { kind: 'transform', animation: TRANSFORM_OPTS[0], duration: 2 };
         fx.layers = fx.layers || [];
         fx.layers.push(layer);
-        _syncLegacy();
         renderLayers();
         renderPreview();
       }));
       const clearBtn = ctr.querySelector('button[data-fx-clear-layers]');
       if (clearBtn) clearBtn.addEventListener('click', () => {
         fx.layers = [];
-        _syncLegacy();
         renderLayers();
         renderPreview();
       });
-      _syncLegacy();
       renderLayers();
     }
 
