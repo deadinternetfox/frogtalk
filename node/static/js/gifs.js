@@ -12,6 +12,10 @@ const GIFs = (() => {
   let _stickersById = new Map(); // sticker_id -> { image_data, name, effects }
   let _stickerGridDelegated = false;
   let _smStickerCache = {};      // sticker_id -> full sticker row (used by the FX editor)
+  let _managerScope = 'personal'; // 'personal' | 'channel'
+  let _packGridCache = new Map(); // key -> { at, packs }
+  const _PACK_GRID_TTL_MS = 45000;
+  let _stickerGridSeq = 0;
   let _gifReqSeq = 0;
 
   // ─── Themed prompt / confirm ─────────────────────────────────────────
@@ -117,7 +121,7 @@ const GIFs = (() => {
           <button class="gif-tab" data-tab="channel-stickers" onclick="GIFs.switchTab('channel-stickers')" id="gif-tab-channel-stickers" style="display:none">Channel</button>
         </div>
         <div style="display:flex;gap:6px;align-items:center">
-          <button class="gif-manage-btn" id="gif-manage-btn" onclick="GIFs.openManager()" title="Manage sticker packs" style="display:none">⚙ Manage</button>
+          <button class="gif-manage-btn" id="gif-manage-btn" onclick="GIFs.openManagerFromPicker()" title="Manage sticker packs" style="display:none">⚙ Manage</button>
           <button class="gif-close" onclick="GIFs.close()">✕</button>
         </div>
       </div>
@@ -387,6 +391,33 @@ const GIFs = (() => {
         letter-spacing: .5px;
         border-bottom: 1px solid var(--border-color);
       }
+      .sticker-pack-meta {
+        text-transform: none;
+        letter-spacing: 0;
+        font-weight: 500;
+        color: var(--text-muted);
+      }
+      .gif-empty-channel {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 8px;
+        padding: 20px 12px;
+      }
+      .gif-empty-cta {
+        margin-top: 8px;
+        background: var(--accent-color);
+        border: none;
+        color: color-mix(in srgb, var(--accent-color) 12%, #000);
+        padding: 8px 16px;
+        border-radius: 8px;
+        cursor: pointer;
+        font-weight: 600;
+        font-size: 13px;
+      }
+      .gif-empty-cta:hover {
+        filter: brightness(1.08);
+      }
       .gif-loading {
         grid-column: 1 / -1;
         text-align: center;
@@ -545,7 +576,11 @@ const GIFs = (() => {
       _stickerSubTab = 'channel';
       searchInput.placeholder = 'Search channel stickers...';
       categoriesEl.style.display = 'none';
-      document.getElementById('gif-manage-btn').style.display = 'none';
+      const manageBtn = document.getElementById('gif-manage-btn');
+      if (manageBtn) {
+        manageBtn.style.display = _canModerateChannel() ? '' : 'none';
+        manageBtn.title = 'Manage channel sticker packs';
+      }
       loadChannelStickerPacks();
     } else {
       _stickerSubTab = 'mine';
@@ -705,7 +740,37 @@ const GIFs = (() => {
     if (searchInput) searchInput.value = trimmed;
   }
 
-  async function loadChannelStickerPacks() {
+  function _packGridCacheKey(scope, roomId) {
+    return scope === 'room' ? `room:${roomId}` : 'mine';
+  }
+
+  function _invalidateStickerCache(scope, roomId) {
+    if (scope) {
+      _packGridCache.delete(_packGridCacheKey(scope, roomId));
+    } else {
+      _packGridCache.clear();
+    }
+    _smStickerCache = {};
+  }
+
+  async function _fetchStickerGrid(scope, roomId, { force } = {}) {
+    const key = _packGridCacheKey(scope, roomId);
+    const cached = _packGridCache.get(key);
+    if (!force && cached && (Date.now() - cached.at) < _PACK_GRID_TTL_MS) {
+      return cached.packs;
+    }
+    const q = scope === 'room'
+      ? `/api/media/stickers/grid?scope=room&room_id=${encodeURIComponent(roomId)}`
+      : '/api/media/stickers/grid?scope=mine';
+    const res = await apiFetch(q);
+    if (!res.ok) throw new Error('grid_fetch_failed');
+    const data = await res.json();
+    const packs = data.packs || [];
+    _packGridCache.set(key, { at: Date.now(), packs });
+    return packs;
+  }
+
+  async function loadChannelStickerPacks(force) {
     const grid = document.getElementById('gif-grid');
     if (!grid) return;
     const rid = _currentRoomId();
@@ -713,59 +778,90 @@ const GIFs = (() => {
       grid.innerHTML = '<div class="gif-empty">Open a channel to use channel stickers</div>';
       return;
     }
+    const reqSeq = ++_stickerGridSeq;
     grid.innerHTML = '<div class="gif-loading">Loading channel stickers...</div>';
+    const canMod = _canModerateChannel();
+    const emptyHtml = canMod
+      ? `<div class="gif-empty gif-empty-channel">
+          <div>No channel stickers yet</div>
+          <div class="gif-empty-hint">Mods can create packs for everyone in this channel.</div>
+          <button type="button" class="gif-empty-cta" onclick="GIFs.showCreatePack({channel:true})">+ Create channel pack</button>
+        </div>`
+      : '<div class="gif-empty">No channel stickers yet<div class="gif-empty-hint">Channel mods can add sticker packs here.</div></div>';
     try {
-      const res = await apiFetch(`/api/media/stickers/room/${rid}`);
-      if (!res.ok) throw new Error('API error');
-      const data = await res.json();
-      _channelStickerPacks = data.packs || [];
-      await _renderStickerPackGrid(grid, _channelStickerPacks, {
-        emptyHtml: '<div class="gif-empty">No channel stickers yet — channel mods can add packs in ⚙ Manage</div>',
+      const packs = await _fetchStickerGrid('room', rid, { force: !!force });
+      if (reqSeq !== _stickerGridSeq) return;
+      _channelStickerPacks = packs;
+      _renderStickerPackGridFromData(grid, packs, {
+        emptyHtml,
+        scope: 'channel',
       });
     } catch {
+      if (reqSeq !== _stickerGridSeq) return;
       grid.innerHTML = '<div class="gif-empty">Failed to load channel stickers</div>';
     }
   }
 
-  async function _renderStickerPackGrid(grid, packs, opts = {}) {
+  function _renderStickerPackGridFromData(grid, packs, opts = {}) {
     _stickersById.clear();
+    const scope = opts.scope || _stickerSubTab || 'mine';
+    const filtered = (opts.filterQuery || '').trim().toLowerCase();
     const _toHydrate = [];
-    if (!packs.length) {
+
+    const visible = [];
+    for (const pack of (packs || [])) {
+      const stickers = (pack.stickers || []).filter(s => {
+        if (!filtered) return true;
+        const hay = `${s.name || ''} ${pack.name || ''}`.toLowerCase();
+        return hay.includes(filtered);
+      });
+      if (stickers.length) visible.push({ pack, stickers });
+    }
+
+    if (!visible.length) {
       grid.innerHTML = opts.emptyHtml || '<div class="gif-empty">No stickers</div>';
       return;
     }
+
     let html = '';
-    for (const pack of packs) {
-      const packRes = await apiFetch(`/api/media/stickers/packs/${pack.id}`);
-      if (!packRes.ok) continue;
-      const packData = await packRes.json();
-      if (!packData.stickers?.length) continue;
-      html += `<div class="sticker-pack-header">${UI.escHtml(pack.name)}</div>`;
-      html += packData.stickers.map(s => {
-        _stickersById.set(String(s.id), {
+    for (const { pack, stickers } of visible) {
+      const ownerHint = pack.owner_name
+        ? `<span class="sticker-pack-meta"> · by ${UI.escHtml(pack.owner_name)}</span>`
+        : '';
+      html += `<div class="sticker-pack-header">${UI.escHtml(pack.name)}${ownerHint}</div>`;
+      html += stickers.map(s => {
+        const sid = String(s.id);
+        _stickersById.set(sid, {
           image_data: s.image_data,
           name: s.name,
           effects: s.effects || null,
+          pack_id: pack.id,
+          can_manage: !!pack.can_manage,
         });
         const hasFx = s.effects && window.StickerFX && !StickerFX.isDefault(s.effects);
-        if (hasFx) _toHydrate.push(String(s.id));
+        if (hasFx) _toHydrate.push(sid);
         return `
-          <div class="sticker-item" data-sticker-id="${UI.escHtml(String(s.id))}" title="${UI.escHtml(s.name)}">
-            <div class="sticker-host" data-sticker-id="${UI.escHtml(String(s.id))}">
+          <div class="sticker-item" data-sticker-id="${UI.escHtml(sid)}" title="${UI.escHtml(s.name)}">
+            <div class="sticker-host" data-sticker-id="${UI.escHtml(sid)}">
               ${hasFx ? '' : `<img src="${UI.escHtml(s.image_data)}" alt="${UI.escHtml(s.name)}" loading="lazy">`}
             </div>
           </div>`;
       }).join('');
     }
-    grid.innerHTML = html || '<div class="gif-empty">No stickers in these packs</div>';
+
+    grid.innerHTML = html || '<div class="gif-empty">No stickers match your search</div>';
+
     if (window.StickerFX) {
-      for (const sid of _toHydrate) {
-        const rec = _stickersById.get(sid);
-        const slot = grid.querySelector(`.sticker-host[data-sticker-id="${CSS.escape(sid)}"]`);
-        if (!rec || !slot) continue;
-        StickerFX.renderInto(slot, { src: rec.image_data, effects: rec.effects, alt: rec.name, size: 96 });
-      }
+      requestAnimationFrame(() => {
+        for (const sid of _toHydrate) {
+          const rec = _stickersById.get(sid);
+          const slot = grid.querySelector(`.sticker-host[data-sticker-id="${CSS.escape(sid)}"]`);
+          if (!rec || !slot) continue;
+          StickerFX.renderInto(slot, { src: rec.image_data, effects: rec.effects, alt: rec.name, size: 96 });
+        }
+      });
     }
+
     if (!_stickerGridDelegated) {
       grid.addEventListener('click', e => {
         const item = e.target.closest('.sticker-item[data-sticker-id]');
@@ -775,7 +871,12 @@ const GIFs = (() => {
       });
       _stickerGridDelegated = true;
     }
-    _bindStickerGridLongPress(grid);
+    _bindStickerGridLongPress(grid, scope);
+  }
+
+  /** @deprecated — use grid API via loadStickerPacks / loadChannelStickerPacks */
+  async function _renderStickerPackGrid(grid, packs, opts = {}) {
+    return _renderStickerPackGridFromData(grid, packs, opts);
   }
 
   function _canModerateChannel() {
@@ -785,30 +886,33 @@ const GIFs = (() => {
       || (Array.isArray(State.currentRoomMods) && State.currentRoomMods.includes(State.user.nickname));
   }
 
-  function _bindStickerGridLongPress(grid) {
+  function _bindStickerGridLongPress(grid, scope) {
     if (!grid) return;
+    const menuScope = scope || _stickerSubTab || 'mine';
     grid.querySelectorAll('.sticker-item:not([data-lp-bound])').forEach(item => {
       item.dataset.lpBound = '1';
       item.addEventListener('contextmenu', (e) => {
         e.preventDefault();
         e.stopPropagation();
-        _openStickerItemMenu(item.dataset.stickerId, _stickerSubTab);
+        _openStickerItemMenu(item.dataset.stickerId, menuScope);
       });
       if (typeof bindLongPress === 'function') {
         bindLongPress(item, (ev) => {
           ev.preventDefault();
-          _openStickerItemMenu(item.dataset.stickerId, _stickerSubTab);
+          _openStickerItemMenu(item.dataset.stickerId, menuScope);
         });
       }
     });
   }
 
   function _openStickerItemMenu(stickerId, scope) {
+    const rec = _stickersById.get(String(stickerId || ''));
     const items = [];
     if (scope === 'channel') {
-      items.push({ label: 'Add sticker', icon: '➕', onclick: () => importStickerToAccount(stickerId) });
+      items.push({ label: 'Save to my stickers', icon: '➕', onclick: () => importStickerToAccount(stickerId) });
     }
-    if (scope === 'mine') {
+    if (rec?.can_manage || scope === 'mine') {
+      items.push({ label: 'Edit effects', icon: '✨', onclick: () => editStickerFx(stickerId) });
       items.push({ label: 'Delete sticker', icon: '🗑', danger: true, onclick: () => deleteSticker(stickerId) });
     }
     if (!items.length) return;
@@ -844,45 +948,55 @@ const GIFs = (() => {
     }
   }
 
-  async function loadStickerPacks() {
+  async function loadStickerPacks(force) {
     const grid = document.getElementById('gif-grid');
+    if (!grid) return;
+    const reqSeq = ++_stickerGridSeq;
     grid.innerHTML = '<div class="gif-loading">Loading stickers...</div>';
-    
+
     try {
-      const res = await apiFetch('/api/media/stickers/packs');
-      if (!res.ok) throw new Error('API error');
-      const data = await res.json();
-      
-      _stickerPacks = [...(data.own_packs || []), ...(data.installed_packs || [])];
-      
-      if (_stickerPacks.length === 0) {
+      const packs = await _fetchStickerGrid('mine', null, { force: !!force });
+      if (reqSeq !== _stickerGridSeq) return;
+      _stickerPacks = packs;
+
+      if (!_stickerPacks.length) {
         grid.innerHTML = `
           <div class="gif-empty">
             No stickers yet<br>
-            <button onclick="GIFs.showPublicPacks()" style="margin-top:12px;background:var(--accent-color);border:none;color:color-mix(in srgb, var(--accent-color) 12%, #000);padding:8px 16px;border-radius:8px;cursor:pointer;font-weight:600">
-              Browse Sticker Packs
-            </button>
-          </div>
-        `;
+            <button type="button" class="gif-empty-cta" onclick="GIFs.showPublicPacks()">Browse sticker packs</button>
+            <button type="button" class="gif-empty-cta" style="background:color-mix(in srgb, var(--bg-color) 60%, transparent);border:1px solid var(--border-color);color:var(--text-color)" onclick="GIFs.showCreatePack()">+ Create a pack</button>
+          </div>`;
         return;
       }
-      await _renderStickerPackGrid(grid, _stickerPacks, {
+      _renderStickerPackGridFromData(grid, _stickerPacks, {
         emptyHtml: '<div class="gif-empty">No stickers in your packs</div>',
+        scope: 'mine',
+        filterQuery: document.getElementById('gif-search')?.value || '',
       });
-    } catch (e) {
+    } catch {
+      if (reqSeq !== _stickerGridSeq) return;
       grid.innerHTML = '<div class="gif-empty">Failed to load stickers</div>';
     }
   }
 
   function filterStickers(query) {
-    // Simple local filter based on loaded packs
     const grid = document.getElementById('gif-grid');
-    const items = grid.querySelectorAll('.sticker-item');
-    const lowerQuery = query.toLowerCase();
-    
-    items.forEach(item => {
-      const name = item.title.toLowerCase();
-      item.style.display = name.includes(lowerQuery) ? '' : 'none';
+    if (!grid) return;
+    const q = String(query || '').trim();
+    if (_currentTab === 'channel-stickers') {
+      _renderStickerPackGridFromData(grid, _channelStickerPacks, {
+        scope: 'channel',
+        filterQuery: q,
+        emptyHtml: _canModerateChannel()
+          ? '<div class="gif-empty">No channel stickers match your search</div>'
+          : '<div class="gif-empty">No channel stickers match your search</div>',
+      });
+      return;
+    }
+    _renderStickerPackGridFromData(grid, _stickerPacks, {
+      scope: 'mine',
+      filterQuery: q,
+      emptyHtml: '<div class="gif-empty">No stickers match your search</div>',
     });
   }
 
@@ -977,7 +1091,8 @@ const GIFs = (() => {
       const res = await apiFetch(`/api/media/stickers/packs/${packId}/install`, 'POST');
       if (res.ok) {
         UI.showToast('Sticker pack installed!', 'success');
-        loadStickerPacks();
+        _invalidateStickerCache('mine', null);
+        loadStickerPacks(true);
       } else {
         const data = await res.json();
         UI.showToast(data.error || 'Failed to install', 'error');
@@ -1117,7 +1232,19 @@ const GIFs = (() => {
   }
 
   // ─── Sticker pack manager ────────────────────────────────────────────
-  async function openManager() {
+  function openManagerFromPicker() {
+    if (_currentTab === 'channel-stickers') openManager('channel');
+    else openManager('personal');
+  }
+
+  async function openManager(scope) {
+    if (scope === 'channel' || _currentTab === 'channel-stickers') {
+      _managerScope = 'channel';
+    } else if (scope === 'personal' || scope === 'mine') {
+      _managerScope = 'personal';
+    } else if (!_managerScope) {
+      _managerScope = 'personal';
+    }
     let modal = document.getElementById('sticker-manager-modal');
     if (modal) { modal.style.display = 'flex'; await renderManager(); return; }
     modal = document.createElement('div');
@@ -1133,25 +1260,46 @@ const GIFs = (() => {
         box-shadow:0 18px 48px rgba(0,0,0,.6), 0 0 0 1px color-mix(in srgb, var(--accent-color) 15%, transparent);
         color:var(--text-color)">
         <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 16px;border-bottom:1px solid var(--border-color)">
-          <div style="font-weight:700;color:var(--text-color);font-size:15px">🎨 Manage Sticker Packs</div>
+          <div id="sm-title" style="font-weight:700;color:var(--text-color);font-size:15px">🎨 Manage Sticker Packs</div>
           <button onclick="GIFs.closeManager()" style="background:none;border:none;color:var(--text-muted);font-size:18px;cursor:pointer;width:28px;height:28px;border-radius:6px">✕</button>
         </div>
         <div id="sm-body" style="flex:1;overflow-y:auto;padding:14px 16px;color:var(--text-color);scrollbar-width:thin;scrollbar-color:color-mix(in srgb, var(--accent-color) 40%, transparent) transparent"></div>
-        <div style="padding:12px 16px;border-top:1px solid var(--border-color);display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">
-          <button onclick="GIFs.browseFromManager()" style="background:color-mix(in srgb, var(--bg-color) 60%, transparent);border:1px solid var(--border-color);color:var(--text-color);padding:8px 14px;border-radius:8px;cursor:pointer">🌍 Browse Public</button>
-          <button onclick="GIFs.closeManager()" style="background:color-mix(in srgb, var(--bg-color) 60%, transparent);border:1px solid var(--border-color);color:var(--text-color);padding:8px 14px;border-radius:8px;cursor:pointer">Close</button>
-          <button onclick="GIFs.showCreatePack()" style="background:var(--accent-color);border:1px solid var(--accent-color);color:color-mix(in srgb, var(--accent-color) 12%, #000);padding:8px 14px;border-radius:8px;cursor:pointer;font-weight:700">+ New Pack</button>
-        </div>
+        <div id="sm-footer" style="padding:12px 16px;border-top:1px solid var(--border-color);display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap"></div>
       </div>`;
     document.body.appendChild(modal);
     modal.addEventListener('click', (e) => { if (e.target === modal) closeManager(); });
     await renderManager();
   }
 
+  function _renderManagerFooter() {
+    const foot = document.getElementById('sm-footer');
+    if (!foot) return;
+    const isChannel = _managerScope === 'channel';
+    const roomLabel = State?.currentRoom ? `#${State.currentRoom}` : 'this channel';
+    if (isChannel) {
+      foot.innerHTML = `
+        <button type="button" onclick="GIFs.closeManager()" style="background:color-mix(in srgb, var(--bg-color) 60%, transparent);border:1px solid var(--border-color);color:var(--text-color);padding:8px 14px;border-radius:8px;cursor:pointer">Close</button>
+        <button type="button" onclick="GIFs.showCreatePack({channel:true})" style="background:var(--accent-color);border:1px solid var(--accent-color);color:color-mix(in srgb, var(--accent-color) 12%, #000);padding:8px 14px;border-radius:8px;cursor:pointer;font-weight:700">+ Channel pack</button>`;
+    } else {
+      foot.innerHTML = `
+        <button type="button" onclick="GIFs.browseFromManager()" style="background:color-mix(in srgb, var(--bg-color) 60%, transparent);border:1px solid var(--border-color);color:var(--text-color);padding:8px 14px;border-radius:8px;cursor:pointer">🌍 Browse public</button>
+        <button type="button" onclick="GIFs.closeManager()" style="background:color-mix(in srgb, var(--bg-color) 60%, transparent);border:1px solid var(--border-color);color:var(--text-color);padding:8px 14px;border-radius:8px;cursor:pointer">Close</button>
+        <button type="button" onclick="GIFs.showCreatePack()" style="background:var(--accent-color);border:1px solid var(--accent-color);color:color-mix(in srgb, var(--accent-color) 12%, #000);padding:8px 14px;border-radius:8px;cursor:pointer;font-weight:700">+ New pack</button>`;
+    }
+    const title = document.getElementById('sm-title');
+    if (title) {
+      title.textContent = isChannel
+        ? `🎨 Channel stickers — ${roomLabel}`
+        : '🎨 Manage sticker packs';
+    }
+  }
+
   function closeManager() {
     const m = document.getElementById('sticker-manager-modal');
     if (m) m.style.display = 'none';
-    loadStickerPacks();
+    _invalidateStickerCache();
+    if (_currentTab === 'channel-stickers') loadChannelStickerPacks(true);
+    else if (_currentTab === 'stickers') loadStickerPacks(true);
   }
 
   // Lightweight tab UI update without kicking off any data fetch — used
@@ -1216,114 +1364,175 @@ const GIFs = (() => {
     showPublicPacks();
   }
 
+  function _smPackCardHtml(p, { channel } = {}) {
+    const canManage = !!p.can_manage || (!channel && !p.room_id);
+    const pubBtns = (!channel && canManage)
+      ? `<button type="button" onclick="GIFs.togglePublic(${p.id}, ${p.is_public ? 0 : 1})" title="${p.is_public ? 'Make private' : 'Publish'}" style="background:color-mix(in srgb, var(--accent-color) 14%, transparent);border:1px solid var(--border-color);color:var(--text-color);padding:5px 9px;border-radius:6px;cursor:pointer;font-size:12px">${p.is_public ? '🔒' : '🌍'}</button>`
+      : '';
+    const meta = channel
+      ? `📢 Channel · ${p.sticker_count || 0} stickers${p.owner_name ? ' · by ' + UI.escHtml(p.owner_name) : ''}`
+      : `${p.is_public ? '🌍 Public' : '🔒 Private'}${p.description ? ' · ' + UI.escHtml(p.description) : ''}`;
+    const actions = canManage
+      ? `<button type="button" onclick="GIFs.editPack(${p.id})" title="Rename" style="background:color-mix(in srgb, var(--accent-color) 14%, transparent);border:1px solid var(--border-color);color:var(--text-color);padding:5px 9px;border-radius:6px;cursor:pointer;font-size:12px">✎</button>
+         ${pubBtns}
+         <button type="button" onclick="GIFs.deletePack(${p.id})" title="Delete pack" style="background:rgba(180,40,40,.18);border:1px solid #6b2a2a;color:#f0a0a0;padding:5px 9px;border-radius:6px;cursor:pointer;font-size:12px">🗑</button>`
+      : '';
+    const uploadRow = canManage
+      ? `<div style="margin-top:8px"><button type="button" onclick="GIFs.uploadStickerTo(${p.id})" style="background:color-mix(in srgb, var(--accent-color) 10%, transparent);border:1px dashed var(--accent-color);color:var(--accent-color);padding:6px 12px;border-radius:8px;cursor:pointer;font-size:12px;width:100%">+ Add sticker (PNG/WebP/GIF, ≤500KB)</button></div>`
+      : '';
+    return `
+      <div style="background:color-mix(in srgb, var(--bg-color) 60%, transparent);border:1px solid color-mix(in srgb, var(--accent-color) 25%, var(--border-color));border-radius:10px;padding:10px 12px;margin-bottom:8px">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+          <div style="min-width:0;flex:1">
+            <div style="font-weight:700;color:var(--text-color)">${UI.escHtml(p.name)}</div>
+            <div style="font-size:11px;color:var(--text-muted)">${meta}</div>
+          </div>
+          <div style="display:flex;gap:4px;flex-shrink:0">${actions}</div>
+        </div>
+        <div id="sm-stickers-${p.id}" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;padding-top:10px;border-top:1px solid color-mix(in srgb, var(--accent-color) 18%, transparent)"></div>
+        ${uploadRow}
+      </div>`;
+  }
+
+  function _hydrateManagerPackStickers(pack, stickers, { canManage }) {
+    const cont = document.getElementById(`sm-stickers-${pack.id}`);
+    if (!cont) return;
+    if (!stickers?.length) {
+      cont.innerHTML = '<div style="font-size:11px;color:var(--text-muted)">No stickers yet</div>';
+      return;
+    }
+    cont.innerHTML = stickers.map(s => {
+      const safeName = UI.escHtml(s.name || '');
+      const hasFx = !!(s.effects && window.StickerFX && !StickerFX.isDefault(s.effects));
+      const fxBadge = hasFx
+        ? '<div style="position:absolute;bottom:2px;left:2px;background:var(--accent-color);color:color-mix(in srgb, var(--accent-color) 12%, #000);font-size:9px;font-weight:700;padding:1px 5px;border-radius:6px;line-height:1.2;pointer-events:none">FX</div>'
+        : '';
+      const fxBtn = canManage
+        ? `<button type="button" onclick="GIFs.editStickerFx(${s.id})" title="Edit effects" style="position:absolute;top:2px;left:2px;background:rgba(0,0,0,.55);border:none;color:var(--accent-color);width:20px;height:20px;border-radius:50%;cursor:pointer;font-size:11px;line-height:1;padding:0">✨</button>`
+        : '';
+      const delBtn = canManage
+        ? `<button type="button" onclick="GIFs.deleteSticker(${s.id})" title="Delete sticker" style="position:absolute;top:2px;right:2px;background:rgba(0,0,0,.7);border:none;color:#f0a0a0;width:20px;height:20px;border-radius:50%;cursor:pointer;font-size:11px;line-height:1;padding:0">×</button>`
+        : '';
+      return `
+        <div class="sm-sticker-tile" data-sticker-id="${s.id}" style="position:relative;width:64px;height:64px;background:color-mix(in srgb, var(--surface-color) 70%, transparent);border-radius:10px;overflow:hidden;border:1px solid var(--border-color)" title="${safeName}">
+          <div class="sm-sticker-host" data-sticker-id="${s.id}" style="width:100%;height:100%;display:flex;align-items:center;justify-content:center">
+            ${hasFx ? '' : `<img src="${s.image_data}" style="width:100%;height:100%;object-fit:contain" alt="">`}
+          </div>
+          ${fxBadge}${fxBtn}${delBtn}
+        </div>`;
+    }).join('');
+    if (window.StickerFX) {
+      for (const s of stickers) {
+        if (!s.effects || StickerFX.isDefault(s.effects)) continue;
+        const slot = cont.querySelector(`.sm-sticker-host[data-sticker-id="${s.id}"]`);
+        if (!slot) continue;
+        StickerFX.renderInto(slot, { src: s.image_data, effects: s.effects, alt: s.name, size: 64 });
+      }
+    }
+    for (const s of stickers) _smStickerCache[s.id] = s;
+  }
+
   async function renderManager() {
     const body = document.getElementById('sm-body');
     if (!body) return;
+    _renderManagerFooter();
     body.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text-muted)">Loading…</div>';
     try {
-      const res = await apiFetch('/api/media/stickers/packs');
-      if (!res.ok) throw 0;
-      const data = await res.json();
-      const own = data.own_packs || [];
-      const installed = data.installed_packs || [];
+      let own = [];
+      let installed = [];
+      const isChannel = _managerScope === 'channel';
+
+      if (isChannel) {
+        if (!_canModerateChannel()) {
+          body.innerHTML = '<div style="text-align:center;padding:24px;color:var(--text-muted)">Only channel mods can manage channel sticker packs.</div>';
+          return;
+        }
+        const rid = _currentRoomId();
+        if (!rid) {
+          body.innerHTML = '<div style="text-align:center;padding:24px;color:var(--text-muted)">Open a channel first.</div>';
+          return;
+        }
+        own = await _fetchStickerGrid('room', rid, { force: true });
+      } else {
+        const res = await apiFetch('/api/media/stickers/packs');
+        if (!res.ok) throw 0;
+        const data = await res.json();
+        own = (data.own_packs || []).map(p => ({ ...p, can_manage: true, stickers: [] }));
+        installed = data.installed_packs || [];
+        const packsWithStickers = await _fetchStickerGrid('mine', null, { force: true });
+        const byId = new Map(packsWithStickers.map(p => [p.id, p]));
+        own = own.map(p => byId.get(p.id) || p);
+      }
+
       let html = '';
       if (own.length) {
-        html += '<div style="font-size:11px;color:var(--accent-color);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;font-weight:700">Your Packs</div>';
-        for (const p of own) {
-          html += `
-            <div style="background:color-mix(in srgb, var(--bg-color) 60%, transparent);border:1px solid color-mix(in srgb, var(--accent-color) 25%, var(--border-color));border-radius:10px;padding:10px 12px;margin-bottom:8px">
-              <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
-                <div style="min-width:0;flex:1">
-                  <div style="font-weight:700;color:var(--text-color)">${UI.escHtml(p.name)}</div>
-                  <div style="font-size:11px;color:var(--text-muted)">${p.is_public ? '🌍 Public' : '🔒 Private'}${p.description ? ' · ' + UI.escHtml(p.description) : ''}</div>
-                </div>
-                <div style="display:flex;gap:4px;flex-shrink:0">
-                  <button onclick="GIFs.editPack(${p.id})" title="Rename" style="background:color-mix(in srgb, var(--accent-color) 14%, transparent);border:1px solid var(--border-color);color:var(--text-color);padding:5px 9px;border-radius:6px;cursor:pointer;font-size:12px">✎</button>
-                  <button onclick="GIFs.togglePublic(${p.id}, ${p.is_public ? 0 : 1})" title="${p.is_public ? 'Make private' : 'Publish'}" style="background:color-mix(in srgb, var(--accent-color) 14%, transparent);border:1px solid var(--border-color);color:var(--text-color);padding:5px 9px;border-radius:6px;cursor:pointer;font-size:12px">${p.is_public ? '🔒' : '🌍'}</button>
-                  <button onclick="GIFs.deletePack(${p.id})" title="Delete pack" style="background:rgba(180,40,40,.18);border:1px solid #6b2a2a;color:#f0a0a0;padding:5px 9px;border-radius:6px;cursor:pointer;font-size:12px">🗑</button>
-                </div>
-              </div>
-              <div id="sm-stickers-${p.id}" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;padding-top:10px;border-top:1px solid color-mix(in srgb, var(--accent-color) 18%, transparent)"></div>
-              <div style="margin-top:8px"><button onclick="GIFs.uploadStickerTo(${p.id})" style="background:color-mix(in srgb, var(--accent-color) 10%, transparent);border:1px dashed var(--accent-color);color:var(--accent-color);padding:6px 12px;border-radius:8px;cursor:pointer;font-size:12px;width:100%">+ Add sticker (PNG/WebP/GIF, ≤500KB)</button></div>
-            </div>`;
-        }
+        html += `<div style="font-size:11px;color:var(--accent-color);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;font-weight:700">${isChannel ? 'Channel packs' : 'Your packs'}</div>`;
+        for (const p of own) html += _smPackCardHtml(p, { channel: isChannel });
       }
-      if (installed.length) {
+      if (!isChannel && installed.length) {
         html += '<div style="font-size:11px;color:var(--accent-color);text-transform:uppercase;letter-spacing:.5px;margin:14px 0 6px;font-weight:700">Installed</div>';
         for (const p of installed) {
           html += `
             <div style="background:color-mix(in srgb, var(--bg-color) 60%, transparent);border:1px solid var(--border-color);border-radius:10px;padding:10px 12px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center">
               <div><div style="font-weight:600;color:var(--text-color)">${UI.escHtml(p.name)}</div><div style="font-size:11px;color:var(--text-muted)">by ${UI.escHtml(p.owner_name || '?')}</div></div>
-              <button onclick="GIFs.uninstallPack(${p.id})" style="background:rgba(180,40,40,.18);border:1px solid #6b2a2a;color:#f0a0a0;padding:5px 10px;border-radius:6px;cursor:pointer;font-size:12px">Uninstall</button>
+              <button type="button" onclick="GIFs.uninstallPack(${p.id})" style="background:rgba(180,40,40,.18);border:1px solid #6b2a2a;color:#f0a0a0;padding:5px 10px;border-radius:6px;cursor:pointer;font-size:12px">Uninstall</button>
             </div>`;
         }
       }
       if (!own.length && !installed.length) {
-        html += '<div style="text-align:center;padding:24px;color:var(--text-muted)">No packs yet — create one with the + button below, or browse public packs.</div>';
+        html += isChannel
+          ? '<div style="text-align:center;padding:24px;color:var(--text-muted)">No channel packs yet — tap <strong>+ Channel pack</strong> below.</div>'
+          : '<div style="text-align:center;padding:24px;color:var(--text-muted)">No packs yet — create one below or browse public packs.</div>';
       }
       body.innerHTML = html;
-      // load own pack stickers
+
       for (const p of own) {
-        try {
-          const r = await apiFetch(`/api/media/stickers/packs/${p.id}`);
-          if (!r.ok) continue;
-          const d = await r.json();
-          const cont = document.getElementById(`sm-stickers-${p.id}`);
-          if (!cont) continue;
-          if (!d.stickers || !d.stickers.length) {
-            cont.innerHTML = '<div style="font-size:11px;color:var(--text-muted)">No stickers yet</div>';
-            continue;
-          }
-          cont.innerHTML = d.stickers.map(s => {
-            const safeName = UI.escHtml(s.name || '');
-            const hasFx = !!(s.effects && window.StickerFX && !StickerFX.isDefault(s.effects));
-            const fxBadge = hasFx
-              ? '<div style="position:absolute;bottom:2px;left:2px;background:var(--accent-color);color:color-mix(in srgb, var(--accent-color) 12%, #000);font-size:9px;font-weight:700;padding:1px 5px;border-radius:6px;line-height:1.2;pointer-events:none">FX</div>'
-              : '';
-            return `
-            <div class="sm-sticker-tile" data-sticker-id="${s.id}" style="position:relative;width:64px;height:64px;background:color-mix(in srgb, var(--surface-color) 70%, transparent);border-radius:10px;overflow:hidden;border:1px solid var(--border-color)" title="${safeName}">
-              <div class="sm-sticker-host" data-sticker-id="${s.id}" style="width:100%;height:100%;display:flex;align-items:center;justify-content:center">
-                ${hasFx ? '' : `<img src="${s.image_data}" style="width:100%;height:100%;object-fit:contain" alt="">`}
-              </div>
-              ${fxBadge}
-              <button onclick="GIFs.editStickerFx(${s.id})" title="Edit effects" style="position:absolute;top:2px;left:2px;background:rgba(0,0,0,.55);border:none;color:var(--accent-color);width:20px;height:20px;border-radius:50%;cursor:pointer;font-size:11px;line-height:1;padding:0">✨</button>
-              <button onclick="GIFs.deleteSticker(${s.id})" title="Delete sticker" style="position:absolute;top:2px;right:2px;background:rgba(0,0,0,.7);border:none;color:#f0a0a0;width:20px;height:20px;border-radius:50%;cursor:pointer;font-size:11px;line-height:1;padding:0">×</button>
-            </div>`;
-          }).join('');
-          // Hydrate animated stickers in the manager.
-          if (window.StickerFX) {
-            for (const s of d.stickers) {
-              if (!s.effects || StickerFX.isDefault(s.effects)) continue;
-              const slot = cont.querySelector(`.sm-sticker-host[data-sticker-id="${s.id}"]`);
-              if (!slot) continue;
-              StickerFX.renderInto(slot, {
-                src: s.image_data,
-                effects: s.effects,
-                alt: s.name,
-                size: 64,
-              });
+        let stickers = p.stickers;
+        if (!stickers?.length && !isChannel) {
+          try {
+            const r = await apiFetch(`/api/media/stickers/packs/${p.id}`);
+            if (r.ok) {
+              const d = await r.json();
+              stickers = d.stickers || [];
             }
-          }
-          // Cache stickers so the editor can read effects/image_data without
-          // an extra round-trip.
-          _smStickerCache = _smStickerCache || {};
-          for (const s of d.stickers) _smStickerCache[s.id] = s;
-        } catch {}
+          } catch {}
+        }
+        _hydrateManagerPackStickers(p, stickers || [], {
+          canManage: !!p.can_manage || !isChannel,
+        });
       }
-    } catch (e) {
+    } catch {
       body.innerHTML = '<div style="color:#f0a0a0;padding:20px;text-align:center">Failed to load packs</div>';
     }
   }
 
-  async function showCreatePack() {
-    const name = await _smPrompt('New Sticker Pack', '', { placeholder: 'Pack name (2-32 chars)' });
+  async function showCreatePack(opts = {}) {
+    const forChannel = !!(opts.channel || _managerScope === 'channel');
+    const rid = forChannel ? _currentRoomId() : null;
+    if (forChannel && !rid) {
+      UI.showToast('Open a channel first', 'error');
+      return;
+    }
+    if (forChannel && !_canModerateChannel()) {
+      UI.showToast('Only channel mods can create channel packs', 'error');
+      return;
+    }
+    const title = forChannel ? 'New channel sticker pack' : 'New sticker pack';
+    const name = await _smPrompt(title, '', { placeholder: 'Pack name (2-32 chars)' });
     if (!name || !name.trim()) return;
-    const desc = await _smPrompt('Pack Description', '', { placeholder: 'Optional short description', multiline: true });
+    const desc = await _smPrompt('Pack description', '', { placeholder: 'Optional short description', multiline: true });
+    const body = { name: name.trim(), description: (desc || '').trim() };
+    if (forChannel && rid) body.room_id = rid;
     try {
-      const r = await apiFetch('/api/media/stickers/packs', 'POST', { name: name.trim(), description: (desc || '').trim() });
+      const r = await apiFetch('/api/media/stickers/packs', 'POST', body);
       const d = await r.json();
       if (!r.ok || d.error) UI.showToast(d.error || 'Failed to create pack', 'error');
-      else { UI.showToast('Pack created', 'success'); renderManager(); }
+      else {
+        UI.showToast(forChannel ? 'Channel pack created' : 'Pack created', 'success');
+        _invalidateStickerCache(forChannel ? 'room' : 'mine', rid);
+        renderManager();
+        if (forChannel && _currentTab === 'channel-stickers') loadChannelStickerPacks(true);
+      }
     } catch { UI.showToast('Failed to create pack', 'error'); }
   }
 
@@ -1332,36 +1541,55 @@ const GIFs = (() => {
     const newName = await _smPrompt('Rename Pack', current, { placeholder: 'New name (2-32 chars)' });
     if (!newName || !newName.trim()) return;
     const r = await apiFetch(`/api/media/stickers/packs/${packId}`, 'PATCH', { name: newName.trim() });
-    if (r.ok) { UI.showToast('Renamed', 'success'); renderManager(); }
-    else { const d = await r.json(); UI.showToast(d.error || 'Rename failed', 'error'); }
+    if (r.ok) {
+      UI.showToast('Renamed', 'success');
+      _invalidateStickerCache();
+      renderManager();
+    } else { const d = await r.json(); UI.showToast(d.error || 'Rename failed', 'error'); }
   }
 
   async function togglePublic(packId, makePublic) {
     const r = await apiFetch(`/api/media/stickers/packs/${packId}`, 'PATCH', { is_public: !!makePublic });
-    if (r.ok) { UI.showToast(makePublic ? 'Pack is now public' : 'Pack is now private', 'success'); renderManager(); }
-    else UI.showToast('Update failed', 'error');
+    if (r.ok) {
+      UI.showToast(makePublic ? 'Pack is now public' : 'Pack is now private', 'success');
+      _invalidateStickerCache('mine', null);
+      renderManager();
+    } else UI.showToast('Update failed', 'error');
   }
 
   async function deletePack(packId) {
     const ok = await _smConfirm('Delete Pack?', 'This will permanently delete the pack and all its stickers. This cannot be undone.', { okLabel: 'Delete' });
     if (!ok) return;
     const r = await apiFetch(`/api/media/stickers/packs/${packId}`, 'DELETE');
-    if (r.ok) { UI.showToast('Pack deleted', 'success'); renderManager(); }
-    else UI.showToast('Delete failed', 'error');
+    if (r.ok) {
+      UI.showToast('Pack deleted', 'success');
+      _invalidateStickerCache();
+      renderManager();
+      if (_currentTab === 'channel-stickers') loadChannelStickerPacks(true);
+      else if (_currentTab === 'stickers') loadStickerPacks(true);
+    } else UI.showToast('Delete failed', 'error');
   }
 
   async function uninstallPack(packId) {
     const r = await apiFetch(`/api/media/stickers/packs/${packId}/uninstall`, 'DELETE');
-    if (r.ok) { UI.showToast('Uninstalled', 'success'); renderManager(); }
-    else UI.showToast('Uninstall failed', 'error');
+    if (r.ok) {
+      UI.showToast('Uninstalled', 'success');
+      _invalidateStickerCache('mine', null);
+      renderManager();
+    } else UI.showToast('Uninstall failed', 'error');
   }
 
   async function deleteSticker(stickerId) {
     const ok = await _smConfirm('Delete Sticker?', 'Remove this sticker from the pack?', { okLabel: 'Delete' });
     if (!ok) return;
     const r = await apiFetch(`/api/media/stickers/${stickerId}`, 'DELETE');
-    if (r.ok) { UI.showToast('Deleted', 'success'); renderManager(); }
-    else UI.showToast('Delete failed', 'error');
+    if (r.ok) {
+      UI.showToast('Deleted', 'success');
+      _invalidateStickerCache();
+      renderManager();
+      if (_currentTab === 'channel-stickers') loadChannelStickerPacks(true);
+      else if (_currentTab === 'stickers') loadStickerPacks(true);
+    } else UI.showToast('Delete failed', 'error');
   }
 
   // ─── Sticker effects editor ──────────────────────────────────────────
@@ -1378,20 +1606,39 @@ const GIFs = (() => {
     }
     let sticker = _smStickerCache[stickerId];
     if (!sticker) {
-      // Not in cache yet — fetch the pack list & locate it.
+      const tryPacks = async (packs) => {
+        for (const p of packs || []) {
+          for (const s of (p.stickers || [])) {
+            _smStickerCache[s.id] = s;
+            if (String(s.id) === String(stickerId)) sticker = s;
+          }
+          if (sticker) return;
+        }
+      };
       try {
-        const r = await apiFetch('/api/media/stickers/packs');
-        if (r.ok) {
-          const d = await r.json();
-          for (const p of [...(d.own_packs || []), ...(d.installed_packs || [])]) {
-            const r2 = await apiFetch(`/api/media/stickers/packs/${p.id}`);
-            if (!r2.ok) continue;
-            const d2 = await r2.json();
-            for (const s of (d2.stickers || [])) {
-              _smStickerCache[s.id] = s;
-              if (s.id === stickerId) sticker = s;
+        const rid = _currentRoomId();
+        if (_managerScope === 'channel' && rid) {
+          const packs = await _fetchStickerGrid('room', rid, { force: false });
+          await tryPacks(packs.filter(p => p.can_manage));
+        }
+        if (!sticker) {
+          const packs = await _fetchStickerGrid('mine', null, { force: false });
+          await tryPacks(packs);
+        }
+        if (!sticker) {
+          const r = await apiFetch('/api/media/stickers/packs');
+          if (r.ok) {
+            const d = await r.json();
+            for (const p of [...(d.own_packs || []), ...(d.installed_packs || [])]) {
+              const r2 = await apiFetch(`/api/media/stickers/packs/${p.id}`);
+              if (!r2.ok) continue;
+              const d2 = await r2.json();
+              for (const s of (d2.stickers || [])) {
+                _smStickerCache[s.id] = s;
+                if (String(s.id) === String(stickerId)) sticker = s;
+              }
+              if (sticker) break;
             }
-            if (sticker) break;
           }
         }
       } catch {}
@@ -1482,6 +1729,7 @@ const GIFs = (() => {
         sticker.effects = null;
         _smStickerCache[sticker.id] = sticker;
         close();
+        _invalidateStickerCache();
         renderManager();
       } else {
         UI.showToast('Failed to clear', 'error');
@@ -1494,7 +1742,10 @@ const GIFs = (() => {
         sticker.effects = fx;
         _smStickerCache[sticker.id] = sticker;
         close();
+        _invalidateStickerCache();
         renderManager();
+        if (_currentTab === 'channel-stickers') loadChannelStickerPacks(true);
+        else if (_currentTab === 'stickers') loadStickerPacks(true);
       } else {
         const d = await r.json().catch(() => ({}));
         UI.showToast(d.error || 'Save failed', 'error');
@@ -1670,8 +1921,13 @@ const GIFs = (() => {
         const r = await apiFetch('/api/media/stickers', 'POST', {
           pack_id: packId, name, image_data: reader.result, emoji: ''
         });
-        if (r.ok) { UI.showToast('Sticker added', 'success'); renderManager(); }
-        else { const d = await r.json(); UI.showToast(d.error || 'Upload failed', 'error'); }
+        if (r.ok) {
+          UI.showToast('Sticker added', 'success');
+          _invalidateStickerCache();
+          renderManager();
+          if (_currentTab === 'channel-stickers') loadChannelStickerPacks(true);
+          else if (_currentTab === 'stickers') loadStickerPacks(true);
+        } else { const d = await r.json(); UI.showToast(d.error || 'Upload failed', 'error'); }
       };
       reader.readAsDataURL(file);
     };
@@ -1694,6 +1950,7 @@ const GIFs = (() => {
     sendSticker,
     scrollCats,
     openManager,
+    openManagerFromPicker,
     closeManager,
     browseFromManager,
     showCreatePack,

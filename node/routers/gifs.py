@@ -128,6 +128,116 @@ from deps import get_current_user
 router = APIRouter(prefix="/media", tags=["media"])
 _log = logging.getLogger("frogtalk.gifs")
 
+# Display name for pack browse / install lists (federated packs cache owner_nickname).
+_STICKER_OWNER_NAME_SQL = """
+CASE
+  WHEN sp.origin_server_id IS NOT NULL THEN
+    COALESCE(NULLIF(TRIM(sp.owner_nickname), ''), NULLIF(u.nickname, '__federated__'), '@federated')
+  ELSE COALESCE(u.nickname, NULLIF(TRIM(sp.owner_nickname), ''), '@unknown')
+END AS owner_name
+"""
+
+
+def _ensure_sticker_schema(con) -> None:
+    """Idempotent sticker tables + federation columns (safe on every request)."""
+    con.execute("""CREATE TABLE IF NOT EXISTS sticker_packs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        description TEXT DEFAULT '',
+        owner_id INTEGER NOT NULL,
+        is_public INTEGER DEFAULT 0,
+        origin_server_id TEXT DEFAULT NULL,
+        foreign_pack_id INTEGER DEFAULT NULL,
+        owner_nickname TEXT DEFAULT NULL,
+        room_id INTEGER DEFAULT NULL,
+        created_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE CASCADE
+    )""")
+    for _col, _ddl in (
+        ("origin_server_id", "ALTER TABLE sticker_packs ADD COLUMN origin_server_id TEXT DEFAULT NULL"),
+        ("foreign_pack_id", "ALTER TABLE sticker_packs ADD COLUMN foreign_pack_id INTEGER DEFAULT NULL"),
+        ("owner_nickname", "ALTER TABLE sticker_packs ADD COLUMN owner_nickname TEXT DEFAULT NULL"),
+        ("room_id", "ALTER TABLE sticker_packs ADD COLUMN room_id INTEGER DEFAULT NULL"),
+    ):
+        try:
+            con.execute(_ddl)
+        except Exception:
+            pass
+    try:
+        con.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_sticker_packs_origin "
+            "ON sticker_packs(origin_server_id, foreign_pack_id) "
+            "WHERE origin_server_id IS NOT NULL"
+        )
+        con.execute("CREATE INDEX IF NOT EXISTS idx_sticker_packs_room ON sticker_packs(room_id)")
+    except Exception:
+        pass
+    con.execute("""CREATE TABLE IF NOT EXISTS stickers (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        pack_id INTEGER NOT NULL,
+        name TEXT NOT NULL,
+        image_data TEXT NOT NULL,
+        emoji TEXT DEFAULT '',
+        effects TEXT DEFAULT NULL,
+        created_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (pack_id) REFERENCES sticker_packs(id) ON DELETE CASCADE
+    )""")
+    try:
+        con.execute("ALTER TABLE stickers ADD COLUMN effects TEXT DEFAULT NULL")
+    except Exception:
+        pass
+    con.execute("""CREATE TABLE IF NOT EXISTS user_sticker_packs (
+        user_id INTEGER NOT NULL,
+        pack_id INTEGER NOT NULL,
+        PRIMARY KEY (user_id, pack_id),
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+        FOREIGN KEY (pack_id) REFERENCES sticker_packs(id) ON DELETE CASCADE
+    )""")
+
+
+def _decode_sticker_row(row: dict) -> dict:
+    d = dict(row)
+    raw = d.pop("effects", None)
+    if raw:
+        try:
+            d["effects"] = validate_sticker_effects(_json_mod.loads(raw))
+        except Exception:
+            d["effects"] = None
+    else:
+        d["effects"] = None
+    return d
+
+
+def _stickers_for_pack_ids(con, pack_ids: list[int]) -> dict[int, list]:
+    if not pack_ids:
+        return {}
+    ph = ",".join("?" * len(pack_ids))
+    rows = con.execute(
+        f"SELECT id, pack_id, name, image_data, emoji, effects FROM stickers "
+        f"WHERE pack_id IN ({ph}) ORDER BY pack_id, id",
+        pack_ids,
+    ).fetchall()
+    out: dict[int, list] = {pid: [] for pid in pack_ids}
+    for row in rows:
+        out[int(row["pack_id"])].append(_decode_sticker_row(row))
+    return out
+
+
+def _packs_with_stickers(con, pack_rows, *, user_id: int) -> list:
+    packs = [dict(r) for r in pack_rows]
+    by_pack = _stickers_for_pack_ids(con, [int(p["id"]) for p in packs])
+    uid = int(user_id)
+    result = []
+    for p in packs:
+        p["stickers"] = by_pack.get(int(p["id"]), [])
+        p["sticker_count"] = len(p["stickers"])
+        p["can_manage"] = (
+            int(p.get("owner_id") or 0) == uid
+            and not p.get("origin_server_id")
+        )
+        result.append(p)
+    return result
+
 # ─── Sticker pack federation ────────────────────────────────────────────────
 # Sticker packs flagged is_public=1 are mirrored to peer servers via the
 # federation event bus. Foreign packs are stored locally with origin_server_id
@@ -150,6 +260,9 @@ def _fed_emit_sticker_event(pack_id: int, action: str) -> None:
             pack = dict(pack)
             # Never re-emit foreign-origin packs.
             if pack.get("origin_server_id"):
+                return
+            # Channel packs stay on this node only — never federate them.
+            if pack.get("room_id"):
                 return
             if action == "upsert" and not pack.get("is_public"):
                 # Private packs aren't federated. If a pack flips public->private
@@ -571,82 +684,27 @@ class UpdateStickerRequest(BaseModel):
 @router.get("/stickers/packs")
 async def list_sticker_packs(current_user: dict = Depends(get_current_user)):
     """List all sticker packs (user's own + installed)."""
+    uid = int(current_user["id"])
     with db._conn() as con:
-        # Ensure tables exist
-        con.execute("""CREATE TABLE IF NOT EXISTS sticker_packs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            description TEXT DEFAULT '',
-            owner_id INTEGER NOT NULL,
-            is_public INTEGER DEFAULT 0,
-            origin_server_id TEXT DEFAULT NULL,
-            foreign_pack_id INTEGER DEFAULT NULL,
-            created_at TEXT DEFAULT (datetime('now')),
-            FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE CASCADE
-        )""")
-        # Backfill columns on old DBs (idempotent).
-        for _col, _ddl in (
-            ("origin_server_id", "ALTER TABLE sticker_packs ADD COLUMN origin_server_id TEXT DEFAULT NULL"),
-            ("foreign_pack_id",  "ALTER TABLE sticker_packs ADD COLUMN foreign_pack_id INTEGER DEFAULT NULL"),
-        ):
-            try:
-                con.execute(_ddl)
-            except Exception:
-                pass
-        try:
-            con.execute(
-                "CREATE UNIQUE INDEX IF NOT EXISTS idx_sticker_packs_origin "
-                "ON sticker_packs(origin_server_id, foreign_pack_id) "
-                "WHERE origin_server_id IS NOT NULL"
-            )
-        except Exception:
-            pass
-        
-        con.execute("""CREATE TABLE IF NOT EXISTS stickers (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            pack_id INTEGER NOT NULL,
-            name TEXT NOT NULL,
-            image_data TEXT NOT NULL,
-            emoji TEXT DEFAULT '',
-            effects TEXT DEFAULT NULL,
-            created_at TEXT DEFAULT (datetime('now')),
-            FOREIGN KEY (pack_id) REFERENCES sticker_packs(id) ON DELETE CASCADE
-        )""")
-        # Backfill `effects` column on existing DBs (idempotent).
-        try:
-            con.execute("ALTER TABLE stickers ADD COLUMN effects TEXT DEFAULT NULL")
-        except Exception:
-            pass
-        
-        con.execute("""CREATE TABLE IF NOT EXISTS user_sticker_packs (
-            user_id INTEGER NOT NULL,
-            pack_id INTEGER NOT NULL,
-            PRIMARY KEY (user_id, pack_id),
-            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-            FOREIGN KEY (pack_id) REFERENCES sticker_packs(id) ON DELETE CASCADE
-        )""")
-        
-        # Personal packs only (channel packs use /stickers/room/{id})
+        _ensure_sticker_schema(con)
         own_packs = con.execute("""
-            SELECT sp.*, 
+            SELECT sp.*,
                    (SELECT COUNT(*) FROM stickers WHERE pack_id=sp.id) as sticker_count
             FROM sticker_packs sp
             WHERE sp.owner_id=? AND sp.room_id IS NULL
-        """, (current_user["id"],)).fetchall()
-        
-        # Get installed packs (includes federated packs whose owner_id = -1)
-        installed_packs = con.execute("""
-            SELECT sp.*, COALESCE(u.nickname, '@federated') as owner_name,
+        """, (uid,)).fetchall()
+        installed_packs = con.execute(f"""
+            SELECT sp.*, {_STICKER_OWNER_NAME_SQL},
                    (SELECT COUNT(*) FROM stickers WHERE pack_id=sp.id) as sticker_count
             FROM user_sticker_packs usp
             JOIN sticker_packs sp ON usp.pack_id = sp.id
             LEFT JOIN users u ON sp.owner_id = u.id
             WHERE usp.user_id=? AND sp.owner_id != ? AND sp.room_id IS NULL
-        """, (current_user["id"], current_user["id"])).fetchall()
-    
+        """, (uid, uid)).fetchall()
+
     return {
         "own_packs": [dict(p) for p in own_packs],
-        "installed_packs": [dict(p) for p in installed_packs]
+        "installed_packs": [dict(p) for p in installed_packs],
     }
 
 
@@ -656,29 +714,69 @@ async def list_room_sticker_packs(room_id: int, current_user: dict = Depends(get
     if not db.is_room_member(current_user["id"], room_id):
         return JSONResponse(status_code=403, content={"error": "Not a member of this channel"})
     with db._conn() as con:
-        con.execute("""CREATE TABLE IF NOT EXISTS sticker_packs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            description TEXT DEFAULT '',
-            owner_id INTEGER NOT NULL,
-            is_public INTEGER DEFAULT 0,
-            origin_server_id TEXT DEFAULT NULL,
-            foreign_pack_id INTEGER DEFAULT NULL,
-            created_at TEXT DEFAULT (datetime('now')),
-            FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE CASCADE
-        )""")
-        try:
-            con.execute("ALTER TABLE sticker_packs ADD COLUMN room_id INTEGER DEFAULT NULL")
-        except Exception:
-            pass
-        packs = con.execute("""
-            SELECT sp.*,
+        _ensure_sticker_schema(con)
+        packs = con.execute(f"""
+            SELECT sp.*, {_STICKER_OWNER_NAME_SQL},
                    (SELECT COUNT(*) FROM stickers WHERE pack_id=sp.id) as sticker_count
             FROM sticker_packs sp
+            LEFT JOIN users u ON sp.owner_id = u.id
             WHERE sp.room_id=?
             ORDER BY sp.created_at DESC
         """, (room_id,)).fetchall()
     return {"packs": [dict(p) for p in packs]}
+
+
+@router.get("/stickers/grid")
+async def get_sticker_grid(
+    scope: str = Query("mine"),
+    room_id: Optional[int] = Query(None),
+    current_user: dict = Depends(get_current_user),
+):
+    """Return packs with embedded stickers in one round-trip (picker / channel tab).
+
+    scope:
+      mine  — personal own + installed packs (room_id must be null)
+      room  — channel packs for room_id (members only)
+    """
+    uid = int(current_user["id"])
+    scope_norm = (scope or "mine").strip().lower()
+    with db._conn() as con:
+        _ensure_sticker_schema(con)
+        if scope_norm == "room":
+            rid = int(room_id or 0)
+            if not rid:
+                return JSONResponse(status_code=400, content={"error": "room_id required"})
+            if not db.is_room_member(uid, rid):
+                return JSONResponse(status_code=403, content={"error": "Not a member of this channel"})
+            pack_rows = con.execute(f"""
+                SELECT sp.*, {_STICKER_OWNER_NAME_SQL}
+                FROM sticker_packs sp
+                LEFT JOIN users u ON sp.owner_id = u.id
+                WHERE sp.room_id=?
+                ORDER BY sp.created_at DESC
+            """, (rid,)).fetchall()
+        else:
+            own = con.execute(f"""
+                SELECT sp.*, {_STICKER_OWNER_NAME_SQL}
+                FROM sticker_packs sp
+                LEFT JOIN users u ON sp.owner_id = u.id
+                WHERE sp.owner_id=? AND sp.room_id IS NULL
+                ORDER BY sp.created_at DESC
+            """, (uid,)).fetchall()
+            installed = con.execute(f"""
+                SELECT sp.*, {_STICKER_OWNER_NAME_SQL}
+                FROM user_sticker_packs usp
+                JOIN sticker_packs sp ON usp.pack_id = sp.id
+                LEFT JOIN users u ON sp.owner_id = u.id
+                WHERE usp.user_id=? AND sp.owner_id != ? AND sp.room_id IS NULL
+                ORDER BY sp.created_at DESC
+            """, (uid, uid)).fetchall()
+            pack_rows = list(own) + list(installed)
+
+        packs = _packs_with_stickers(con, pack_rows, user_id=uid)
+    for p in packs:
+        p.pop("foreign_pack_id", None)
+    return {"packs": packs, "scope": scope_norm}
 
 
 @router.post("/stickers/import")
@@ -747,14 +845,12 @@ async def create_sticker_pack(body: CreateStickerPackRequest, current_user: dict
             return JSONResponse(status_code=403, content={"error": "Only channel mods can create channel sticker packs"})
 
     with db._conn() as con:
-        try:
-            con.execute("ALTER TABLE sticker_packs ADD COLUMN room_id INTEGER DEFAULT NULL")
-        except Exception:
-            pass
+        _ensure_sticker_schema(con)
+        owner_nick = str(current_user.get("nickname") or "")[:64]
         cur = con.execute("""
-            INSERT INTO sticker_packs (name, description, owner_id, room_id)
-            VALUES (?, ?, ?, ?)
-        """, (body.name, body.description, current_user["id"], room_id))
+            INSERT INTO sticker_packs (name, description, owner_id, room_id, owner_nickname)
+            VALUES (?, ?, ?, ?, ?)
+        """, (body.name, body.description, current_user["id"], room_id, owner_nick))
         pack_id = cur.lastrowid
 
         if room_id is None:
@@ -812,40 +908,31 @@ async def add_sticker(body: AddStickerRequest, current_user: dict = Depends(get_
 @router.get("/stickers/packs/{pack_id}")
 async def get_sticker_pack(pack_id: int, current_user: dict = Depends(get_current_user)):
     """Get all stickers in a pack."""
+    uid = int(current_user["id"])
     with db._conn() as con:
-        pack = con.execute("""
-            SELECT sp.*, COALESCE(u.nickname, '@federated') as owner_name
+        _ensure_sticker_schema(con)
+        pack = con.execute(f"""
+            SELECT sp.*, {_STICKER_OWNER_NAME_SQL}
             FROM sticker_packs sp
             LEFT JOIN users u ON sp.owner_id = u.id
             WHERE sp.id=?
         """, (pack_id,)).fetchone()
-        
+
         if not pack:
             return JSONResponse(status_code=404, content={"error": "Pack not found"})
-        
-        stickers = con.execute("""
-            SELECT id, name, image_data, emoji, effects FROM stickers WHERE pack_id=?
-        """, (pack_id,)).fetchall()
 
-    out = []
-    for s in stickers:
-        d = dict(s)
-        # Decode persisted effects JSON; never expose raw text from the DB
-        # column if it somehow got corrupted — fall back to no effects.
-        raw = d.pop("effects", None)
-        if raw:
-            try:
-                d["effects"] = validate_sticker_effects(_json_mod.loads(raw))
-            except Exception:
-                d["effects"] = None
-        else:
-            d["effects"] = None
-        out.append(d)
+        stickers = con.execute(
+            "SELECT id, name, image_data, emoji, effects FROM stickers WHERE pack_id=? ORDER BY id",
+            (pack_id,),
+        ).fetchall()
 
-    return {
-        "pack": dict(pack),
-        "stickers": out,
-    }
+    out = [_decode_sticker_row(s) for s in stickers]
+    pack_d = dict(pack)
+    pack_d["can_manage"] = (
+        int(pack_d.get("owner_id") or 0) == uid
+        and not pack_d.get("origin_server_id")
+    )
+    return {"pack": pack_d, "stickers": out}
 
 
 @router.post("/stickers/packs/{pack_id}/install")
@@ -964,23 +1051,25 @@ async def browse_public_sticker_packs(
 ):
     """Browse public sticker packs."""
     with db._conn() as con:
+        _ensure_sticker_schema(con)
         if q:
-            packs = con.execute("""
-                SELECT sp.*, COALESCE(u.nickname, '@federated') as owner_name,
+            packs = con.execute(f"""
+                SELECT sp.*, {_STICKER_OWNER_NAME_SQL},
                        (SELECT COUNT(*) FROM stickers WHERE pack_id=sp.id) as sticker_count
                 FROM sticker_packs sp
                 LEFT JOIN users u ON sp.owner_id = u.id
-                WHERE sp.is_public=1 AND (sp.name LIKE ? OR sp.description LIKE ?)
+                WHERE sp.is_public=1 AND sp.room_id IS NULL
+                  AND (sp.name LIKE ? OR sp.description LIKE ?)
                 ORDER BY sp.created_at DESC
                 LIMIT ?
             """, (f'%{q}%', f'%{q}%', limit)).fetchall()
         else:
-            packs = con.execute("""
-                SELECT sp.*, COALESCE(u.nickname, '@federated') as owner_name,
+            packs = con.execute(f"""
+                SELECT sp.*, {_STICKER_OWNER_NAME_SQL},
                        (SELECT COUNT(*) FROM stickers WHERE pack_id=sp.id) as sticker_count
                 FROM sticker_packs sp
                 LEFT JOIN users u ON sp.owner_id = u.id
-                WHERE sp.is_public=1
+                WHERE sp.is_public=1 AND sp.room_id IS NULL
                 ORDER BY sp.created_at DESC
                 LIMIT ?
             """, (limit,)).fetchall()
@@ -1008,6 +1097,14 @@ async def update_sticker_pack(pack_id: int, body: UpdateStickerPackRequest, curr
         if body.description is not None:
             sets.append("description=?"); vals.append(body.description[:200])
         if body.is_public is not None:
+            row_room = con.execute(
+                "SELECT room_id FROM sticker_packs WHERE id=?", (pack_id,)
+            ).fetchone()
+            if row_room and row_room["room_id"]:
+                return JSONResponse(
+                    status_code=400,
+                    content={"error": "Channel sticker packs cannot be published globally"},
+                )
             sets.append("is_public=?"); vals.append(1 if body.is_public else 0)
         if not sets:
             return {"ok": True}
