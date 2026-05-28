@@ -908,16 +908,103 @@ const GIFs = (() => {
   function _openStickerItemMenu(stickerId, scope) {
     const rec = _stickersById.get(String(stickerId || ''));
     const items = [];
-    if (scope === 'channel') {
-      items.push({ label: 'Save to my stickers', icon: '➕', onclick: () => importStickerToAccount(stickerId) });
+    const canModChannel = _canModerateChannel() && _currentRoomId();
+    items.push({ label: 'Save to my stickers', icon: '➕', onclick: () => importStickerToAccount(stickerId) });
+    if (canModChannel && scope !== 'channel') {
+      items.push({
+        label: 'Add to channel stickers',
+        icon: '📢',
+        onclick: () => addStickerToChannel(stickerId),
+      });
     }
-    if (rec?.can_manage || scope === 'mine') {
+    if (rec?.can_manage) {
       items.push({ label: 'Edit effects', icon: '✨', onclick: () => editStickerFx(stickerId) });
       items.push({ label: 'Delete sticker', icon: '🗑', danger: true, onclick: () => deleteSticker(stickerId) });
     }
     if (!items.length) return;
     if (typeof showActionSheet === 'function') showActionSheet('Sticker', items);
     else if (items[0]?.onclick) items[0].onclick();
+  }
+
+  async function addStickerToChannel(stickerId, packId) {
+    const rid = _currentRoomId();
+    if (!rid) {
+      UI.showToast('Open a channel first', 'error');
+      return;
+    }
+    if (!_canModerateChannel()) {
+      UI.showToast('Only channel mods can add channel stickers', 'error');
+      return;
+    }
+    let targetPackId = packId;
+    if (!targetPackId) {
+      let packs = _channelStickerPacks || [];
+      if (!packs.length) {
+        try {
+          packs = await _fetchStickerGrid('room', rid, { force: true });
+        } catch {
+          packs = [];
+        }
+      }
+      const manageable = packs.filter(p => p.can_manage !== false);
+      if (!manageable.length) {
+        const ok = await _smConfirm(
+          'No channel packs',
+          'Create a channel sticker pack first?',
+          { okLabel: 'Create pack' }
+        );
+        if (ok) await showCreatePack({ channel: true });
+        return;
+      }
+      if (manageable.length === 1) {
+        targetPackId = manageable[0].id;
+      } else {
+        const labels = manageable.map(p => p.name);
+        const pick = await _smPickFromList('Choose channel pack', labels);
+        if (pick == null || pick < 0) return;
+        targetPackId = manageable[pick].id;
+      }
+    }
+    try {
+      const r = await apiFetch(`/api/media/stickers/${Number(stickerId)}/add-to-channel`, 'POST', {
+        room_id: rid,
+        pack_id: targetPackId,
+      });
+      const d = await r.json();
+      if (!r.ok) {
+        UI.showToast(d.error || 'Could not add to channel', 'error');
+        return;
+      }
+      UI.showToast(d.skipped ? 'Already in that channel pack' : 'Added to channel stickers', d.skipped ? 'info' : 'success');
+      _invalidateStickerCache('room', rid);
+      if (_currentTab === 'channel-stickers') loadChannelStickerPacks(true);
+    } catch {
+      UI.showToast('Failed to add to channel', 'error');
+    }
+  }
+
+  function _smPickFromList(title, options) {
+    return new Promise(resolve => {
+      if (!options?.length) { resolve(-1); return; }
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:3000;display:flex;align-items:center;justify-content:center;padding:20px';
+      const btns = options.map((label, i) =>
+        `<button type="button" data-pick-idx="${i}" style="display:block;width:100%;text-align:left;background:color-mix(in srgb, var(--bg-color) 60%, transparent);border:1px solid var(--border-color);color:var(--text-color);padding:10px 12px;border-radius:8px;cursor:pointer;margin-bottom:6px;font-size:13px">${UI.escHtml(label)}</button>`
+      ).join('');
+      overlay.innerHTML = `
+        <div style="background:var(--surface-color);border:1px solid var(--border-color);border-radius:12px;width:360px;max-width:100%;max-height:80vh;overflow:auto;padding:14px 16px;color:var(--text-color)">
+          <div style="font-weight:700;margin-bottom:10px">${UI.escHtml(title)}</div>
+          ${btns}
+          <button type="button" id="sm-pick-cancel" style="margin-top:8px;width:100%;padding:8px;border-radius:8px;border:1px solid var(--border-color);background:transparent;color:var(--text-muted);cursor:pointer">Cancel</button>
+        </div>`;
+      document.body.appendChild(overlay);
+      const close = (v) => { try { overlay.remove(); } catch {} resolve(v); };
+      overlay.querySelector('#sm-pick-cancel').onclick = () => close(-1);
+      overlay.addEventListener('click', e => { if (e.target === overlay) close(-1); });
+      overlay.querySelectorAll('[data-pick-idx]').forEach(btn => {
+        btn.onclick = () => close(parseInt(btn.getAttribute('data-pick-idx'), 10));
+      });
+    });
   }
 
   async function importStickerToAccount(stickerId) {
@@ -1070,10 +1157,20 @@ const GIFs = (() => {
           const r = await apiFetch(`/api/media/stickers/packs/${pack.id}`);
           if (!r.ok) continue;
           const d = await r.json();
-          const stickers = (d.stickers || []).slice(0, 5);
+          const canManage = !!(d.pack && d.pack.can_manage);
+          const stickers = (d.stickers || []).slice(0, 12);
+          for (const s of stickers) {
+            _stickersById.set(String(s.id), {
+              image_data: s.image_data,
+              name: s.name,
+              effects: s.effects || null,
+              pack_id: pack.id,
+              can_manage: canManage,
+            });
+          }
           cont.innerHTML = stickers.map(s => `
-            <div title="${UI.escHtml(s.name)}" style="width:42px;height:42px;border-radius:8px;overflow:hidden;background:color-mix(in srgb, var(--surface-color) 70%, transparent);border:1px solid var(--border-color);display:flex;align-items:center;justify-content:center;flex-shrink:0">
-              <img src="${UI.escHtml(s.image_data)}" alt="" loading="lazy" style="max-width:100%;max-height:100%;object-fit:contain">
+            <div class="sp-thumb-sticker" data-sticker-id="${s.id}" data-sticker-scope="public" title="${UI.escHtml(s.name)}" style="width:42px;height:42px;border-radius:8px;overflow:hidden;background:color-mix(in srgb, var(--surface-color) 70%, transparent);border:1px solid var(--border-color);display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer">
+              <img src="${UI.escHtml(s.image_data)}" alt="" loading="lazy" style="max-width:100%;max-height:100%;object-fit:contain;pointer-events:none">
             </div>`).join('') + (
               pack.sticker_count > 5
                 ? `<div style="font-size:11px;color:var(--text-muted);margin-left:4px">+${pack.sticker_count - 5}</div>`
@@ -1081,9 +1178,33 @@ const GIFs = (() => {
             );
         } catch {}
       }
+      _bindPublicThumbMenus(grid);
     } catch (e) {
       grid.innerHTML = '<div class="gif-empty">Failed to load public packs</div>';
     }
+  }
+
+  function _bindPublicThumbMenus(grid) {
+    if (!grid) return;
+    grid.querySelectorAll('.sp-thumb-sticker:not([data-lp-bound])').forEach(el => {
+      el.dataset.lpBound = '1';
+      el.addEventListener('click', (e) => {
+        const sid = el.getAttribute('data-sticker-id');
+        const rec = _stickersById.get(String(sid || ''));
+        if (rec?.image_data) sendSticker(rec.image_data, rec.effects);
+      });
+      el.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        _openStickerItemMenu(el.getAttribute('data-sticker-id'), 'public');
+      });
+      if (typeof bindLongPress === 'function') {
+        bindLongPress(el, (ev) => {
+          ev.preventDefault();
+          _openStickerItemMenu(el.getAttribute('data-sticker-id'), 'public');
+        });
+      }
+    });
   }
 
   async function installPack(packId) {
@@ -1365,7 +1486,7 @@ const GIFs = (() => {
   }
 
   function _smPackCardHtml(p, { channel } = {}) {
-    const canManage = !!p.can_manage || (!channel && !p.room_id);
+    const canManage = !!p.can_manage;
     const pubBtns = (!channel && canManage)
       ? `<button type="button" onclick="GIFs.togglePublic(${p.id}, ${p.is_public ? 0 : 1})" title="${p.is_public ? 'Make private' : 'Publish'}" style="background:color-mix(in srgb, var(--accent-color) 14%, transparent);border:1px solid var(--border-color);color:var(--text-color);padding:5px 9px;border-radius:6px;cursor:pointer;font-size:12px">${p.is_public ? '🔒' : '🌍'}</button>`
       : '';
@@ -1498,7 +1619,7 @@ const GIFs = (() => {
           } catch {}
         }
         _hydrateManagerPackStickers(p, stickers || [], {
-          canManage: !!p.can_manage || !isChannel,
+          canManage: !!p.can_manage,
         });
       }
     } catch {
@@ -1944,6 +2065,7 @@ const GIFs = (() => {
     loadChannelStickerPacks,
     importStickerToAccount,
     importStickerImageToAccount,
+    addStickerToChannel,
     showPublicPacks,
     installPack,
     send,

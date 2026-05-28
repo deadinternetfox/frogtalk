@@ -135,6 +135,7 @@ def enqueue_server_event(
     payload: dict,
     *,
     target_server_ids: list[str] | None = None,
+    actor_global_user_id: str | None = None,
 ) -> dict:
     local = db.get_or_create_local_server_identity()
     # Random suffix prevents same-millisecond collisions when multiple
@@ -153,7 +154,7 @@ def enqueue_server_event(
         "event_version": 1,
         "origin_server_id": local["server_id"],
         "origin_time": datetime.utcnow().isoformat() + "Z",
-        "actor_global_user_id": "server-admin",
+        "actor_global_user_id": str(actor_global_user_id or "server-admin").strip() or "server-admin",
         "payload": payload or {},
         "signature": "",
     }
@@ -3772,6 +3773,8 @@ def _insert_inbox_events_sync(events: list[dict]) -> tuple[int, int]:
         "room.member.joined",
         "room.member.left",
         "channel.directory.updated",
+        # Cross-node owner relay must be signed; nickname alone is not proof.
+        "sticker.pack.owner.request",
     }
     now = datetime.now(tz=timezone.utc)
     # Tightened from ±1h to ±5min after audit: an attacker who captures a
@@ -7256,18 +7259,156 @@ async def _handle_social_event(event: dict) -> None:
             db.unfollow_user(follower["id"], following["id"])
 
 
+_STICKER_MAX_BYTES = 500 * 1024
+_STICKER_MAX_PER_PACK = 30
+
+
+def _validate_federated_sticker_row(s: dict) -> bool:
+    """Reject oversized or malformed sticker blobs at the federation boundary."""
+    img = str(s.get("image_data") or "")
+    if not img.startswith("data:image/"):
+        return False
+    if len(img) > _STICKER_MAX_BYTES:
+        return False
+    return True
+
+
+async def _handle_sticker_owner_request(event: dict) -> None:
+    """Apply cross-node owner edits relayed from a peer where the creator is logged in."""
+    payload = event.get("payload") or {}
+    action = str(payload.get("action") or "upsert").strip().lower()
+    target_origin = str(payload.get("target_origin") or "").strip()
+    pack_id = int(payload.get("pack_id") or 0)
+    owner_nick = str(payload.get("owner_nickname") or "").strip().lower()
+    payload_owner_gid = str(payload.get("owner_global_user_id") or "").strip()
+    actor_gid = str(event.get("actor_global_user_id") or "").strip()
+    if not target_origin or not pack_id or not owner_nick:
+        return
+    if not actor_gid or actor_gid == "server-admin":
+        return
+    if payload_owner_gid and payload_owner_gid != actor_gid:
+        return
+    try:
+        local_sid = str((db.get_or_create_local_server_identity() or {}).get("server_id") or "").strip()
+    except Exception:
+        return
+    if not local_sid or target_origin != local_sid:
+        return
+
+    def _apply() -> None:
+        with db._conn() as con:
+            pack = con.execute(
+                "SELECT id, owner_id, name, owner_global_user_id FROM sticker_packs WHERE id=? "
+                "AND (origin_server_id IS NULL OR origin_server_id='')",
+                (pack_id,),
+            ).fetchone()
+            if not pack:
+                return
+            owner = con.execute(
+                "SELECT global_user_id, nickname FROM users WHERE id=?",
+                (int(pack["owner_id"]),),
+            ).fetchone()
+            if not owner:
+                return
+            owner_gid = str(pack["owner_global_user_id"] or owner["global_user_id"] or "").strip()
+            owner_nickname = str(owner["nickname"] or "").strip().lower()
+            if owner_nickname != owner_nick:
+                return
+            if not owner_gid or actor_gid != owner_gid:
+                return
+
+            if action == "delete":
+                con.execute("DELETE FROM stickers WHERE pack_id=?", (pack_id,))
+                con.execute("DELETE FROM user_sticker_packs WHERE pack_id=?", (pack_id,))
+                con.execute("DELETE FROM sticker_packs WHERE id=?", (pack_id,))
+                enqueue_server_event("sticker.pack.delete", {"pack_id": pack_id})
+                return
+
+            name = str(payload.get("name") or pack["name"] or "").strip() or "Pack"
+            desc = str(payload.get("description") or "")[:200]
+            is_public = int(payload.get("is_public") or 1)
+            con.execute(
+                "UPDATE sticker_packs SET name=?, description=?, is_public=? WHERE id=?",
+                (name, desc, is_public, pack_id),
+            )
+            con.execute("DELETE FROM stickers WHERE pack_id=?", (pack_id,))
+            sticker_rows = (payload.get("stickers") or [])[:_STICKER_MAX_PER_PACK]
+            for s in sticker_rows:
+                if not _validate_federated_sticker_row(s):
+                    continue
+                try:
+                    from routers.gifs import validate_sticker_effects as _vfx
+                    fx_raw = s.get("effects")
+                    fx_json = None
+                    if isinstance(fx_raw, str) and fx_raw.strip():
+                        import json as _j
+                        fx_raw = _j.loads(fx_raw)
+                    fx_norm = _vfx(fx_raw)
+                    if fx_norm:
+                        import json as _j2
+                        fx_json = _j2.dumps(fx_norm)
+                except Exception:
+                    fx_json = None
+                con.execute(
+                    "INSERT INTO stickers (pack_id, name, image_data, emoji, effects) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (
+                        pack_id,
+                        str(s.get("name") or ""),
+                        str(s.get("image_data") or ""),
+                        str(s.get("emoji") or ""),
+                        fx_json,
+                    ),
+                )
+            owner_row = con.execute(
+                "SELECT nickname FROM users WHERE id=?", (int(pack["owner_id"]),)
+            ).fetchone()
+            owner_nick_out = str(owner_row["nickname"] or "") if owner_row else owner_nick
+            upsert_payload = {
+                "pack_id": pack_id,
+                "name": name,
+                "description": desc,
+                "owner_nickname": owner_nick_out,
+                "is_public": is_public,
+                "stickers": [
+                    dict(r)
+                    for r in con.execute(
+                        "SELECT id, name, image_data, emoji, effects FROM stickers WHERE pack_id=?",
+                        (pack_id,),
+                    ).fetchall()
+                ],
+            }
+            enqueue_server_event("sticker.pack.upsert", upsert_payload)
+
+    try:
+        await asyncio.to_thread(_apply)
+    except Exception:
+        _log.exception("sticker owner request failed (pack=%s)", pack_id)
+
+
 async def _handle_sticker_event(event: dict) -> None:
     """Apply incoming sticker.pack.upsert / sticker.pack.delete events.
 
     Foreign packs are stored locally with origin_server_id + foreign_pack_id
     set so subsequent updates/deletes find the same row.
     """
-    payload = event.get("payload") or {}
     event_type = str(event.get("event_type") or "")
+    if event_type == "sticker.pack.owner.request":
+        await _handle_sticker_owner_request(event)
+        return
+
+    payload = event.get("payload") or {}
     origin = str(event.get("origin_server_id") or "").strip()
     foreign_pack_id = int(payload.get("pack_id") or 0)
     if not origin or not foreign_pack_id:
         return
+    # Never materialise our own public packs as owner_id=-1 mirrors on this node.
+    try:
+        local_sid = str((db.get_or_create_local_server_identity() or {}).get("server_id") or "").strip()
+        if local_sid and origin == local_sid:
+            return
+    except Exception:
+        pass
 
     def _apply() -> None:
         with db._conn() as con:
@@ -7297,12 +7438,15 @@ async def _handle_sticker_event(event: dict) -> None:
             desc = str(payload.get("description") or "")[:200]
             is_public = int(payload.get("is_public") or 1)
             owner_nick = str(payload.get("owner_nickname") or "").strip()[:64]
-            try:
-                con.execute(
-                    "ALTER TABLE sticker_packs ADD COLUMN owner_nickname TEXT DEFAULT NULL"
-                )
-            except Exception:
-                pass
+            owner_gid = str(payload.get("owner_global_user_id") or "").strip()[:128]
+            for _ddl in (
+                "ALTER TABLE sticker_packs ADD COLUMN owner_nickname TEXT DEFAULT NULL",
+                "ALTER TABLE sticker_packs ADD COLUMN owner_global_user_id TEXT DEFAULT NULL",
+            ):
+                try:
+                    con.execute(_ddl)
+                except Exception:
+                    pass
             # Owner mapping: use a synthetic system user (-1) so foreign packs
             # never appear as a local user's pack but still satisfy the FK
             # contract loosely via the public-browse path. We don't enforce
@@ -7312,19 +7456,21 @@ async def _handle_sticker_event(event: dict) -> None:
                 pid = int(row["id"])
                 con.execute(
                     "UPDATE sticker_packs SET name=?, description=?, is_public=?, "
-                    "owner_nickname=? WHERE id=?",
-                    (name, desc, is_public, owner_nick, pid),
+                    "owner_nickname=?, owner_global_user_id=? WHERE id=?",
+                    (name, desc, is_public, owner_nick, owner_gid or None, pid),
                 )
                 con.execute("DELETE FROM stickers WHERE pack_id=?", (pid,))
             else:
                 cur = con.execute(
                     "INSERT INTO sticker_packs (name, description, owner_id, is_public, "
-                    "origin_server_id, foreign_pack_id, owner_nickname) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    (name, desc, owner_id, is_public, origin, foreign_pack_id, owner_nick),
+                    "origin_server_id, foreign_pack_id, owner_nickname, owner_global_user_id) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (name, desc, owner_id, is_public, origin, foreign_pack_id, owner_nick, owner_gid or None),
                 )
                 pid = int(cur.lastrowid)
-            for s in (payload.get("stickers") or []):
+            for s in (payload.get("stickers") or [])[:_STICKER_MAX_PER_PACK]:
+                if not _validate_federated_sticker_row(s):
+                    continue
                 try:
                     # Effects come over the wire as either an already-encoded
                     # JSON string (from the DB column) or a dict (older peers).

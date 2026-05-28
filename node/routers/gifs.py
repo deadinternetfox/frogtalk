@@ -157,6 +157,7 @@ def _ensure_sticker_schema(con) -> None:
         ("origin_server_id", "ALTER TABLE sticker_packs ADD COLUMN origin_server_id TEXT DEFAULT NULL"),
         ("foreign_pack_id", "ALTER TABLE sticker_packs ADD COLUMN foreign_pack_id INTEGER DEFAULT NULL"),
         ("owner_nickname", "ALTER TABLE sticker_packs ADD COLUMN owner_nickname TEXT DEFAULT NULL"),
+        ("owner_global_user_id", "ALTER TABLE sticker_packs ADD COLUMN owner_global_user_id TEXT DEFAULT NULL"),
         ("room_id", "ALTER TABLE sticker_packs ADD COLUMN room_id INTEGER DEFAULT NULL"),
     ):
         try:
@@ -223,18 +224,153 @@ def _stickers_for_pack_ids(con, pack_ids: list[int]) -> dict[int, list]:
     return out
 
 
-def _packs_with_stickers(con, pack_rows, *, user_id: int) -> list:
+def _local_server_id() -> str:
+    try:
+        return str((db.get_or_create_local_server_identity() or {}).get("server_id") or "").strip()
+    except Exception:
+        return ""
+
+
+def _pack_is_home_origin_mirror(pack: dict) -> bool:
+    """Federated row that mirrors a pack first created on this node."""
+    origin = str(pack.get("origin_server_id") or "").strip()
+    if not origin:
+        return False
+    local_sid = _local_server_id()
+    return bool(local_sid and origin == local_sid)
+
+
+def _pack_is_remote_federated(pack: dict) -> bool:
+    """Federated copy of a pack created on another node."""
+    origin = str(pack.get("origin_server_id") or "").strip()
+    if not origin:
+        return False
+    local_sid = _local_server_id()
+    return bool(local_sid and origin != local_sid)
+
+
+def _canonical_pack_id_for_manage(con, pack: dict) -> int:
+    """Prefer the native local pack row when a home-node mirror duplicate exists."""
+    pid = int(pack.get("id") or 0)
+    if not _pack_is_home_origin_mirror(pack):
+        return pid
+    fpid = int(pack.get("foreign_pack_id") or 0)
+    if not fpid:
+        return pid
+    row = con.execute(
+        "SELECT id FROM sticker_packs WHERE id=? AND (origin_server_id IS NULL OR origin_server_id='')",
+        (fpid,),
+    ).fetchone()
+    return int(row["id"]) if row else pid
+
+
+def _user_is_pack_creator(con, pack: dict, user: dict) -> bool:
+    uid = int(user["id"])
+    gid = str(user.get("global_user_id") or "").strip()
+    nick = str(user.get("nickname") or "").strip().lower()
+    origin = str(pack.get("origin_server_id") or "").strip()
+    owner_gid = str(pack.get("owner_global_user_id") or "").strip()
+    owner_nick = str(pack.get("owner_nickname") or "").strip().lower()
+
+    if int(pack.get("owner_id") or 0) == uid and int(pack.get("owner_id") or 0) > 0:
+        return True
+
+    if origin:
+        if owner_gid and gid and owner_gid == gid:
+            return True
+        if owner_nick and nick and owner_nick == nick and gid:
+            row = con.execute(
+                "SELECT 1 FROM federation_user_profiles "
+                "WHERE global_user_id=? AND LOWER(nickname)=? AND origin_server_id=?",
+                (gid, owner_nick, origin),
+            ).fetchone()
+            if row:
+                return True
+        if _pack_is_home_origin_mirror(pack):
+            fpid = int(pack.get("foreign_pack_id") or 0)
+            if fpid:
+                row = con.execute(
+                    "SELECT owner_id, owner_global_user_id FROM sticker_packs "
+                    "WHERE id=? AND (origin_server_id IS NULL OR origin_server_id='')",
+                    (fpid,),
+                ).fetchone()
+                if row:
+                    if int(row["owner_id"]) == uid:
+                        return True
+                    hog = str(row["owner_global_user_id"] or "").strip()
+                    if hog and gid and hog == gid:
+                        return True
+        return False
+
+    if owner_gid and gid and owner_gid == gid:
+        return True
+    if owner_nick and nick and owner_nick == nick:
+        return True
+    return False
+
+
+def _user_can_manage_pack(con, pack: dict, user: dict) -> bool:
+    """Owner, channel mod, or node admin (node-local only for admins).
+
+    Federated packs from other nodes: owner may manage cross-node (nickname match).
+    Node admins may only manage native packs and home-node mirrors, not foreign
+    federated catalog copies from peers.
+    Native local packs: owner + node admin + channel mods.
+    """
+    if not pack or not user:
+        return False
+    uid = int(user["id"])
+    is_admin = bool(user.get("is_admin"))
+    origin = str(pack.get("origin_server_id") or "").strip()
+
+    if origin:
+        if _user_is_pack_creator(con, pack, user):
+            return True
+        if is_admin and _pack_is_home_origin_mirror(pack):
+            return True
+        return False
+
+    if is_admin:
+        return True
+    if int(pack.get("owner_id") or 0) == uid:
+        return True
+    rid = pack.get("room_id")
+    if rid:
+        room = con.execute("SELECT name FROM rooms WHERE id=?", (int(rid),)).fetchone()
+        if room and db.can_moderate_room(room["name"], uid, is_admin):
+            return True
+    return False
+
+
+def _user_can_read_pack(con, pack: dict, user_id: int) -> bool:
+    """Whether the user may view/copy stickers from this pack."""
+    if not pack:
+        return False
+    uid = int(user_id)
+    if int(pack.get("is_public") or 0) and not pack.get("room_id"):
+        return True
+    if int(pack.get("owner_id") or 0) == uid:
+        return True
+    pid = int(pack.get("id") or 0)
+    if pid and con.execute(
+        "SELECT 1 FROM user_sticker_packs WHERE user_id=? AND pack_id=?",
+        (uid, pid),
+    ).fetchone():
+        return True
+    rid = pack.get("room_id")
+    if rid and db.is_room_member(uid, int(rid)):
+        return True
+    return False
+
+
+def _packs_with_stickers(con, pack_rows, *, user: dict) -> list:
     packs = [dict(r) for r in pack_rows]
     by_pack = _stickers_for_pack_ids(con, [int(p["id"]) for p in packs])
-    uid = int(user_id)
     result = []
     for p in packs:
         p["stickers"] = by_pack.get(int(p["id"]), [])
         p["sticker_count"] = len(p["stickers"])
-        p["can_manage"] = (
-            int(p.get("owner_id") or 0) == uid
-            and not p.get("origin_server_id")
-        )
+        p["can_manage"] = _user_can_manage_pack(con, p, user)
         result.append(p)
     return result
 
@@ -273,14 +409,20 @@ def _fed_emit_sticker_event(pack_id: int, action: str) -> None:
                 "name": pack.get("name"),
                 "description": pack.get("description") or "",
                 "owner_nickname": None,
+                "owner_global_user_id": None,
                 "is_public": int(pack.get("is_public") or 0),
                 "stickers": [],
             }
             owner = con.execute(
-                "SELECT nickname FROM users WHERE id=?", (pack.get("owner_id"),)
+                "SELECT nickname, global_user_id FROM users WHERE id=?",
+                (pack.get("owner_id"),),
             ).fetchone()
             if owner:
                 payload["owner_nickname"] = owner["nickname"]
+                payload["owner_global_user_id"] = str(owner["global_user_id"] or "").strip() or None
+            hog = str(pack.get("owner_global_user_id") or "").strip()
+            if hog:
+                payload["owner_global_user_id"] = hog
             if action == "upsert":
                 rows = con.execute(
                     "SELECT id, name, image_data, emoji, effects FROM stickers WHERE pack_id=?",
@@ -290,6 +432,71 @@ def _fed_emit_sticker_event(pack_id: int, action: str) -> None:
         _fed.enqueue_server_event(f"sticker.pack.{action}", payload)
     except Exception:
         _log.exception("Federation emit failed (pack=%s action=%s)", pack_id, action)
+
+
+def _fed_owner_request_sync(con, pack: dict, user: dict, action: str) -> None:
+    """Ask the pack's home node to apply an owner change and re-broadcast.
+
+    Used when the creator edits a federated mirror on a peer node.
+    """
+    if not _pack_is_remote_federated(pack) or not _user_is_pack_creator(con, pack, user):
+        return
+    origin = str(pack.get("origin_server_id") or "").strip()
+    fpid = int(pack.get("foreign_pack_id") or 0)
+    gid = str(user.get("global_user_id") or "").strip()
+    nick = str(user.get("nickname") or "").strip()
+    if not origin or not fpid or not gid or not nick:
+        return
+    try:
+        from routers import federation as _fed
+        local_pid = int(pack.get("id") or 0)
+        row = con.execute("SELECT * FROM sticker_packs WHERE id=?", (local_pid,)).fetchone()
+        if not row:
+            return
+        pack_now = dict(row)
+        stickers = con.execute(
+            "SELECT id, name, image_data, emoji, effects FROM stickers WHERE pack_id=?",
+            (local_pid,),
+        ).fetchall()
+        payload = {
+            "target_origin": origin,
+            "pack_id": fpid,
+            "owner_nickname": nick,
+            "owner_global_user_id": gid,
+            "action": action,
+            "name": pack_now.get("name"),
+            "description": pack_now.get("description") or "",
+            "is_public": int(pack_now.get("is_public") or 0),
+            "stickers": [dict(s) for s in stickers],
+        }
+        _fed.enqueue_server_event(
+            "sticker.pack.owner.request",
+            payload,
+            target_server_ids=[origin],
+            actor_global_user_id=gid,
+        )
+    except Exception:
+        _log.exception("Federation owner sync failed (origin=%s pack=%s)", origin, fpid)
+
+
+def _manage_pack_id(con, pack: dict) -> int:
+    """Row id to mutate: canonical native pack for home mirrors, else this row."""
+    if _pack_is_home_origin_mirror(pack):
+        return _canonical_pack_id_for_manage(con, pack)
+    return int(pack.get("id") or 0)
+
+
+def _after_pack_mutation(pack: dict, user: dict, action: str) -> None:
+    """Propagate pack changes to federation (native emit or owner relay)."""
+    with db._conn() as con:
+        if _pack_is_remote_federated(pack):
+            local_id = int(pack.get("id") or 0)
+            row = con.execute("SELECT * FROM sticker_packs WHERE id=?", (local_id,)).fetchone()
+            pack_now = dict(row) if row else pack
+            _fed_owner_request_sync(con, pack_now, user, action)
+            return
+        pid = _canonical_pack_id_for_manage(con, pack)
+    _fed_emit_sticker_event(pid, action)
 
 # ─── GIF provider configuration ─────────────────────────────────────────────
 # Google announced Tenor API sunset on June 30 2026 (no new keys after Jan 13
@@ -681,6 +888,12 @@ class UpdateStickerRequest(BaseModel):
     effects: Optional[Dict[str, Any]] = None  # pass {} to clear
 
 
+class AddStickerToChannelRequest(BaseModel):
+    room_id: int
+    pack_id: Optional[int] = None
+    name: Optional[str] = None
+
+
 @router.get("/stickers/packs")
 async def list_sticker_packs(current_user: dict = Depends(get_current_user)):
     """List all sticker packs (user's own + installed)."""
@@ -701,10 +914,20 @@ async def list_sticker_packs(current_user: dict = Depends(get_current_user)):
             LEFT JOIN users u ON sp.owner_id = u.id
             WHERE usp.user_id=? AND sp.owner_id != ? AND sp.room_id IS NULL
         """, (uid, uid)).fetchall()
+        own_out = []
+        for row in own_packs:
+            d = dict(row)
+            d["can_manage"] = _user_can_manage_pack(con, d, current_user)
+            own_out.append(d)
+        installed_out = []
+        for row in installed_packs:
+            d = dict(row)
+            d["can_manage"] = _user_can_manage_pack(con, d, current_user)
+            installed_out.append(d)
 
     return {
-        "own_packs": [dict(p) for p in own_packs],
-        "installed_packs": [dict(p) for p in installed_packs],
+        "own_packs": own_out,
+        "installed_packs": installed_out,
     }
 
 
@@ -723,7 +946,12 @@ async def list_room_sticker_packs(room_id: int, current_user: dict = Depends(get
             WHERE sp.room_id=?
             ORDER BY sp.created_at DESC
         """, (room_id,)).fetchall()
-    return {"packs": [dict(p) for p in packs]}
+        out = []
+        for row in packs:
+            d = dict(row)
+            d["can_manage"] = _user_can_manage_pack(con, d, current_user)
+            out.append(d)
+    return {"packs": out}
 
 
 @router.get("/stickers/grid")
@@ -773,7 +1001,7 @@ async def get_sticker_grid(
             """, (uid, uid)).fetchall()
             pack_rows = list(own) + list(installed)
 
-        packs = _packs_with_stickers(con, pack_rows, user_id=uid)
+        packs = _packs_with_stickers(con, pack_rows, user=current_user)
     for p in packs:
         p.pop("foreign_pack_id", None)
     return {"packs": packs, "scope": scope_norm}
@@ -847,10 +1075,11 @@ async def create_sticker_pack(body: CreateStickerPackRequest, current_user: dict
     with db._conn() as con:
         _ensure_sticker_schema(con)
         owner_nick = str(current_user.get("nickname") or "")[:64]
+        owner_gid = str(current_user.get("global_user_id") or "").strip() or None
         cur = con.execute("""
-            INSERT INTO sticker_packs (name, description, owner_id, room_id, owner_nickname)
-            VALUES (?, ?, ?, ?, ?)
-        """, (body.name, body.description, current_user["id"], room_id, owner_nick))
+            INSERT INTO sticker_packs (name, description, owner_id, room_id, owner_nickname, owner_global_user_id)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (body.name, body.description, current_user["id"], room_id, owner_nick, owner_gid))
         pack_id = cur.lastrowid
 
         if room_id is None:
@@ -866,20 +1095,19 @@ async def create_sticker_pack(body: CreateStickerPackRequest, current_user: dict
 
 @router.post("/stickers")
 async def add_sticker(body: AddStickerRequest, current_user: dict = Depends(get_current_user)):
-    """Add a sticker to a pack."""
-    # Verify ownership
+    """Add a sticker to a pack (owner, channel mod, or node admin)."""
     with db._conn() as con:
-        pack = con.execute(
-            "SELECT id FROM sticker_packs WHERE id=? AND owner_id=?",
-            (body.pack_id, current_user["id"])
+        _ensure_sticker_schema(con)
+        pack_row = con.execute(
+            "SELECT * FROM sticker_packs WHERE id=?", (body.pack_id,)
         ).fetchone()
-        
-        if not pack:
-            return JSONResponse(status_code=404, content={"error": "Pack not found or not owned by you"})
-        
-        # Limit stickers per pack
+        pack_d = dict(pack_row)
+        if not _user_can_manage_pack(con, pack_d, current_user):
+            return JSONResponse(status_code=404, content={"error": "Pack not found or not permitted"})
+        manage_id = _manage_pack_id(con, pack_d)
+
         count = con.execute(
-            "SELECT COUNT(*) FROM stickers WHERE pack_id=?", (body.pack_id,)
+            "SELECT COUNT(*) FROM stickers WHERE pack_id=?", (manage_id,)
         ).fetchone()[0]
         
         if count >= 30:
@@ -898,10 +1126,14 @@ async def add_sticker(body: AddStickerRequest, current_user: dict = Depends(get_
         cur = con.execute("""
             INSERT INTO stickers (pack_id, name, image_data, emoji, effects)
             VALUES (?, ?, ?, ?, ?)
-        """, (body.pack_id, body.name, body.image_data, body.emoji, fx_json))
+        """, (manage_id, body.name, body.image_data, body.emoji, fx_json))
         new_id = cur.lastrowid
+        if manage_id != int(pack_d["id"]):
+            row2 = con.execute("SELECT * FROM sticker_packs WHERE id=?", (manage_id,)).fetchone()
+            if row2:
+                pack_d = dict(row2)
 
-    _fed_emit_sticker_event(body.pack_id, "upsert")
+        _after_pack_mutation(pack_d, current_user, "upsert")
     return {"id": new_id, "name": body.name, "effects": fx}
 
 
@@ -925,13 +1157,9 @@ async def get_sticker_pack(pack_id: int, current_user: dict = Depends(get_curren
             "SELECT id, name, image_data, emoji, effects FROM stickers WHERE pack_id=? ORDER BY id",
             (pack_id,),
         ).fetchall()
-
-    out = [_decode_sticker_row(s) for s in stickers]
-    pack_d = dict(pack)
-    pack_d["can_manage"] = (
-        int(pack_d.get("owner_id") or 0) == uid
-        and not pack_d.get("origin_server_id")
-    )
+        pack_d = dict(pack)
+        pack_d["can_manage"] = _user_can_manage_pack(con, pack_d, current_user)
+        out = [_decode_sticker_row(s) for s in stickers]
     return {"pack": pack_d, "stickers": out}
 
 
@@ -972,42 +1200,150 @@ async def uninstall_sticker_pack(pack_id: int, current_user: dict = Depends(get_
 
 @router.delete("/stickers/{sticker_id}")
 async def delete_sticker(sticker_id: int, current_user: dict = Depends(get_current_user)):
-    """Delete a sticker (owner only)."""
+    """Delete a sticker (pack owner, channel mod, or node admin)."""
     with db._conn() as con:
-        sticker = con.execute("""
-            SELECT s.id, s.pack_id FROM stickers s
-            JOIN sticker_packs sp ON s.pack_id = sp.id
-            WHERE s.id=? AND sp.owner_id=?
-        """, (sticker_id, current_user["id"])).fetchone()
-        
-        if not sticker:
-            return JSONResponse(status_code=404, content={"error": "Sticker not found or not owned by you"})
-        
+        _ensure_sticker_schema(con)
+        row = con.execute(
+            "SELECT id, pack_id FROM stickers WHERE id=?", (sticker_id,)
+        ).fetchone()
+        if not row:
+            return JSONResponse(status_code=404, content={"error": "Sticker not found"})
+        pack_row = con.execute(
+            "SELECT * FROM sticker_packs WHERE id=?", (int(row["pack_id"]),)
+        ).fetchone()
+        pack_d = dict(pack_row) if pack_row else {}
+        if not pack_row or not _user_can_manage_pack(con, pack_d, current_user):
+            return JSONResponse(status_code=403, content={"error": "Not permitted to delete this sticker"})
+        src = con.execute(
+            "SELECT image_data FROM stickers WHERE id=?", (sticker_id,)
+        ).fetchone()
+        img = src["image_data"] if src else None
+        manage_id = _manage_pack_id(con, pack_d)
         con.execute("DELETE FROM stickers WHERE id=?", (sticker_id,))
-        pack_id_for_emit = int(sticker["pack_id"]) if "pack_id" in sticker.keys() else None
-    if pack_id_for_emit:
-        _fed_emit_sticker_event(pack_id_for_emit, "upsert")
+        if img and manage_id != int(row["pack_id"]):
+            con.execute(
+                "DELETE FROM stickers WHERE pack_id=? AND image_data=?",
+                (manage_id, img),
+            )
+        if _pack_is_remote_federated(pack_d):
+            row2 = con.execute("SELECT * FROM sticker_packs WHERE id=?", (int(pack_d["id"]),)).fetchone()
+            if row2:
+                pack_d = dict(row2)
+        _after_pack_mutation(pack_d, current_user, "upsert")
     return {"ok": True}
+
+
+@router.post("/stickers/{sticker_id}/add-to-channel")
+async def add_sticker_to_channel(
+    sticker_id: int,
+    body: AddStickerToChannelRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Copy a sticker into a channel pack (channel mods / node admins)."""
+    rid = int(body.room_id)
+    if not db.is_room_member(current_user["id"], rid):
+        return JSONResponse(status_code=403, content={"error": "Not a member of this channel"})
+    with db._conn() as con:
+        _ensure_sticker_schema(con)
+        room = con.execute("SELECT name FROM rooms WHERE id=?", (rid,)).fetchone()
+        if not room or not db.can_moderate_room(
+            room["name"], current_user["id"], bool(current_user.get("is_admin"))
+        ):
+            return JSONResponse(status_code=403, content={"error": "Only channel mods can add channel stickers"})
+
+        src = con.execute(
+            "SELECT id, pack_id, name, image_data, emoji, effects FROM stickers WHERE id=?",
+            (sticker_id,),
+        ).fetchone()
+        if not src:
+            return JSONResponse(status_code=404, content={"error": "Sticker not found"})
+        src_pack = con.execute(
+            "SELECT * FROM sticker_packs WHERE id=?", (int(src["pack_id"]),)
+        ).fetchone()
+        if not src_pack or not _user_can_read_pack(con, dict(src_pack), int(current_user["id"])):
+            return JSONResponse(status_code=403, content={"error": "Cannot use this sticker"})
+
+        target_pack_id = body.pack_id
+        if target_pack_id:
+            tgt = con.execute(
+                "SELECT * FROM sticker_packs WHERE id=? AND room_id=?",
+                (int(target_pack_id), rid),
+            ).fetchone()
+            if not tgt:
+                return JSONResponse(status_code=404, content={"error": "Channel pack not found"})
+        else:
+            tgt = con.execute(
+                "SELECT * FROM sticker_packs WHERE room_id=? ORDER BY created_at ASC LIMIT 1",
+                (rid,),
+            ).fetchone()
+            if not tgt:
+                return JSONResponse(
+                    status_code=400,
+                    content={"error": "Create a channel sticker pack first"},
+                )
+            target_pack_id = int(tgt["id"])
+
+        if not _user_can_manage_pack(con, dict(tgt), current_user):
+            return JSONResponse(status_code=403, content={"error": "Not permitted to edit this channel pack"})
+
+        count = con.execute(
+            "SELECT COUNT(*) FROM stickers WHERE pack_id=?", (target_pack_id,)
+        ).fetchone()[0]
+        if count >= 30:
+            return JSONResponse(status_code=400, content={"error": "Pack full (max 30 stickers)"})
+
+        dup = con.execute(
+            "SELECT id FROM stickers WHERE pack_id=? AND image_data=?",
+            (target_pack_id, src["image_data"]),
+        ).fetchone()
+        if dup:
+            return {
+                "ok": True,
+                "skipped": True,
+                "id": int(dup["id"]),
+                "pack_id": target_pack_id,
+            }
+
+        base_name = (body.name or src["name"] or "sticker").strip()[:32] or "sticker"
+        name = base_name
+        n = 2
+        while con.execute(
+            "SELECT 1 FROM stickers WHERE pack_id=? AND name=?", (target_pack_id, name)
+        ).fetchone():
+            suffix = f"_{n}"
+            name = (base_name[: max(2, 32 - len(suffix))] + suffix)[:32]
+            n += 1
+
+        cur = con.execute(
+            "INSERT INTO stickers (pack_id, name, image_data, emoji, effects) VALUES (?,?,?,?,?)",
+            (target_pack_id, name, src["image_data"], src["emoji"] or "", src["effects"]),
+        )
+        new_id = int(cur.lastrowid)
+
+    return {"ok": True, "skipped": False, "id": new_id, "pack_id": target_pack_id, "name": name}
 
 
 @router.patch("/stickers/{sticker_id}")
 async def update_sticker(sticker_id: int, body: UpdateStickerRequest,
                           current_user: dict = Depends(get_current_user)):
-    """Update a sticker's name / emoji / CSS effects (owner only).
+    """Update a sticker's name / emoji / CSS effects (pack manager).
 
     Effects are run through `validate_sticker_effects` so only whitelisted
     fields with clamped numeric values are persisted. Pass `effects: {}` to
     clear all effects on the sticker (resets to the plain image).
     """
     with db._conn() as con:
-        sticker = con.execute("""
-            SELECT s.id, s.pack_id FROM stickers s
-            JOIN sticker_packs sp ON s.pack_id = sp.id
-            WHERE s.id=? AND sp.owner_id=?
-        """, (sticker_id, current_user["id"])).fetchone()
-
+        _ensure_sticker_schema(con)
+        sticker = con.execute(
+            "SELECT id, pack_id FROM stickers WHERE id=?", (sticker_id,)
+        ).fetchone()
         if not sticker:
-            return JSONResponse(status_code=404, content={"error": "Sticker not found or not owned by you"})
+            return JSONResponse(status_code=404, content={"error": "Sticker not found"})
+        pack_row = con.execute(
+            "SELECT * FROM sticker_packs WHERE id=?", (int(sticker["pack_id"]),)
+        ).fetchone()
+        if not pack_row or not _user_can_manage_pack(con, dict(pack_row), current_user):
+            return JSONResponse(status_code=403, content={"error": "Not permitted to edit this sticker"})
 
         sets = []
         vals = []
@@ -1038,9 +1374,13 @@ async def update_sticker(sticker_id: int, body: UpdateStickerRequest,
 
         vals.append(sticker_id)
         con.execute(f"UPDATE stickers SET {', '.join(sets)} WHERE id=?", vals)
-        pack_id_for_emit = int(sticker["pack_id"])
+        pack_d = dict(pack_row)
+        if _pack_is_remote_federated(pack_d):
+            row2 = con.execute("SELECT * FROM sticker_packs WHERE id=?", (int(pack_d["id"]),)).fetchone()
+            if row2:
+                pack_d = dict(row2)
 
-    _fed_emit_sticker_event(pack_id_for_emit, "upsert")
+        _after_pack_mutation(pack_d, current_user, "upsert")
     return {"ok": True}
 
 
@@ -1052,6 +1392,14 @@ async def browse_public_sticker_packs(
     """Browse public sticker packs."""
     with db._conn() as con:
         _ensure_sticker_schema(con)
+        local_sid = _local_server_id()
+        origin_hide = (
+            " AND (sp.origin_server_id IS NULL OR sp.origin_server_id='' "
+            "OR sp.origin_server_id != ?)"
+            if local_sid else
+            " AND (sp.origin_server_id IS NULL OR sp.origin_server_id='')"
+        )
+        origin_args = (local_sid,) if local_sid else ()
         if q:
             packs = con.execute(f"""
                 SELECT sp.*, {_STICKER_OWNER_NAME_SQL},
@@ -1059,10 +1407,11 @@ async def browse_public_sticker_packs(
                 FROM sticker_packs sp
                 LEFT JOIN users u ON sp.owner_id = u.id
                 WHERE sp.is_public=1 AND sp.room_id IS NULL
+                  {origin_hide}
                   AND (sp.name LIKE ? OR sp.description LIKE ?)
                 ORDER BY sp.created_at DESC
                 LIMIT ?
-            """, (f'%{q}%', f'%{q}%', limit)).fetchall()
+            """, (*origin_args, f'%{q}%', f'%{q}%', limit)).fetchall()
         else:
             packs = con.execute(f"""
                 SELECT sp.*, {_STICKER_OWNER_NAME_SQL},
@@ -1070,23 +1419,26 @@ async def browse_public_sticker_packs(
                 FROM sticker_packs sp
                 LEFT JOIN users u ON sp.owner_id = u.id
                 WHERE sp.is_public=1 AND sp.room_id IS NULL
+                  {origin_hide}
                 ORDER BY sp.created_at DESC
                 LIMIT ?
-            """, (limit,)).fetchall()
+            """, (*origin_args, limit)).fetchall()
     
     return {"packs": [dict(p) for p in packs]}
 
 
 @router.patch("/stickers/packs/{pack_id}")
 async def update_sticker_pack(pack_id: int, body: UpdateStickerPackRequest, current_user: dict = Depends(get_current_user)):
-    """Update a sticker pack (owner only)."""
+    """Update a sticker pack (owner, channel mod, or node admin)."""
     with db._conn() as con:
-        pack = con.execute(
-            "SELECT id FROM sticker_packs WHERE id=? AND owner_id=?",
-            (pack_id, current_user["id"])
+        _ensure_sticker_schema(con)
+        pack_row = con.execute(
+            "SELECT * FROM sticker_packs WHERE id=?", (pack_id,)
         ).fetchone()
-        if not pack:
-            return JSONResponse(status_code=404, content={"error": "Pack not found or not owned by you"})
+        pack_d = dict(pack_row)
+        if not _user_can_manage_pack(con, pack_d, current_user):
+            return JSONResponse(status_code=404, content={"error": "Pack not found or not permitted"})
+        pid = _manage_pack_id(con, pack_d)
 
         sets, vals = [], []
         if body.name is not None:
@@ -1098,7 +1450,7 @@ async def update_sticker_pack(pack_id: int, body: UpdateStickerPackRequest, curr
             sets.append("description=?"); vals.append(body.description[:200])
         if body.is_public is not None:
             row_room = con.execute(
-                "SELECT room_id FROM sticker_packs WHERE id=?", (pack_id,)
+                "SELECT room_id FROM sticker_packs WHERE id=?", (pid,)
             ).fetchone()
             if row_room and row_room["room_id"]:
                 return JSONResponse(
@@ -1108,35 +1460,64 @@ async def update_sticker_pack(pack_id: int, body: UpdateStickerPackRequest, curr
             sets.append("is_public=?"); vals.append(1 if body.is_public else 0)
         if not sets:
             return {"ok": True}
-        vals.append(pack_id)
+        vals.append(pid)
         con.execute(f"UPDATE sticker_packs SET {', '.join(sets)} WHERE id=?", vals)
-    # If the public flag was touched, emit. Going public → upsert; going
-    # private → delete. Other edits (name/description) also propagate via
-    # upsert when the pack is currently public.
-    if body.is_public is not None:
-        _fed_emit_sticker_event(pack_id, "upsert" if body.is_public else "delete")
-    elif body.name is not None or body.description is not None:
-        _fed_emit_sticker_event(pack_id, "upsert")
+        if pid != int(pack_d["id"]):
+            row2 = con.execute("SELECT * FROM sticker_packs WHERE id=?", (pid,)).fetchone()
+            if row2:
+                pack_d = dict(row2)
+        elif _pack_is_remote_federated(pack_d):
+            row2 = con.execute("SELECT * FROM sticker_packs WHERE id=?", (int(pack_d["id"]),)).fetchone()
+            if row2:
+                pack_d = dict(row2)
+        action = "upsert"
+        if body.is_public is not None and not body.is_public:
+            action = "delete"
+        _after_pack_mutation(pack_d, current_user, action)
     return {"ok": True}
 
 
 @router.delete("/stickers/packs/{pack_id}")
 async def delete_sticker_pack(pack_id: int, current_user: dict = Depends(get_current_user)):
-    """Delete a sticker pack (owner only). Cascades stickers + installs."""
+    """Delete a sticker pack (owner, channel mod, or node admin). Cascades stickers + installs."""
     with db._conn() as con:
-        pack = con.execute(
-            "SELECT id, is_public, origin_server_id FROM sticker_packs WHERE id=? AND owner_id=?",
-            (pack_id, current_user["id"])
+        _ensure_sticker_schema(con)
+        pack_row = con.execute(
+            "SELECT * FROM sticker_packs WHERE id=?", (pack_id,)
         ).fetchone()
-        if not pack:
-            return JSONResponse(status_code=404, content={"error": "Pack not found or not owned by you"})
-        con.execute("DELETE FROM stickers WHERE pack_id=?", (pack_id,))
-        con.execute("DELETE FROM user_sticker_packs WHERE pack_id=?", (pack_id,))
-        was_public = int(pack["is_public"] or 0)
-        is_foreign  = bool(pack["origin_server_id"])
-        con.execute("DELETE FROM sticker_packs WHERE id=?", (pack_id,))
+        pack_d = dict(pack_row) if pack_row else {}
+        if not _user_can_manage_pack(con, pack_d, current_user):
+            return JSONResponse(status_code=404, content={"error": "Pack not found or not permitted"})
+
+        if _pack_is_remote_federated(pack_d):
+            _fed_owner_request_sync(con, pack_d, current_user, "delete")
+            pid = int(pack_d["id"])
+            con.execute("DELETE FROM stickers WHERE pack_id=?", (pid,))
+            con.execute("DELETE FROM user_sticker_packs WHERE pack_id=?", (pid,))
+            con.execute("DELETE FROM sticker_packs WHERE id=?", (pid,))
+            return {"ok": True}
+
+        pid = _canonical_pack_id_for_manage(con, pack_d)
+        local_sid = _local_server_id()
+        pack_ids = [pid]
+        if local_sid:
+            mirrors = con.execute(
+                "SELECT id FROM sticker_packs WHERE foreign_pack_id=? AND origin_server_id=?",
+                (pid, local_sid),
+            ).fetchall()
+            pack_ids.extend(int(r["id"]) for r in mirrors)
+        pack_ids = list(dict.fromkeys(pack_ids))
+        canon = con.execute(
+            "SELECT is_public, origin_server_id FROM sticker_packs WHERE id=?", (pid,)
+        ).fetchone()
+        was_public = int(canon["is_public"] or 0) if canon else 0
+        is_foreign = bool(canon and canon["origin_server_id"])
+        for del_id in pack_ids:
+            con.execute("DELETE FROM stickers WHERE pack_id=?", (del_id,))
+            con.execute("DELETE FROM user_sticker_packs WHERE pack_id=?", (del_id,))
+            con.execute("DELETE FROM sticker_packs WHERE id=?", (del_id,))
+        pack_id = pid
     if was_public and not is_foreign:
-        # Tell peers the pack went away.
         try:
             from routers import federation as _fed
             _fed.enqueue_server_event("sticker.pack.delete", {"pack_id": pack_id})
