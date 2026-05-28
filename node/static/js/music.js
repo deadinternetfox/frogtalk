@@ -2134,6 +2134,15 @@ const Music = (() => {
     _paused = true;
     _lastPlayerState = 2;
     const tick = () => {
+      // Kill any in-flight auto-resume chain (_resumeOnVisible runs a
+      // ~5s, 5-attempt playVideo ladder with ignorePaused, so it would
+      // otherwise outlast and override our pause — the "pause/resume
+      // flicker, then play wins" symptom). Bumping the token supersedes
+      // its verify loop; stamping _lastResumeAt debounces new non-force
+      // resume triggers (e.g. the window focus event the iframe reload
+      // fires) for 1.5s.
+      _resumeRetryToken++;
+      _lastResumeAt = Date.now();
       try {
         const frame = document.querySelector('#mp-player-wrap iframe.mp-frame');
         if (frame) {
@@ -2153,10 +2162,12 @@ const Music = (() => {
       // state=1 doesn't get reconciled back into _paused=false mid-ladder.
       _userIntentPaused = true;
       _userIntentAt = Date.now();
+      _userPaused = true;
+      _paused = true;
       _lastPlayerState = 2;
       try { _syncPlayPauseButtons(false); } catch {}
     };
-    [0, 150, 400, 800, 1500, 2500, 3500].forEach(ms => setTimeout(tick, ms));
+    [0, 150, 400, 800, 1500, 2500, 3500, 5000].forEach(ms => setTimeout(tick, ms));
   }
 
   // Toggle the collapsed state of the music panel. When collapsed, the
