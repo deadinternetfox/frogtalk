@@ -305,9 +305,9 @@
     if (!host) return;
     const anim = host.dataset.fxAnimation || '';
     if (!anim || anim === 'none') return;
-    const root = host.shadowRoot;
-    if (!root) return;
-    const img = root.querySelector('img');
+    // Keep shadow root closed for isolation. We stash a handle to the <img>
+    // on the host at build time so replay works without `host.shadowRoot`.
+    const img = host._fxImg || null;
     if (!img) return;
     img.style.animation = 'none';
     void img.offsetWidth;
@@ -418,6 +418,8 @@
       img.setAttribute('decoding', 'async');
       img.setAttribute('loading', 'lazy');
       if (safeSrc) img.src = safeSrc;
+      // Stash the internal <img> reference for replayAnimation().
+      host._fxImg = img;
       wrap.appendChild(img);
       root.appendChild(style);
       root.appendChild(wrap);
@@ -429,6 +431,7 @@
       if (safeSrc) img.src = safeSrc;
       img.style.cssText = 'max-width:100%;max-height:100%;object-fit:contain';
       if (safeAlt) img.alt = safeAlt;
+      host._fxImg = img;
       host.appendChild(img);
     }
     return host;
