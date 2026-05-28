@@ -1075,6 +1075,35 @@ def enqueue_channel_directory_updated(room_name: str) -> dict:
     )
 
 
+def enqueue_channel_directory_deleted(room_snapshot: dict) -> dict:
+    """Announce a public channel deletion so peers tombstone their mirror.
+
+    Takes the room dict captured *before* the local row was deleted, since
+    ``enqueue_channel_directory_updated`` can't run once the room is gone.
+    Only the authoritative home node emits the tombstone."""
+    room = room_snapshot or {}
+    name = str(room.get("name") or "").strip().lower()
+    if not name:
+        return {"ok": False, "error": "no_room"}
+    if str(room.get("type") or "public").lower() != "public":
+        return {"ok": False, "error": "not_public"}
+    if not _room_snapshot_authoritative(room):
+        return {"ok": False, "error": "not_authoritative"}
+    local_sid = _local_server_id()
+    if not local_sid:
+        return {"ok": False, "error": "no_server_id"}
+    return enqueue_server_event(
+        "channel.directory.updated",
+        {
+            "room_name": name,
+            "home_server_id": local_sid,
+            "is_public": False,
+            "listed": False,
+            "tombstone": True,
+        },
+    )
+
+
 def maybe_emit_room_members_snapshot(room_name: str) -> dict:
     """Emit a fresh `room.members.snapshot` if we haven't done so recently.
 

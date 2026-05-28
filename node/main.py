@@ -143,6 +143,16 @@ async def cleanup_task():
                         _log.warning("Failed to enqueue prune report event: %s", (outbox or {}).get("error"))
             except Exception:
                 _log.exception("inactive room cleanup error")
+            try:
+                # Drop federation directory mirrors that were tombstoned (their
+                # home node deleted the channel) and have aged past retention,
+                # so stale remote channels don't linger in Discover forever.
+                from database import prune_federation_channel_index
+                pruned_fci = await asyncio.to_thread(prune_federation_channel_index)
+                if pruned_fci > 0:
+                    _log.info("Pruned %d stale federation channel index entries", pruned_fci)
+            except Exception:
+                _log.exception("federation channel index prune error")
         except Exception:
             _log.exception("Cleanup task error")
 

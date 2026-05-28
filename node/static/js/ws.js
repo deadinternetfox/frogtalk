@@ -1039,6 +1039,10 @@ const WS = (() => {
         try { if (typeof handleRoomUnban === 'function') handleRoomUnban(data); } catch {}
         break;
       }
+      case 'room_deleted': {
+        try { if (typeof handleRoomDeleted === 'function') handleRoomDeleted(data); } catch {}
+        break;
+      }
       case 'room_muted': {
         // A mod muted us in this channel — toast + disable composer if
         // we're currently looking at that room. We also persist the
@@ -1165,6 +1169,19 @@ const WS = (() => {
     }
     if (_room) connect(_room);
   }
+
+  // Android WebViews suspend on backgrounding and often drop the socket
+  // without firing onclose, so the backoff timer never starts. When the app
+  // returns to the foreground, nudge a reconnect (reconnectNow no-ops if the
+  // socket is genuinely still open).
+  try {
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible' && _room && !isOpen()) reconnectNow();
+    });
+    window.addEventListener('pageshow', () => {
+      if (_room && !isOpen()) reconnectNow();
+    });
+  } catch {}
 
   return {
     connect,

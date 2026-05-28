@@ -1268,6 +1268,10 @@ def delete_room(room_name: str, requester_id: int, is_admin: bool) -> bool:
         con.execute("DELETE FROM telegram_bridges WHERE room_name=?", (room_name,))
         con.execute("DELETE FROM discord_bridges WHERE room_name=?", (room_name,))
         con.execute("DELETE FROM messages WHERE room_name=?", (room_name,))
+        # Federation member mirror is keyed by room_name with no FK, so it
+        # would otherwise outlive the room. Always lowercased on the fed side.
+        con.execute("DELETE FROM federation_room_member_index WHERE room_name=?",
+                    ((room_name or "").strip().lower(),))
         con.execute("DELETE FROM rooms WHERE name=?", (room_name,))
         con.commit()
     try:
@@ -5822,7 +5826,8 @@ def get_friends(user_id: int) -> List[Dict]:
     """All accepted friends with basic profile."""
     with _conn() as con:
         rows = con.execute("""
-            SELECT u.id, u.nickname, u.display_name, u.avatar, u.presence, u.last_seen, u.status_msg, u.is_admin
+            SELECT u.id, u.nickname, u.display_name, u.avatar, u.presence, u.last_seen, u.status_msg, u.is_admin,
+                   COALESCE(u.global_user_id, '') AS global_user_id
             FROM friends f JOIN users u ON f.friend_id = u.id
             WHERE f.user_id=? AND f.status='accepted'
             ORDER BY u.nickname
@@ -12814,34 +12819,44 @@ def leave_room(user_id: int, room_id: int):
     """Remove user from room. If the leaver is the owner, transfer ownership
     to the longest-serving moderator; if no moderators exist, delete the room."""
     with _conn() as con:
-        # Check ownership before removing membership
-        row = con.execute("SELECT owner_id FROM rooms WHERE id=?", (room_id,)).fetchone()
-        is_owner = bool(row and row["owner_id"] == user_id)
-        # Remove membership
-        con.execute("DELETE FROM room_members WHERE room_id=? AND user_id=?",
-                    (room_id, user_id))
-        if is_owner:
-            # Find the longest-serving (earliest-added) moderator who isn't the departing owner
-            new_owner = con.execute("""
-                SELECT user_id FROM room_moderators
-                WHERE room_id=? AND user_id!=?
-                ORDER BY added_at ASC, user_id ASC
-                LIMIT 1
-            """, (room_id, user_id)).fetchone()
-            if new_owner:
-                new_owner_id = new_owner["user_id"]
-                con.execute("UPDATE rooms SET owner_id=? WHERE id=?",
-                            (new_owner_id, room_id))
-                # Remove them from mods list since they're now the owner
-                con.execute("DELETE FROM room_moderators WHERE room_id=? AND user_id=?",
-                            (room_id, new_owner_id))
-                # Make sure the new owner is a member of the room
-                con.execute("INSERT OR IGNORE INTO room_members (room_id, user_id) VALUES (?,?)",
-                            (room_id, new_owner_id))
-            else:
-                # No moderators — delete the room entirely
-                con.execute("DELETE FROM rooms WHERE id=?", (room_id,))
-        con.commit()
+        # IMMEDIATE upgrades the implicit transaction so the ownership check and
+        # the transfer/delete below share one write barrier — otherwise two
+        # concurrent owner-leaves can both read owner_id and promote the same
+        # moderator, leaving owner/mod state inconsistent (matches
+        # transfer_room_ownership).
+        con.execute("BEGIN IMMEDIATE")
+        try:
+            # Check ownership before removing membership
+            row = con.execute("SELECT owner_id FROM rooms WHERE id=?", (room_id,)).fetchone()
+            is_owner = bool(row and row["owner_id"] == user_id)
+            # Remove membership
+            con.execute("DELETE FROM room_members WHERE room_id=? AND user_id=?",
+                        (room_id, user_id))
+            if is_owner:
+                # Find the longest-serving (earliest-added) moderator who isn't the departing owner
+                new_owner = con.execute("""
+                    SELECT user_id FROM room_moderators
+                    WHERE room_id=? AND user_id!=?
+                    ORDER BY added_at ASC, user_id ASC
+                    LIMIT 1
+                """, (room_id, user_id)).fetchone()
+                if new_owner:
+                    new_owner_id = new_owner["user_id"]
+                    con.execute("UPDATE rooms SET owner_id=? WHERE id=?",
+                                (new_owner_id, room_id))
+                    # Remove them from mods list since they're now the owner
+                    con.execute("DELETE FROM room_moderators WHERE room_id=? AND user_id=?",
+                                (room_id, new_owner_id))
+                    # Make sure the new owner is a member of the room
+                    con.execute("INSERT OR IGNORE INTO room_members (room_id, user_id) VALUES (?,?)",
+                                (room_id, new_owner_id))
+                else:
+                    # No moderators — delete the room entirely
+                    con.execute("DELETE FROM rooms WHERE id=?", (room_id,))
+            con.execute("COMMIT")
+        except Exception:
+            con.execute("ROLLBACK")
+            raise
 
 
 def get_user_joined_room_ids(user_id: int) -> set:

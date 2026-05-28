@@ -5768,6 +5768,28 @@ function handleRoomBan(data) {
 }
 window.handleRoomBan = handleRoomBan;
 
+// The channel was deleted by its owner/admin (server broadcast room_deleted).
+// Drop cached state, refresh the sidebar so it disappears, and move the user
+// off it if they're currently viewing it.
+function handleRoomDeleted(data) {
+  try {
+    const room = (data && data.room) || '';
+    if (!room) return;
+    const viewing = State.currentRoom === room;
+    try { if (State.messages && State.messages[room]) delete State.messages[room]; } catch {}
+    try { toast(`#${room} was deleted`, 'info'); } catch {}
+    try {
+      if (typeof Rooms !== 'undefined' && typeof Rooms.loadRooms === 'function') Rooms.loadRooms();
+    } catch {}
+    if (viewing) {
+      try {
+        if (typeof Rooms !== 'undefined' && typeof Rooms.switchToRoom === 'function') Rooms.switchToRoom('general');
+      } catch {}
+    }
+  } catch {}
+}
+window.handleRoomDeleted = handleRoomDeleted;
+
 // Receiver-side companion to handleRoomBan: a mod (or admin) lifted the
 // ban via DELETE /api/rooms/{room}/bans/{user_id}. The server pings us
 // over WS so the inline ban banner clears live without needing a reload

@@ -835,9 +835,26 @@ async def create_room(request: Request, body: CreateRoomRequest,
 
 @router.delete("/{room_name}")
 async def delete_room(room_name: str, current_user: dict = Depends(get_current_user)):
+    name = (room_name or "").strip().lower()
+    # Capture the room before deletion so we can announce the tombstone to
+    # peers (enqueue_channel_directory_deleted needs the pre-delete snapshot).
+    room_snapshot = db.get_room_by_name(name)
     ok = db.delete_room(room_name, current_user["id"], bool(current_user.get("is_admin")))
     if not ok:
         return JSONResponse(status_code=403, content={"error": "Not found or not authorised"})
+    # Tell connected clients the channel is gone so it leaves their sidebar
+    # instead of lingering as a ghost that 404s on the next send.
+    try:
+        await manager.broadcast_all({"type": "room_deleted", "room": name})
+    except Exception:
+        pass
+    # Federation: announce the deletion so peers tombstone their directory mirror.
+    if room_snapshot and str(room_snapshot.get("type") or "public").lower() == "public":
+        try:
+            from routers import federation as federation_mod
+            federation_mod.enqueue_channel_directory_deleted(room_snapshot)
+        except Exception:
+            pass
     return {"ok": True}
 
 
