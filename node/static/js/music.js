@@ -2008,6 +2008,13 @@ const Music = (() => {
       const hasLive = (_room || _soloMode) && _state && (_state.queue || []).length;
       if (hasLive) {
         const cur = _state.queue[0];
+        // Snapshot playback intent BEFORE the surface switch. Leaving a
+        // music channel must not resume a paused track in the mini dock.
+        // A native (in-iframe) pause leaves _userPaused false, so promote
+        // the current effective state to sticky intent — that keeps
+        // _renderMini's autoplay decision (and any later rebuild) paused.
+        const wasPaused = _currentEffectivePaused();
+        _userPaused = wasPaused;
         panel.classList.remove('active');
         panel.classList.add('mini');
         panel.style.display = 'flex';
@@ -2034,6 +2041,12 @@ const Music = (() => {
         // glyph until the next 1.5s UI tick caught the drift.
         try { _lastEmitHash = ''; _emitState(); } catch {}
         try { _probeIframeStateSoon(); } catch {}
+        // Belt + braces: if the surface switch (or a rebuilt frame) tries
+        // to resume, force the pre-switch paused state back on a short
+        // ladder so the mini dock keeps the state the user left it in.
+        if (wasPaused) {
+          try { _forcePauseFrameSoon(); } catch {}
+        }
         return;
       }
       panel.classList.remove('active');
