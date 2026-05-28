@@ -2121,27 +2121,42 @@ const Music = (() => {
   }
 
   // Re-assert a paused state on the in-channel iframe across a surface
-  // resize (collapse/expand). Resizing the embed — and on Android WebView
-  // a layout change on its own — can nudge a natively-paused YouTube /
-  // SoundCloud player back into playback. Replay the pause on a short
-  // ladder so the player ends in the state the user left it.
+  // switch (collapse/expand, channel-leave → mini dock, FrogSocial close).
+  // The hard case is Android WebView: reparenting/restyling the panel
+  // (big → mini) reloads the iframe, which resets our embed handshake AND
+  // replays the embed's baked-in autoplay=1 — so a single pause postMessage
+  // gets dropped (handshake not ready yet) and the track resumes. Retry
+  // across a longer window, re-handshaking each tick so a pause lands once
+  // the reloaded iframe is listening, and keep the user-intent guard fresh
+  // so the UI-sync recovery tick / visibility resume ladder don't fight us.
   function _forcePauseFrameSoon() {
-    const send = () => {
-      try {
-        const frame = document.querySelector('#mp-player-wrap iframe.mp-frame');
-        if (!frame) return;
-        const src = frame.src || '';
-        if (src.includes('youtube.com')) {
-          _postToFrame(frame, { event: 'command', func: 'pauseVideo', args: [] });
-        } else if (src.includes('soundcloud.com')) {
-          _postToFrame(frame, { method: 'pause' });
-        }
-      } catch {}
-    };
-    [0, 150, 400, 900].forEach(ms => setTimeout(send, ms));
+    _userPaused = true;
     _paused = true;
     _lastPlayerState = 2;
-    try { _syncPlayPauseButtons(false); } catch {}
+    const tick = () => {
+      try {
+        const frame = document.querySelector('#mp-player-wrap iframe.mp-frame');
+        if (frame) {
+          const src = frame.src || '';
+          if (src.includes('youtube.com')) {
+            // Re-register our listening channel (resets after a reload),
+            // then command pause.
+            _postYtProbe(frame);
+            _postToFrame(frame, { event: 'command', func: 'pauseVideo', args: [] });
+          } else if (src.includes('soundcloud.com')) {
+            _bindSoundCloudWidget(frame);
+            _postToFrame(frame, { method: 'pause' });
+          }
+        }
+      } catch {}
+      // Refresh the guard window on every tick so a transient post-reload
+      // state=1 doesn't get reconciled back into _paused=false mid-ladder.
+      _userIntentPaused = true;
+      _userIntentAt = Date.now();
+      _lastPlayerState = 2;
+      try { _syncPlayPauseButtons(false); } catch {}
+    };
+    [0, 150, 400, 800, 1500, 2500, 3500].forEach(ms => setTimeout(tick, ms));
   }
 
   // Toggle the collapsed state of the music panel. When collapsed, the
