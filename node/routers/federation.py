@@ -1057,7 +1057,10 @@ def enqueue_channel_directory_updated(room_name: str) -> dict:
         fci = db.get_federation_channel_index_entry(name) or {}
         owner_nick = str(fci.get("owner_nickname") or "")
         owner_gid = str(fci.get("owner_global_user_id") or "")
-    member_count = int(room.get("member_count") or 0)
+    # Use the live member count — `rooms.member_count` is a stale denormalised
+    # column that is never maintained on join/leave, so federating it would push
+    # 0 to peers and zero out their directory counts.
+    member_count = db.get_room_member_count(int(room.get("id") or 0))
     listed = bool(int(room.get("is_public") or 0))
     return enqueue_server_event(
         "channel.directory.updated",

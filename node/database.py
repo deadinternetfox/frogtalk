@@ -10358,6 +10358,20 @@ def update_room_member_count(room_id: int, count: int):
         con.execute("UPDATE rooms SET member_count=? WHERE id=?", (count, room_id))
 
 
+def get_room_member_count(room_id: int) -> int:
+    """Live member count for a local room (authoritative; never the stale
+    ``rooms.member_count`` column, which is not maintained on join/leave)."""
+    try:
+        with _conn() as con:
+            row = con.execute(
+                "SELECT COUNT(*) AS c FROM room_members WHERE room_id=?",
+                (int(room_id),),
+            ).fetchone()
+            return int(row["c"] if row else 0)
+    except Exception:
+        return 0
+
+
 # ── Channel likes & comments (directory engagement) ───────────────────────
 
 def like_channel(room_id: int, user_id: int) -> bool:
@@ -15174,7 +15188,10 @@ def upsert_federation_channel_index(
                     channel_type=excluded.channel_type,
                     channel_theme=excluded.channel_theme,
                     visibility=excluded.visibility,
-                    member_count=excluded.member_count,
+                    member_count=CASE
+                        WHEN excluded.member_count > 0 THEN excluded.member_count
+                        ELSE federation_channel_index.member_count
+                    END,
                     owner_nickname=excluded.owner_nickname,
                     owner_global_user_id=excluded.owner_global_user_id,
                     home_base_url=excluded.home_base_url,

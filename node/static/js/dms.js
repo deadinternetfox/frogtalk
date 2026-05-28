@@ -2487,8 +2487,11 @@ function renderDMChannels () {
   const el = document.getElementById('dm-channels');
   if (!el) return;
   if (!_dmChannels.length) {
-    if (_dmSidebarLoading || el.querySelector('.ft-sidebar-skeleton')) return;
-    el.innerHTML = '<div style="font-size:12px;color:#555;padding:4px 8px">No DMs yet</div>';
+    // While the sidebar is still fetching, leave the skeleton in place. Once
+    // loading is done, replace it (or any leftover skeleton) with a placeholder
+    // so an empty inbox doesn't keep showing the loading skeleton forever.
+    if (_dmSidebarLoading) return;
+    el.innerHTML = '<div style="font-size:12px;color:#777;padding:10px 8px;line-height:1.4">No direct messages yet.<br>Send one to start a conversation! 🐸</div>';
     return;
   }
   el.innerHTML = _dmChannels.map(ch => {
