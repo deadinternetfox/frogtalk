@@ -2468,6 +2468,13 @@ const Music = (() => {
     const panel = $('music-panel');
     if (!panel) return false;
 
+    // Snapshot playback intent BEFORE the surface switch. Closing
+    // FrogSocial must not resume a paused track in the mini dock. A native
+    // (in-iframe) pause leaves _userPaused false, so promote the current
+    // effective state to sticky intent so the dock keeps it paused.
+    const wasPaused = _currentEffectivePaused();
+    _userPaused = wasPaused;
+
     const useSoloEmbed = (cur.provider === 'spotify' || cur.provider === 'soundcloud');
     panel.classList.remove('active');
     panel.classList.remove('collapsed');
@@ -2483,6 +2490,11 @@ const Music = (() => {
     try { _startUiSync(); } catch {}
     try { _startSyncProbeIfNeeded(); } catch {}
     try { _lastEmitHash = ''; _emitState(); } catch {}
+    // Belt + braces: if the surface switch tries to resume, force the
+    // pre-switch paused state back on a short ladder.
+    if (wasPaused) {
+      try { _forcePauseFrameSoon(); } catch {}
+    }
     return true;
   }
 
