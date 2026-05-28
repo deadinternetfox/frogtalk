@@ -229,6 +229,7 @@
 
   function toCss(rawEffects, opts) {
     const playOnce = !!(opts && opts.playOnce);
+    const forceAnimation = !!(opts && opts.forceAnimation);
     const n = normalize(rawEffects);
     if (!n) return null;
     const filterStr = _filterCss(n.filter);
@@ -239,7 +240,9 @@
     if (shadowStr) combinedFilter = combinedFilter ? `${filterStr} ${shadowStr}` : shadowStr;
 
     let animation = '';
-    if (n.animation && n.animation !== 'none' && !_prefersReducedMotion()) {
+    // Default: honor reduced-motion. Editor preview can explicitly override
+    // by passing { forceAnimation: true }.
+    if (n.animation && n.animation !== 'none' && (forceAnimation || !_prefersReducedMotion())) {
       animation = _animationCss(n.animation, n.animation_duration, playOnce);
     }
 

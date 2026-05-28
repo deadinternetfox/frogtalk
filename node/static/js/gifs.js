@@ -2072,6 +2072,9 @@ const GIFs = (() => {
         alt: sticker.name,
         size: 160,
         playOnce: false,
+        // Explicit user intent: preview should animate even when OS/browser
+        // is in reduced-motion mode.
+        forceAnimation: true,
       });
     }
 
