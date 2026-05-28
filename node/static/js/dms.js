@@ -2423,6 +2423,17 @@ async function loadDMChannels () {
   finally {
     _dmSidebarLoading = false;
     renderDMChannels();
+    // If the DM list is empty, ensure we don't leave the chat area stuck
+    // in a loading skeleton state (common after a DM wipe / fresh install).
+    try {
+      if (!_dmChannels || _dmChannels.length === 0) {
+        if (typeof _activeDM !== 'undefined') _activeDM = null;
+        try { _dmMessages = []; } catch {}
+        try { _dmMessagesLoading = false; _dmMessagesReady = true; } catch {}
+        try { window.hideChatLoadSkeleton?.(true); } catch {}
+        try { if (typeof clearChatTransition === 'function') clearChatTransition({ finish: false }); } catch {}
+      }
+    } catch {}
   }
 }
 
@@ -3070,6 +3081,25 @@ function openDMsPanel () {
         renderDMChannels();
       }
     } else if (typeof showNewDM === 'function') {
+      // No conversations exist. Make sure the chat area isn't left in an
+      // infinite loading skeleton, then show the "New DM" modal.
+      try {
+        _activeDM = null;
+        _dmMessages = [];
+        _dmMessagesLoading = false;
+        _dmMessagesReady = true;
+      } catch {}
+      try { window.hideChatLoadSkeleton?.(true); } catch {}
+      try { if (typeof clearChatTransition === 'function') clearChatTransition({ finish: false }); } catch {}
+      try {
+        const area = document.getElementById('messages-area');
+        if (area) {
+          const shell = _dmEnsureChatShell(area) || area;
+          if (!shell.querySelector('.ft-empty-dm')) {
+            shell.innerHTML = '<div class="ft-empty-dm" style="padding:14px;color:#85a89a;font-size:13px">No DMs yet. Start a new conversation.</div>';
+          }
+        }
+      } catch {}
       showNewDM();
     }
   });
