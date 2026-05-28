@@ -49,6 +49,15 @@ _call_offer_tracker: dict[int, list[float]] = {}
 # honest client is never kicked.
 _WS_FRAME_WINDOW_S = 10.0
 _WS_FRAME_MAX = 240
+# Real-time call/voice signaling is exempt from the general frame cap: WebRTC
+# trickle-ICE legitimately bursts many small frames during call setup (more so
+# in mesh group voice), and dropping one would break call establishment. These
+# paths are already bounded by the call state machine and _call_offer_allowed.
+_WS_RATE_EXEMPT_TYPES = frozenset({
+    "call_offer", "call_answer", "call_reject", "call_end", "ice_candidate",
+    "voice_join", "voice_leave", "voice_offer", "voice_answer", "voice_ice",
+    "voice_mute",
+})
 
 
 def _call_offer_allowed(user_id: int) -> bool:
@@ -633,26 +642,6 @@ async def websocket_endpoint(
                 raw = await websocket.receive_text()
             except RuntimeError:
                 break
-            # Per-connection frame-rate cap. Prune the window, and if this
-            # socket is over quota drop the frame before any DB write or
-            # broadcast. Notify at most once per window so the error frame
-            # isn't itself a flood amplifier.
-            _fr_now = time.monotonic()
-            _fr_cutoff = _fr_now - _WS_FRAME_WINDOW_S
-            while _frame_times and _frame_times[0] < _fr_cutoff:
-                _frame_times.pop(0)
-            if len(_frame_times) >= _WS_FRAME_MAX:
-                if _fr_now - _last_rl_notice > _WS_FRAME_WINDOW_S:
-                    _last_rl_notice = _fr_now
-                    try:
-                        await manager.send_personal(websocket, {
-                            "type": "error", "error": "rate_limited",
-                            "text": "Slow down — too many messages",
-                        })
-                    except Exception:
-                        pass
-                continue
-            _frame_times.append(_fr_now)
             if len(raw) > _WS_MAX_FRAME:
                 # Drop oversize frames silently; logging the body would
                 # itself be a memory amplifier under flood.
@@ -681,6 +670,30 @@ async def websocket_endpoint(
                     pass
                 continue
 
+            msg_type = data.get("type")
+
+            # Per-connection frame-rate cap. Drops chat/typing/reaction floods
+            # before any DB write or broadcast; call/voice signaling is exempt
+            # (see _WS_RATE_EXEMPT_TYPES). Notify at most once per window so the
+            # error frame isn't itself a flood amplifier.
+            if msg_type not in _WS_RATE_EXEMPT_TYPES:
+                _fr_now = time.monotonic()
+                _fr_cutoff = _fr_now - _WS_FRAME_WINDOW_S
+                while _frame_times and _frame_times[0] < _fr_cutoff:
+                    _frame_times.pop(0)
+                if len(_frame_times) >= _WS_FRAME_MAX:
+                    if _fr_now - _last_rl_notice > _WS_FRAME_WINDOW_S:
+                        _last_rl_notice = _fr_now
+                        try:
+                            await manager.send_personal(websocket, {
+                                "type": "error", "error": "rate_limited",
+                                "text": "Slow down — too many messages",
+                            })
+                        except Exception:
+                            pass
+                    continue
+                _frame_times.append(_fr_now)
+
             try:
                 db.update_last_seen(user["id"])
             except Exception:
@@ -690,7 +703,6 @@ async def websocket_endpoint(
                 emit_user_last_seen(user)
             except Exception:
                 pass
-            msg_type = data.get("type")
 
             # ── Keepalive ping ────────────────────────────────────────
             if msg_type == "ping":

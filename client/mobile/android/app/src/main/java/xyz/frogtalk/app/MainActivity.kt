@@ -330,6 +330,12 @@ class MainActivity : AppCompatActivity() {
                 persistServerBaseUrlAndReload(normalized, markSetup)
                 return@runOnUiThread
             }
+            // Live app: the in-app node switcher re-syncs the URL on every
+            // network-settings save, so ignore no-op changes — otherwise an
+            // unrelated settings save would spuriously prompt and reload.
+            if (normalized == normalizeServerBaseUrl(getServerBaseUrl())) {
+                return@runOnUiThread
+            }
             val host = Uri.parse(normalized).host ?: normalized
             try {
                 AlertDialog.Builder(this)
