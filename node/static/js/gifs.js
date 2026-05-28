@@ -1929,18 +1929,28 @@ const GIFs = (() => {
       }
     };
 
-    // Preset buttons: click to quick-set legacy animation; drag onto timeline to add a clip.
+    // Preset buttons: click OR drag to add a timeline clip.
     modal.querySelectorAll('.fx-preset-btn').forEach(btn => {
       btn.style.cssText = 'background:color-mix(in srgb, var(--accent-color) 10%, transparent);border:1px solid var(--border-color);color:var(--text-color);padding:5px 9px;border-radius:6px;cursor:pointer;font-size:11px';
-      btn.onclick = () => {
-        fx.animation = btn.dataset.fxPreset;
+      const p = (btn.dataset.fxPreset || '').trim();
+      const addClip = (start) => {
+        const anim = (p || '').trim();
+        if (!anim || anim === 'none') return;
+        const kind =
+          (anim === 'rainbow' || anim === 'rainbow_tint') ? 'filter' :
+          (anim === 'glow' || anim === 'rainbow_glow') ? 'glow' :
+          'transform';
+        fx.layers = fx.layers || [];
+        fx.layers.push({ kind, animation: anim, start: start || 0, duration: (kind === 'filter' ? 2 : 1.5) });
         renderControls();
         renderPreview();
       };
-      const p = (btn.dataset.fxPreset || '').trim();
+      btn.onclick = () => addClip(0);
       if (p && p !== 'none') {
-        // Infer kind: filter-style vs transform-style.
-        const kind = (p === 'glow' || p === 'rainbow' || p === 'rainbow_tint' || p === 'rainbow_glow') ? 'filter' : 'transform';
+        const kind =
+          (p === 'rainbow' || p === 'rainbow_tint') ? 'filter' :
+          (p === 'glow' || p === 'rainbow_glow') ? 'glow' :
+          'transform';
         btn.draggable = true;
         btn.addEventListener('dragstart', (e) => {
           try {

@@ -48,7 +48,10 @@
     'spin', 'pulse', 'bounce', 'shake', 'wobble', 'float', 'flip', 'swing', 'sparkle', 'pop',
   ]);
   const FILTER_ANIMS = new Set([
-    'glow', 'rainbow', 'rainbow_tint', 'rainbow_glow',
+    'rainbow', 'rainbow_tint',
+  ]);
+  const GLOW_ANIMS = new Set([
+    'glow', 'rainbow_glow',
   ]);
   const HEX_CHARS = '0123456789abcdef';
   const FX_B64_MAX_LEN = 1500;
@@ -139,10 +142,11 @@
         if (!it || typeof it !== 'object') continue;
         const kind = (typeof it.kind === 'string') ? it.kind.trim() : '';
         const anim = (typeof it.animation === 'string') ? it.animation.trim() : '';
-        if (kind !== 'transform' && kind !== 'filter') continue;
+        if (kind !== 'transform' && kind !== 'filter' && kind !== 'glow') continue;
         if (!ANIMATIONS.has(anim) || anim === 'none') continue;
         if (kind === 'transform' && !TRANSFORM_ANIMS.has(anim)) continue;
         if (kind === 'filter' && !FILTER_ANIMS.has(anim)) continue;
+        if (kind === 'glow' && !GLOW_ANIMS.has(anim)) continue;
         const start = _clamp(it.start, 0, 20, 0);
         const dur = _clamp(it.duration, 0.3, 10, 2);
         layers.push({ kind, animation: anim, start, duration: dur });
@@ -236,13 +240,20 @@
     if (anim === 'rainbow_tint') {
       return _kf(name, `${hold}${sPct}%{filter:var(--fx-filter) sepia(1) saturate(3) hue-rotate(0deg);} ${ePct}%{filter:var(--fx-filter) sepia(1) saturate(3) hue-rotate(360deg);} ${endHold}`);
     }
+    // Glow is handled by a separate overlay layer so it can stack with rainbow.
+    return _kf(name, `${hold}${endHold}`);
+  }
+
+  function _makeGlowTimelineKeyframes(name, anim, sPct, ePct) {
+    const hold = `0%,${sPct}%{opacity:0;}`;
+    const endHold = `${ePct}%,100%{opacity:0;}`;
+    const mid = (sPct + ePct) / 2;
     if (anim === 'glow') {
-      const mid = (sPct + ePct) / 2;
-      return _kf(name, `${hold}${sPct}%{filter:var(--fx-filter) drop-shadow(0 0 4px var(--fx-glow));} ${mid}%{filter:var(--fx-filter) drop-shadow(0 0 14px var(--fx-glow));} ${ePct}%{filter:var(--fx-filter) drop-shadow(0 0 4px var(--fx-glow));} ${endHold}`);
+      return _kf(name, `${hold}${sPct}%{opacity:.35;} ${mid}%{opacity:1;} ${ePct}%{opacity:.35;} ${endHold}`);
     }
     if (anim === 'rainbow_glow') {
-      const mid = (sPct + ePct) / 2;
-      return _kf(name, `${hold}${sPct}%{filter:var(--fx-filter) drop-shadow(0 0 6px var(--fx-glow));} ${mid}%{filter:var(--fx-filter) drop-shadow(0 0 18px var(--fx-glow));} ${ePct}%{filter:var(--fx-filter) drop-shadow(0 0 6px var(--fx-glow));} ${endHold}`);
+      // Stronger pulse intended to pair with rainbow_tint filter.
+      return _kf(name, `${hold}${sPct}%{opacity:.25;} ${mid}%{opacity:1;} ${ePct}%{opacity:.25;} ${endHold}`);
     }
     return _kf(name, `${hold}${endHold}`);
   }
@@ -548,10 +559,12 @@
     let dynKeyframes = '';
     let tLayerAnims = [];
     let fAnim = 'none';
+    let gAnim = 'none';
     if (layers && (forceAnimation || !_prefersReducedMotion())) {
       const total = _timelineDurationSec(nfx);
       const tLayers = layers.filter(l => l.kind === 'transform').slice(0, 3);
       const fLayer = layers.find(l => l.kind === 'filter') || null;
+      const gLayer = layers.find(l => l.kind === 'glow') || null;
       let i = 0;
       for (const tl of tLayers) {
         const sPct = _pct(tl.start || 0, total);
@@ -567,6 +580,13 @@
         dynKeyframes += _makeFilterTimelineKeyframes(kfName, fLayer.animation, sPct, ePct);
         fAnim = `${kfName} ${total}s linear infinite`;
       }
+      if (gLayer) {
+        const sPct = _pct(gLayer.start || 0, total);
+        const ePct = _pct((gLayer.start || 0) + (gLayer.duration || 0), total);
+        const kfName = `fxG_${Math.random().toString(36).slice(2, 8)}`;
+        dynKeyframes += _makeGlowTimelineKeyframes(kfName, gLayer.animation, sPct, ePct);
+        gAnim = `${kfName} ${total}s linear infinite`;
+      }
     }
 
     const styleHtml = `
@@ -577,6 +597,7 @@
         background: ${css ? css.background : 'transparent'};
         border-radius: ${css ? css.borderRadius : '0'};
         overflow: hidden;
+        position: relative;
       }
       .fx-anim {
         width: 100%; height: 100%;
@@ -638,6 +659,27 @@
       img.setAttribute('loading', 'lazy');
       if (safeSrc) img.src = safeSrc;
 
+      // Optional glow overlay (separate from filter track so it can combine with rainbow).
+      let glowImg = null;
+      if (layers && gAnim && gAnim !== 'none') {
+        glowImg = document.createElement('img');
+        glowImg.className = 'fx-media';
+        glowImg.setAttribute('alt', safeAlt);
+        glowImg.setAttribute('draggable', 'false');
+        glowImg.setAttribute('decoding', 'async');
+        glowImg.setAttribute('loading', 'lazy');
+        if (safeSrc) glowImg.src = safeSrc;
+        glowImg.style.position = 'absolute';
+        glowImg.style.inset = '0';
+        glowImg.style.margin = 'auto';
+        glowImg.style.pointerEvents = 'none';
+        glowImg.style.opacity = '0';
+        // Apply glow via drop-shadow; opacity timeline controls intensity.
+        glowImg.style.filter = 'drop-shadow(0 0 14px var(--fx-glow))';
+        glowImg.style.animation = gAnim;
+        glowImg.dataset.fxAnim = gAnim;
+      }
+
       const freezeToCanvas = () => {
         try {
           const w = img.naturalWidth || 0;
@@ -683,10 +725,13 @@
       // Store for replayAnimation()
       img.dataset.fxAnim = img.style.animation || 'none';
       replayEls.push(img);
+      if (glowImg) replayEls.push(glowImg);
       host._fxReplayEls = replayEls;
       host._fxImg = img;
       host._fxRestartGif = startGifPlayback;
+      // Glow needs to share the same transform wrappers. Place it alongside the base img.
       parent.appendChild(img);
+      if (glowImg) parent.appendChild(glowImg);
       // Kick GIF control if configured.
       if (isGif && (gifMode === 'once' || gifMode === 'paused')) {
         // Wait for image decode to improve snapshot reliability.

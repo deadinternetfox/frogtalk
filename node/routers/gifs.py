@@ -132,7 +132,7 @@ def validate_sticker_effects(raw: Any) -> Optional[Dict[str, Any]]:
             kind = it.get("kind")
             if isinstance(kind, str):
                 kind = kind.strip()
-            if kind not in ("transform", "filter"):
+            if kind not in ("transform", "filter", "glow"):
                 continue
             an = it.get("animation")
             if isinstance(an, str):
@@ -142,7 +142,9 @@ def validate_sticker_effects(raw: Any) -> Optional[Dict[str, Any]]:
             # Keep this tight: only specific animations are allowed per kind.
             if kind == "transform" and an not in {"spin","pulse","bounce","shake","wobble","float","flip","swing","sparkle","pop"}:
                 continue
-            if kind == "filter" and an not in {"glow","rainbow","rainbow_tint","rainbow_glow"}:
+            if kind == "filter" and an not in {"rainbow","rainbow_tint"}:
+                continue
+            if kind == "glow" and an not in {"glow","rainbow_glow"}:
                 continue
             start = _clamp(it.get("start"), 0.0, 20.0, 0.0)
             dur = _clamp(it.get("duration"), 0.3, 10.0, 2.0)
