@@ -2107,6 +2107,30 @@ const Music = (() => {
     try { _probeIframeStateSoon(); } catch {}
   }
 
+  // Re-assert a paused state on the in-channel iframe across a surface
+  // resize (collapse/expand). Resizing the embed — and on Android WebView
+  // a layout change on its own — can nudge a natively-paused YouTube /
+  // SoundCloud player back into playback. Replay the pause on a short
+  // ladder so the player ends in the state the user left it.
+  function _forcePauseFrameSoon() {
+    const send = () => {
+      try {
+        const frame = document.querySelector('#mp-player-wrap iframe.mp-frame');
+        if (!frame) return;
+        const src = frame.src || '';
+        if (src.includes('youtube.com')) {
+          _postToFrame(frame, { event: 'command', func: 'pauseVideo', args: [] });
+        } else if (src.includes('soundcloud.com')) {
+          _postToFrame(frame, { method: 'pause' });
+        }
+      } catch {}
+    };
+    [0, 150, 400, 900].forEach(ms => setTimeout(send, ms));
+    _paused = true;
+    _lastPlayerState = 2;
+    try { _syncPlayPauseButtons(false); } catch {}
+  }
+
   // Toggle the collapsed state of the music panel. When collapsed, the
   // panel shrinks to a slim bar so the chat takes most of the screen;
   // tap the same button again to bring the player back. Persisted across
@@ -2114,6 +2138,13 @@ const Music = (() => {
   function toggleCollapse() {
     _collapsed = !_collapsed;
     try { localStorage.setItem('mp.collapsed', _collapsed ? '1' : '0'); } catch {}
+    // Snapshot playback intent BEFORE the re-render. Collapsing or
+    // expanding must never flip a paused player back to playing. A native
+    // (in-iframe) pause leaves _userPaused false, so promote the current
+    // effective state to sticky intent — that keeps any re-render's
+    // autoplay decision (which keys off _userPaused) paused too.
+    const wasPaused = _currentEffectivePaused();
+    _userPaused = wasPaused;
     const panel = $('music-panel');
     if (panel) panel.classList.toggle('collapsed', _collapsed);
     document.body.toggleAttribute('data-music-collapsed', _collapsed);
@@ -2133,6 +2164,11 @@ const Music = (() => {
     } catch {}
     // Re-render the rest so meta / queue layout adapt to the new height.
     _render();
+    // Belt + braces: if the resize (or a rebuilt frame) tries to resume,
+    // force the pre-toggle paused state back on a short ladder.
+    if (wasPaused) {
+      try { _forcePauseFrameSoon(); } catch {}
+    }
   }
 
   // Manual re-align to the room's play head. Useful after a user pauses
