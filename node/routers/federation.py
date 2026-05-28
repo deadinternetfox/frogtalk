@@ -3024,6 +3024,10 @@ async def sync_peer_channels_once() -> dict:
                 _fetch_url_bytes,
                 f"{target}/api/network/channels",
                 timeout_s=8.0,
+                headers={
+                    "User-Agent": "FrogTalk-DirectorySync/1.0",
+                    "Accept": "application/json",
+                },
             )
             payload = json.loads(raw.decode("utf-8", errors="replace"))
         except Exception as e:
