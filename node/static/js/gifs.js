@@ -1173,10 +1173,11 @@ const GIFs = (() => {
           const canManage = !!(d.pack && d.pack.can_manage);
           const stickers = (d.stickers || []).slice(0, 12);
           for (const s of stickers) {
+            const parsedFx = _parseStickerEffects(s.effects);
             _stickersById.set(String(s.id), {
               image_data: s.image_data,
               name: s.name,
-              effects: s.effects || null,
+              effects: parsedFx,
               pack_id: pack.id,
               can_manage: canManage,
             });
@@ -1538,7 +1539,8 @@ const GIFs = (() => {
     }
     cont.innerHTML = stickers.map(s => {
       const safeName = UI.escHtml(s.name || '');
-      const hasFx = !!(s.effects && window.StickerFX && !StickerFX.isDefault(s.effects));
+      const parsedFx = _parseStickerEffects(s.effects);
+      const hasFx = !!(parsedFx && window.StickerFX && !StickerFX.isDefault(parsedFx));
       const fxBadge = hasFx
         ? '<div style="position:absolute;bottom:2px;left:2px;background:var(--accent-color);color:color-mix(in srgb, var(--accent-color) 12%, #000);font-size:9px;font-weight:700;padding:1px 5px;border-radius:6px;line-height:1.2;pointer-events:none">FX</div>'
         : '';
@@ -1558,13 +1560,18 @@ const GIFs = (() => {
     }).join('');
     if (window.StickerFX) {
       for (const s of stickers) {
-        if (!s.effects || StickerFX.isDefault(s.effects)) continue;
+        const fx = _parseStickerEffects(s.effects);
+        if (!fx || StickerFX.isDefault(fx)) continue;
         const slot = cont.querySelector(`.sm-sticker-host[data-sticker-id="${s.id}"]`);
         if (!slot) continue;
-        StickerFX.renderInto(slot, { src: s.image_data, effects: s.effects, alt: s.name, size: 64 });
+        StickerFX.renderInto(slot, {
+          src: s.image_data, effects: fx, alt: s.name, size: 64, playOnce: false,
+        });
       }
     }
-    for (const s of stickers) _smStickerCache[s.id] = s;
+    for (const s of stickers) {
+      _smStickerCache[s.id] = { ...s, effects: _parseStickerEffects(s.effects) };
+    }
   }
 
   async function renderManager() {
@@ -1779,6 +1786,7 @@ const GIFs = (() => {
       } catch {}
     }
     if (!sticker) { UI.showToast('Sticker not found', 'error'); return; }
+    if (sticker.effects) sticker.effects = _parseStickerEffects(sticker.effects);
     _openFxEditor(sticker);
   }
 
