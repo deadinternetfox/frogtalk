@@ -347,9 +347,6 @@
         will-change: transform, filter;
       }
       ${KEYFRAMES}
-      @media (prefers-reduced-motion: reduce) {
-        img { animation: none !important; }
-      }
     `;
 
     if (root) {
