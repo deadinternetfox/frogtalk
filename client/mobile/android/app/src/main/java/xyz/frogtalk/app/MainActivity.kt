@@ -160,6 +160,12 @@ class MainActivity : AppCompatActivity() {
     private var pendingIncomingCallPeer: String? = null
     private var incomingCallRecoveryToken: Long = 0L
     private var incomingCallRecoveryRetries: Int = 0
+    /** Last URL the main WebView started/finished loading; used to tell the
+     *  bundled setup asset apart from the live (frogtalk-origin) app. */
+    @Volatile private var currentPageUrl: String = ""
+
+    private fun isOnSetupAsset(): Boolean =
+        currentPageUrl.startsWith("file:///android_asset/")
 
     private fun isNetworkOnline(): Boolean {
         return try {
@@ -292,15 +298,50 @@ class MainActivity : AppCompatActivity() {
     }
 
     fun setServerBaseUrlFromJs(url: String) {
-        val normalized = normalizeServerBaseUrl(url) ?: return
+        requestServerBaseUrlChange(url, markSetup = false)
+    }
+
+    /** Persist a normalized server base URL and reload the app from it. */
+    private fun persistServerBaseUrlAndReload(normalized: String, markSetup: Boolean) {
         getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .edit().putString(PREF_SERVER_BASE_URL, normalized).apply()
+        if (markSetup) {
+            markAndroidSetupDone()
+            markPermissionWizardDone()
+        }
+        reloadAppAfterServerConfigured()
+    }
+
+    /**
+     * Apply a JS-requested server change. From the bundled setup asset this is
+     * the expected setup/onboarding flow and applies directly. From the live
+     * app (in-app node switcher) it first asks for explicit user confirmation,
+     * so a hostile in-page script cannot silently repoint the app to an
+     * attacker-controlled node (security audit Finding A — XSS amplifier).
+     */
+    fun requestServerBaseUrlChange(rawUrl: String, markSetup: Boolean) {
+        val normalized = normalizeServerBaseUrl(rawUrl)
         runOnUiThread {
+            if (normalized == null) {
+                showErrorScreen("Invalid server URL.\nGo back and enter a valid address.")
+                return@runOnUiThread
+            }
+            if (isOnSetupAsset()) {
+                persistServerBaseUrlAndReload(normalized, markSetup)
+                return@runOnUiThread
+            }
+            val host = Uri.parse(normalized).host ?: normalized
             try {
-                showLoadingScreen("Opening FrogTalk…")
-                webView?.loadUrl(buildAppUrl(getConfiguredAppEntryUrl()))
+                AlertDialog.Builder(this)
+                    .setTitle("Switch FrogTalk node?")
+                    .setMessage("Connect this app to:\n\n$host\n\nOnly continue if you trust this server.")
+                    .setPositiveButton("Switch") { _, _ ->
+                        persistServerBaseUrlAndReload(normalized, markSetup)
+                    }
+                    .setNegativeButton("Cancel", null)
+                    .show()
             } catch (e: Throwable) {
-                Log.e(TAG, "setServerBaseUrlFromJs reload failed", e)
+                Log.e(TAG, "server switch confirm failed", e)
             }
         }
     }
@@ -697,9 +738,14 @@ class MainActivity : AppCompatActivity() {
             domStorageEnabled = true
             databaseEnabled = true
             mediaPlaybackRequiresUserGesture = false
-            allowFileAccess = true
+            // Security audit Finding B: the app never navigates to user file://
+            // URLs (those open externally), and the bundled android_asset pages
+            // (setup/offline) stay accessible regardless of this flag, so keep
+            // arbitrary file-system access off. All app traffic is HTTPS, so
+            // forbid mixed content outright.
+            allowFileAccess = false
             allowContentAccess = true
-            mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
+            mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
             setSupportZoom(false)
             setSupportMultipleWindows(true)
             javaScriptCanOpenWindowsAutomatically = true
@@ -731,8 +777,14 @@ class MainActivity : AppCompatActivity() {
         }
 
         wv.webViewClient = object : WebViewClient() {
+            override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
+                super.onPageStarted(view, url, favicon)
+                if (!url.isNullOrBlank()) currentPageUrl = url
+            }
+
             override fun onPageFinished(view: WebView?, url: String?) {
                 super.onPageFinished(view, url)
+                if (!url.isNullOrBlank()) currentPageUrl = url
                 view?.let { injectStoryShareTapFix(it) }
                 val finished = url.orEmpty()
                 if (finished.contains("/app") || finished.contains("incoming_call=1")) {
@@ -1317,21 +1369,7 @@ class MainActivity : AppCompatActivity() {
         @android.webkit.JavascriptInterface
         fun connectToServer(url: String) {
             try {
-                val normalized = activity.normalizeServerBaseUrl(url)
-                if (normalized == null) {
-                    activity.runOnUiThread {
-                        activity.showErrorScreen("Invalid server URL.\nGo back and enter a valid address.")
-                    }
-                    return
-                }
-                activity.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-                    .edit().putString(PREF_SERVER_BASE_URL, normalized).apply()
-                activity.markAndroidSetupDone()
-                activity.markPermissionWizardDone()
-                activity.runOnUiThread {
-                    activity.showLoadingScreen("Opening FrogTalk…")
-                    activity.reloadAppAfterServerConfigured()
-                }
+                activity.requestServerBaseUrlChange(url, markSetup = true)
             } catch (e: Throwable) {
                 Log.e(TAG, "connectToServer failed", e)
             }

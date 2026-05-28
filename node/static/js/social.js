@@ -7281,8 +7281,8 @@ const Social = (() => {
         const dotCls = cur.paused ? 'mtnp-dot paused' : 'mtnp-dot';
         const stateTxt = cur.paused ? 'Paused' : 'Playing now';
         const sharerEsc = cur.sharer ? esc(cur.sharer) : '';
-        const sharerTxt = sharerEsc
-          ? `shared by <a class="mtnp-sharer-link" href="javascript:void(0)" onclick="event.stopPropagation();Social.openProfile('${sharerEsc.replace(/'/g,"\\'")}')" title="View @${sharerEsc}'s profile">@${sharerEsc}</a>`
+        const sharerTxt = cur.sharer
+          ? `shared by <a class="mtnp-sharer-link" href="javascript:void(0)" onclick="event.stopPropagation();Social.openProfile(${jsStr(cur.sharer)})" title="View @${sharerEsc}'s profile">@${sharerEsc}</a>`
           : '';
         const trackUrlEsc = esc(cur.url || '');
         const canPause = cur.provider === 'youtube' || cur.provider === 'soundcloud';

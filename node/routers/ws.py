@@ -40,6 +40,16 @@ _CALL_OFFER_WINDOW_S = 30
 _CALL_OFFER_MAX = 8
 _call_offer_tracker: dict[int, list[float]] = {}
 
+# General per-connection inbound frame-rate cap. The 256 KB frame-size cap
+# below bounds per-frame cost; this bounds frame *frequency* so a single
+# socket can't flood the node (DB writes on last_seen, broadcasts, federation
+# emits) by streaming tiny frames in a tight loop. 24 frames/sec sustained is
+# far above any legitimate client (typing + messages + reactions burst well
+# under this); excess frames are dropped, not disconnected, so a bursty-but-
+# honest client is never kicked.
+_WS_FRAME_WINDOW_S = 10.0
+_WS_FRAME_MAX = 240
+
 
 def _call_offer_allowed(user_id: int) -> bool:
     """Sliding-window throttle for outbound call_offer per caller."""
@@ -615,12 +625,34 @@ async def websocket_endpoint(
     # (message text, reactions, typing, presence) fits comfortably under
     # 256 KB; encrypted media goes through the HTTP /api/messages path.
     _WS_MAX_FRAME = 262_144  # 256 KB
+    _frame_times: list[float] = []   # sliding window for this connection
+    _last_rl_notice = 0.0            # throttle the rate_limited error frame
     try:
         while True:
             try:
                 raw = await websocket.receive_text()
             except RuntimeError:
                 break
+            # Per-connection frame-rate cap. Prune the window, and if this
+            # socket is over quota drop the frame before any DB write or
+            # broadcast. Notify at most once per window so the error frame
+            # isn't itself a flood amplifier.
+            _fr_now = time.monotonic()
+            _fr_cutoff = _fr_now - _WS_FRAME_WINDOW_S
+            while _frame_times and _frame_times[0] < _fr_cutoff:
+                _frame_times.pop(0)
+            if len(_frame_times) >= _WS_FRAME_MAX:
+                if _fr_now - _last_rl_notice > _WS_FRAME_WINDOW_S:
+                    _last_rl_notice = _fr_now
+                    try:
+                        await manager.send_personal(websocket, {
+                            "type": "error", "error": "rate_limited",
+                            "text": "Slow down — too many messages",
+                        })
+                    except Exception:
+                        pass
+                continue
+            _frame_times.append(_fr_now)
             if len(raw) > _WS_MAX_FRAME:
                 # Drop oversize frames silently; logging the body would
                 # itself be a memory amplifier under flood.
