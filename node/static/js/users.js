@@ -395,7 +395,9 @@ const Users = (() => {
     }
     State.presenceByNick = presenceByNick;
 
-    if (count) count.textContent = (onRoom && _channelMembers.length) ? onlineSource.length : _allUsers.length;
+    if (count) count.textContent = (onRoom && _channelMembers.length)
+      ? (onlineSource.length + offlineSource.length + remoteSource.length)
+      : _allUsers.length;
 
     const prevSearchValue = _filter;
     const hadFocus = _searchInput && document.activeElement === _searchInput;

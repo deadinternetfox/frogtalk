@@ -2506,6 +2506,38 @@ def _build_travel_room_shell_export(ctx: dict, room_name: str) -> dict:
     return _attach_sync_export_signature(export)
 
 
+def _build_travel_profile_export(ctx: dict) -> dict:
+    """Profile-only visit->home merge: the user's own editable profile/privacy.
+
+    Lets a user logged in away from their account home push their own profile
+    edits back to the home node, which re-federates them as the authoritative
+    origin. Deliberately narrow: only display + privacy fields, never PIN,
+    password, theme, or account-structural state (those stay on the home)."""
+    uid = int(ctx.get("uid") or 0)
+    me = db.get_user_by_id(uid) or {}
+    if not me:
+        return {}
+    fields = {
+        "display_name": str(me.get("display_name") or "")[:64],
+        "avatar": str(me.get("avatar") or ""),
+        "bio": str(me.get("bio") or "")[:4000],
+        "status_msg": str(me.get("status_msg") or "")[:200],
+        "mood": str(me.get("mood") or "")[:200],
+        "banner": me.get("banner") or "",
+        "profile_public": 1 if int(me.get("profile_public") or 0) else 0,
+        "allow_friend_requests": 1 if int(me.get("allow_friend_requests") or 0) else 0,
+        "allow_dms_from": str(me.get("allow_dms_from") or "everyone").strip().lower(),
+        "show_last_seen": str(me.get("show_last_seen") or "everyone").strip().lower(),
+        "show_read_receipts": 1 if int(me.get("show_read_receipts") or 0) else 0,
+    }
+    export = {
+        **_build_travel_export_meta_from_ctx(ctx),
+        **_travel_push_empty_lists(),
+        "profile_fields": fields,
+    }
+    return _attach_sync_export_signature(export)
+
+
 def _build_travel_room_secrets_export(ctx: dict, room_names: set[str] | None = None) -> dict:
     uid = int(ctx.get("uid") or 0)
     secrets = _sanitize_travel_room_secrets(db.list_travel_room_secrets_staging(uid))
@@ -2812,6 +2844,37 @@ def schedule_travel_push_to_home(user_id: int, *, force: bool = False) -> None:
     except RuntimeError:
         return
     loop.create_task(_push_travel_state_to_home(uid, force=force))
+
+
+async def _push_profile_state_to_home(user_id: int) -> dict:
+    """Relay this user's own profile/privacy edits to their account home node."""
+    uid = int(user_id or 0)
+    if uid <= 0 or not _travel_push_home_enabled() or _user_at_account_home(uid):
+        return {"ok": False, "skipped": True}
+    ctx = _travel_push_visit_context(uid)
+    if not ctx:
+        _mark_travel_push_needs_retry(uid, "home_unreachable")
+        return {"ok": False, "error": "home_unreachable"}
+    export = await asyncio.to_thread(_build_travel_profile_export, ctx)
+    if not export:
+        return {"ok": False, "error": "export_empty"}
+    return await _federate_travel_merge_export(ctx, export)
+
+
+def schedule_profile_push_to_home(user_id: int) -> None:
+    """Fire-and-forget relay of the user's own profile edits to the home node.
+
+    A user.profile.updated signed by a visit node is dropped by peers'
+    cross-origin pin, so a traveling user's edits must be applied by — and
+    re-federated from — their account home node."""
+    uid = int(user_id or 0)
+    if uid <= 0 or not _travel_push_home_enabled() or _user_at_account_home(uid):
+        return
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    loop.create_task(_push_profile_state_to_home(uid))
 
 
 def _account_home_server_id(user_id: int) -> str:
@@ -4593,6 +4656,63 @@ def _apply_sync_export_to_user(
                 _apply_sync_pin_from_self_profile(uid, self_profile)
         except Exception:
             pass
+
+    # Narrow visit->home profile relay (a traveling user editing their own
+    # profile). Only display + privacy fields, applied as a partial update so
+    # untouched columns are never clobbered, then re-federated from the home as
+    # the authoritative origin. Only the account home applies + re-broadcasts.
+    profile_fields = payload.get("profile_fields")
+    if merge_mode and isinstance(profile_fields, dict) and _user_at_account_home(uid):
+        try:
+            pf = profile_fields
+            sets: list[str] = []
+            vals: list = []
+            priv: dict = {}
+            if "display_name" in pf:
+                sets.append("display_name=?"); vals.append(str(pf.get("display_name") or "")[:64])
+            if "avatar" in pf:
+                sets.append("avatar=?"); vals.append(str(pf.get("avatar") or ""))
+            if "bio" in pf:
+                sets.append("bio=?"); vals.append(str(pf.get("bio") or "")[:4000])
+            if "status_msg" in pf:
+                sets.append("status_msg=?"); vals.append(str(pf.get("status_msg") or "")[:200])
+            if "mood" in pf:
+                sets.append("mood=?"); vals.append(str(pf.get("mood") or "")[:200])
+            if "banner" in pf:
+                sets.append("banner=?"); vals.append(_prepare_sync_profile_banner(pf.get("banner")) or None)
+            if "profile_public" in pf:
+                v = 1 if int(pf.get("profile_public") or 0) else 0
+                sets.append("profile_public=?"); vals.append(v); priv["profile_public"] = v
+            if "allow_friend_requests" in pf:
+                v = 1 if int(pf.get("allow_friend_requests") or 0) else 0
+                sets.append("allow_friend_requests=?"); vals.append(v); priv["allow_friend_requests"] = v
+            if "allow_dms_from" in pf:
+                v = str(pf.get("allow_dms_from") or "everyone").strip().lower()
+                if v not in ("everyone", "friends", "nobody"):
+                    v = "everyone"
+                sets.append("allow_dms_from=?"); vals.append(v); priv["allow_dms_from"] = v
+            if "show_last_seen" in pf:
+                v = str(pf.get("show_last_seen") or "everyone").strip().lower()
+                if v not in ("everyone", "friends", "nobody"):
+                    v = "everyone"
+                sets.append("show_last_seen=?"); vals.append(v); priv["show_last_seen"] = v
+            if "show_read_receipts" in pf:
+                v = 1 if int(pf.get("show_read_receipts") or 0) else 0
+                sets.append("show_read_receipts=?"); vals.append(v); priv["show_read_receipts"] = v
+            if sets:
+                with db._conn() as con:
+                    con.execute(f"UPDATE users SET {', '.join(sets)} WHERE id=?", (*vals, uid))
+                    con.commit()
+                from routers import federation as federation_mod
+                fresh = db.get_user_by_id(uid) or {}
+                federation_mod.enqueue_user_profile_updated(fresh)
+                if priv:
+                    if my_gid:
+                        db.apply_federation_user_privacy(my_gid, **priv)
+                    federation_mod.enqueue_user_privacy_updated(fresh)
+        except Exception:
+            _log.debug("travel profile merge apply failed uid=%s", uid, exc_info=True)
+
     _sync_step("profile", "Syncing profile & settings…", "profile", 1)
 
     _sync_progress(uid, max(78, 12 + int(83 * done_units / max(work_units, 1))),
@@ -8599,13 +8719,16 @@ async def update_profile(request: Request, body: ProfileUpdateRequest, current_u
         ident = db.get_user_by_id(current_user["id"]) or {}
         prof = db.get_user_profile(ident.get("nickname") or "") or {}
         merged = {**ident, **{k: prof[k] for k in ("status_msg", "presence", "mood", "banner") if k in prof}}
-        federation_mod.enqueue_user_profile_updated(merged)
-        if privacy_changed:
-            fresh_priv = db.get_user_by_id(current_user["id"]) or {}
-            if _user_at_account_home(int(current_user["id"])):
+        if _user_at_account_home(int(current_user["id"])):
+            federation_mod.enqueue_user_profile_updated(merged)
+            if privacy_changed:
+                fresh_priv = db.get_user_by_id(current_user["id"]) or {}
                 federation_mod.enqueue_user_privacy_updated(fresh_priv)
-            else:
-                schedule_travel_push_to_home(int(current_user["id"]), force=True)
+        else:
+            # Away from the account home: a user.profile.updated signed by this
+            # visit node is rejected by peers' cross-origin pin. Relay the edit
+            # to the home node, which applies it and re-federates authoritatively.
+            schedule_profile_push_to_home(int(current_user["id"]))
     except Exception:
         _log.exception("federation: failed to enqueue user.profile.updated")
     # Return the fresh row so clients can merge without a follow-up /me that

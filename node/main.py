@@ -124,6 +124,16 @@ async def cleanup_task():
             except Exception:
                 _log.exception("federation outbox prune error")
             try:
+                # Trim applied/failed inbox rows so the dedup table doesn't grow
+                # without bound on long-running nodes (replay protection is the
+                # ±5min skew window, not the row's permanence).
+                from database import prune_federation_inbox
+                inbox_pruned = await asyncio.to_thread(prune_federation_inbox)
+                if any(int(v or 0) for v in (inbox_pruned or {}).values()):
+                    _log.info("Federation inbox prune: %s", inbox_pruned)
+            except Exception:
+                _log.exception("federation inbox prune error")
+            try:
                 stale = await asyncio.to_thread(cleanup_inactive_public_rooms)
                 deleted_rooms = int((stale or {}).get("deleted") or 0)
                 if deleted_rooms > 0:
@@ -346,6 +356,19 @@ async def lifespan(app: FastAPI):
         _log.info("anyio threadpool limiter raised to %d", int(limiter.total_tokens))
     except Exception:
         _log.exception("Failed to raise anyio threadpool limiter; using default")
+    # Loudly flag relaxed federation signature enforcement. Soak mode
+    # (FROGTALK_FEDERATION_REQUIRE_SIGS=0) is only for rolling key rollout and
+    # must never be left on in production — unsigned non-sensitive events from
+    # peers without a pinned key would be accepted.
+    try:
+        if os.getenv("FROGTALK_FEDERATION_REQUIRE_SIGS", "1").strip().lower() in ("0", "false", "no", "off"):
+            _log.warning(
+                "SECURITY: FROGTALK_FEDERATION_REQUIRE_SIGS is OFF (soak mode) — "
+                "unsigned federation events are accepted from peers without a "
+                "pinned key. Set it to 1 before/at production."
+            )
+    except Exception:
+        pass
     # Start background tasks
     tasks = [
         asyncio.create_task(cleanup_task()),

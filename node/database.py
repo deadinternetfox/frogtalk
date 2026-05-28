@@ -13757,6 +13757,33 @@ def prune_federation_outbox(sent_max_age_days: int = 7,
     }
 
 
+def prune_federation_inbox(applied_max_age_days: int = 7,
+                           failed_max_age_days: int = 30) -> dict:
+    """Delete applied/failed inbox events past their retention window.
+
+    Safe against replay: incoming events older than the ±5min clock-skew window
+    are rejected before the (event_id) dedup lookup, so deleting rows far older
+    than that window cannot re-open a replay. Prevents unbounded inbox growth on
+    long-running nodes.
+    """
+    with _conn() as con:
+        cur1 = con.execute(
+            "DELETE FROM federation_inbox_events "
+            "WHERE status='applied' AND received_at < datetime('now', ?)",
+            (f"-{int(applied_max_age_days)} days",),
+        )
+        cur2 = con.execute(
+            "DELETE FROM federation_inbox_events "
+            "WHERE status='failed' AND received_at < datetime('now', ?)",
+            (f"-{int(failed_max_age_days)} days",),
+        )
+        con.commit()
+    return {
+        "applied_deleted": int(cur1.rowcount or 0),
+        "failed_deleted": int(cur2.rowcount or 0),
+    }
+
+
 def list_federation_outbox_events(
     since_cursor: str | None = None,
     limit: int = 100,

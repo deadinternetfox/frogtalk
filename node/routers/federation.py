@@ -3811,6 +3811,9 @@ def _insert_inbox_events_sync(events: list[dict]) -> tuple[int, int]:
         "room.member.joined",
         "room.member.left",
         "channel.directory.updated",
+        # Settings apply is gated on origin == channel home, so the origin must
+        # be cryptographically authenticated (not spoofable in soak mode).
+        "room.settings.updated",
         # Cross-node owner relay must be signed; nickname alone is not proof.
         "sticker.pack.owner.request",
         # A channel owner editing from a non-home node: the home node only
@@ -5358,11 +5361,22 @@ async def _apply_federated_room_settings(room_name: str, payload: dict, origin: 
     # any peer holding a moderator account could push settings for a channel it
     # does not home.
     room_home = str(room_row.get("home_server_id") or "").strip()
-    if not ((origin and room_home and origin == room_home)
-            or _fed_room_moderator(room_name, payload.get("updated_by_nickname"))):
+    if room_home:
+        # The channel has a pinned authoritative home — only that node may push
+        # settings. A nickname-moderator match must NOT let a non-home peer
+        # mutate the channel (nickname collisions across nodes are trivial).
+        if not origin or origin != room_home:
+            _log.warning(
+                "federation: dropping room.settings.updated (wrong home) room=%s origin=%s home=%s",
+                room_name, origin, room_home,
+            )
+            return
+    elif not _fed_room_moderator(room_name, payload.get("updated_by_nickname")):
+        # No pinned home (legacy/first-contact): fall back to the local
+        # moderator check on the named actor.
         _log.warning(
-            "federation: dropping room.settings.updated (unauthorised) room=%s origin=%s home=%s",
-            room_name, origin, room_home,
+            "federation: dropping room.settings.updated (unauthorised) room=%s",
+            room_name,
         )
         return
     from routers import rooms as rooms_router
@@ -5562,6 +5576,16 @@ async def _handle_room_event(event: dict) -> None:
         if ts <= 0:
             ts = int(time.time())
         origin_sid = str(event.get("origin_server_id") or "").strip()
+        # Only the node that authoritatively homes a user may report that
+        # user's presence — otherwise any peer could spoof a foreign user's
+        # online/offline state in a room.
+        gid_home = str(db.resolve_global_user_home_server_id(gid) or "").strip()
+        if gid_home and origin_sid and gid_home != origin_sid:
+            _log.warning(
+                "federation: drop room.presence.updated — gid %s home %s != origin %s",
+                gid, gid_home, origin_sid,
+            )
+            return
         db.upsert_federation_room_presence(
             room_name,
             gid,
@@ -5903,12 +5927,14 @@ async def _handle_room_event(event: dict) -> None:
         except Exception:
             pass
     elif event_type == "room.member.banned":
-        await _apply_federated_room_ban(room, user, payload)
+        await _apply_federated_room_ban(
+            room, user, payload, origin=str(event.get("origin_server_id") or "").strip())
     elif event_type == "room.member.unbanned":
-        await _apply_federated_room_unban(room, user, payload)
+        await _apply_federated_room_unban(
+            room, user, payload, origin=str(event.get("origin_server_id") or "").strip())
 
 
-async def _apply_federated_room_ban(room: dict, target_user: dict, payload: dict) -> None:
+async def _apply_federated_room_ban(room: dict, target_user: dict, payload: dict, origin: str = "") -> None:
     """Apply a room ban received from a federated peer.
 
     Security: we do NOT blindly trust the peer's claim of authority.
@@ -5917,7 +5943,18 @@ async def _apply_federated_room_ban(room: dict, target_user: dict, payload: dict
     THIS node's room state. If the actor isn't an owner/mod/admin
     locally, the ban is dropped silently. This means a node can only
     federate bans for rooms it (or a user it owns) actually moderates.
+
+    Defense in depth: when the room has a pinned authoritative home, only that
+    home node may federate bans for it (a non-home peer cannot push bans even if
+    a colliding moderator nickname exists locally).
     """
+    room_home = str(room.get("home_server_id") or "").strip()
+    if room_home and origin and origin != room_home:
+        _log.warning(
+            "federation: dropping room.member.banned (room=%s origin=%s != home=%s)",
+            room.get("name"), origin, room_home,
+        )
+        return
     actor_nick = _fed_nickname(payload.get("banned_by_nickname"))
     if not actor_nick:
         return
@@ -5975,7 +6012,14 @@ async def _apply_federated_room_ban(room: dict, target_user: dict, payload: dict
         pass
 
 
-async def _apply_federated_room_unban(room: dict, target_user: dict, payload: dict) -> None:
+async def _apply_federated_room_unban(room: dict, target_user: dict, payload: dict, origin: str = "") -> None:
+    room_home = str(room.get("home_server_id") or "").strip()
+    if room_home and origin and origin != room_home:
+        _log.warning(
+            "federation: dropping room.member.unbanned (room=%s origin=%s != home=%s)",
+            room.get("name"), origin, room_home,
+        )
+        return
     actor_nick = _fed_nickname(payload.get("unbanned_by_nickname"))
     if not actor_nick:
         return
