@@ -117,7 +117,7 @@ const GIFs = (() => {
           <button class="gif-tab" data-tab="channel-stickers" onclick="GIFs.switchTab('channel-stickers')" id="gif-tab-channel-stickers" style="display:none">Channel</button>
         </div>
         <div style="display:flex;gap:6px;align-items:center">
-          <button class="gif-manage-btn" id="gif-manage-btn" onclick="GIFs.openManager()" title="Manage sticker packs" style="display:none;padding:5px 10px;border-radius:8px;cursor:pointer;font-size:12px;font-weight:600">⚙ Manage</button>
+          <button class="gif-manage-btn" id="gif-manage-btn" onclick="GIFs.openManager()" title="Manage sticker packs" style="display:none">⚙ Manage</button>
           <button class="gif-close" onclick="GIFs.close()">✕</button>
         </div>
       </div>
@@ -192,6 +192,28 @@ const GIFs = (() => {
         color: var(--accent-color);
         box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-color) 40%, transparent);
       }
+      /* Make Manage/X match tab chip sizing (esp. on mobile). */
+      .gif-manage-btn {
+        background: transparent;
+        border: none;
+        color: var(--text-muted);
+        cursor: pointer;
+        padding: 6px 14px;
+        border-radius: 6px;
+        font-size: 13px;
+        font-weight: 600;
+        transition: background .12s, color .12s;
+        line-height: 1;
+        height: 28px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+      }
+      .gif-manage-btn:hover {
+        color: var(--text-color);
+        background: color-mix(in srgb, var(--accent-color) 12%, transparent);
+      }
       .gif-close {
         background: none;
         border: none;
@@ -201,6 +223,10 @@ const GIFs = (() => {
         width: 28px; height: 28px;
         border-radius: 6px;
         transition: background .12s, color .12s;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        line-height: 1;
       }
       .gif-close:hover { color: var(--text-color); background: color-mix(in srgb, var(--accent-color) 12%, transparent); }
       .gif-search-wrap { padding: 8px 12px; }
@@ -375,15 +401,7 @@ const GIFs = (() => {
         line-height: 1.5;
       }
       .gif-empty .gif-empty-hint { font-size: 12px; opacity: .8; margin-top: 6px; }
-      .gif-manage-btn {
-        background: color-mix(in srgb, var(--accent-color) 14%, transparent) !important;
-        border: 1px solid color-mix(in srgb, var(--accent-color) 35%, var(--border-color)) !important;
-        color: var(--text-color) !important;
-      }
-      .gif-manage-btn:hover {
-        background: color-mix(in srgb, var(--accent-color) 22%, transparent) !important;
-        border-color: var(--accent-color) !important;
-      }
+      /* (Mobile polish) Manage shares the same chip styling as tabs. */
     `;
     document.head.appendChild(style);
   }
