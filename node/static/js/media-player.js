@@ -404,7 +404,7 @@ const MediaPlayer = (() => {
       content.innerHTML = `<img src="${esc(url)}" alt="Media" onclick="event.stopPropagation()">`;
       controls.classList.add('hidden');
     } else if (type === 'video') {
-      content.innerHTML = `<video id="mp-video" src="${esc(url)}" onclick="MediaPlayer.togglePlay()"></video>`;
+      content.innerHTML = `<video id="mp-video" src="${esc(url)}" playsinline webkit-playsinline onclick="MediaPlayer.togglePlay()"></video>`;
       controls.classList.remove('hidden');
       setupVideoControls();
     } else if (type === 'audio') {

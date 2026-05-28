@@ -23,8 +23,13 @@ const State = {
   blockedNicks: new Set(), // lowercased nicknames the viewer has blocked
 
   save() {
-    if (this.token) localStorage.setItem('fc_token', this.token);
-    if (this.user) localStorage.setItem('fc_user', JSON.stringify(this.user));
+    // iOS Safari private mode throws QuotaExceededError on setItem; never let
+    // that crash the login/save flow — the in-memory State.token still works
+    // for the session, it just won't persist across a relaunch.
+    try {
+      if (this.token) localStorage.setItem('fc_token', this.token);
+      if (this.user) localStorage.setItem('fc_user', JSON.stringify(this.user));
+    } catch {}
   },
 
   load() {
