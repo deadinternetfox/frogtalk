@@ -25,7 +25,6 @@ Self-host your own node and join the mesh — or use the public instance at frog
 [![Stars](https://img.shields.io/github/stars/deadinternetfox/frogtalk?label=stars&style=flat&color=4caf50)](https://github.com/deadinternetfox/frogtalk/stargazers)
 
 [🌐 frogtalk.app](https://frogtalk.app) ·
-[🧪 frogtalk.xyz (dev)](https://frogtalk.xyz) ·
 [📥 Downloads](https://frogtalk.app/#downloads) ·
 [📚 Node guide](https://frogtalk.app/docs/node) ·
 [🔌 API reference](https://frogtalk.app/docs/api) ·
@@ -50,10 +49,10 @@ and private channels (AES-GCM) before data reaches your disk.
 | Branch | Default client node | Live host | Role |
 |--------|---------------------|-----------|------|
 | **`master`** | `frogtalk.app` | [frogtalk.app](https://frogtalk.app) | Pre-alpha **production hub** — official directory, stable line for operators |
-| **`dev`** | `frogtalk.xyz` | [frogtalk.xyz](https://frogtalk.xyz) | **Active development** — features land here first; may break without notice |
+| **`dev`** | `dev branch` | `dev` branch docs | **Active development** — features land here first; may break without notice |
 | **Tor** (any branch) | varies | `.onion` | Hidden service; `FROGTALK_HOME_PAGE=tor` — vanity search: [docs/TOR_VANITY_ONION.md](docs/TOR_VANITY_ONION.md) |
 
-**Workflow:** fork and PR into **`dev`**. After testing on [frogtalk.xyz](https://frogtalk.xyz), maintainers merge **`dev` → `master`** for production deploys. The only intentional code diff between branches in git is usually `client/official-node.json` (see [client/README.md](client/README.md)); **`dev`** also carries a contributor-focused root README.
+**Workflow:** fork and PR into **`dev`**. After testing, maintainers merge **`dev` → `master`** for production deploys. The only intentional code diff between branches in git is usually `client/official-node.json` (see [client/README.md](client/README.md)); **`dev`** also carries a contributor-focused root README.
 
 **Official directory:** `https://frogtalk.app/api/network/servers` (hub is always **frogtalk.app**, not `.xyz`).
 
@@ -216,7 +215,7 @@ bash node/scripts/node_federation_join.sh --install-dir /opt/frogtalk -y \
 | Node | Clearnet | Notes |
 |------|----------|--------|
 | FrogTalk Main | `https://frogtalk.app` | Production hub · board `@frog-general` |
-| FrogTalk Dev | `https://frogtalk.xyz` | Development instance · board `@frogtalk-support` |
+| FrogTalk Dev | `dev branch` | Development instance · board `@frogtalk-support` |
 | FrogTalk Tor Mirror | `.onion` only | Listed in **Settings → Network** when configured |
 
 Federation is **not hardcoded** in application source. Hub operators copy
