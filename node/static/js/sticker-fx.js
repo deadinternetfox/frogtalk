@@ -41,7 +41,8 @@
   };
   const ANIMATIONS = new Set([
     'none', 'spin', 'pulse', 'bounce', 'shake', 'wobble',
-    'float', 'glow', 'rainbow', 'flip', 'swing',
+    'float', 'glow', 'rainbow', 'rainbow_tint', 'rainbow_glow',
+    'flip', 'swing', 'sparkle', 'pop',
   ]);
   const HEX_CHARS = '0123456789abcdef';
   const FX_B64_MAX_LEN = 1500;
@@ -194,9 +195,19 @@
     @keyframes fxGlow   { 0%,100% { filter: var(--fx-filter) drop-shadow(0 0 4px var(--fx-glow)); } 50% { filter: var(--fx-filter) drop-shadow(0 0 14px var(--fx-glow)); } }
     @keyframes fxRainbow{ 0%   { filter: var(--fx-filter) hue-rotate(0deg); }
                           100% { filter: var(--fx-filter) hue-rotate(360deg); } }
+    @keyframes fxRainbowTint { 0%   { filter: var(--fx-filter) sepia(1) saturate(3) hue-rotate(0deg); }
+                               100% { filter: var(--fx-filter) sepia(1) saturate(3) hue-rotate(360deg); } }
+    @keyframes fxRainbowGlow { 0%,100% { filter: var(--fx-filter) drop-shadow(0 0 6px var(--fx-glow)); }
+                               50%     { filter: var(--fx-filter) drop-shadow(0 0 18px var(--fx-glow)); } }
     @keyframes fxFlip   { 0%,100% { transform: var(--fx-base) rotateY(0); } 50% { transform: var(--fx-base) rotateY(180deg); } }
     @keyframes fxSwing  { 0%,100% { transform: var(--fx-base) rotate(-8deg); transform-origin: 50% 0%; }
                           50%     { transform: var(--fx-base) rotate(8deg);  transform-origin: 50% 0%; } }
+    @keyframes fxSparkle{ 0%,100% { transform: var(--fx-base) scale(1); opacity: 1; }
+                          35%     { transform: var(--fx-base) scale(1.06); opacity: .88; }
+                          70%     { transform: var(--fx-base) scale(0.98); opacity: 1; } }
+    @keyframes fxPop    { 0% { transform: var(--fx-base) scale(0.92); opacity: .85; }
+                          45% { transform: var(--fx-base) scale(1.12); opacity: 1; }
+                          100% { transform: var(--fx-base) scale(1); opacity: 1; } }
   `;
 
   const ANIM_MAP = {
@@ -208,8 +219,12 @@
     float:   'fxFloat  __D__ ease-in-out __ITER__',
     glow:    'fxGlow   __D__ ease-in-out __ITER__',
     rainbow: 'fxRainbow __D__ linear __ITER__',
+    rainbow_tint: 'fxRainbowTint __D__ linear __ITER__',
+    rainbow_glow: 'fxRainbowGlow __D__ ease-in-out __ITER__',
     flip:    'fxFlip __D__ ease-in-out __ITER__',
     swing:   'fxSwing __D__ ease-in-out __ITER__',
+    sparkle: 'fxSparkle __D__ ease-in-out __ITER__',
+    pop:     'fxPop __D__ cubic-bezier(.2,.9,.2,1) __ITER__',
   };
 
   function _prefersReducedMotion() {

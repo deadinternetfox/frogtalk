@@ -42,7 +42,8 @@ _STICKER_FX_SHADOW_RANGES = {
 }
 _STICKER_FX_ANIMATIONS = {
     "none", "spin", "pulse", "bounce", "shake", "wobble",
-    "float", "glow", "rainbow", "flip", "swing",
+    "float", "glow", "rainbow", "rainbow_tint", "rainbow_glow",
+    "flip", "swing", "sparkle", "pop",
 }
 _STICKER_FX_HEX_COLOR = (
     # simple #rgb / #rgba / #rrggbb / #rrggbbaa whitelist

@@ -3825,6 +3825,9 @@ const Messages = (() => {
 
   function _hydrateStickers(root) {
     if (!window.StickerFX) return;
+    const canHover = (() => {
+      try { return !!window.matchMedia && window.matchMedia('(hover: hover)').matches; } catch { return false; }
+    })();
     const scope = root || document;
     const nodes = scope.querySelectorAll('.frog-sticker-mount:not([data-fx-rendered])');
     nodes.forEach(node => {
@@ -3836,6 +3839,22 @@ const Messages = (() => {
           src, effects: fx, size: 160, alt: 'sticker', playOnce: true,
         });
         node.appendChild(host);
+        // Desktop polish: hovering a sticker replays the animation.
+        // Debounced so mouse jitter doesn't constantly restart.
+        if (canHover && !node.hasAttribute('data-fx-hover')) {
+          let t = 0;
+          node.addEventListener('mouseenter', () => {
+            const now = Date.now();
+            if (now - t < 350) return;
+            t = now;
+            try { StickerFX.replayAnimation(host); } catch {}
+          }, { passive: true });
+          // Also trigger on keyboard focus (accessibility / tab navigation).
+          node.addEventListener('focusin', () => {
+            try { StickerFX.replayAnimation(host); } catch {}
+          }, { passive: true });
+          node.setAttribute('data-fx-hover', '1');
+        }
         node.setAttribute('data-fx-rendered', '1');
       } catch (e) {
         // Last-resort fallback so a bad fx blob can never blank the bubble.
