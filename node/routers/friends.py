@@ -249,6 +249,18 @@ async def accept_request(request: Request, nickname: str, current_user: dict = D
                  f"{current_user['nickname']} accepted your friend request",
                  kind="friend_accepted",
                  from_nickname="")
+    # Realtime notify the requester so their friends list updates live (matches
+    # decline/cancel); the push above is only a backgrounded-app backup.
+    try:
+        from ws_manager import manager
+        await manager.send_to_user(int(profile["id"]), {
+            "type": "friend_notify",
+            "action": "accepted",
+            "from": current_user.get("nickname") or "",
+            "from_avatar": current_user.get("avatar"),
+        })
+    except Exception:
+        pass
     _emit_friend_graph_event("friend.accepted", profile, current_user)
     try:
         from routers.federation import _notify_wall_rewrap_for_new_follower
