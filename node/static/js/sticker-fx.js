@@ -235,7 +235,9 @@
     const hold = `0%,${sPct}%{filter:var(--fx-filter);}`;
     const endHold = `${ePct}%,100%{filter:var(--fx-filter);}`;
     if (anim === 'rainbow') {
-      return _kf(name, `${hold}${sPct}%{filter:var(--fx-filter) hue-rotate(0deg);} ${ePct}%{filter:var(--fx-filter) hue-rotate(360deg);} ${endHold}`);
+      // Hue-rotate alone can look subtle on flat-color stickers; force a visible
+      // rainbow by adding sepia+saturate (still safe, fixed functions only).
+      return _kf(name, `${hold}${sPct}%{filter:var(--fx-filter) sepia(1) saturate(3.2) hue-rotate(0deg);} ${ePct}%{filter:var(--fx-filter) sepia(1) saturate(3.2) hue-rotate(360deg);} ${endHold}`);
     }
     if (anim === 'rainbow_tint') {
       return _kf(name, `${hold}${sPct}%{filter:var(--fx-filter) sepia(1) saturate(3) hue-rotate(0deg);} ${ePct}%{filter:var(--fx-filter) sepia(1) saturate(3) hue-rotate(360deg);} ${endHold}`);
@@ -329,8 +331,8 @@
     @keyframes fxWobble { 0%,100% { transform: var(--fx-base) rotate(-4deg); } 50% { transform: var(--fx-base) rotate(4deg); } }
     @keyframes fxFloat  { 0%,100% { transform: var(--fx-base) translateY(0); } 50% { transform: var(--fx-base) translateY(-6%); } }
     @keyframes fxGlow   { 0%,100% { filter: var(--fx-filter) drop-shadow(0 0 4px var(--fx-glow)); } 50% { filter: var(--fx-filter) drop-shadow(0 0 14px var(--fx-glow)); } }
-    @keyframes fxRainbow{ 0%   { filter: var(--fx-filter) hue-rotate(0deg); }
-                          100% { filter: var(--fx-filter) hue-rotate(360deg); } }
+    @keyframes fxRainbow{ 0%   { filter: var(--fx-filter) sepia(1) saturate(3.2) hue-rotate(0deg); }
+                          100% { filter: var(--fx-filter) sepia(1) saturate(3.2) hue-rotate(360deg); } }
     @keyframes fxRainbowTint { 0%   { filter: var(--fx-filter) sepia(1) saturate(3) hue-rotate(0deg); }
                                100% { filter: var(--fx-filter) sepia(1) saturate(3) hue-rotate(360deg); } }
     @keyframes fxRainbowGlow { 0%,100% { filter: var(--fx-filter) drop-shadow(0 0 6px var(--fx-glow)); }
