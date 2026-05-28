@@ -7296,6 +7296,13 @@ async def _handle_sticker_event(event: dict) -> None:
             name = str(payload.get("name") or "").strip() or "Imported Pack"
             desc = str(payload.get("description") or "")[:200]
             is_public = int(payload.get("is_public") or 1)
+            owner_nick = str(payload.get("owner_nickname") or "").strip()[:64]
+            try:
+                con.execute(
+                    "ALTER TABLE sticker_packs ADD COLUMN owner_nickname TEXT DEFAULT NULL"
+                )
+            except Exception:
+                pass
             # Owner mapping: use a synthetic system user (-1) so foreign packs
             # never appear as a local user's pack but still satisfy the FK
             # contract loosely via the public-browse path. We don't enforce
@@ -7304,15 +7311,17 @@ async def _handle_sticker_event(event: dict) -> None:
             if row:
                 pid = int(row["id"])
                 con.execute(
-                    "UPDATE sticker_packs SET name=?, description=?, is_public=? WHERE id=?",
-                    (name, desc, is_public, pid),
+                    "UPDATE sticker_packs SET name=?, description=?, is_public=?, "
+                    "owner_nickname=? WHERE id=?",
+                    (name, desc, is_public, owner_nick, pid),
                 )
                 con.execute("DELETE FROM stickers WHERE pack_id=?", (pid,))
             else:
                 cur = con.execute(
                     "INSERT INTO sticker_packs (name, description, owner_id, is_public, "
-                    "origin_server_id, foreign_pack_id) VALUES (?, ?, ?, ?, ?, ?)",
-                    (name, desc, owner_id, is_public, origin, foreign_pack_id),
+                    "origin_server_id, foreign_pack_id, owner_nickname) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (name, desc, owner_id, is_public, origin, foreign_pack_id, owner_nick),
                 )
                 pid = int(cur.lastrowid)
             for s in (payload.get("stickers") or []):

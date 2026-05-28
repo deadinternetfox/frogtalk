@@ -8950,6 +8950,13 @@ def _migrate_custom_emoji_sticker_scope(con: sqlite3.Connection) -> None:
         con.execute("CREATE INDEX IF NOT EXISTS idx_sticker_packs_room ON sticker_packs(room_id)")
     except Exception:
         pass
+    if sp_cols and "owner_nickname" not in sp_cols:
+        try:
+            con.execute(
+                "ALTER TABLE sticker_packs ADD COLUMN owner_nickname TEXT DEFAULT NULL"
+            )
+        except Exception:
+            pass
     con.commit()
 
 
