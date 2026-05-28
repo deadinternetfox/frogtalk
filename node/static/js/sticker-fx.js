@@ -126,6 +126,10 @@
     out.animation_duration = _clamp(raw.animation_duration, 0.3, 10, 2);
     out.background = _hex(raw.background, '');
     out.border_radius = _clamp(raw.border_radius, 0, 50, 0);
+    // Optional: GIF playback controls for sticker media (only meaningful for GIF src).
+    const gm = (typeof raw.gif_mode === 'string') ? raw.gif_mode.trim() : '';
+    out.gif_mode = (gm === 'once' || gm === 'paused' || gm === 'loop') ? gm : 'loop';
+    out.gif_play_seconds = _clamp(raw.gif_play_seconds, 0.3, 10, 2.5);
     // Optional v2: effect layers (animation stack). Each layer is whitelisted.
     // This enables chaining multiple effects while keeping strict validation.
     const layersIn = raw.layers;
@@ -455,6 +459,7 @@
   /** Restart CSS animation on an existing .frog-sticker host (shadow DOM). */
   function replayAnimation(host) {
     if (!host) return;
+    try { host._fxRestartGif?.(); } catch {}
     // Restart CSS animations on any registered replay elements.
     const els = host._fxReplayEls || [];
     if (!els.length) return;
@@ -507,6 +512,9 @@
     const safeSrc = _safeImageSrc(src);
     const safeAlt = _safeAlt(alt);
     const safeSize = _safeSize(size);
+    const isGif = typeof safeSrc === 'string' && (
+      safeSrc.startsWith('data:image/gif') || /\.gif(\?|#|$)/i.test(safeSrc)
+    );
 
     const host = document.createElement('span');
     host.className = 'frog-sticker';
@@ -533,6 +541,9 @@
     const css  = toCss(effects, { playOnce: !!playOnce, forceAnimation: !!forceAnimation });
     const nfx = normalize(effects);
     const layers = (nfx && Array.isArray(nfx.layers) && nfx.layers.length) ? nfx.layers : null;
+    const gifModeRaw = (nfx && typeof nfx.gif_mode === 'string') ? nfx.gif_mode : '';
+    const gifMode = (gifModeRaw === 'once' || gifModeRaw === 'paused' || gifModeRaw === 'loop') ? gifModeRaw : 'loop';
+    const gifPlaySec = nfx && typeof nfx.gif_play_seconds === 'number' ? nfx.gif_play_seconds : 2.5;
 
     let dynKeyframes = '';
     let tLayerAnims = [];
@@ -568,7 +579,7 @@
         overflow: hidden;
       }
       .fx-anim { width: 100%; height: 100%; display:flex; align-items:center; justify-content:center; }
-      img {
+      .fx-media {
         max-width: 100%; max-height: 100%;
         width: auto; height: auto;
         object-fit: contain;
@@ -613,18 +624,67 @@
       }
 
       const img = document.createElement('img');
+      img.className = 'fx-media';
       img.setAttribute('alt', safeAlt);
       img.setAttribute('draggable', 'false');
       img.setAttribute('decoding', 'async');
       img.setAttribute('loading', 'lazy');
       if (safeSrc) img.src = safeSrc;
+
+      const freezeToCanvas = () => {
+        try {
+          const w = img.naturalWidth || 0;
+          const h = img.naturalHeight || 0;
+          if (!w || !h) return;
+          const c = document.createElement('canvas');
+          c.className = 'fx-media';
+          c.width = w; c.height = h;
+          const ctx = c.getContext('2d');
+          if (!ctx) return;
+          ctx.drawImage(img, 0, 0, w, h);
+          // Swap in the canvas to "pause" the GIF visually.
+          img.replaceWith(c);
+          // Keep restart handle.
+          host._fxGifCanvas = c;
+        } catch {}
+      };
+
+      const startGifPlayback = () => {
+        if (!isGif) return;
+        // If we were frozen, restore the <img>.
+        try {
+          if (host._fxGifCanvas && host._fxGifCanvas.parentNode) {
+            host._fxGifCanvas.replaceWith(img);
+            host._fxGifCanvas = null;
+          }
+        } catch {}
+        // Restart GIF animation by resetting src.
+        try {
+          const s = img.src;
+          img.src = '';
+          img.src = s;
+        } catch {}
+        if (gifMode === 'paused') {
+          // Freeze immediately after first frame settles.
+          setTimeout(freezeToCanvas, 60);
+        } else if (gifMode === 'once') {
+          const ms = Math.max(300, Math.min(10000, Math.round((gifPlaySec || 2.5) * 1000)));
+          setTimeout(freezeToCanvas, ms);
+        }
+      };
+
       // Store for replayAnimation()
       img.dataset.fxAnim = img.style.animation || 'none';
       replayEls.push(img);
       host._fxReplayEls = replayEls;
-      // Stash the internal <img> reference for other code paths.
       host._fxImg = img;
+      host._fxRestartGif = startGifPlayback;
       parent.appendChild(img);
+      // Kick GIF control if configured.
+      if (isGif && (gifMode === 'once' || gifMode === 'paused')) {
+        // Wait for image decode to improve snapshot reliability.
+        img.addEventListener('load', () => { try { startGifPlayback(); } catch {} }, { once: true });
+      }
       root.appendChild(style);
       root.appendChild(wrap);
     } else {

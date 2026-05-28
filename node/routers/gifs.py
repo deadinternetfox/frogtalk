@@ -114,6 +114,14 @@ def validate_sticker_effects(raw: Any) -> Optional[Dict[str, Any]]:
     bg = _safe_hex(raw.get("background"), "")  # "" → transparent
     border_radius = _clamp(raw.get("border_radius"), 0.0, 50.0, 0.0)
 
+    # Optional: GIF playback controls (only affects client rendering for GIF media).
+    gm = raw.get("gif_mode")
+    if isinstance(gm, str):
+        gm = gm.strip()
+    if gm not in ("loop", "once", "paused"):
+        gm = "loop"
+    gif_play_seconds = _clamp(raw.get("gif_play_seconds"), 0.3, 10.0, 2.5)
+
     # Optional v2: chained effect layers (animation stack).
     layers_out = []
     layers_in = raw.get("layers")
@@ -151,6 +159,8 @@ def validate_sticker_effects(raw: Any) -> Optional[Dict[str, Any]]:
         "background": bg,
         "border_radius": border_radius,
     }
+    out["gif_mode"] = gm
+    out["gif_play_seconds"] = gif_play_seconds
     if layers_out:
         out["layers"] = layers_out
     return out

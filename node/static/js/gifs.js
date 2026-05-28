@@ -2025,6 +2025,29 @@ const GIFs = (() => {
             ${sliderHtml('Round', '_root', 'border_radius', 0, 50, 1, fx.border_radius, '%')}
           </div>
         </details>
+
+        <details style="border:1px solid color-mix(in srgb, var(--accent-color) 22%, var(--border-color));border-radius:10px;padding:10px 12px;background:color-mix(in srgb, var(--bg-color) 55%, transparent)">
+          <summary style="cursor:pointer;font-weight:700;color:var(--accent-color);font-size:12px;text-transform:uppercase;letter-spacing:.4px">GIF Playback</summary>
+          <div style="display:flex;flex-direction:column;gap:8px;margin-top:8px">
+            <label style="display:grid;grid-template-columns:90px 1fr;align-items:center;gap:8px;font-size:12px">
+              <span style="color:var(--text-muted)">Mode</span>
+              <select data-fx-gif-mode style="background:var(--surface-color);color:var(--text-color);border:1px solid var(--border-color);border-radius:6px;padding:5px 7px">
+                <option value="loop">Loop</option>
+                <option value="once">Play once</option>
+                <option value="paused">Paused</option>
+              </select>
+            </label>
+            <label style="display:grid;grid-template-columns:90px 1fr 56px;align-items:center;gap:8px;font-size:12px">
+              <span style="color:var(--text-muted)">Play time</span>
+              <input type="range" min="0.3" max="10" step="0.1" value="${Number(fx.gif_play_seconds||2.5).toFixed(1)}"
+                data-fx-gif-seconds style="width:100%;accent-color:var(--accent-color)">
+              <span class="fx-num" data-fx-show="_root.gif_play_seconds" style="text-align:right;font-variant-numeric:tabular-nums;color:var(--text-color)">${Number(fx.gif_play_seconds||2.5).toFixed(1)}s</span>
+            </label>
+            <div style="font-size:11px;color:var(--text-muted);line-height:1.35">
+              “Play once” and “Paused” freeze the GIF by snapshotting to a canvas (safe; no raw CSS).
+            </div>
+          </div>
+        </details>
       `;
 
       // Wire sliders / inputs.
@@ -2059,6 +2082,23 @@ const GIFs = (() => {
       });
       if (bgOn) bgOn.addEventListener('change', e => {
         fx.background = e.target.checked ? (bgColor && bgColor.value) || '#000000' : '';
+        renderPreview();
+      });
+
+      const gifMode = ctr.querySelector('select[data-fx-gif-mode]');
+      if (gifMode) {
+        gifMode.value = (fx.gif_mode || 'loop');
+        gifMode.addEventListener('change', e => {
+          fx.gif_mode = e.target.value;
+          renderPreview();
+        });
+      }
+      const gifSecs = ctr.querySelector('input[data-fx-gif-seconds]');
+      if (gifSecs) gifSecs.addEventListener('input', e => {
+        const v = Math.max(0.3, Math.min(10, parseFloat(e.target.value || '2.5') || 2.5));
+        fx.gif_play_seconds = v;
+        const show = ctr.querySelector(`.fx-num[data-fx-show="_root.gif_play_seconds"]`);
+        if (show) show.textContent = v.toFixed(1) + 's';
         renderPreview();
       });
       // ── Layer stack UI ─────────────────────────────────────────────
