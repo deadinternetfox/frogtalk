@@ -349,6 +349,7 @@
       alt,
       onClick,
       playOnce,           // chat: play once; picker/editor: loop
+      forceAnimation,     // editor preview: override reduced-motion
     } = opts || {};
 
     const safeSrc = _safeImageSrc(src);
@@ -377,7 +378,7 @@
 
     // Closed shadow — outside JS can't reach in and tamper with the styles.
     const root = host.attachShadow ? host.attachShadow({ mode: 'closed' }) : null;
-    const css  = toCss(effects, { playOnce: !!playOnce });
+    const css  = toCss(effects, { playOnce: !!playOnce, forceAnimation: !!forceAnimation });
     if (css && css.animation && css.animation !== 'none') {
       host.dataset.fxAnimation = css.animation;
     }
