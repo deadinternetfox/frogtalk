@@ -225,6 +225,21 @@ async def send_request(request: Request, nickname: str, current_user: dict = Dep
                  f"{current_user['nickname']} wants to be friends",
                  kind="friend_request",
                  from_nickname="")
+    # Realtime notify the recipient so their "Pending" list updates live
+    # (matches accept/decline/cancel). Previously this relied solely on the
+    # sender's client emitting a WS frame, which is lost whenever the sender's
+    # socket is mid-reconnect or the request is initiated server-side — leaving
+    # the recipient stuck until a manual refresh.
+    try:
+        from ws_manager import manager
+        await manager.send_to_user(int(profile["id"]), {
+            "type": "friend_notify",
+            "action": "request",
+            "from": current_user.get("nickname") or "",
+            "from_avatar": current_user.get("avatar"),
+        })
+    except Exception:
+        pass
     _emit_friend_graph_event("friend.requested", current_user, profile)
     try:
         from routers.auth import schedule_travel_push_to_home

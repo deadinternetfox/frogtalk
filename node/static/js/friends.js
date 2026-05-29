@@ -258,8 +258,10 @@ async function sendFriendReq (nick, btn) {
       _pendingOutgoing.push({ nickname: nick });
     }
     try { await loadFriends(); } catch {}
-    // Notify recipient in real-time via WebSocket
-    wsSend({ type: 'friend_notify', action: 'request', to_nick: nick });
+    // Realtime fan-out to the recipient is handled server-side by
+    // POST /friends/request (see friends.py). Emitting it from the client too
+    // produced a duplicate toast and silently dropped the notification whenever
+    // this socket was mid-reconnect.
   } else {
     const d = await r.json().catch(()=>({}));
     const msg = String(d.detail || d.error || 'Could not send request');
@@ -294,7 +296,8 @@ async function acceptFriend (nick, btn) {
     if (btn) await _animateRemoveRow(btn);
     loadFriends();
     try { if (typeof Social !== 'undefined' && Social.refreshProfileRelationship) Social.refreshProfileRelationship(nick); } catch {}
-    wsSend({ type: 'friend_notify', action: 'accept', to_nick: nick });
+    // Realtime fan-out to the requester is handled server-side by
+    // POST /friends/accept (see friends.py); emitting it here too double-toasted.
   } else {
     if (btn) { btn.disabled = false; btn.textContent = '✓ Accept'; }
     toast('Could not accept request', 'error');
@@ -735,6 +738,19 @@ const _originalLoadFriends = loadFriends;
 loadFriends = async function() {
   await _originalLoadFriends();
   updateFrogBadge();
+  // _originalLoadFriends only re-renders the modal friends panel
+  // (renderFriendTab → #friends-content). The frog-friends-panel drawer
+  // (#ffp-content) is the primary friends UI on mobile and is rendered by a
+  // *separate* path (renderFfpContent), so without this it stays stale after
+  // an accept/decline arrives over WS — forcing the user to close and reopen
+  // the drawer to see the change.
+  try {
+    const drawer = document.getElementById('frog-friends-panel');
+    if (drawer && drawer.classList.contains('open') && typeof renderFfpContent === 'function') {
+      const activeTab = document.querySelector('.ffp-tab.active')?.dataset?.tab || 'online';
+      renderFfpContent(activeTab);
+    }
+  } catch {}
 };
 
 // ── Per-friend custom sounds editor ──────────────────────────────────────
