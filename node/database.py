@@ -5356,8 +5356,14 @@ def apply_sync_room_allowlist(user_id: int, keep_names: set) -> int:
     if uid <= 0:
         return 0
     keep = {str(n or "").strip().lower() for n in (keep_names or set()) if n}
-    if user_traveling_on_local_node(uid):
-        keep = merge_travel_local_room_allowlist(uid, keep)
+    # ALWAYS spare channels this user owns/created (and is joined to) from the
+    # sync prune — not just while traveling. A home node's authoritative room
+    # list can legitimately omit a public-UNLISTED channel the user just made
+    # locally; without this union the membership reconcile below removed the
+    # creator from their own channel (and the room/messages looked "wiped after
+    # a while" on the next account sync). You should never be auto-removed from
+    # a channel you created.
+    keep = merge_travel_local_room_allowlist(uid, keep)
     try:
         set_user_sync_room_allowlist(uid, sorted(keep))
     except Exception:

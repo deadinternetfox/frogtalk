@@ -1395,10 +1395,21 @@ const Rooms = (() => {
         if (evt.icon != null) rd.icon = evt.icon;
         if (evt.description != null) rd.description = evt.description;
         if (evt.about != null) rd.about = evt.about;
+        if (typeof evt.channel_theme === 'string') rd.channel_theme = evt.channel_theme;
         // Re-render the sidebar so the channel's icon/avatar swaps live.
         try { renderRooms(); } catch {}
       }
     } catch {}
+
+    // Live channel-theme repaint for everyone currently viewing this channel
+    // (colors / background / custom CSS) — no room re-entry needed. The server
+    // rides channel_theme along on theme edits; an empty string = cleared.
+    if (State.currentRoom === roomName && evt && typeof evt.channel_theme === 'string') {
+      try {
+        clearChannelThemeOverride();
+        if (evt.channel_theme) applyChannelThemeOverride(JSON.parse(evt.channel_theme));
+      } catch {}
+    }
     // If the channel profile card for this room is open, re-fetch it so the new
     // banner/icon/about appear live (the banner is fetched, never broadcast).
     try {
@@ -6178,7 +6189,13 @@ function applyChannelThemeOverride(t) {
       return '';
     })();
     if (safeBgImage) {
-      css += `#messages-area { background-image: url('${safeBgImage}'); background-size: cover; background-position: center; background-attachment: fixed; }\n`;
+      // #messages-area carries an `!important` gradient `background` in
+      // index.html, so the bg-image MUST also be `!important` (and appear
+      // later in source order, which this injected stylesheet does) or the
+      // gradient wins and the uploaded image never paints. Use the longhand
+      // background-image so we don't wipe the gradient's color underneath
+      // transparent images.
+      css += `#messages-area { background-image: url('${safeBgImage}') !important; background-size: cover !important; background-position: center !important; background-attachment: fixed !important; background-repeat: no-repeat !important; }\n`;
     }
   }
   if (t.css) {

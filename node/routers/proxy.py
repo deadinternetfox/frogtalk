@@ -34,10 +34,13 @@ from typing import Optional, Tuple
 from urllib.parse import urlparse
 
 import httpx
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse, Response
 
-from deps import get_current_user
+# Reuse the app's shared limiter instance (registered as app.state.limiter in
+# main.py) so SlowAPIMiddleware actually enforces our @limiter.limit decorator
+# — a fresh Limiter() here would register limits the middleware never sees.
+from routers.rooms import limiter
 
 router = APIRouter(prefix="/proxy", tags=["proxy"])
 
@@ -313,13 +316,22 @@ async def _fetch_with_redirects(url: str) -> Tuple[bytes, str]:
 
 
 @router.get("/image")
+@limiter.limit("120/minute")
 async def proxy_image(
+    request: Request,
     u: str = Query(..., min_length=1, max_length=2048),
-    current_user: dict = Depends(get_current_user),
 ):
     """Proxy an image URL after SSRF / content-type / size validation.
     Cached on disk so the upstream only sees one fetch per URL per
-    `_CACHE_TTL` window across the whole server."""
+    `_CACHE_TTL` window across the whole server.
+
+    PUBLIC (no auth): this is loaded by CSS `background-image: url(...)` for
+    channel theme backgrounds, and a stylesheet `url()` cannot carry the
+    `X-Session-Token` header — header-token / Android-WebView clients have no
+    `ft_session` cookie either, so an authed proxy 401s and the background
+    never paints. The SSRF allowlist, image-only content-type check, size cap
+    and disk cache keep this safe to expose; it only ever returns re-encoded
+    image bytes. Rate-limited to blunt abuse as an open fetcher."""
     # Cache hit short-circuits the entire fetch + re-encode path.
     cached = _cache_get(u)
     if cached:
