@@ -260,7 +260,7 @@ const Rooms = (() => {
   /** Paint channel-style sidebar skeleton if the list is still empty (idempotent). */
   function paintSidebarListSkeleton(listId, scope) {
     const el = document.getElementById(listId);
-    if (!el || el.querySelector('.channel-item')) return false;
+    if (!el || el.querySelector('.channel-item') || el.querySelector('.ft-sidebar-empty')) return false;
     if (el.querySelector('.ft-sidebar-skeleton')) return true;
     const sk = scope === 'dm' ? 'dm' : 'channel';
     el.innerHTML = sidebarListSkeletonHtml(5, sk) + _sidebarListSyncHint(sk);
