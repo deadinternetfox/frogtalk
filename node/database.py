@@ -8016,81 +8016,38 @@ def get_pinned_messages(room_name: str) -> List[Dict]:
 def get_room_by_name(room_name: str) -> Optional[Dict]:
     """Get room details by name."""
     with _conn() as con:
-        try:
-            row = con.execute("""
-                SELECT r.id, r.name, r.description, r.type, r.icon, r.slowmode,
-                       r.owner_id, r.room_key_hint, r.channel_type, r.channel_theme, r.created_at,
-                       r.invite_only, r.who_can_invite,
-                       r.is_public, r.category, r.tags, r.directory_description,
-                       COALESCE(r.home_server_id, '') AS home_server_id,
-                       COALESCE(r.room_key_version, 1) AS room_key_version,
-                       (SELECT COUNT(*) FROM room_members WHERE room_id=r.id) AS member_count,
-                       r.banner, r.about, r.dj_only_queue, r.forwarding_disabled,
-                       r.vanity,
-                       COALESCE(r.content_warning_enabled, 0) AS content_warning_enabled,
-                       COALESCE(r.content_warning_flags, 0) AS content_warning_flags,
-                       CASE
-                         WHEN LOWER(u.nickname) <> 'federation_sync' THEN u.nickname
-                         WHEN COALESCE(fci.owner_nickname,'') <> '' THEN fci.owner_nickname
-                         WHEN COALESCE(fup.nickname,'')       <> '' THEN fup.nickname
-                         WHEN COALESCE(NULLIF(r.owner_global_user_id,''), fci.owner_global_user_id) <> '' THEN ''
-                         ELSE 'federation_sync'
-                       END AS owner_nickname,
-                       COALESCE(NULLIF(r.owner_global_user_id,''), fci.owner_global_user_id, u.global_user_id, '') AS owner_global_user_id
-                FROM rooms r
-                LEFT JOIN users u ON r.owner_id = u.id
-                LEFT JOIN federation_channel_index fci
-                       ON fci.room_name = r.name AND fci.tombstoned = 0
-                      AND fci.last_seen_at = (
-                            SELECT MAX(f2.last_seen_at) FROM federation_channel_index f2
-                             WHERE f2.room_name = r.name AND f2.tombstoned = 0)
-                LEFT JOIN federation_user_profiles fup
-                       ON fup.global_user_id = COALESCE(NULLIF(r.owner_global_user_id,''), fci.owner_global_user_id)
-                WHERE r.name = ?
-            """, (room_name,)).fetchone()
-            return dict(row) if row else None
-        except sqlite3.OperationalError as e:
-            # Older/partially-migrated nodes can be missing federation tables
-            # or newer room columns. Fall back to a legacy-safe projection so
-            # /api/rooms/{room} remains available during rolling upgrades.
-            logging.warning("get_room_by_name full query failed; falling back: %s", e)
-            row = con.execute(
-                """
-                SELECT r.id, r.name, r.description, r.type, r.owner_id, r.created_at,
-                       u.nickname AS owner_nickname
-                FROM rooms r
-                LEFT JOIN users u ON r.owner_id = u.id
-                WHERE r.name = ?
-                """,
-                (room_name,),
-            ).fetchone()
-            if not row:
-                return None
-            out = dict(row)
-            out.setdefault("description", "")
-            out.setdefault("icon", None)
-            out.setdefault("slowmode", 0)
-            out.setdefault("room_key_hint", "")
-            out.setdefault("channel_type", "text")
-            out.setdefault("channel_theme", "")
-            out.setdefault("invite_only", 0)
-            out.setdefault("who_can_invite", "everyone")
-            out.setdefault("is_public", 1 if str(out.get("type") or "public").lower() == "public" else 0)
-            out.setdefault("category", "")
-            out.setdefault("tags", "")
-            out.setdefault("directory_description", "")
-            out.setdefault("home_server_id", "")
-            out.setdefault("room_key_version", 1)
-            out.setdefault("member_count", 0)
-            out.setdefault("banner", None)
-            out.setdefault("about", "")
-            out.setdefault("dj_only_queue", 0)
-            out.setdefault("forwarding_disabled", 0)
-            out.setdefault("vanity", None)
-            out.setdefault("content_warning_enabled", 0)
-            out.setdefault("content_warning_flags", 0)
-            out.setdefault("owner_global_user_id", "")
-            return out
+        row = con.execute("""
+            SELECT r.id, r.name, r.description, r.type, r.icon, r.slowmode,
+                   r.owner_id, r.room_key_hint, r.channel_type, r.channel_theme, r.created_at,
+                   r.invite_only, r.who_can_invite,
+                   r.is_public, r.category, r.tags, r.directory_description,
+                   COALESCE(r.home_server_id, '') AS home_server_id,
+                   COALESCE(r.room_key_version, 1) AS room_key_version,
+                   (SELECT COUNT(*) FROM room_members WHERE room_id=r.id) AS member_count,
+                   r.banner, r.about, r.dj_only_queue, r.forwarding_disabled,
+                   r.vanity,
+                   COALESCE(r.content_warning_enabled, 0) AS content_warning_enabled,
+                   COALESCE(r.content_warning_flags, 0) AS content_warning_flags,
+                   CASE
+                     WHEN LOWER(u.nickname) <> 'federation_sync' THEN u.nickname
+                     WHEN COALESCE(fci.owner_nickname,'') <> '' THEN fci.owner_nickname
+                     WHEN COALESCE(fup.nickname,'')       <> '' THEN fup.nickname
+                     WHEN COALESCE(NULLIF(r.owner_global_user_id,''), fci.owner_global_user_id) <> '' THEN ''
+                     ELSE 'federation_sync'
+                   END AS owner_nickname,
+                   COALESCE(NULLIF(r.owner_global_user_id,''), fci.owner_global_user_id, u.global_user_id, '') AS owner_global_user_id
+            FROM rooms r
+            LEFT JOIN users u ON r.owner_id = u.id
+            LEFT JOIN federation_channel_index fci
+                   ON fci.room_name = r.name AND fci.tombstoned = 0
+                  AND fci.last_seen_at = (
+                        SELECT MAX(f2.last_seen_at) FROM federation_channel_index f2
+                         WHERE f2.room_name = r.name AND f2.tombstoned = 0)
+            LEFT JOIN federation_user_profiles fup
+                   ON fup.global_user_id = COALESCE(NULLIF(r.owner_global_user_id,''), fci.owner_global_user_id)
+            WHERE r.name = ?
+        """, (room_name,)).fetchone()
+    return dict(row) if row else None
 
 # Alias used by directory.py, bots.py, external_api.py
 get_room = get_room_by_name
