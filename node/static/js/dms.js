@@ -3404,7 +3404,7 @@ function renderDMChat () {
     const travelNote = onTravel
       ? `<div style="font-size:12px;color:#7ba88f;max-width:340px;margin:14px auto 0;line-height:1.5">On a travel node, new messages use fresh encryption in this browser. Older chat history from your home node is not decrypted here — that is expected.</div>`
       : '';
-    mount.innerHTML = `<div style="text-align:center;color:#555;padding:48px 16px">
+    mount.innerHTML = `<div class="dm-empty-state" style="text-align:center;color:#555;padding:48px 16px">
       <div style="display:flex;justify-content:center;margin-bottom:10px">${fmtAv(_activeDM.avatar, _activeDM.nickname, 64)}</div>
       <div style="font-size:18px;font-weight:700;margin:8px 0">This is the beginning of your DM with ${esc(_activeDM.nickname)}</div>
       <div style="font-size:13px;color:#444">Messages are end-to-end encrypted 🔒</div>
@@ -5015,6 +5015,10 @@ async function sendDMMessage () {
     }
     const area = document.getElementById('messages-area');
     if (area) {
+      // Append into the chat shell (#cw-chat-content), not #messages-area —
+      // see appendDMMessage: the shell's min-height:100% otherwise pushes a
+      // sibling bubble below the stretched shell, leaving a big blank gap.
+      const mount = _dmEnsureChatShell(area) || area;
       const tmp = document.createElement('div');
       tmp.innerHTML = renderDMMessage(_tempMsg);
       const el = tmp.firstElementChild;
@@ -5023,7 +5027,9 @@ async function sendDMMessage () {
         el.setAttribute('data-own', '1');
         el.setAttribute('data-nonce', _nonce);
         el.style.opacity = '0.65';
-        area.appendChild(el);
+        const _emptyState = mount.querySelector('.dm-empty-state');
+        if (_emptyState) _emptyState.remove();
+        mount.appendChild(el);
         _scrollDMToBottomStable();
       }
     }
@@ -5408,6 +5414,12 @@ function appendDMMessage (m) {
   }
   const area = document.getElementById('messages-area');
   if (!area) return;
+  // Append into the chat shell (#cw-chat-content), NOT #messages-area itself.
+  // The shell carries min-height:100%, so on a short conversation it stretches
+  // to fill the viewport; a bubble appended as a *sibling* lands below that
+  // stretched shell, opening a large blank gap that only heals on a full
+  // re-render. Mirror the channel append path (Messages uses _historyMount).
+  const mount = _dmEnsureChatShell(area) || area;
   const atBottom = area.scrollHeight - area.scrollTop - area.clientHeight < 80;
   const myId = STATE.user?.id;
   const myNick = STATE.user?.nickname;
@@ -5417,7 +5429,9 @@ function appendDMMessage (m) {
   tmp.innerHTML = renderDMMessage(m);
   const el = tmp.firstElementChild;
   // reaction buttons now use inline onclick → showDMReactMenu
-  area.appendChild(el);
+  const _emptyState = mount.querySelector('.dm-empty-state');
+  if (_emptyState) _emptyState.remove();
+  mount.appendChild(el);
   _dmObserveReadMessageEl(el);
   if (!mine && (_looksEncryptedBlob(m.content) || _dmCipherRaw(m))) {
     if (m._decryptPending) _dmScheduleDecryptStaleCheck(m);
