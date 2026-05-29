@@ -625,6 +625,14 @@ function handleFileSelect (input) {
   }
   input.value = '';
 }
+// messages.js loads AFTER media.js and redefines a `handleFileSelect` stub
+// that overrides the global function declaration above. That stub delegates
+// to `window.handleFileSelectMedia` when present, else falls back to a dumb
+// raw-<video>/no-controls preview. Expose THIS renderer under that name so
+// the stub routes attachments through the real chip + still-frame pipeline.
+// Without this, every attachment preview silently used the fallback.
+window.handleFileSelectMedia = handleFileSelect;
+window.handleFileSelect = handleFileSelect;
 
 function getPendingAttachments () {
   if (Array.isArray(window._pendingAttachments) && window._pendingAttachments.length) {
