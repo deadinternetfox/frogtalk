@@ -2333,6 +2333,8 @@ async function doAuth() {
       presence: data.presence || 'online',
       status_msg: ('status_msg' in data) ? (data.status_msg ?? '') : '',
       at_home_node: data.at_home_node !== false,
+      theme: data.theme || 'frog',
+      custom_theme_json: data.custom_theme_json || '',
     };
     State.save();
     try {

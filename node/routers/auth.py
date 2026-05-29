@@ -6892,6 +6892,20 @@ async def _start_federation_sync_for_user(
 def _auth_session_response(user_id: int, token: str, sync_meta: dict | None = None) -> dict:
     """Login/ticket payload — always include server-stored presence + status."""
     ident = db.get_user_by_id(user_id) or {}
+    # Carry the account's saved theme so the client's first paint uses the
+    # per-account palette rather than a stale device-global localStorage value.
+    theme = "frog"
+    custom_theme_json = ""
+    try:
+        with db._conn() as con:
+            trow = con.execute(
+                "SELECT theme, custom_theme_json FROM users WHERE id=?", (user_id,)
+            ).fetchone()
+        if trow:
+            theme = (trow["theme"] or "frog")
+            custom_theme_json = trow["custom_theme_json"] or ""
+    except Exception:
+        pass
     out = {
         # NOTE: token is still echoed in the JSON body for back-compat with
         #   * existing native/Electron/Android clients that store it
@@ -6912,6 +6926,8 @@ def _auth_session_response(user_id: int, token: str, sync_meta: dict | None = No
         "presence": ident.get("presence") or "online",
         "status_msg": ident.get("status_msg") or "",
         "at_home_node": _user_at_account_home(user_id),
+        "theme": theme,
+        "custom_theme_json": custom_theme_json,
     }
     if isinstance(sync_meta, dict) and sync_meta and not out["at_home_node"]:
         out["federation_sync"] = sync_meta
@@ -8999,7 +9015,11 @@ async def register_with_captcha(
         except Exception:
             _log.exception("register: peer fanout failed")
     token = _create_session_with_meta(request, user_id)
-    return {"token": token, "nickname": body.nickname, "user_id": user_id, "is_admin": False}
+    # Seed the account's theme so the client paints the correct palette on the
+    # very first load instead of falling back to a stale device-global theme.
+    # New accounts default to 'frog'.
+    return {"token": token, "nickname": body.nickname, "user_id": user_id,
+            "is_admin": False, "theme": "frog", "custom_theme_json": ""}
 
 
 # ===========================================================================
