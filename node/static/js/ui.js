@@ -909,9 +909,22 @@ const UI = (() => {
     const room = State?.currentRoom || '';
     const names = Object.keys(_typingTimers[room] || {});
     if (!names.length) { bar.textContent = ''; return; }
+    const wasEmpty = !bar.textContent;
     if (names.length === 1) bar.textContent = `${names[0]} is typing…`;
     else if (names.length === 2) bar.textContent = `${names[0]} and ${names[1]} are typing…`;
     else bar.textContent = `${names.length} people are typing…`;
+    // The typing bar is an in-flow row that grows from 0→~18px on first
+    // appearance, shrinking #messages-area and hiding the latest message
+    // behind the composer. Keep the last message visible when the user was
+    // already at the bottom.
+    if (wasEmpty) {
+      try {
+        const area = document.getElementById('messages-area');
+        if (area && area.scrollHeight - area.scrollTop - area.clientHeight < 140) {
+          area.scrollTop = area.scrollHeight;
+        }
+      } catch {}
+    }
   }
 
   function showPresence(event, nickname) {

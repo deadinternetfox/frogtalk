@@ -88,6 +88,21 @@
       schedule();
       setTimeout(apply, 80);
       setTimeout(apply, 220);
+      // Edge-case safety for the message composer: on Android / desktop
+      // WebViews the visual-viewport resize can land late, or a tall input
+      // area (e.g. with an attachment preview) can leave the focused field
+      // partly tucked under the keyboard. Nudge it back into view once the
+      // keyboard has settled. iOS is intentionally excluded — it pins via
+      // visualViewport above and a manual scroll there fights Safari's
+      // keyboard animation (jank), per the note at the top of this IIFE.
+      const composer = (e.target.closest && e.target.closest('#input-area')) ? e.target : null;
+      if (composer && !_isIOS()) {
+        const ensureVisible = () => {
+          try { composer.scrollIntoView({ block: 'nearest', inline: 'nearest' }); } catch {}
+        };
+        setTimeout(ensureVisible, 120);
+        setTimeout(ensureVisible, 320);
+      }
     }, true);
 
     document.addEventListener('focusout', () => {

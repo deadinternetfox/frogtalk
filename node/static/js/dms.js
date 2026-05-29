@@ -3494,6 +3494,13 @@ function renderDMChat () {
   };
   area.addEventListener('wheel', onUserScroll, { passive: true });
   area.addEventListener('touchmove', onUserScroll, { passive: true });
+  // Also watch the real `scroll` event: on touch devices `touchmove` fires
+  // before scrollTop actually moves, so the wheel/touchmove checks can miss a
+  // scroll-up and the auto-pin below keeps yanking the user back to the bottom
+  // (i.e. "can't scroll up to read history"). The scroll event fires *after*
+  // the position changes, so it reliably flips userScrolled. forceBottom()'s
+  // own scroll lands at the bottom, so it never trips this.
+  area.addEventListener('scroll', onUserScroll, { passive: true });
   const ro = (typeof ResizeObserver !== 'undefined')
     ? new ResizeObserver(() => {
         if (userScrolled) return;
@@ -3515,6 +3522,7 @@ function renderDMChat () {
     try { ro?.disconnect(); } catch {}
     area.removeEventListener('wheel', onUserScroll);
     area.removeEventListener('touchmove', onUserScroll);
+    area.removeEventListener('scroll', onUserScroll);
   }, WINDOW_MS + 200);
   _dmSetupReadReceiptUi();
   if (_dmIsChatFocused()) _dmScheduleReadFlush();
@@ -4286,6 +4294,8 @@ async function revealDMViewOnce (msgId) {
   const safeMime = mimeType || '';
   const mediaEl = safeMime.startsWith('video')
     ? `<video class="vo-media" src="${mediaData}" autoplay controls playsinline></video>`
+    : safeMime.startsWith('audio')
+    ? `<audio class="vo-media vo-audio" src="${mediaData}" autoplay controls></audio>`
     : `<img class="vo-media" src="${mediaData}" alt="">`;
   const hintText = isSender
     ? '🔥 Sent • Waiting for them to open…'
@@ -5264,6 +5274,13 @@ function handleWSDMMessage (data) {
         if (previewUrl && !_dmMessages[pi].preview_suppressed) {
           setTimeout(() => _loadDMPreview(data.id, previewUrl), 80);
         }
+        // The pending bubble was first rendered under a temporary id, so any
+        // invite / post / reel / music embeds hydrated (or failed to) against
+        // that id. Now that it carries the real message id, re-run social-card
+        // hydration so those cards don't stay stuck on "🐸 Loading…" after
+        // sending. Already-rendered cards short-circuit, so this is a no-op
+        // when the first pass succeeded.
+        setTimeout(() => _hydrateDMSocialCards(data.id), 80);
       }
       return;
     }
@@ -5319,6 +5336,9 @@ function handleWSDMMessage (data) {
           if (previewUrl && !_dmMessages[pi].preview_suppressed) {
             setTimeout(() => _loadDMPreview(data.id, previewUrl), 80);
           }
+          // Re-hydrate Frog social cards against the now-real id (see the
+          // matching note in the nonce-reconcile branch above).
+          setTimeout(() => _hydrateDMSocialCards(data.id), 80);
         }
         return;
       }
@@ -5484,9 +5504,15 @@ function handleWSDMTyping (data) {
   if (!_activeDM || !_dmIdEq(data.channel_id, _activeDM.id)) return;
   const bar = document.getElementById('typing-bar');
   if (!bar) return;
+  const wasEmpty = !bar.textContent;
   bar.style.display = '';
   const who = data.sender_nick || data.nickname || 'Someone';
   bar.textContent = who + ' is typing…';
+  // The typing bar is an in-flow row that grows from 0→~18px the first time
+  // it appears, shrinking #messages-area and tucking the latest message under
+  // the fold. Re-pin to the bottom (only on first appearance) so the last
+  // message stays visible if the user was already at the bottom.
+  if (wasEmpty) _dmScrollIfNearBottom();
   clearTimeout(_dmTypingTimer);
   _dmTypingTimer = setTimeout(() => { bar.textContent = ''; }, 3000);
 }

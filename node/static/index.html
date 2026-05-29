@@ -3054,6 +3054,19 @@ html.ft-kb-open #input-area{
   background:linear-gradient(135deg,#ff6b35,#d84315);color:#fff;
   border-color:#ff6b35;box-shadow:0 0 0 2px rgba(255,107,53,.35)
 }
+/* Burn-chip placement variants. The base .att-viewonce-fire is absolutely
+   positioned (image top-left overlay); these put it back into normal flow
+   so it can sit in the voice-note top-right column or the video-note info
+   column without breaking the layout. */
+.att-viewonce-fire.att-viewonce-fire--stacked,
+.att-viewonce-fire.att-viewonce-fire--inline{
+  position:static;top:auto;left:auto;right:auto;bottom:auto
+}
+/* Video-note preview: ✕ pinned to the bubble's top-right corner. */
+.att-preview-chip.att-vn-remove{position:absolute;top:6px;right:6px;z-index:4}
+/* Reserve room on the right of the voice bubble so the stacked chips never
+   sit on top of the duration text. */
+.att-preview-voice .att-voice-bubble{padding-right:46px}
 /* View-once message overlay in chat */
 .view-once-wrap{
   position:relative;
@@ -4358,6 +4371,9 @@ body:is([data-theme="dark"],[data-theme="frog"],:not([data-theme])) #modal-add-e
 .vo-overlay{position:fixed;inset:0;z-index:10000;background:radial-gradient(circle at 50% 20%,rgba(255,120,32,.12),rgba(0,0,0,.95) 40%);backdrop-filter:blur(2px);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:var(--safe-top) var(--safe-right) var(--safe-bottom) var(--safe-left);box-sizing:border-box;animation:voFade .18s ease}
 @keyframes voFade{from{opacity:0}to{opacity:1}}
 .vo-overlay .vo-media{max-width:min(92vw,820px);max-height:72vh;border-radius:14px;border:1px solid rgba(255,255,255,.12);box-shadow:0 16px 50px rgba(0,0,0,.62);animation:voPop .2s ease}
+/* View-once voice notes play inline in the overlay — give the audio bar a
+   sensible width and drop the heavy media border/height meant for images. */
+.vo-overlay .vo-audio{width:min(92vw,420px);max-height:none;border:none;border-radius:24px;box-shadow:none;background:transparent}
 @keyframes voPop{from{opacity:.85;transform:scale(.97)}to{opacity:1;transform:scale(1)}}
 .vo-timer-ring{position:relative;width:56px;height:56px}
 .vo-timer-ring svg{transform:rotate(-90deg)}

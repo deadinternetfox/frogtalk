@@ -342,10 +342,6 @@ function finaliseVoiceMemo () {
     () => `<div class="wave-bar" style="height:${4 + Math.random() * 20}px"></div>`
   ).join('');
   const _inDM = typeof isDMView === 'function' && isDMView();
-  const _voBtn = _inDM
-    ? `<button type="button" class="att-viewonce-fire" title="View once — disappears after viewing"
-                onclick="toggleMediaFlag('view_once')" aria-pressed="false">🔥</button>`
-    : '';
   thumb.innerHTML = `
     <div class="att-preview-item att-preview-voice" id="att-preview-item">
       <div class="att-media-wrap" style="max-width:280px;width:100%">
@@ -354,11 +350,15 @@ function finaliseVoiceMemo () {
           <div class="audio-waves">${waveBars}</div>
           <div class="audio-meta"><span class="audio-duration">${dur}</span></div>
         </div>
-        ${_voBtn}
       </div>
       <div class="att-preview-sub">Voice note · ${dur}</div>
     </div>`;
   prev.style.display = 'flex';
+  // Mount the styled ✕ remove (always) + 🔥 view-once (DMs) chips in the
+  // top-right corner — same chip styling as image / file previews so the
+  // burn button isn't an unstyled native control and the note can be cleared.
+  const _voWrap = thumb.querySelector('.att-media-wrap');
+  if (_voWrap) _mountAttPreviewControls(_voWrap, window._pendingAttachments[0], 0, _inDM);
 }
 
 /* Lightweight inline play/pause for the composer voice preview. Uses a
@@ -423,8 +423,13 @@ function finaliseVideoNote () {
   const thumb = document.getElementById('attachment-thumb');
   const prev  = document.getElementById('attachment-preview');
   const durTxt = formatRecDuration(_recSeconds).replace('● REC ', '');
+  // Burn (view-once) is a DM-only feature — same as voice notes & images.
+  const _inDM = typeof isDMView === 'function' && isDMView();
+  const _vnFire = _inDM
+    ? `<button type="button" class="att-preview-chip att-viewonce-fire att-viewonce-fire--inline" title="View once — disappears after viewing" aria-pressed="false" onclick="toggleMediaFlag('view_once',0)">🔥</button>`
+    : '';
   thumb.innerHTML = `
-    <div class="att-preview-item att-preview-vidnote" style="display:flex;align-items:center;gap:12px">
+    <div class="att-preview-item att-preview-vidnote" id="att-preview-item" style="position:relative;display:flex;align-items:center;gap:12px">
       <div class="att-vn-wrap" style="position:relative;width:72px;height:72px;flex:0 0 72px;cursor:pointer;border-radius:50%;overflow:hidden;border:2px solid var(--accent-color);background:color-mix(in srgb, var(--bg-color) 85%, var(--accent-color) 15%)"
            onclick="_attPreviewPlayVidNote(this, event)">
         <video class="att-vn-video" src="${url}" preload="auto" muted playsinline
@@ -432,10 +437,12 @@ function finaliseVideoNote () {
         <div class="att-vn-poster" style="position:absolute;inset:0;background-size:cover;background-position:center;border-radius:50%;opacity:0;transition:opacity .2s ease"></div>
         <div class="att-vn-play" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.35);color:#fff;font-size:22px;border-radius:50%;pointer-events:none">▶</div>
       </div>
-      <span style="font-size:12px;color:#85a89a;display:flex;flex-direction:column;gap:2px">
+      <span style="font-size:12px;color:#85a89a;display:flex;flex-direction:column;gap:6px">
         <span style="color:#cfeedb;font-weight:600">🎥 Video note</span>
         <span>${durTxt}</span>
+        ${_vnFire}
       </span>
+      <button type="button" class="att-preview-chip att-preview-remove att-vn-remove" title="Remove this attachment" aria-label="Remove this attachment" onclick="_removePendingAttachment(0)">✕</button>
     </div>`;
   prev.style.display = 'flex';
   // Capture a first-frame poster off the canvas (works around Android
@@ -676,16 +683,30 @@ function _updatePreviewClearAll () {
   btn.hidden = getPendingAttachments().length < 2;
 }
 
-/** Top-right stack: spoiler eye, then remove ✕ — same chip style as view-once fire. */
+/** Top-right stack: spoiler eye, then remove ✕ — same chip style as view-once fire.
+   The burn (🔥 view-once) chip is added for ANY media inside a DM — images,
+   videos and voice notes alike. Placement varies by kind:
+     • voice notes / audio → stacked in the top-right column with the ✕
+     • images / normal videos → top-left overlay (unchanged)
+   Video notes don't use this helper (their round bubble has a bespoke layout). */
 function _mountAttPreviewControls (mediaWrap, item, index, isDM) {
   if (!mediaWrap || !item) return;
   mediaWrap.querySelector('.att-preview-controls')?.remove();
+  mediaWrap.querySelector('.att-viewonce-fire')?.remove();
 
-  const isVisual = !!(item.type && (item.type.startsWith('image/') || item.type.startsWith('video/')));
+  const type = item.type || '';
+  const isVisual = type.startsWith('image/') || type.startsWith('video/');
+  const isAudio  = type.startsWith('audio/') || !!item.isVoice;
+  // Spoiler (blur-until-tap) only makes sense for flat visual media, never
+  // for an audio waveform bubble.
+  const canSpoiler  = isVisual;
+  // View-once applies to any media inside a DM.
+  const canViewOnce = isDM && (isVisual || isAudio);
+
   const controls = document.createElement('div');
   controls.className = 'att-preview-controls';
 
-  if (isVisual) {
+  if (canSpoiler) {
     const eye = document.createElement('button');
     eye.type = 'button';
     eye.className = 'att-preview-chip att-spoiler-eye' + (item.blur ? ' active' : '');
@@ -714,8 +735,7 @@ function _mountAttPreviewControls (mediaWrap, item, index, isDM) {
   controls.appendChild(removeBtn);
   mediaWrap.appendChild(controls);
 
-  if (isVisual && isDM) {
-    mediaWrap.querySelector('.att-viewonce-fire')?.remove();
+  if (canViewOnce) {
     const fire = document.createElement('button');
     fire.type = 'button';
     fire.className = 'att-preview-chip att-viewonce-fire' + (item.viewOnce ? ' active' : '');
@@ -727,7 +747,14 @@ function _mountAttPreviewControls (mediaWrap, item, index, isDM) {
       e.preventDefault();
       toggleMediaFlag('view_once', index);
     });
-    mediaWrap.appendChild(fire);
+    if (isAudio) {
+      // Voice notes have no spoiler eye, so park the burn chip in the
+      // top-right column above the ✕ instead of the image top-left overlay.
+      fire.classList.add('att-viewonce-fire--stacked');
+      controls.insertBefore(fire, controls.firstChild);
+    } else {
+      mediaWrap.appendChild(fire);
+    }
   }
 }
 
