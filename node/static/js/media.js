@@ -815,6 +815,9 @@ function _renderPendingAttachmentList () {
     }
 
     _mountAttPreviewControls(mediaWrap, item, index, isDM);
+    if (item.type && item.type.startsWith('video/') && !isLoopingGifVideo(item.type, item.name)) {
+      _attMountVideoPoster(mediaWrap);
+    }
 
     const sub = document.createElement('div');
     sub.className = 'att-preview-sub';
@@ -903,6 +906,23 @@ function addPendingAttachmentFile (file, opts = {}) {
   return true;
 }
 
+/* Overlay a captured first-frame poster on a composer video preview so it
+   shows the real frame instead of a grey/black box. Android WebView never
+   paints a native <video> poster for a freshly-loaded blob: URL, so we reuse
+   the same canvas-capture the round video notes use. */
+function _attMountVideoPoster (mediaWrap) {
+  if (!mediaWrap) return;
+  const v = mediaWrap.querySelector('video');
+  if (!v) return;
+  let ps = mediaWrap.querySelector('.att-vid-poster');
+  if (!ps) {
+    ps = document.createElement('div');
+    ps.className = 'att-vid-poster';
+    mediaWrap.appendChild(ps);
+  }
+  try { _attVidNoteCapturePoster(v, ps); } catch {}
+}
+
 /* Shared attachment preview renderer. Produces:
    - image/video thumbnail with an eye-button overlay (spoiler toggle)
    - filename + size on a smaller line below
@@ -941,7 +961,10 @@ function _renderAttachmentPreview ({ blob, name, type, sizeBytes }) {
     const vidAttrs = loopGif
       ? 'autoplay loop muted playsinline preload="auto"'
       : 'muted playsinline preload="metadata"';
-    mediaHtml = `<div class="att-media-wrap"><video src="${url}" ${vidAttrs}></video></div>`;
+    // Non-looping videos get a captured first-frame poster overlay so the
+    // preview shows the real frame instead of a grey box (see _attMountVideoPoster).
+    const posterEl = loopGif ? '' : '<div class="att-vid-poster"></div>';
+    mediaHtml = `<div class="att-media-wrap"><video src="${url}" ${vidAttrs}></video>${posterEl}</div>`;
   } else {
     const icon = /pdf/.test(type || '') ? '📕'
                : /audio/.test(type || '') ? '🎵'
@@ -964,6 +987,7 @@ function _renderAttachmentPreview ({ blob, name, type, sizeBytes }) {
       viewOnce: !!window._pendingViewOnce,
     };
     _mountAttPreviewControls(singleWrap, att, 0, _inDM);
+    if (isVid && !isLoopingGifVideo(type, name)) _attMountVideoPoster(singleWrap);
   }
 
   // Fire button is always visible on images/videos (no DM-only restriction)

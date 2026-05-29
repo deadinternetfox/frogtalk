@@ -3045,6 +3045,9 @@ html.ft-kb-open #input-area{
 .att-preview-name{font-size:10px;color:#888;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;line-height:1.2}
 /* Attachment preview — circular overlay chips (fire / eye / remove) */
 .att-media-wrap{position:relative;display:inline-block;max-width:200px}
+/* Captured first-frame poster overlay for composer video previews — covers
+   the grey/black <video> until (and after) the real frame is drawn. */
+.att-vid-poster{position:absolute;inset:0;background-size:cover;background-position:center;border-radius:inherit;opacity:0;transition:opacity .2s ease;pointer-events:none}
 .att-viewonce-fire{position:absolute;top:10px;left:8px;z-index:3}
 .att-spoiler-eye.active{
   background:linear-gradient(135deg,var(--accent-color),color-mix(in srgb, var(--accent-color) 70%, #000));color:#fff;
@@ -12254,7 +12257,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoa
   <script src="/static/js/rooms.js?v=__APP_ASSET_VERSION__"></script>
 <script src="/static/js/sticker-fx.js?v=18"></script>
 <script src="/static/js/text_format.js?v=2"></script>
-<script src="/static/js/media.js?v=427"></script>
+<script src="/static/js/media.js?v=428"></script>
 <script src="/static/js/messages.js?v=__APP_ASSET_VERSION__"></script>
 <script src="/static/js/format_toolbar.js?v=2"></script>
 <script src="/static/js/users.js?v=__APP_ASSET_VERSION__"></script>
