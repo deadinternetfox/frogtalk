@@ -5021,8 +5021,8 @@ function handleFileSelect(input) {
   // original simple fallback (images/video only, base64)
   const file = input.files[0];
   if (!file) return;
-  const MAX = 8 * 1024 * 1024;
-  if (file.size > MAX) { UI.showToast('File too large (max 8MB)', 'error'); return; }
+  const MAX = 20 * 1024 * 1024;
+  if (file.size > MAX) { UI.showToast('File too large (max 20MB)', 'error'); return; }
   UI.blobToDataURL(file).then(dataUrl => {
     State.pendingAttachment = { dataUrl, type: file.type };
     const preview = document.getElementById('attachment-preview');

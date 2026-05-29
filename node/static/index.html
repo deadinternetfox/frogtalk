@@ -3065,18 +3065,26 @@ html.ft-kb-open #input-area{
   border-color:#ff6b35;box-shadow:0 0 0 2px rgba(255,107,53,.35)
 }
 /* Burn-chip placement variants. The base .att-viewonce-fire is absolutely
-   positioned (image top-left overlay); these put it back into normal flow
-   so it can sit in the voice-note top-right column or the video-note info
-   column without breaking the layout. */
-.att-viewonce-fire.att-viewonce-fire--stacked,
-.att-viewonce-fire.att-viewonce-fire--inline{
+   positioned (image top-left overlay); --stacked puts it back into normal
+   flow so it can sit in the voice-note chip row. */
+.att-viewonce-fire.att-viewonce-fire--stacked{
   position:static;top:auto;left:auto;right:auto;bottom:auto
 }
-/* Video-note preview: ✕ pinned to the bubble's top-right corner. */
-.att-preview-chip.att-vn-remove{position:absolute;top:6px;right:6px;z-index:4}
-/* Reserve room on the right of the voice bubble so the stacked chips never
-   sit on top of the duration text. */
-.att-preview-voice .att-voice-bubble{padding-right:46px}
+/* Voice notes: burn + ✕ as one small horizontal row in the top-right corner,
+   ✕ on the outer corner edge. Smaller chips so the row stays compact. */
+.att-preview-controls.att-preview-controls--row{
+  flex-direction:row;align-items:center;gap:4px;top:6px;right:6px
+}
+.att-preview-controls--row .att-preview-chip{width:22px;height:22px;font-size:11px}
+/* Reserve room on the right of the voice bubble so the chip row never sits
+   on top of the duration text. */
+.att-preview-voice .att-voice-bubble{padding-right:54px}
+/* Video-note preview: ✕ and 🔥 frame the round bubble at its top corners.
+   ✕ top-right (just inside the bubble edge, "closer to the node"); 🔥
+   mirrored at the top-left. Bubble is 72px wide, chips ~24px. */
+.att-preview-vidnote{padding-top:2px}
+.att-preview-chip.att-vn-remove{position:absolute;top:0;left:50px;z-index:4}
+.att-preview-chip.att-vn-fire{position:absolute;top:0;left:0;z-index:4}
 /* View-once message overlay in chat */
 .view-once-wrap{
   position:relative;
@@ -12264,7 +12272,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoa
   <script src="/static/js/rooms.js?v=__APP_ASSET_VERSION__"></script>
 <script src="/static/js/sticker-fx.js?v=18"></script>
 <script src="/static/js/text_format.js?v=2"></script>
-<script src="/static/js/media.js?v=429"></script>
+<script src="/static/js/media.js?v=430"></script>
 <script src="/static/js/messages.js?v=__APP_ASSET_VERSION__"></script>
 <script src="/static/js/format_toolbar.js?v=2"></script>
 <script src="/static/js/users.js?v=__APP_ASSET_VERSION__"></script>

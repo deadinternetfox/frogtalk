@@ -425,8 +425,10 @@ function finaliseVideoNote () {
   const durTxt = formatRecDuration(_recSeconds).replace('● REC ', '');
   // Burn (view-once) is a DM-only feature — same as voice notes & images.
   const _inDM = typeof isDMView === 'function' && isDMView();
+  // Burn (view-once) is DM-only. ✕ and 🔥 frame the round bubble at its top
+  // corners — ✕ top-right (corner side), 🔥 mirrored at top-left.
   const _vnFire = _inDM
-    ? `<button type="button" class="att-preview-chip att-viewonce-fire att-viewonce-fire--inline" title="View once — disappears after viewing" aria-pressed="false" onclick="toggleMediaFlag('view_once',0)">🔥</button>`
+    ? `<button type="button" class="att-preview-chip att-viewonce-fire att-vn-fire" title="View once — disappears after viewing" aria-pressed="false" onclick="toggleMediaFlag('view_once',0)">🔥</button>`
     : '';
   thumb.innerHTML = `
     <div class="att-preview-item att-preview-vidnote" id="att-preview-item" style="position:relative;display:flex;align-items:center;gap:12px">
@@ -437,11 +439,11 @@ function finaliseVideoNote () {
         <div class="att-vn-poster" style="position:absolute;inset:0;background-size:cover;background-position:center;border-radius:50%;opacity:0;transition:opacity .2s ease"></div>
         <div class="att-vn-play" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.35);color:#fff;font-size:22px;border-radius:50%;pointer-events:none">▶</div>
       </div>
-      <span style="font-size:12px;color:#85a89a;display:flex;flex-direction:column;gap:6px">
+      <span style="font-size:12px;color:#85a89a;display:flex;flex-direction:column;gap:4px">
         <span style="color:#cfeedb;font-weight:600">🎥 Video note</span>
         <span>${durTxt}</span>
-        ${_vnFire}
       </span>
+      ${_vnFire}
       <button type="button" class="att-preview-chip att-preview-remove att-vn-remove" title="Remove this attachment" aria-label="Remove this attachment" onclick="_removePendingAttachment(0)">✕</button>
     </div>`;
   prev.style.display = 'flex';
@@ -705,6 +707,9 @@ function _mountAttPreviewControls (mediaWrap, item, index, isDM) {
 
   const controls = document.createElement('div');
   controls.className = 'att-preview-controls';
+  // Voice notes: lay the chips out as one small horizontal row in the top
+  // corner ([🔥 ✕] with ✕ on the corner side) instead of a vertical stack.
+  if (isAudio) controls.classList.add('att-preview-controls--row');
 
   if (canSpoiler) {
     const eye = document.createElement('button');
@@ -748,8 +753,10 @@ function _mountAttPreviewControls (mediaWrap, item, index, isDM) {
       toggleMediaFlag('view_once', index);
     });
     if (isAudio) {
-      // Voice notes have no spoiler eye, so park the burn chip in the
-      // top-right column above the ✕ instead of the image top-left overlay.
+      // Voice notes: burn + ✕ sit side-by-side as one small row in the top
+      // corner. Fire goes first so the order reads [🔥 ✕] with ✕ on the
+      // outer corner edge. --stacked resets the absolute positioning the base
+      // .att-viewonce-fire would otherwise apply.
       fire.classList.add('att-viewonce-fire--stacked');
       controls.insertBefore(fire, controls.firstChild);
     } else {
