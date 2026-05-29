@@ -276,6 +276,49 @@ async def accept_request(request: Request, nickname: str, current_user: dict = D
         })
     except Exception:
         pass
+    # Discord-style: drop a friendly system line into the DM thread so a
+    # conversation immediately pops up in both users' DM lists on a successful
+    # add, instead of them having to search each other out again.
+    try:
+        from datetime import datetime as _dt
+        from dm_system_messages import dm_sys_content
+        from ws_manager import manager as _mgr
+        a_id = int(current_user["id"])      # accepter
+        b_id = int(profile["id"])           # original requester
+        channel_id = db.get_or_create_dm(a_id, b_id)
+        content = dm_sys_content(
+            kind="friends_added",
+            title="You're now friends \U0001F438",
+            subtitle="Say hi to start the conversation.",
+            icon="\U0001F91D",
+        )
+        msg_id = db.send_dm_message(channel_id, a_id, content)
+        if msg_id:
+            dm_payload = {
+                "type": "dm_message",
+                "id": msg_id,
+                "channel_id": channel_id,
+                "sender_id": a_id,
+                "sender_nick": current_user.get("nickname") or "",
+                "sender_display_name": current_user.get("display_name"),
+                "sender_avatar": current_user.get("avatar") or "",
+                "sender_is_admin": bool(current_user.get("is_admin")),
+                "content": content,
+                "media_type": None,
+                "media_name": None,
+                "has_media": False,
+                "media_blur": 0,
+                "view_once": 0,
+                "reply_to": None,
+                "edited": False,
+                "deleted": False,
+                "reactions": {},
+                "created_at": _dt.utcnow().isoformat() + "Z",
+            }
+            await _mgr.send_to_user(a_id, dm_payload)
+            await _mgr.send_to_user(b_id, dm_payload)
+    except Exception:
+        _log.debug("friends: now-friends DM line failed", exc_info=True)
     _emit_friend_graph_event("friend.accepted", profile, current_user)
     try:
         from routers.federation import _notify_wall_rewrap_for_new_follower

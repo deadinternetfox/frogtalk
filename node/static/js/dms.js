@@ -2593,7 +2593,12 @@ async function openDMChannel (id, nickname, avatar) {
     }
   } catch {}
 
-  try { WS?.disconnect?.(); } catch {}
+  // NOTE: do NOT disconnect the WebSocket when opening a DM. DM delivery and
+  // presence are keyed by user id server-side (send_to_user), so the existing
+  // room socket is what keeps us "online" to friends and streams live DMs.
+  // A 2026-05 "transition polish" change closed the socket here with no
+  // reconnect, which made users appear offline the moment they opened a DM and
+  // dropped realtime DMs until a manual refresh.
   try { State._roomSwitchInProgress = `dm:${id}`; } catch {}
   try { if (typeof clearChannelThemeOverride === 'function') clearChannelThemeOverride(); } catch {}
 
