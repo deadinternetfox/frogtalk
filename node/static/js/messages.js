@@ -2339,21 +2339,21 @@ const Messages = (() => {
     modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
     const preview = (msg.content || '').slice(0, 120) || (msg.has_media || msg.media_type ? '[media]' : '');
     modal.innerHTML = `
-      <div style="background:linear-gradient(180deg,#173027 0%,#13271f 56%,#102018 100%);border:1px solid #2f5548;border-radius:14px;width:min(460px,100%);max-height:85vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 18px 48px rgba(0,0,0,.62)">
-        <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 16px;border-bottom:1px solid #2f5548;background:linear-gradient(180deg,rgba(255,255,255,.02),rgba(255,255,255,0))">
-          <div style="font-weight:700;color:#cfe8d2;font-size:15px">↪ Forward message</div>
-          <button id="fwd-cancel-x" style="background:none;border:none;color:#9bbf9b;font-size:18px;cursor:pointer;width:28px;height:28px;border-radius:6px" title="Close">✕</button>
+      <div style="background:linear-gradient(180deg,color-mix(in srgb, var(--surface-color) 80%, var(--accent-color) 20%) 0%,color-mix(in srgb, var(--surface-color) 88%, var(--accent-color) 12%) 56%,color-mix(in srgb, var(--bg-color) 88%, var(--accent-color) 12%) 100%);border:1px solid color-mix(in srgb, var(--accent-color) 35%, var(--border-color));border-radius:14px;width:min(460px,100%);max-height:85vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 18px 48px rgba(0,0,0,.62)">
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 16px;border-bottom:1px solid color-mix(in srgb, var(--accent-color) 35%, var(--border-color));background:linear-gradient(180deg,rgba(255,255,255,.02),rgba(255,255,255,0))">
+          <div style="font-weight:700;color:color-mix(in srgb, var(--text-color) 80%, var(--accent-color));font-size:15px">↪ Forward message</div>
+          <button id="fwd-cancel-x" style="background:none;border:none;color:var(--text-muted);font-size:18px;cursor:pointer;width:28px;height:28px;border-radius:6px" title="Close">✕</button>
         </div>
-        <div style="padding:10px 14px;border-bottom:1px solid #24473b;font-size:12px;color:#9bbf9b;background:rgba(0,0,0,.2)">
-          From <b style="color:#cfe8d2">${UI.escHtml(msg.nickname || '?')}</b>: <span style="color:#a8c4ad">${UI.escHtml(preview)}</span>
+        <div style="padding:10px 14px;border-bottom:1px solid color-mix(in srgb, var(--accent-color) 24%, var(--border-color));font-size:12px;color:var(--text-muted);background:rgba(0,0,0,.2)">
+          From <b style="color:color-mix(in srgb, var(--text-color) 80%, var(--accent-color))">${UI.escHtml(msg.nickname || '?')}</b>: <span style="color:var(--text-muted)">${UI.escHtml(preview)}</span>
         </div>
         <div style="padding:10px 14px 4px">
-          <input id="fwd-search" type="text" placeholder="Search channels, DMs, and friends…" style="width:100%;padding:9px 12px;background:rgba(0,0,0,.28);border:1px solid #2f5548;color:#dff5e8;border-radius:8px;outline:none;font-size:13px"/>
+          <input id="fwd-search" type="text" placeholder="Search channels, DMs, and friends…" style="width:100%;padding:9px 12px;background:rgba(0,0,0,.28);border:1px solid color-mix(in srgb, var(--accent-color) 35%, var(--border-color));color:var(--text-color);border-radius:8px;outline:none;font-size:13px"/>
         </div>
-        <div id="fwd-list" style="overflow-y:auto;flex:1;padding:4px 10px 10px;scrollbar-width:thin;scrollbar-color:rgba(76,175,80,.4) transparent;color:#d6ecda"></div>
-        <div style="padding:12px 16px;border-top:1px solid #2f5548;display:flex;gap:8px;justify-content:flex-end;background:rgba(0,0,0,.2)">
-          <button id="fwd-cancel" style="background:linear-gradient(180deg,#15291f,#11221b);border:1px solid #2f5548;color:#cfe8d2;padding:8px 16px;border-radius:8px;cursor:pointer;font-weight:600">Cancel</button>
-          <button id="fwd-send" style="background:linear-gradient(135deg,#2a5a2a 0%,#1a3a1a 100%);border:1px solid #4caf50;color:#dff5e8;padding:8px 18px;border-radius:8px;cursor:pointer;font-weight:600;opacity:.5" disabled>Send</button>
+        <div id="fwd-list" style="overflow-y:auto;flex:1;padding:4px 10px 10px;scrollbar-width:thin;scrollbar-color:color-mix(in srgb, var(--accent-color) 40%, transparent) transparent;color:var(--text-color)"></div>
+        <div style="padding:12px 16px;border-top:1px solid color-mix(in srgb, var(--accent-color) 35%, var(--border-color));display:flex;gap:8px;justify-content:flex-end;background:rgba(0,0,0,.2)">
+          <button id="fwd-cancel" style="background:linear-gradient(180deg,color-mix(in srgb, var(--surface-color) 84%, var(--accent-color) 16%),color-mix(in srgb, var(--bg-color) 90%, var(--accent-color) 10%));border:1px solid color-mix(in srgb, var(--accent-color) 30%, var(--border-color));color:color-mix(in srgb, var(--text-color) 80%, var(--accent-color));padding:8px 16px;border-radius:8px;cursor:pointer;font-weight:600">Cancel</button>
+          <button id="fwd-send" style="background:linear-gradient(135deg,color-mix(in srgb, var(--accent-color) 45%, var(--bg-color)) 0%,color-mix(in srgb, var(--accent-color) 25%, var(--bg-color)) 100%);border:1px solid var(--accent-color);color:var(--text-color);padding:8px 18px;border-radius:8px;cursor:pointer;font-weight:600;opacity:.5" disabled>Send</button>
         </div>
       </div>`;
     document.body.appendChild(modal);
@@ -2367,7 +2367,7 @@ const Messages = (() => {
     function render() {
       const q = search.value.trim().toLowerCase();
       if (loading) {
-        list.innerHTML = '<div style="padding:24px 18px;color:#9bbf9b;text-align:center;font-size:13px">Loading conversations…</div>';
+        list.innerHTML = '<div style="padding:24px 18px;color:var(--text-muted);text-align:center;font-size:13px">Loading conversations…</div>';
         return;
       }
       const visible = items.filter(it => {
@@ -2381,15 +2381,15 @@ const Messages = (() => {
         const checked = selected.has(it.key) ? 'checked' : '';
         const chosen = selected.has(it.key);
         const bg = chosen
-          ? 'background:linear-gradient(135deg,rgba(76,175,80,.2),rgba(46,120,68,.16));border-color:rgba(127,210,167,.55);box-shadow:inset 0 0 0 1px rgba(127,210,167,.12);'
-          : 'background:rgba(0,0,0,.2);border-color:rgba(58,107,72,.45);';
+          ? 'background:linear-gradient(135deg,color-mix(in srgb, var(--accent-color) 20%, transparent),color-mix(in srgb, var(--accent-color) 16%, transparent));border-color:color-mix(in srgb, var(--accent-color) 55%, transparent);box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--accent-color) 12%, transparent);'
+          : 'background:rgba(0,0,0,.2);border-color:color-mix(in srgb, var(--accent-color) 30%, var(--border-color));';
         const checkBg = chosen
-          ? 'background:linear-gradient(135deg,#7fd2a7,#4caf50);border-color:#7fd2a7;color:#082114;'
-          : 'background:rgba(0,0,0,.25);border-color:rgba(127,210,167,.45);color:transparent;';
-        return `<label class="fwd-row" data-key="${UI.escHtml(it.key)}" style="${bg}display:flex;align-items:center;gap:10px;padding:9px 10px;margin-bottom:6px;border-radius:10px;border:1px solid #2f5548;cursor:pointer;transition:background .15s,border-color .15s,box-shadow .15s">
+          ? 'background:linear-gradient(135deg,color-mix(in srgb, var(--accent-color) 60%, white),var(--accent-color));border-color:color-mix(in srgb, var(--accent-color) 60%, white);color:color-mix(in srgb, var(--accent-color) 14%, #000);'
+          : 'background:rgba(0,0,0,.25);border-color:color-mix(in srgb, var(--accent-color) 45%, transparent);color:transparent;';
+        return `<label class="fwd-row" data-key="${UI.escHtml(it.key)}" style="${bg}display:flex;align-items:center;gap:10px;padding:9px 10px;margin-bottom:6px;border-radius:10px;border:1px solid color-mix(in srgb, var(--accent-color) 35%, var(--border-color));cursor:pointer;transition:background .15s,border-color .15s,box-shadow .15s">
           <input type="checkbox" data-key="${UI.escHtml(it.key)}" ${checked} style="position:absolute;opacity:0;pointer-events:none"/>
-          <span aria-hidden="true" style="${checkBg}width:18px;height:18px;border:1px solid #2f5548;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;line-height:1;flex-shrink:0;transition:all .15s">✓</span>
-          <span style="flex:1;min-width:0;color:#dff5e8;font-size:14px;display:flex;flex-direction:column;gap:2px">
+          <span aria-hidden="true" style="${checkBg}width:18px;height:18px;border:1px solid color-mix(in srgb, var(--accent-color) 35%, var(--border-color));border-radius:6px;display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;line-height:1;flex-shrink:0;transition:all .15s">✓</span>
+          <span style="flex:1;min-width:0;color:var(--text-color);font-size:14px;display:flex;flex-direction:column;gap:2px">
             <span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${UI.escHtml(it.label)}</span>
             ${it.hint ? `<span style="font-size:11px;color:#8db69b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${UI.escHtml(it.hint)}</span>` : ''}
           </span>
@@ -2398,8 +2398,8 @@ const Messages = (() => {
       list.querySelectorAll('.fwd-row').forEach(row => {
         row.addEventListener('mouseenter', () => {
           if (!selected.has(row.dataset.key)) {
-            row.style.background = 'rgba(76,175,80,.08)';
-            row.style.borderColor = 'rgba(76,175,80,.38)';
+            row.style.background = 'color-mix(in srgb, var(--accent-color) 8%, transparent)';
+            row.style.borderColor = 'color-mix(in srgb, var(--accent-color) 38%, transparent)';
           }
         });
         row.addEventListener('mouseleave', () => {
@@ -2542,7 +2542,7 @@ const Messages = (() => {
           <div style="background:#1a1a1a;border:1px solid #2a2a2a;border-radius:14px;
                       padding:6px 14px;font-size:12px;color:#aaa;max-width:80%;text-align:center;">
             <span style="margin-right:6px">🔄</span>
-            <strong style="color:#4caf50">@${actor}</strong>
+            <strong style="color:var(--accent-color)">@${actor}</strong>
             rotated the room key
             ${detail}
             ${verTag}
@@ -2559,7 +2559,7 @@ const Messages = (() => {
     const isAdmin = !isBotMsg && (msg.nickname === 'admin' || msg.is_admin || msg._is_admin);
     const time = UI.formatTime(msg.created_at);
     const editedTag = msg.edited ? '<span class="msg-edited">(edited)</span>' : '';
-    const pinnedTag = msg.pinned ? '<span class="msg-pinned" style="color:#4caf50;font-size:11px;margin-left:4px">📌</span>' : '';
+    const pinnedTag = msg.pinned ? '<span class="msg-pinned" style="color:var(--accent-color);font-size:11px;margin-left:4px">📌</span>' : '';
     // Muted-user collapse: if this author is on the local mute list, render a
     // tiny click-to-reveal placeholder instead of the real content/media.
     const isMutedAuthor = !isOwn && typeof Mute !== 'undefined' && Mute.isUserMuted(msg.nickname);
@@ -3449,10 +3449,10 @@ const Messages = (() => {
       : contentEl.textContent;
     contentEl.dataset.originalText = current;
     contentEl.innerHTML = `
-      <textarea id="edit-input-${id}" style="width:100%;background:#1a1a1a;border:1px solid #4caf50;border-radius:6px;color:#e0e0e0;padding:6px;font-size:14px;resize:none;outline:none" rows="2">${UI.escHtml(current)}</textarea>
+      <textarea id="edit-input-${id}" style="width:100%;background:var(--surface-color);border:1px solid var(--accent-color);border-radius:6px;color:var(--text-color);padding:6px;font-size:14px;resize:none;outline:none" rows="2">${UI.escHtml(current)}</textarea>
       <div style="display:flex;gap:8px;margin-top:4px">
-        <button onclick="Messages.submitEdit(${id})" style="background:#4caf50;border:none;border-radius:6px;color:#000;padding:4px 12px;cursor:pointer;font-size:13px">Save</button>
-        <button onclick="Messages.cancelEdit(${id})" style="background:#1a1a1a;border:none;border-radius:6px;color:#888;padding:4px 12px;cursor:pointer;font-size:13px">Cancel</button>
+        <button onclick="Messages.submitEdit(${id})" style="background:var(--accent-color);border:none;border-radius:6px;color:color-mix(in srgb, var(--accent-color) 12%, #000);padding:4px 12px;cursor:pointer;font-size:13px">Save</button>
+        <button onclick="Messages.cancelEdit(${id})" style="background:var(--surface-color);border:none;border-radius:6px;color:var(--text-muted);padding:4px 12px;cursor:pointer;font-size:13px">Cancel</button>
       </div>
     `;
     document.getElementById(`edit-input-${id}`)?.focus();
@@ -4545,9 +4545,9 @@ const Messages = (() => {
     left = Math.max(8, Math.min(left, window.innerWidth - pw - 8));
     let top = rect.bottom + 6;
     if (top + 120 > window.innerHeight) top = rect.top - 120;
-    pop.style.cssText = `position:fixed;left:${left}px;top:${top}px;width:${pw}px;background:#141414;border:1px solid #2a4a2a;border-radius:10px;padding:6px;z-index:9999;box-shadow:0 8px 24px rgba(0,0,0,.5);display:flex;flex-direction:column;gap:2px`;
+    pop.style.cssText = `position:fixed;left:${left}px;top:${top}px;width:${pw}px;background:var(--surface-color);border:1px solid color-mix(in srgb, var(--accent-color) 30%, var(--border-color));border-radius:10px;padding:6px;z-index:9999;box-shadow:0 8px 24px rgba(0,0,0,.5);display:flex;flex-direction:column;gap:2px`;
     pop.querySelectorAll('.msg-mod-popup-sep').forEach(s => {
-      s.style.cssText = 'height:1px;background:#2a4a2a;margin:4px 6px;';
+      s.style.cssText = 'height:1px;background:color-mix(in srgb, var(--accent-color) 30%, var(--border-color));margin:4px 6px;';
     });
     pop.querySelectorAll('.msg-mod-popup-btn').forEach(btn => {
       btn.style.cssText = 'background:transparent;border:0;padding:10px 12px;text-align:left;border-radius:6px;cursor:pointer;font-size:14px';
@@ -5163,7 +5163,7 @@ function _buildMsgHtml(msg, isCont) {
         <div style="background:#1a1a1a;border:1px solid #2a2a2a;border-radius:14px;
                     padding:6px 14px;font-size:12px;color:#aaa;max-width:80%;text-align:center;">
           <span style="margin-right:6px">🔄</span>
-          <strong style="color:#4caf50">@${actor}</strong>
+          <strong style="color:var(--accent-color)">@${actor}</strong>
           rotated the room key
           ${detail}
           ${verTag}
@@ -5174,7 +5174,7 @@ function _buildMsgHtml(msg, isCont) {
   }
   // Simple inline builder for older messages (avoids circular dependency)
   const time = UI.formatTime(msg.created_at);
-  const content = msg.content ? UI.escHtml(msg.content).replace(/https?:\/\/[^\s]+/g, url => `<a href="${url}" target="_blank" rel="noopener noreferrer" style="color:#4caf50">${url}</a>`) : '';
+  const content = msg.content ? UI.escHtml(msg.content).replace(/https?:\/\/[^\s]+/g, url => `<a href="${url}" target="_blank" rel="noopener noreferrer" style="color:var(--accent-color)">${url}</a>`) : '';
   const avatar = UI.avatarEl(msg.avatar, msg.nickname, 38);
   const authorName = msg.bridge_platform
     ? (msg.bridge_source_name || msg.display_name || msg.nickname)

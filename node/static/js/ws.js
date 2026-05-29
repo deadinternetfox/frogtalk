@@ -447,7 +447,7 @@ const WS = (() => {
               if (head) {
                 const tag = document.createElement('span');
                 tag.className = 'msg-pinned';
-                tag.style.cssText = 'color:#4caf50;font-size:11px;margin-left:4px';
+                tag.style.cssText = 'color:var(--accent-color);font-size:11px;margin-left:4px';
                 tag.textContent = '📌';
                 head.appendChild(tag);
               }

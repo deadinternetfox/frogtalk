@@ -21,7 +21,7 @@ A censorship-free, federated, end-to-end encrypted chat platform.<br>
 
 [![Branch](https://img.shields.io/badge/branch-dev-2563eb)](https://github.com/deadinternetfox/frogtalk/tree/dev)
 [![Pre-alpha](https://img.shields.io/badge/status-pre--alpha-orange)](https://frogtalk.app/security)
-[![Release](https://img.shields.io/github/v/release/deadinternetfox/frogtalk?display_name=release&sort=semver&color=4caf50)](https://github.com/deadinternetfox/frogtalk/releases)
+[![Release](https://img.shields.io/github/v/release/deadinternetfox/frogtalk?include_prereleases&color=4caf50)](https://github.com/deadinternetfox/frogtalk/releases)
 [![License](https://img.shields.io/github/license/deadinternetfox/frogtalk?color=4caf50)](LICENSE)
 [![Docker](https://img.shields.io/badge/ghcr.io-frogtalk-4caf50?logo=docker&logoColor=white)](https://github.com/deadinternetfox/frogtalk/pkgs/container/frogtalk)
 [![Stars](https://img.shields.io/github/stars/deadinternetfox/frogtalk?label=stars&style=flat&color=4caf50)](https://github.com/deadinternetfox/frogtalk/stargazers)

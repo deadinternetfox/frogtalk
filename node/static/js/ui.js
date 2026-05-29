@@ -59,7 +59,7 @@ const UI = (() => {
 
   function profileBannerBackground(banner, fallbackGradient) {
     const url = profileBannerCssUrl(banner);
-    const grad = fallbackGradient || 'linear-gradient(135deg,#1a3a1a 0%,#0d1f0d 50%,#1a2a1a 100%)';
+    const grad = fallbackGradient || 'linear-gradient(135deg,color-mix(in srgb, var(--surface-color) 80%, var(--accent-color) 20%) 0%,var(--bg-color) 50%,color-mix(in srgb, var(--surface-color) 86%, var(--accent-color) 14%) 100%)';
     return url ? `url('${url}') center/cover` : grad;
   }
 
@@ -1764,7 +1764,7 @@ function fmtAv(avatar, nick, size) {
   const initial = (nick || '?')[0].toUpperCase();
   const colors = ['#1a3a1a', '#2a1a3a', '#3a1a1a', '#1a2a3a', '#3a2a1a'];
   const idx = (nick || '').charCodeAt(0) % colors.length || 0;
-  return `<span style="display:inline-flex;width:${size}px;height:${size}px;border-radius:50%;background:${colors[idx]};align-items:center;justify-content:center;font-size:${Math.round(size*0.5)}px;font-weight:700;color:#4caf50;vertical-align:middle">${UI.escHtml(initial)}</span>`;
+  return `<span style="display:inline-flex;width:${size}px;height:${size}px;border-radius:50%;background:${colors[idx]};align-items:center;justify-content:center;font-size:${Math.round(size*0.5)}px;font-weight:700;color:var(--accent-color);vertical-align:middle">${UI.escHtml(initial)}</span>`;
 }
 
 /* Skeleton loading placeholders */
@@ -2607,43 +2607,43 @@ function ensureNetworkPaneContent() {
   if (_networkPaneBuilt && document.getElementById('network-mode')) return;
 
   pane.innerHTML = `
-    <div style="font-size:13px;color:#4caf50;font-weight:600;margin-bottom:8px">🌐 Network Settings</div>
-    <div style="font-size:12px;color:#666;margin-bottom:12px">Pick how FrogTalk chooses a server. Auto mode probes known servers and prefers healthy low-latency options.</div>
+    <div style="font-size:13px;color:var(--accent-color);font-weight:600;margin-bottom:8px">🌐 Network Settings</div>
+    <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px">Pick how FrogTalk chooses a server. Auto mode probes known servers and prefers healthy low-latency options.</div>
 
-    <div style="background:linear-gradient(135deg,#0f1f16,#0d1712);border:1px solid #234532;border-radius:10px;padding:10px;margin-bottom:12px">
+    <div style="background:linear-gradient(135deg,color-mix(in srgb, var(--surface-color) 82%, var(--accent-color) 18%),color-mix(in srgb, var(--bg-color) 88%, var(--accent-color) 12%));border:1px solid color-mix(in srgb, var(--accent-color) 30%, var(--border-color));border-radius:10px;padding:10px;margin-bottom:12px">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
         <div>
-          <div style="font-size:12px;color:#9bd6ab;font-weight:700">Build Integrity</div>
-          <div id="network-build-local" style="font-size:11px;color:#78a187;margin-top:3px">Checking local build hash...</div>
+          <div style="font-size:12px;color:color-mix(in srgb, var(--text-color) 70%, var(--accent-color));font-weight:700">Build Integrity</div>
+          <div id="network-build-local" style="font-size:11px;color:var(--text-muted);margin-top:3px">Checking local build hash...</div>
         </div>
         <button class="modal-btn secondary" type="button" onclick="verifyNetworkBuildIntegrity()" style="padding:8px 12px;min-width:180px">Verify Server Legitimacy</button>
       </div>
-      <div id="network-trust-summary" style="font-size:11px;color:#6f8e77;margin-top:8px">Probe servers, then verify they run the same legitimate copy.</div>
+      <div id="network-trust-summary" style="font-size:11px;color:var(--text-muted);margin-top:8px">Probe servers, then verify they run the same legitimate copy.</div>
     </div>
 
-    <div style="background:#1a3a1a;border:1px solid #2a5a2a;border-radius:8px;padding:10px;margin-bottom:12px">
-      <div style="font-size:11px;color:#93ab9a;line-height:1.5">
+    <div style="background:color-mix(in srgb, var(--accent-color) 18%, var(--bg-color));border:1px solid color-mix(in srgb, var(--accent-color) 35%, var(--border-color));border-radius:8px;padding:10px;margin-bottom:12px">
+      <div style="font-size:11px;color:color-mix(in srgb, var(--text-color) 75%, var(--text-muted));line-height:1.5">
         💡 <strong>Run your own server:</strong> FrogTalk is open-source and free to self-host for complete privacy and control.<br>
         <span style="margin-top:6px;display:inline-block">
-          Setup guide: <a href="https://github.com/deadinternetfox/frogtalk#docker" target="_blank" rel="noopener noreferrer" style="color:#4caf50;text-decoration:underline;font-weight:600">Docker</a> • 
-          <a href="/docs/api" target="_blank" style="color:#4caf50;text-decoration:underline;font-weight:600">API docs</a> • 
-          <a href="/docs/node" target="_blank" style="color:#4caf50;text-decoration:underline;font-weight:600">Run a node doc</a> • 
-          <a href="/app" target="_blank" style="color:#4caf50;text-decoration:underline;font-weight:600">Open app</a> • 
-          <a href="https://github.com/deadinternetfox/frogtalk" target="_blank" rel="noopener noreferrer" style="color:#4caf50;text-decoration:underline;font-weight:600">GitHub</a>
+          Setup guide: <a href="https://github.com/deadinternetfox/frogtalk#docker" target="_blank" rel="noopener noreferrer" style="color:var(--accent-color);text-decoration:underline;font-weight:600">Docker</a> •
+          <a href="/docs/api" target="_blank" style="color:var(--accent-color);text-decoration:underline;font-weight:600">API docs</a> •
+          <a href="/docs/node" target="_blank" style="color:var(--accent-color);text-decoration:underline;font-weight:600">Run a node doc</a> •
+          <a href="/app" target="_blank" style="color:var(--accent-color);text-decoration:underline;font-weight:600">Open app</a> •
+          <a href="https://github.com/deadinternetfox/frogtalk" target="_blank" rel="noopener noreferrer" style="color:var(--accent-color);text-decoration:underline;font-weight:600">GitHub</a>
         </span>
       </div>
     </div>
 
-    <div id="network-account-sync-panel" style="background:linear-gradient(135deg,#121a16,#0f1411);border:1px solid #2a4a36;border-radius:10px;padding:12px;margin-bottom:12px"></div>
+    <div id="network-account-sync-panel" style="background:linear-gradient(135deg,color-mix(in srgb, var(--surface-color) 84%, var(--accent-color) 16%),color-mix(in srgb, var(--bg-color) 90%, var(--accent-color) 10%));border:1px solid color-mix(in srgb, var(--accent-color) 26%, var(--border-color));border-radius:10px;padding:12px;margin-bottom:12px"></div>
 
-    <div style="background:#121816;border:1px solid #2a3a32;border-radius:8px;padding:10px;margin-bottom:12px;font-size:11px;color:#8da59b;line-height:1.5">
-      <strong style="color:#9ec59e">Routing vs account home</strong><br>
-      <span style="color:#7a8a82">Preferred routing</span> (mode + custom URL below) only chooses which node opens when you connect — it does <em>not</em> change your account home.<br>
-      <span style="color:#7a8a82">Account home</span> (sync panel above) is your federation identity: peers import from it, and changes while traveling merge back to it. Use <strong>Set home node…</strong> only if you registered on the wrong node by mistake.
+    <div style="background:var(--surface-color);border:1px solid color-mix(in srgb, var(--accent-color) 18%, var(--border-color));border-radius:8px;padding:10px;margin-bottom:12px;font-size:11px;color:var(--text-muted);line-height:1.5">
+      <strong style="color:color-mix(in srgb, var(--text-color) 70%, var(--accent-color))">Routing vs account home</strong><br>
+      <span style="color:var(--text-muted)">Preferred routing</span> (mode + custom URL below) only chooses which node opens when you connect — it does <em>not</em> change your account home.<br>
+      <span style="color:var(--text-muted)">Account home</span> (sync panel above) is your federation identity: peers import from it, and changes while traveling merge back to it. Use <strong>Set home node…</strong> only if you registered on the wrong node by mistake.
     </div>
 
     <label class="modal-label" style="margin-top:0">Connection Mode</label>
-    <select id="network-mode" class="modal-input" style="color:#e0e0e0;background:#0d0d0d">
+    <select id="network-mode" class="modal-input" style="color:var(--text-color);background:var(--bg-color)">
       <option value="auto">Auto (recommended)</option>
       <option value="official">Official only</option>
       <option value="custom">Custom server URL</option>
@@ -2651,29 +2651,29 @@ function ensureNetworkPaneContent() {
 
     <label style="display:flex;align-items:center;justify-content:space-between;padding:8px 0 12px;cursor:pointer">
       <div>
-        <div style="font-size:13px;color:#e0e0e0">Prefer onion endpoints</div>
-        <div style="font-size:11px;color:#666;margin-top:2px">Use Tor/onion URLs when available during auto-select</div>
+        <div style="font-size:13px;color:var(--text-color)">Prefer onion endpoints</div>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:2px">Use Tor/onion URLs when available during auto-select</div>
       </div>
-      <input type="checkbox" id="network-prefer-onion" style="width:18px;height:18px;cursor:pointer;accent-color:#4caf50">
+      <input type="checkbox" id="network-prefer-onion" style="width:18px;height:18px;cursor:pointer;accent-color:var(--accent-color)">
     </label>
 
     <label class="modal-label">Custom Server URL</label>
     <input id="network-custom-url" class="modal-input" placeholder="frogtalk.app" value="frogtalk.app">
-    <div style="font-size:11px;color:#7a8a82;margin-top:6px;line-height:1.45">
-      Preferred routing when using <strong>Custom</strong> mode — not the node you are on now (see <em>Connected</em> below). Official: <strong style="color:#9ec59e">frogtalk.app</strong>.
+    <div style="font-size:11px;color:var(--text-muted);margin-top:6px;line-height:1.45">
+      Preferred routing when using <strong>Custom</strong> mode — not the node you are on now (see <em>Connected</em> below). Official: <strong style="color:color-mix(in srgb, var(--text-color) 70%, var(--accent-color))">frogtalk.app</strong>.
     </div>
 
     <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
       <button id="network-probe-btn" class="modal-btn secondary" type="button" onclick="refreshNetworkServersManual()" style="flex:1;min-width:160px">Probe Nodes</button>
       <button id="network-auto-select-btn" class="modal-btn secondary" type="button" onclick="runAutoNetworkSelect()" style="flex:1;min-width:160px">Auto Select Best</button>
     </div>
-    <div id="network-probe-hint" style="font-size:11px;color:#6f8e77;margin-top:6px;min-height:14px;line-height:1.4"></div>
+    <div id="network-probe-hint" style="font-size:11px;color:var(--text-muted);margin-top:6px;min-height:14px;line-height:1.4"></div>
 
-    <div id="network-current-selection" style="margin-top:10px;font-size:12px;color:#9ec59e"></div>
-    <div id="network-sync-state" style="margin-top:6px;font-size:11px;color:#7fbaa0;display:none"></div>
+    <div id="network-current-selection" style="margin-top:10px;font-size:12px;color:color-mix(in srgb, var(--text-color) 70%, var(--accent-color))"></div>
+    <div id="network-sync-state" style="margin-top:6px;font-size:11px;color:color-mix(in srgb, var(--accent-color) 80%, var(--text-color));display:none"></div>
 
-    <div style="margin-top:10px;background:#0d0d0d;border:1px solid #1e1e1e;border-radius:8px;padding:8px;max-height:220px;overflow-y:auto" id="network-servers-list">
-      <div style="color:#666;font-size:12px;text-align:center;padding:8px">Node list loads from cache when fresh; tap <strong>Probe Nodes</strong> to refresh (8s cooldown).</div>
+    <div style="margin-top:10px;background:var(--bg-color);border:1px solid var(--surface-color);border-radius:8px;padding:8px;max-height:220px;overflow-y:auto" id="network-servers-list">
+      <div style="color:var(--text-muted);font-size:12px;text-align:center;padding:8px">Node list loads from cache when fresh; tap <strong>Probe Nodes</strong> to refresh (8s cooldown).</div>
     </div>
 
     <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
@@ -2681,23 +2681,23 @@ function ensureNetworkPaneContent() {
       <button class="modal-btn secondary" type="button" onclick="useOfficialNetworkUrl()" style="flex:1;min-width:140px">Use official</button>
       <button class="modal-btn secondary" type="button" onclick="connectToSelectedServer()" style="flex:1;min-width:160px">Connect To Selected Node</button>
     </div>
-    <div style="margin-top:6px;font-size:11px;color:#687d74">This saves only Network tab options. The modal "Save" button still saves your account/profile settings.</div>
+    <div style="margin-top:6px;font-size:11px;color:var(--text-muted)">This saves only Network tab options. The modal "Save" button still saves your account/profile settings.</div>
   `;
   _networkPaneBuilt = true;
 }
 
 function _networkSyncPanelSkeletonHtml() {
   return `
-    <div style="font-size:12px;color:#9bd6ab;font-weight:700;margin-bottom:6px">Account sync</div>
-    <div style="color:#8da59b;font-size:11px;line-height:1.45">Loading sync status…</div>
+    <div style="font-size:12px;color:color-mix(in srgb, var(--text-color) 70%, var(--accent-color));font-weight:700;margin-bottom:6px">Account sync</div>
+    <div style="color:var(--text-muted);font-size:11px;line-height:1.45">Loading sync status…</div>
     <div style="margin-top:10px;height:8px;border-radius:4px;background:rgba(255,255,255,.06);overflow:hidden">
-      <div style="height:100%;width:40%;border-radius:4px;background:linear-gradient(90deg,rgba(76,175,80,.15),rgba(76,175,80,.45),rgba(76,175,80,.15));animation:ftSkel 1.1s ease-in-out infinite"></div>
+      <div style="height:100%;width:40%;border-radius:4px;background:linear-gradient(90deg,color-mix(in srgb, var(--accent-color) 15%, transparent),color-mix(in srgb, var(--accent-color) 45%, transparent),color-mix(in srgb, var(--accent-color) 15%, transparent));animation:ftSkel 1.1s ease-in-out infinite"></div>
     </div>`;
 }
 
 function _networkServersListIdleHtml(message) {
   const msg = message || 'Loading node list…';
-  return `<div style="color:#8da59b;font-size:12px;text-align:center;padding:14px 8px">${msg}</div>`;
+  return `<div style="color:var(--text-muted);font-size:12px;text-align:center;padding:14px 8px">${msg}</div>`;
 }
 
 function _networkRoutingCustomUrlDisplay() {
@@ -2856,7 +2856,7 @@ function switchSettingsTab(tab) {
     try {
       const saved = _normalizeThemeKey(document.body.dataset.theme || localStorage.getItem('frogtalk-theme') || 'frog');
       document.querySelectorAll('.theme-btn').forEach(btn => {
-        btn.style.borderColor = btn.dataset.theme === saved ? '#4caf50' : '#333';
+        btn.style.borderColor = btn.dataset.theme === saved ? 'var(--accent-color)' : 'var(--border-color)';
       });
     } catch {}
   }
@@ -3402,9 +3402,9 @@ function _renderNetworkAccountSyncPanel(st, opts) {
   const esc = (t) => (typeof UI !== 'undefined' && UI.escHtml) ? UI.escHtml(t) : String(t || '');
   if (atHome) {
     panel.innerHTML = `
-      <div style="font-size:12px;color:#9bd6ab;font-weight:700;margin-bottom:4px">Account sync</div>
-      <div style="font-size:11px;color:#78a187;line-height:1.45">You're on your home node (<span style="color:#b7d9c3">${esc(here.replace(/^https?:\/\//, ''))}</span>). Channels, DMs, and FrogSocial data are authoritative here — no import needed.</div>
-      <div style="font-size:11px;color:#6f8e77;margin-top:8px;line-height:1.45">Registered on the wrong node by mistake? Set your real account home below (not the preferred routing server).</div>
+      <div style="font-size:12px;color:color-mix(in srgb, var(--text-color) 70%, var(--accent-color));font-weight:700;margin-bottom:4px">Account sync</div>
+      <div style="font-size:11px;color:var(--text-muted);line-height:1.45">You're on your home node (<span style="color:color-mix(in srgb, var(--text-color) 80%, var(--accent-color))">${esc(here.replace(/^https?:\/\//, ''))}</span>). Channels, DMs, and FrogSocial data are authoritative here — no import needed.</div>
+      <div style="font-size:11px;color:var(--text-muted);margin-top:8px;line-height:1.45">Registered on the wrong node by mistake? Set your real account home below (not the preferred routing server).</div>
       <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">
         <button class="modal-btn secondary" type="button" onclick="networkRepinAccountHome()" style="padding:6px 10px;font-size:11px">Set home node…</button>
         <button class="modal-btn secondary" type="button" onclick="networkClearHomePin()" style="padding:6px 10px;font-size:11px">Clear home pin</button>
@@ -3419,11 +3419,11 @@ function _renderNetworkAccountSyncPanel(st, opts) {
   const fullyComplete = _networkSyncFullyComplete(st);
   let statusHtml = '';
   if (loading && !st.done && !st.in_progress && !err) {
-    statusHtml = `<div style="color:#8da59b;font-size:11px;line-height:1.4">Checking sync status with server…</div>`;
+    statusHtml = `<div style="color:var(--text-muted);font-size:11px;line-height:1.4">Checking sync status with server…</div>`;
   } else if (inProgress && st.in_progress) {
     statusHtml = window.FtSync && FtSync.renderInline
       ? FtSync.renderInline(st, { compact: false, fallback: 'Syncing from your home node…' })
-      : `<div style="color:#8da59b;font-size:11px">⏳ ${esc(st.hint || 'Syncing…')}</div>`;
+      : `<div style="color:var(--text-muted);font-size:11px">⏳ ${esc(st.hint || 'Syncing…')}</div>`;
   } else if (err) {
     const hint = _networkSyncErrorHint(err);
     statusHtml = `<div style="color:#e8a0a0;font-size:11px;line-height:1.4">⚠ ${esc(hint || err.slice(0, 200))}</div>`;
@@ -3438,10 +3438,10 @@ function _renderNetworkAccountSyncPanel(st, opts) {
   } else if (st.done && socialPending) {
     statusHtml = `<div style="color:#f6d27a;font-size:11px;line-height:1.4">Partial FrogSocial sync — tap Re-sync to import remaining posts.</div>`;
   } else {
-    statusHtml = `<div style="color:#9ec59e;font-size:11px;line-height:1.4">Import channels, DMs, friends, and FrogSocial posts from your home node.</div>`;
+    statusHtml = `<div style="color:color-mix(in srgb, var(--text-color) 70%, var(--accent-color));font-size:11px;line-height:1.4">Import channels, DMs, friends, and FrogSocial posts from your home node.</div>`;
   }
   const homeLine = home
-    ? `<div style="font-size:11px;color:#6f8e77;margin-top:6px">Home: <span style="color:#9ec59e">${esc(home)}</span> · Now: <span style="color:#9ec59e">${esc(here.replace(/^https?:\/\//, ''))}</span></div>`
+    ? `<div style="font-size:11px;color:var(--text-muted);margin-top:6px">Home: <span style="color:color-mix(in srgb, var(--text-color) 70%, var(--accent-color))">${esc(home)}</span> · Now: <span style="color:color-mix(in srgb, var(--text-color) 70%, var(--accent-color))">${esc(here.replace(/^https?:\/\//, ''))}</span></div>`
     : `<div style="font-size:11px;color:#f6d27a;margin-top:6px">Home node URL unknown — switch nodes from login or set sync source, then re-sync.</div>`;
   const resyncDisabled = inProgress && st.in_progress;
   const resyncLabel = (st.in_progress || (loading && !fullyComplete))
@@ -3454,7 +3454,7 @@ function _renderNetworkAccountSyncPanel(st, opts) {
   panel.innerHTML = `
     <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;flex-wrap:wrap">
       <div style="flex:1;min-width:200px">
-        <div style="font-size:12px;color:#9bd6ab;font-weight:700;margin-bottom:4px">Account sync (visiting node)</div>
+        <div style="font-size:12px;color:color-mix(in srgb, var(--text-color) 70%, var(--accent-color));font-weight:700;margin-bottom:4px">Account sync (visiting node)</div>
         ${statusHtml}
         ${homeLine}
       </div>
@@ -3636,7 +3636,7 @@ function openAccountHomeRepinModal() {
   if (nowEl) nowEl.textContent = _hostLabelFromUrl(window.location.origin);
   if (curEl) {
     curEl.textContent = home ? _hostLabelFromUrl(home) : 'Not set';
-    curEl.style.color = home ? '#9ec59e' : '#f6d27a';
+    curEl.style.color = home ? 'color-mix(in srgb, var(--text-color) 70%, var(--accent-color))' : '#f6d27a';
   }
   if (prefEl) prefEl.textContent = preferred ? _hostLabelFromUrl(preferred) : 'Not set (auto routing)';
   input.value = _hostLabelFromUrl(def);
@@ -4000,7 +4000,7 @@ function _updateNetworkProbeHint(extra) {
   if (!el) return;
   if (_networkProbeLoading) {
     el.textContent = 'Probing federation directory…';
-    el.style.color = '#8da59b';
+    el.style.color = 'var(--text-muted)';
     return;
   }
   if (extra) {
@@ -4012,7 +4012,7 @@ function _updateNetworkProbeHint(extra) {
     const healthy = _networkProbeResults.filter(s => s && s.healthy).length;
     const mins = age < 60000 ? `${Math.max(1, Math.round(age / 1000))}s ago` : `${Math.round(age / 60000)}m ago`;
     el.textContent = `${healthy} of ${_networkProbeResults.length} nodes healthy · last probe ${mins}`;
-    el.style.color = '#6f8e77';
+    el.style.color = 'var(--text-muted)';
     return;
   }
   el.textContent = '';
@@ -4752,11 +4752,11 @@ async function createApiKey() {
     // Show the key once
     const keyModal = document.createElement('div');
     keyModal.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;z-index:99999;background:rgba(0,0,0,.8);display:flex;align-items:center;justify-content:center';
-    keyModal.innerHTML = `<div style="background:#1e1e1e;border:1px solid #4caf50;border-radius:12px;padding:24px;max-width:500px;width:90%">
-      <div style="font-size:16px;font-weight:700;color:#4caf50;margin-bottom:12px">🔑 API Key Created</div>
+    keyModal.innerHTML = `<div style="background:var(--surface-color);border:1px solid var(--accent-color);border-radius:12px;padding:24px;max-width:500px;width:90%">
+      <div style="font-size:16px;font-weight:700;color:var(--accent-color);margin-bottom:12px">🔑 API Key Created</div>
       <div style="font-size:12px;color:#f44336;margin-bottom:12px;font-weight:600">Copy this key now — it won't be shown again!</div>
-      <div style="background:#0d0d0d;border:1px solid #333;border-radius:8px;padding:12px;font-family:monospace;font-size:13px;color:#4caf50;word-break:break-all;cursor:pointer" onclick="navigator.clipboard.writeText('${data.key}');this.style.borderColor='#4caf50'">${data.key}</div>
-      <button onclick="this.parentElement.parentElement.remove()" style="margin-top:16px;width:100%;background:#4caf50;color:#000;border:none;border-radius:8px;padding:10px;font-weight:700;cursor:pointer">Done</button>
+      <div style="background:var(--bg-color);border:1px solid var(--border-color);border-radius:8px;padding:12px;font-family:monospace;font-size:13px;color:var(--accent-color);word-break:break-all;cursor:pointer" onclick="navigator.clipboard.writeText('${data.key}');this.style.borderColor='var(--accent-color)'">${data.key}</div>
+      <button onclick="this.parentElement.parentElement.remove()" style="margin-top:16px;width:100%;background:var(--accent-color);color:color-mix(in srgb, var(--accent-color) 12%, #000);border:none;border-radius:8px;padding:10px;font-weight:700;cursor:pointer">Done</button>
     </div>`;
     document.body.appendChild(keyModal);
     loadApiKeys();
@@ -4823,11 +4823,11 @@ async function createBot() {
     if (data.api_key) {
       const keyModal = document.createElement('div');
       keyModal.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;z-index:99999;background:rgba(0,0,0,.8);display:flex;align-items:center;justify-content:center';
-      keyModal.innerHTML = `<div style="background:#1e1e1e;border:1px solid #4caf50;border-radius:12px;padding:24px;max-width:500px;width:90%">
-        <div style="font-size:16px;font-weight:700;color:#4caf50;margin-bottom:12px">🤖 Bot "${UI.escHtml(name)}" Created</div>
+      keyModal.innerHTML = `<div style="background:var(--surface-color);border:1px solid var(--accent-color);border-radius:12px;padding:24px;max-width:500px;width:90%">
+        <div style="font-size:16px;font-weight:700;color:var(--accent-color);margin-bottom:12px">🤖 Bot "${UI.escHtml(name)}" Created</div>
         <div style="font-size:12px;color:#f44336;margin-bottom:12px;font-weight:600">Save this bot token — it won't be shown again!</div>
-        <div style="background:#0d0d0d;border:1px solid #333;border-radius:8px;padding:12px;font-family:monospace;font-size:12px;color:#4caf50;word-break:break-all;cursor:pointer" onclick="navigator.clipboard.writeText('${data.api_key}');this.style.borderColor='#4caf50'">${data.api_key}</div>
-        <button onclick="this.parentElement.parentElement.remove()" style="margin-top:16px;width:100%;background:#4caf50;color:#000;border:none;border-radius:8px;padding:10px;font-weight:700;cursor:pointer">Done</button>
+        <div style="background:var(--bg-color);border:1px solid var(--border-color);border-radius:8px;padding:12px;font-family:monospace;font-size:12px;color:var(--accent-color);word-break:break-all;cursor:pointer" onclick="navigator.clipboard.writeText('${data.api_key}');this.style.borderColor='var(--accent-color)'">${data.api_key}</div>
+        <button onclick="this.parentElement.parentElement.remove()" style="margin-top:16px;width:100%;background:var(--accent-color);color:color-mix(in srgb, var(--accent-color) 12%, #000);border:none;border-radius:8px;padding:10px;font-weight:700;cursor:pointer">Done</button>
       </div>`;
       document.body.appendChild(keyModal);
     }
@@ -5094,7 +5094,7 @@ function applyStoredCustomThemeJson(raw) {
 function selectTheme(theme) {
   theme = _normalizeThemeKey(theme);
   document.querySelectorAll('.theme-btn').forEach(btn => {
-    btn.style.borderColor = btn.dataset.theme === theme ? '#4caf50' : '#333';
+    btn.style.borderColor = btn.dataset.theme === theme ? 'var(--accent-color)' : 'var(--border-color)';
   });
   // Save current theme before preview
   if (!_themePreviewOriginal) {
@@ -6120,9 +6120,9 @@ function _highlightCurrentPreset() {
   document.querySelectorAll('.css-preset-btn').forEach(btn => {
     const onclick = btn.getAttribute('onclick') || '';
     if (matchedPreset && onclick.includes(`'${matchedPreset}'`)) {
-      btn.style.borderColor = '#4caf50';
+      btn.style.borderColor = 'var(--accent-color)';
     } else {
-      btn.style.borderColor = '#222';
+      btn.style.borderColor = 'var(--border-color)';
     }
   });
 }
@@ -6524,7 +6524,7 @@ async function showProfile() {
   document.body.dataset.theme = currentTheme;
   localStorage.setItem('frogtalk-theme', currentTheme);
   document.querySelectorAll('.theme-btn').forEach(btn => {
-    btn.style.borderColor = btn.dataset.theme === currentTheme ? '#4caf50' : '#333';
+    btn.style.borderColor = btn.dataset.theme === currentTheme ? 'var(--accent-color)' : 'var(--border-color)';
     btn.onclick = () => selectTheme(btn.dataset.theme);
   });
   openModal('modal-profile');
@@ -7174,7 +7174,7 @@ async function _populateRoomEncCard() {
     if (modeLine) modeLine.textContent = 'End-to-end · per-room AES-256-GCM';
   } else {
     modeEl.innerHTML = '<span style="color:#d8b88a">Public channel · plaintext</span>';
-    detail.innerHTML = '<span style="color:#7a8a82">This channel has no shared key, so messages are stored in plaintext on the server. Use a private channel for end-to-end encryption.</span>';
+    detail.innerHTML = '<span style="color:var(--text-muted)">This channel has no shared key, so messages are stored in plaintext on the server. Use a private channel for end-to-end encryption.</span>';
     if (modeLine) modeLine.textContent = 'Public · no encryption';
   }
 }
@@ -7830,7 +7830,7 @@ function showUserInfo(nickname, userId, bridgePlatform, bridgeSourceName, bridge
         applyProfileCustomCss(_effectiveCss);
         if (tagsEl && Array.isArray(u.tags) && u.tags.length > 0) {
           tagsEl.innerHTML = u.tags.map(t =>
-            `<span style="background:#1a2e1a;color:#4caf50;border-radius:12px;padding:4px 10px;font-size:12px">${esc(t)}</span>`
+            `<span style="background:color-mix(in srgb, var(--accent-color) 22%, var(--bg-color));color:var(--accent-color);border-radius:12px;padding:4px 10px;font-size:12px">${esc(t)}</span>`
           ).join('');
           if (tagsSection) tagsSection.style.display = 'block';
         }
@@ -8058,25 +8058,25 @@ async function loadUserWall(nickname) {
       // Comments count
       const commentCount = p.comment_count || 0;
       const commentsToggle = p.allow_comments !== 0
-        ? `<button onclick="toggleWallComments(${p.id})" style="background:none;border:none;color:#888;cursor:pointer;font-size:12px;padding:4px 0">💬 ${commentCount} comment${commentCount !== 1 ? 's' : ''}</button>`
+        ? `<button onclick="toggleWallComments(${p.id})" style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:12px;padding:4px 0">💬 ${commentCount} comment${commentCount !== 1 ? 's' : ''}</button>`
         : '';
 
       const contentTrimmed = String(p.content || '').trim();
       const hasBody = !!(contentTrimmed || mediaHtml);
       const contentHtml = contentTrimmed
-        ? `<div style="font-size:14px;color:#ccc;line-height:1.5;white-space:pre-wrap;word-break:break-word">${esc(contentTrimmed)}</div>`
-        : (hasBody ? '' : `<div style="font-size:13px;color:#666;font-style:italic">(no content)</div>`);
+        ? `<div style="font-size:14px;color:color-mix(in srgb, var(--text-color) 80%, var(--text-muted));line-height:1.5;white-space:pre-wrap;word-break:break-word">${esc(contentTrimmed)}</div>`
+        : (hasBody ? '' : `<div style="font-size:13px;color:var(--text-muted);font-style:italic">(no content)</div>`);
 
       return `
-      <div class="wall-post" data-post-id="${p.id}" style="background:#0d0d0d;border-radius:10px;padding:12px;border:1px solid #222">
+      <div class="wall-post" data-post-id="${p.id}" style="background:var(--bg-color);border-radius:10px;padding:12px;border:1px solid var(--border-color)">
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
           <div style="width:32px;height:32px;flex-shrink:0">${UI.avatarEl(p.avatar, p.nickname, 32)}</div>
           <div style="flex:1;min-width:0">
-            <div style="font-size:13px;font-weight:600;color:#e0e0e0;cursor:pointer" onclick="showUserInfo('${esc(p.nickname)}',${p.user_id})">${esc(p.nickname)}</div>
-            <div style="font-size:11px;color:#666">${UI.formatTime(p.created_at)}${p.edited_at ? ' <span style="color:#555">(edited)</span>' : ''}</div>
+            <div style="font-size:13px;font-weight:600;color:var(--text-color);cursor:pointer" onclick="showUserInfo('${esc(p.nickname)}',${p.user_id})">${esc(p.nickname)}</div>
+            <div style="font-size:11px;color:var(--text-muted)">${UI.formatTime(p.created_at)}${p.edited_at ? ' <span style="color:var(--text-muted)">(edited)</span>' : ''}</div>
           </div>
-          ${p.user_id === State.user?.id ? 
-            `<button onclick="deleteWallPost(${p.id})" style="background:none;border:none;color:#666;cursor:pointer;font-size:14px" title="Delete">🗑️</button>` : ''}
+          ${p.user_id === State.user?.id ?
+            `<button onclick="deleteWallPost(${p.id})" style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:14px" title="Delete">🗑️</button>` : ''}
         </div>
         ${contentHtml}
         ${mediaHtml}
@@ -8145,12 +8145,12 @@ function _openWallReactionHover(postId, wrap) {
     pop.onmouseenter = () => { if (wrap._rxHideTimer) { clearTimeout(wrap._rxHideTimer); wrap._rxHideTimer = null; } };
     pop.onmouseleave = () => scheduleHideWallReactionHover(postId, wrap);
     const removeBtn = myEmoji
-      ? `<button type="button" data-emoji="__remove__" style="background:#1a2e1a;border:1px solid #2a3a2a;color:#8bd48b;border-radius:999px;padding:6px 12px;font-size:13px;cursor:pointer;min-height:36px">Remove ${myEmoji}</button>`
+      ? `<button type="button" data-emoji="__remove__" style="background:color-mix(in srgb, var(--accent-color) 22%, var(--bg-color));border:1px solid color-mix(in srgb, var(--accent-color) 30%, var(--border-color));color:color-mix(in srgb, var(--accent-color) 80%, var(--text-color));border-radius:999px;padding:6px 12px;font-size:13px;cursor:pointer;min-height:36px">Remove ${myEmoji}</button>`
       : '';
     // Bigger emoji pills (28px font, larger hit-box) so they're easy to land on.
-    const innerStyle = 'display:flex;gap:6px;padding:8px 10px;background:#101710;border-radius:999px;border:1px solid #2a3a2a;box-shadow:0 6px 18px rgba(0,0,0,.5)';
+    const innerStyle = 'display:flex;gap:6px;padding:8px 10px;background:color-mix(in srgb, var(--surface-color) 88%, var(--accent-color) 12%);border-radius:999px;border:1px solid color-mix(in srgb, var(--accent-color) 18%, var(--border-color));box-shadow:0 6px 18px rgba(0,0,0,.5)';
     pop.innerHTML = `<div style="${innerStyle}">` + removeBtn + quickEmojis.map(e =>
-      `<button type="button" data-emoji="${e}" style="background:none;border:none;font-size:28px;cursor:pointer;padding:4px 8px;border-radius:999px;line-height:1;min-width:40px;min-height:40px;transition:transform .12s,background .12s" onmouseover="this.style.background='#1a2e1a';this.style.transform='scale(1.25)'" onmouseout="this.style.background='none';this.style.transform='scale(1)'">${e}</button>`
+      `<button type="button" data-emoji="${e}" style="background:none;border:none;font-size:28px;cursor:pointer;padding:4px 8px;border-radius:999px;line-height:1;min-width:40px;min-height:40px;transition:transform .12s,background .12s" onmouseover="this.style.background='color-mix(in srgb, var(--accent-color) 22%, var(--bg-color))';this.style.transform='scale(1.25)'" onmouseout="this.style.background='none';this.style.transform='scale(1)'">${e}</button>`
     ).join('') + '</div>';
     pop.addEventListener('click', (ev) => {
       const btn = ev.target.closest('button[data-emoji]');
@@ -8201,12 +8201,12 @@ async function toggleWallComments(postId) {
       const upActive = myVote === 1 ? ' is-up' : '';
       const downActive = myVote === -1 ? ' is-down' : '';
       return `
-      <div class="wall-comment-row" style="display:flex;gap:8px;padding:6px 0;border-bottom:1px solid #1a1a1a" data-comment-id="${c.id}" data-post-id="${postId}">
+      <div class="wall-comment-row" style="display:flex;gap:8px;padding:6px 0;border-bottom:1px solid var(--border-color)" data-comment-id="${c.id}" data-post-id="${postId}">
         <div style="width:24px;height:24px;flex-shrink:0">${UI.avatarEl(c.avatar, c.nickname, 24)}</div>
         <div style="flex:1;min-width:0">
-          <span style="font-size:12px;font-weight:600;color:#e0e0e0">${esc(c.nickname)}</span>
-          <span style="font-size:12px;color:#aaa;margin-left:4px">${esc(c.content)}</span>
-          <div style="font-size:10px;color:#555;margin-top:2px">${UI.formatTime(c.created_at)}</div>
+          <span style="font-size:12px;font-weight:600;color:var(--text-color)">${esc(c.nickname)}</span>
+          <span style="font-size:12px;color:var(--text-muted);margin-left:4px">${esc(c.content)}</span>
+          <div style="font-size:10px;color:var(--text-muted);margin-top:2px">${UI.formatTime(c.created_at)}</div>
           <div class="sf-comment-votes" style="margin-top:4px">
             <button type="button" class="sf-vote-btn${upActive}" data-vote="up" onclick="voteWallComment(event, ${postId}, ${c.id}, 1, this)" aria-label="Like comment">
               <span class="sf-vote-icon">👍</span><span class="sf-vote-count">${upCount}</span>
@@ -8216,17 +8216,17 @@ async function toggleWallComments(postId) {
             </button>
           </div>
         </div>
-        ${c.user_id === State.user?.id ? `<button onclick="deleteWallComment(${c.id},${postId})" style="background:none;border:none;color:#666;cursor:pointer;font-size:11px" title="Delete">✕</button>` : ''}
+        ${c.user_id === State.user?.id ? `<button onclick="deleteWallComment(${c.id},${postId})" style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:11px" title="Delete">✕</button>` : ''}
       </div>
     `;}).join('');
     if (allowComments) {
       html += `
       <div style="display:flex;gap:6px;margin-top:8px;align-items:center">
         <input id="wall-comment-input-${postId}" placeholder="Write a comment..." style="flex:1;background:#0d0d0d;border:1px solid #2a2a2a;border-radius:16px;color:#e0e0e0;padding:6px 12px;font-size:12px;outline:none" onkeydown="if(event.key==='Enter'){event.preventDefault();submitWallComment(${postId})}">
-        <button onclick="submitWallComment(${postId})" style="background:#4caf50;border:none;border-radius:50%;width:28px;height:28px;color:#000;font-size:14px;cursor:pointer;flex-shrink:0">➤</button>
+        <button onclick="submitWallComment(${postId})" style="background:var(--accent-color);border:none;border-radius:50%;width:28px;height:28px;color:color-mix(in srgb, var(--accent-color) 12%, #000);font-size:14px;cursor:pointer;flex-shrink:0">➤</button>
       </div>`;
     }
-    el.innerHTML = html || '<div style="color:#666;font-size:12px;padding:8px 0">No comments yet</div>' + (allowComments ? `<div style="display:flex;gap:6px;margin-top:8px;align-items:center"><input id="wall-comment-input-${postId}" placeholder="Write a comment..." style="flex:1;background:#0d0d0d;border:1px solid #2a2a2a;border-radius:16px;color:#e0e0e0;padding:6px 12px;font-size:12px;outline:none" onkeydown="if(event.key==='Enter'){event.preventDefault();submitWallComment(${postId})}"><button onclick="submitWallComment(${postId})" style="background:#4caf50;border:none;border-radius:50%;width:28px;height:28px;color:#000;font-size:14px;cursor:pointer;flex-shrink:0">➤</button></div>` : '');
+    el.innerHTML = html || '<div style="color:var(--text-muted);font-size:12px;padding:8px 0">No comments yet</div>' + (allowComments ? `<div style="display:flex;gap:6px;margin-top:8px;align-items:center"><input id="wall-comment-input-${postId}" placeholder="Write a comment..." style="flex:1;background:var(--bg-color);border:1px solid var(--border-color);border-radius:16px;color:var(--text-color);padding:6px 12px;font-size:12px;outline:none" onkeydown="if(event.key==='Enter'){event.preventDefault();submitWallComment(${postId})}"><button onclick="submitWallComment(${postId})" style="background:var(--accent-color);border:none;border-radius:50%;width:28px;height:28px;color:color-mix(in srgb, var(--accent-color) 12%, #000);font-size:14px;cursor:pointer;flex-shrink:0">➤</button></div>` : '');
   } catch {
     el.innerHTML = '<div style="color:#666;font-size:12px;padding:8px 0">Could not load comments</div>';
   }
@@ -8811,7 +8811,7 @@ async function pinMessage(msgId) {
           if (head) {
             const tag = document.createElement('span');
             tag.className = 'msg-pinned';
-            tag.style.cssText = 'color:#4caf50;font-size:11px;margin-left:4px';
+            tag.style.cssText = 'color:var(--accent-color);font-size:11px;margin-left:4px';
             tag.textContent = '📌';
             head.appendChild(tag);
           }
@@ -8927,7 +8927,7 @@ async function refreshPinnedBar() {
           if (head) {
             const tag = document.createElement('span');
             tag.className = 'msg-pinned';
-            tag.style.cssText = 'color:#4caf50;font-size:11px;margin-left:4px';
+            tag.style.cssText = 'color:var(--accent-color);font-size:11px;margin-left:4px';
             tag.textContent = '📌';
             head.appendChild(tag);
           }

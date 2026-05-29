@@ -456,7 +456,7 @@ const Music = (() => {
   // Auto-next ON: stylized ⏭ with a small loop indicator. OFF: same skip
   // glyph dimmed with a strike. Kept as inline SVG so it sits next to the
   // other dock controls without font-emoji weirdness.
-  const _AUTONEXT_ON_SVG  = '<svg viewBox="0 0 24 24" width="1em" height="1em" fill="currentColor" aria-hidden="true" style="vertical-align:-0.15em"><path d="M6 5l9 7-9 7V5zm11 0h2v14h-2V5z"/><circle cx="20" cy="5" r="3" fill="#4caf50"/></svg>';
+  const _AUTONEXT_ON_SVG  = '<svg viewBox="0 0 24 24" width="1em" height="1em" fill="currentColor" aria-hidden="true" style="vertical-align:-0.15em"><path d="M6 5l9 7-9 7V5zm11 0h2v14h-2V5z"/><circle cx="20" cy="5" r="3" fill="#4caf50" style="fill:var(--accent-color)"/></svg>';
   const _AUTONEXT_OFF_SVG = '<svg viewBox="0 0 24 24" width="1em" height="1em" fill="currentColor" aria-hidden="true" style="vertical-align:-0.15em;opacity:0.55"><path d="M6 5l9 7-9 7V5zm11 0h2v14h-2V5z"/><path d="M3 21L21 3" stroke="#e74c3c" stroke-width="2" fill="none"/></svg>';
   const _AUTONEXT_LS_KEY = 'frogtalk:music:autonext';
   const _AUTONEXT_LS_PREFIX = 'frogtalk:music:autonext:';

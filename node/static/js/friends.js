@@ -253,7 +253,7 @@ async function sendFriendReq (nick, btn) {
   const r = await apiFetch('/api/friends/request/' + encodeURIComponent(nick), 'POST');
   if (r.ok) {
     toast('Friend request sent to ' + nick);
-    if (btn) { btn.textContent = 'Requested'; btn.style.background = '#1a3a1a'; btn.style.color = '#4caf50'; }
+    if (btn) { btn.textContent = 'Requested'; btn.style.background = 'color-mix(in srgb, var(--accent-color) 22%, var(--bg-color))'; btn.style.color = 'var(--accent-color)'; }
     if (!_pendingOutgoing.some(f => f.nickname === nick)) {
       _pendingOutgoing.push({ nickname: nick });
     }
@@ -268,8 +268,8 @@ async function sendFriendReq (nick, btn) {
       if (btn) {
         btn.disabled = true;
         btn.textContent = isFriend ? 'Friends' : 'Requested';
-        btn.style.background = '#1a3a1a';
-        btn.style.color = '#4caf50';
+        btn.style.background = 'color-mix(in srgb, var(--accent-color) 22%, var(--bg-color))';
+        btn.style.color = 'var(--accent-color)';
       }
       try { await loadFriends(); } catch {}
       return;
@@ -648,7 +648,7 @@ function renderFfpContent(tab) {
           <div class="ffp-status">Wants to be friends</div>
         </div>
         <div class="ffp-actions">
-          <button class="icon-btn" onclick="acceptFriend('${esc(f.nickname)}', this).then(()=>{renderFfpContent('pending')})" title="Accept" style="color:#4caf50">✓</button>
+          <button class="icon-btn" onclick="acceptFriend('${esc(f.nickname)}', this).then(()=>{renderFfpContent('pending')})" title="Accept" style="color:var(--accent-color)">✓</button>
           <button class="icon-btn fr-cancel-btn" onclick="declineFriend('${esc(f.nickname)}', this).then(()=>{renderFfpContent('pending')})" title="Decline" aria-label="Decline friend request">✕</button>
         </div>
       </div>
@@ -962,9 +962,9 @@ function _renderQuickButtons(kind, current) {
     const selected = (isDefault && !active) || (!isDefault && key === active);
     btn.classList.toggle('active', selected);
     if (selected) {
-      btn.style.boxShadow = '0 0 0 2px rgba(76,175,80,.35)';
-      btn.style.borderColor = '#4caf50';
-      btn.style.color = '#dff5e8';
+      btn.style.boxShadow = '0 0 0 2px color-mix(in srgb, var(--accent-color) 35%, transparent)';
+      btn.style.borderColor = 'var(--accent-color)';
+      btn.style.color = 'var(--text-color)';
     } else {
       btn.style.boxShadow = '';
       btn.style.borderColor = '';
@@ -1200,14 +1200,14 @@ function _renderFriendSoundList(kind) {
         const name = asset?.filename || ('Custom ' + aid);
         const sizeKb = asset?.file_size ? Math.round(asset.file_size / 1024) + ' KB' : '';
         return `
-          <div class="fsm-custom-chip" style="${isActive ? 'box-shadow:0 0 0 2px rgba(76,175,80,.35)' : ''}">
+          <div class="fsm-custom-chip" style="${isActive ? 'box-shadow:0 0 0 2px color-mix(in srgb, var(--accent-color) 35%, transparent)' : ''}">
             <button class="fcc-btn" type="button" title="${playingSaved ? 'Stop preview' : 'Preview'}" data-fsm-action="preview" data-kind="${kind}" data-key="custom" data-asset-id="${aid}">${playingSaved ? '■' : '▶'}</button>
             <div style="flex:1;min-width:0">
               <div class="fcc-name">${esc(name)}</div>
               <div class="fcc-meta">${sizeKb} · ${isActive ? '✓ Active' : 'tap to use'}</div>
             </div>
             ${isActive
-              ? '<span style="color:#4caf50;font-size:11px;font-weight:700;padding:0 6px">ACTIVE</span>'
+              ? '<span style="color:var(--accent-color);font-size:11px;font-weight:700;padding:0 6px">ACTIVE</span>'
               : `<button class="fcc-btn" type="button" title="Use this" data-fsm-action="use-custom" data-kind="${kind}" data-asset-id="${aid}">✓</button>`}
             <button class="fcc-btn danger" type="button" title="Delete" data-fsm-action="delete-custom" data-kind="${kind}" data-asset-id="${aid}">✕</button>
           </div>`;
@@ -1220,14 +1220,14 @@ function _renderFriendSoundList(kind) {
       const name = customMeta?.name || 'Custom file';
       const sizeKb = customMeta?.size ? Math.round(customMeta.size / 1024) + ' KB' : '';
       customEl.innerHTML = `
-        <div class="fsm-custom-chip" style="${isSelected ? 'box-shadow:0 0 0 2px rgba(76,175,80,.35)' : ''}">
+        <div class="fsm-custom-chip" style="${isSelected ? 'box-shadow:0 0 0 2px color-mix(in srgb, var(--accent-color) 35%, transparent)' : ''}">
           <button class="fcc-btn" type="button" title="${playingSaved ? 'Stop preview' : 'Preview'}" data-fsm-action="preview" data-kind="${kind}" data-key="custom">${playingSaved ? '■' : '▶'}</button>
           <div style="flex:1;min-width:0">
             <div class="fcc-name">${esc(name)}</div>
             <div class="fcc-meta">${sizeKb} · ${isSelected ? '✓ Active' : 'tap to use'}</div>
           </div>
           ${isSelected
-            ? '<span style="color:#4caf50;font-size:11px;font-weight:700;padding:0 6px">ACTIVE</span>'
+            ? '<span style="color:var(--accent-color);font-size:11px;font-weight:700;padding:0 6px">ACTIVE</span>'
             : `<button class="fcc-btn" type="button" title="Use this" data-fsm-action="use-custom" data-kind="${kind}">✓</button>`}
           <button class="fcc-btn danger" type="button" title="Delete" data-fsm-action="delete-custom" data-kind="${kind}">✕</button>
         </div>`;

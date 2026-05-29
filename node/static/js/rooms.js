@@ -3440,9 +3440,9 @@ const Rooms = (() => {
         if (isPrivate) {
           const ver = parseInt(data.room.room_key_version, 10) || 1;
           badge.style.display = 'block';
-          badge.style.background = 'rgba(76,175,80,.08)';
-          badge.style.border = '1px solid rgba(76,175,80,.3)';
-          badge.style.color = '#9bd0ad';
+          badge.style.background = 'color-mix(in srgb, var(--accent-color) 8%, transparent)';
+          badge.style.border = '1px solid color-mix(in srgb, var(--accent-color) 30%, transparent)';
+          badge.style.color = 'color-mix(in srgb, var(--text-color) 70%, var(--accent-color))';
           badge.innerHTML =
             '🔒 <strong>End-to-end encrypted</strong> — AES-256-GCM per-room key with rotation. ' +
             '<span style="color:#7a9b85;font-size:12px">Current key version: <strong>v' + ver + '</strong>. ' +
@@ -3656,7 +3656,7 @@ const Rooms = (() => {
     const hint = document.getElementById('xfer-target-hint');
     if (hint) {
       hint.textContent = 'Type the username exactly as shown in the member list.';
-      hint.style.color = '#85a89a';
+      hint.style.color = 'var(--text-muted)';
     }
     _setTransferConfirmArmed(false);
     if (typeof openModal === 'function') openModal('modal-transfer-ownership');
@@ -3680,11 +3680,11 @@ const Rooms = (() => {
     const hint = document.getElementById('xfer-target-hint');
     let armed = false;
     if (!name) {
-      if (hint) { hint.textContent = 'Type the username exactly as shown in the member list.'; hint.style.color = '#85a89a'; }
+      if (hint) { hint.textContent = 'Type the username exactly as shown in the member list.'; hint.style.color = 'var(--text-muted)'; }
     } else if (myNick && name.toLowerCase() === myNick.toLowerCase()) {
       if (hint) { hint.textContent = "That's you — pick a different member."; hint.style.color = '#ff9b9b'; }
     } else {
-      if (hint) { hint.textContent = ackOK ? 'Ready.' : 'Tick the acknowledgement to enable the transfer.'; hint.style.color = ackOK ? '#9bd0ad' : '#85a89a'; }
+      if (hint) { hint.textContent = ackOK ? 'Ready.' : 'Tick the acknowledgement to enable the transfer.'; hint.style.color = ackOK ? 'color-mix(in srgb, var(--text-color) 70%, var(--accent-color))' : 'var(--text-muted)'; }
       armed = ackOK;
     }
     _setTransferConfirmArmed(armed);
@@ -4651,16 +4651,16 @@ async function loadChannelBotsPanel(roomName) {
     const data = await r.json();
     const bots = data.bots || [];
     if (bots.length === 0) {
-      list.innerHTML = '<div style="color:#666;font-size:13px;text-align:center;padding:16px">No bots in this channel yet</div>';
+      list.innerHTML = '<div style="color:var(--text-muted);font-size:13px;text-align:center;padding:16px">No bots in this channel yet</div>';
       return;
     }
     list.innerHTML = bots.map(b => `
-      <div style="display:flex;align-items:center;justify-content:space-between;padding:8px;border-bottom:1px solid #1a1a1a">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:8px;border-bottom:1px solid var(--border-color)">
         <div style="display:flex;align-items:center;gap:10px">
           ${UI.avatarEl(b.avatar, b.name, 32)}
           <div>
-            <div style="color:#e0e0e0;font-size:13px;font-weight:600">🤖 ${UI.escHtml(b.name)}</div>
-            <div style="color:#666;font-size:11px">${UI.escHtml(b.description || 'No description')}</div>
+            <div style="color:var(--text-color);font-size:13px;font-weight:600">🤖 ${UI.escHtml(b.name)}</div>
+            <div style="color:var(--text-muted);font-size:11px">${UI.escHtml(b.description || 'No description')}</div>
           </div>
         </div>
         <button onclick="removeBotFromChannelPrompt(${b.id}, ${_jsStr(roomName)})" style="background:#2a1a1a;border:1px solid #4a2a2a;color:#f66;padding:4px 10px;border-radius:6px;font-size:12px;cursor:pointer">Remove</button>
@@ -4752,14 +4752,14 @@ function filterBotDirectory() {
 function renderBotDirectory(bots) {
   const list = document.getElementById('bot-dir-list');
   if (!list) return;
-  if (!bots.length) { list.innerHTML = '<div style="color:#666;text-align:center;padding:20px">No bots match</div>'; return; }
+  if (!bots.length) { list.innerHTML = '<div style="color:var(--text-muted);text-align:center;padding:20px">No bots match</div>'; return; }
   list.innerHTML = bots.map(b => `
     <div class="modal-card" style="display:flex;align-items:center;gap:12px;padding:10px 12px;margin-bottom:8px">
       ${UI.avatarEl(b.avatar, b.name, 40)}
       <div style="flex:1;min-width:0">
-        <div style="color:#dff5e8;font-weight:700;font-size:14px">🤖 ${UI.escHtml(b.name)}</div>
-        <div style="color:#85a89a;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${UI.escHtml(b.description || 'No description')}</div>
-        <div style="color:#6a9a86;font-size:11px">by ${UI.escHtml(b.owner_name || 'unknown')}</div>
+        <div style="color:var(--text-color);font-weight:700;font-size:14px">🤖 ${UI.escHtml(b.name)}</div>
+        <div style="color:var(--text-muted);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${UI.escHtml(b.description || 'No description')}</div>
+        <div style="color:var(--text-muted);font-size:11px">by ${UI.escHtml(b.owner_name || 'unknown')}</div>
       </div>
       <button class="modal-btn primary" style="padding:6px 14px;flex:0 0 auto" onclick="_addBotToCurrentChannel(${b.id});document.getElementById('bot-directory-overlay').classList.add('hidden')">+ Add</button>
     </div>`).join('');
@@ -4780,7 +4780,7 @@ async function loadChannelBridgesPanel(roomName) {
       ...(dc.bridges || []).filter(b => b.room_name === roomName).map(b => ({ ...b, _platform: 'discord' }))
     ];
     if (!all.length) {
-      list.innerHTML = '<div style="color:#666;font-size:13px;text-align:center;padding:16px">No bridges yet</div>';
+      list.innerHTML = '<div style="color:var(--text-muted);font-size:13px;text-align:center;padding:16px">No bridges yet</div>';
       return;
     }
     list.innerHTML = all.map(b => {
@@ -4788,16 +4788,16 @@ async function loadChannelBridgesPanel(roomName) {
       const label = b._platform === 'telegram' ? 'Telegram' : 'Discord';
       const external = b.telegram_chat_id || b.discord_channel_id || b.webhook_url || '(unknown)';
       const dir = (b.direction || 'both');
-      return `<div style="display:flex;align-items:center;justify-content:space-between;padding:8px;border-bottom:1px solid #1a1a1a;gap:8px;flex-wrap:wrap">
+      return `<div style="display:flex;align-items:center;justify-content:space-between;padding:8px;border-bottom:1px solid var(--border-color);gap:8px;flex-wrap:wrap">
         <div style="display:flex;align-items:center;gap:10px;min-width:0;flex:1">
           <span style="font-size:22px">${icon}</span>
           <div style="min-width:0">
-            <div style="color:#e0e0e0;font-size:13px;font-weight:600">${label}</div>
-            <div style="color:#666;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${UI.escHtml(String(external).slice(0, 60))}</div>
+            <div style="color:var(--text-color);font-size:13px;font-weight:600">${label}</div>
+            <div style="color:var(--text-muted);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${UI.escHtml(String(external).slice(0, 60))}</div>
           </div>
         </div>
         <div style="display:flex;align-items:center;gap:6px">
-          <select class="bridge-dir-sel" data-id="${b.id}" title="Mirroring direction" style="background:#151515;border:1px solid #2a2a2a;color:#e0e0e0;padding:4px 6px;border-radius:6px;font-size:12px;cursor:pointer">
+          <select class="bridge-dir-sel" data-id="${b.id}" title="Mirroring direction" style="background:var(--bg-color);border:1px solid var(--border-color);color:var(--text-color);padding:4px 6px;border-radius:6px;font-size:12px;cursor:pointer">
             <option value="both" ${dir==='both'?'selected':''}>↔ Two-way</option>
             <option value="in"   ${dir==='in'  ?'selected':''}>⬇ From ${label}</option>
             <option value="out"  ${dir==='out' ?'selected':''}>⬆ To ${label}</option>
@@ -4982,7 +4982,7 @@ async function _checkDiscordBridgeCodeNow() {
     if (d.status === 'claimed') {
       if (statusEl) {
         statusEl.textContent = '✅ Discord bridge linked! Messages will now mirror.';
-        statusEl.style.color = '#4caf50';
+        statusEl.style.color = 'var(--accent-color)';
       }
       UI.showToast('Discord bridge connected!', 'success');
       loadChannelBridgesPanel(roomName);
@@ -5037,7 +5037,7 @@ function _startDiscordBridgeCodePoll(code, roomName) {
         clearInterval(_discordBridgeCodePollTimer);
         if (el) {
           el.textContent = '✅ Discord bridge linked automatically. Messages and media will now mirror.';
-          el.style.color = '#4caf50';
+          el.style.color = 'var(--accent-color)';
         }
         UI.showToast('Discord bridge connected!', 'success');
         loadChannelBridgesPanel(roomName);
@@ -5167,7 +5167,7 @@ function _startBridgeCodePoll(code, roomName) {
       const el = document.getElementById('ch-bridge-code-status');
       if (d.status === 'claimed') {
         clearInterval(_bridgeCodePollTimer);
-        if (el) { el.textContent = '✅ Bridge linked! Messages will now mirror.'; el.style.color = '#4caf50'; }
+        if (el) { el.textContent = '✅ Bridge linked! Messages will now mirror.'; el.style.color = 'var(--accent-color)'; }
         UI.showToast('Telegram bridge connected!', 'success');
         loadChannelBridgesPanel(roomName);
       } else if (d.status === 'expired') {
@@ -5214,14 +5214,14 @@ function _renderRichText(md) {
       return _escapeHtml(u);
     }
     const safe = _escapeHtml(u);
-    return `<a href="${safe}" target="_blank" rel="noopener noreferrer" style="color:#4caf50">${safe}</a>`;
+    return `<a href="${safe}" target="_blank" rel="noopener noreferrer" style="color:var(--accent-color)">${safe}</a>`;
   });
   html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
   html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
-  html = html.replace(/`(.+?)`/g, '<code style="background:#1a1a1a;padding:1px 4px;border-radius:4px">$1</code>');
-  html = html.replace(/^###\s+(.+)$/gm, '<h4 style="margin:8px 0 4px;color:#e0e0e0">$1</h4>');
-  html = html.replace(/^##\s+(.+)$/gm, '<h3 style="margin:10px 0 4px;color:#e0e0e0">$1</h3>');
-  html = html.replace(/^#\s+(.+)$/gm, '<h2 style="margin:12px 0 6px;color:#e0e0e0">$1</h2>');
+  html = html.replace(/`(.+?)`/g, '<code style="background:var(--surface-color);padding:1px 4px;border-radius:4px">$1</code>');
+  html = html.replace(/^###\s+(.+)$/gm, '<h4 style="margin:8px 0 4px;color:var(--text-color)">$1</h4>');
+  html = html.replace(/^##\s+(.+)$/gm, '<h3 style="margin:10px 0 4px;color:var(--text-color)">$1</h3>');
+  html = html.replace(/^#\s+(.+)$/gm, '<h2 style="margin:12px 0 6px;color:var(--text-color)">$1</h2>');
   html = html.replace(/^(?:-\s+.+(?:\n|$))+?/gm, block => {
     const items = block.trim().split('\n').map(line => line.replace(/^-\s+/, '').trim());
     return `<ul style="margin:8px 0 8px 18px">${items.map(i => `<li>${i}</li>`).join('')}</ul>`;
@@ -5270,7 +5270,7 @@ async function showChannelDirectory() {
             <span style="font-size:28px">🌐</span>
             <div>
               <div class="modal-title" style="margin:0;font-size:18px">Channel Directory</div>
-              <div style="color:#9bbf9b;font-size:12px">Discover and join communities</div>
+              <div style="color:var(--text-muted);font-size:12px">Discover and join communities</div>
             </div>
           </div>
           <button class="social-close-btn" onclick="document.getElementById('modal-directory').classList.add('hidden')" style="position:static;font-size:20px">✕</button>
@@ -5407,7 +5407,7 @@ function renderDirectoryCard(ch, compact) {
     </div>
     <div class="dir-card-join">
       ${alreadyJoined
-        ? `<button class="modal-btn" style="margin:0;padding:6px 16px;font-size:13px;background:#1a2a1a;color:#7fd97f;border:1px solid #2a4a2a;cursor:pointer" onclick="event.stopPropagation();openChannelFromDiscovery(${_jsStr(ch.name)}, this)">✓ Joined</button>`
+        ? `<button class="modal-btn" style="margin:0;padding:6px 16px;font-size:13px;background:color-mix(in srgb, var(--accent-color) 22%, var(--bg-color));color:var(--accent-color);border:1px solid color-mix(in srgb, var(--accent-color) 40%, var(--border-color));cursor:pointer" onclick="event.stopPropagation();openChannelFromDiscovery(${_jsStr(ch.name)}, this)">✓ Joined</button>`
         : `<button class="modal-btn primary" style="margin:0;padding:6px 16px;font-size:13px" onclick="event.stopPropagation();joinDirectoryChannel(${_jsStr(ch.name)})">Join</button>`}
     </div>
   </div>`;
@@ -5422,7 +5422,7 @@ async function searchDirectory() {
   // them.  Fall back to a plain text placeholder if the area is empty.
   const _hadContent = el.children.length > 0;
   if (!_hadContent) {
-    el.innerHTML = '<div style="text-align:center;padding:20px;color:#666">Loading…</div>';
+    el.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text-muted)">Loading…</div>';
   } else {
     el.style.opacity = '0.55';
     el.style.transition = 'opacity .15s ease';
@@ -5610,7 +5610,7 @@ function directoryAutoSearch() {
               <span>${iconHtml}</span>
               <span style="flex:1">${UI.escHtml(s.name)}</span>
               ${s.category ? `<span style="font-size:11px;color:#888">${catIcons[s.category]||''} ${UI.escHtml(s.category)}</span>` : ''}
-              <span style="font-size:11px;color:#666">👥 ${s.member_count}</span>
+              <span style="font-size:11px;color:var(--text-muted)">👥 ${s.member_count}</span>
             </div>`;
           }).join('');
           sugEl.style.display = 'block';
@@ -5871,7 +5871,7 @@ async function postChannelComment(channelName) {
       if (lr.ok) {
         const ld = await lr.json();
         const list = document.getElementById('ch-comments-list');
-        if (list) list.innerHTML = (ld.comments || []).map(c => _renderChannelComment(c, channelName)).join('') || '<div style="color:#666;font-size:13px;text-align:center;padding:20px">No comments yet</div>';
+        if (list) list.innerHTML = (ld.comments || []).map(c => _renderChannelComment(c, channelName)).join('') || '<div style="color:var(--text-muted);font-size:13px;text-align:center;padding:20px">No comments yet</div>';
       }
     } else {
       const d = await r.json().catch(()=>({}));
@@ -5893,7 +5893,7 @@ async function deleteChannelComment(channelName, commentId) {
       if (lr.ok) {
         const ld = await lr.json();
         const list = document.getElementById('ch-comments-list');
-        if (list) list.innerHTML = (ld.comments || []).map(c => _renderChannelComment(c, channelName)).join('') || '<div style="color:#666;font-size:13px;text-align:center;padding:20px">No comments yet</div>';
+        if (list) list.innerHTML = (ld.comments || []).map(c => _renderChannelComment(c, channelName)).join('') || '<div style="color:var(--text-muted);font-size:13px;text-align:center;padding:20px">No comments yet</div>';
       }
     }
   } catch {}

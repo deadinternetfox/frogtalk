@@ -2527,7 +2527,7 @@ function renderDMChannels () {
           ${previewHtml}
         </span>
       </span>
-      ${ch.unread ? `<span style="background:#4caf50;color:#000;border-radius:8px;padding:1px 6px;font-size:11px;font-weight:700">${ch.unread}</span>` : ''}
+      ${ch.unread ? `<span style="background:var(--accent-color);color:color-mix(in srgb, var(--accent-color) 12%, #000);border-radius:8px;padding:1px 6px;font-size:11px;font-weight:700">${ch.unread}</span>` : ''}
       <button class="dm-close-btn" onclick="event.stopPropagation();hideDMChannel(${ch.id})" title="Hide conversation"
         style="position:absolute;right:4px;top:50%;transform:translateY(-50%);background:none;border:none;color:#666;cursor:pointer;font-size:12px;padding:2px 4px;border-radius:4px;opacity:0;transition:opacity .15s"
         onmouseenter="this.style.color='#ff5555';this.style.opacity='1'" onmouseleave="this.style.color='#666'">✕</button>
@@ -3795,7 +3795,7 @@ function renderDMMessage (m) {
       try { probeAudioDuration(m.id, mediaUrl); } catch {}
     } else {
       const name = mediaUrl.split('/').pop();
-      inner = `<a href="${esc(mediaUrl)}" target="_blank" rel="noopener noreferrer" style="color:#4caf50;display:block;margin-top:4px">📄 ${esc(name)}</a>`;
+      inner = `<a href="${esc(mediaUrl)}" target="_blank" rel="noopener noreferrer" style="color:var(--accent-color);display:block;margin-top:4px">📄 ${esc(name)}</a>`;
     }
     if (isBlurred) {
       // Wrap in a spoiler overlay that reveals on click. Replace the media's
@@ -5498,10 +5498,10 @@ async function editDMMsg (id) {
   const current = String(m.content || '');
   contentEl.dataset.originalText = current;
   contentEl.innerHTML = `
-    <textarea id="dm-edit-input-${id}" style="width:100%;background:#1a1a1a;border:1px solid #4caf50;border-radius:6px;color:#e0e0e0;padding:6px;font-size:14px;resize:none;outline:none" rows="2">${UI.escHtml(current)}</textarea>
+    <textarea id="dm-edit-input-${id}" style="width:100%;background:var(--surface-color);border:1px solid var(--accent-color);border-radius:6px;color:var(--text-color);padding:6px;font-size:14px;resize:none;outline:none" rows="2">${UI.escHtml(current)}</textarea>
     <div style="display:flex;gap:8px;margin-top:4px">
-      <button onclick="submitDMEdit(${id})" style="background:#4caf50;border:none;border-radius:6px;color:#000;padding:4px 12px;cursor:pointer;font-size:13px">Save</button>
-      <button onclick="cancelDMEdit(${id})" style="background:#1a1a1a;border:none;border-radius:6px;color:#888;padding:4px 12px;cursor:pointer;font-size:13px">Cancel</button>
+      <button onclick="submitDMEdit(${id})" style="background:var(--accent-color);border:none;border-radius:6px;color:color-mix(in srgb, var(--accent-color) 12%, #000);padding:4px 12px;cursor:pointer;font-size:13px">Save</button>
+      <button onclick="cancelDMEdit(${id})" style="background:var(--surface-color);border:none;border-radius:6px;color:var(--text-muted);padding:4px 12px;cursor:pointer;font-size:13px">Cancel</button>
     </div>
   `;
   const input = document.getElementById(`dm-edit-input-${id}`);

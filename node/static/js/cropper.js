@@ -91,7 +91,7 @@
     m.innerHTML = `
       <div style="background:#111;border:1px solid #2a2a2a;border-radius:12px;max-width:560px;width:100%;max-height:94vh;max-height:94dvh;display:flex;flex-direction:column">
         <div style="padding:10px 14px;border-bottom:1px solid #222;display:flex;align-items:center;justify-content:space-between">
-          <strong style="color:#4caf50">✂️ Crop image</strong>
+          <strong style="color:var(--accent-color)">✂️ Crop image</strong>
           <button onclick="ImageCropper.close()" style="background:none;border:none;color:#888;font-size:20px;cursor:pointer">✕</button>
         </div>
         <div id="ic-stage" style="position:relative;background:#000;overflow:hidden;flex:1;min-height:220px;display:flex;align-items:center;justify-content:center;touch-action:none">
@@ -101,7 +101,7 @@
           <label style="color:#888;font-size:12px">Zoom</label>
           <input type="range" id="ic-zoom" min="50" max="300" value="100" style="flex:1">
           <button onclick="ImageCropper.close()" style="background:#1e1e1e;border:1px solid #333;color:#e0e0e0;padding:8px 14px;border-radius:8px;cursor:pointer">Cancel</button>
-          <button onclick="ImageCropper.apply()" style="background:#4caf50;border:0;color:#000;font-weight:700;padding:8px 18px;border-radius:8px;cursor:pointer">Done</button>
+          <button onclick="ImageCropper.apply()" style="background:var(--accent-color);border:0;color:color-mix(in srgb, var(--accent-color) 12%, #000);font-weight:700;padding:8px 18px;border-radius:8px;cursor:pointer">Done</button>
         </div>
       </div>`;
     document.body.appendChild(m);
@@ -231,8 +231,8 @@
     ctx.fill('evenodd');
     ctx.restore();
 
-    // Border
-    ctx.strokeStyle = '#4caf50';
+    // Border — resolve the theme accent at draw time (canvas can't take var())
+    ctx.strokeStyle = (getComputedStyle(document.documentElement).getPropertyValue('--accent-color') || '').trim() || '#4caf50';
     ctx.lineWidth = 2;
     if (_state.circle) {
       const cx = rx + rw / 2, cy = ry + rh / 2;

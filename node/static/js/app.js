@@ -1377,10 +1377,10 @@ const App = {
           ? `<img src="${UI.escHtml(rawIcon)}" alt="" style="width:48px;height:48px;border-radius:12px;object-fit:cover;display:block;margin:0 auto 8px">`
           : `<div style="font-size:32px;margin-bottom:8px;line-height:1">${UI.escHtml(rawIcon)}</div>`;
         notice.innerHTML = `
-          <div style="background:#1a3a1a;border:1px solid #4caf50;border-radius:12px;padding:16px;margin-bottom:16px;text-align:center">
+          <div style="background:color-mix(in srgb, var(--accent-color) 18%, var(--bg-color));border:1px solid var(--accent-color);border-radius:12px;padding:16px;margin-bottom:16px;text-align:center">
             ${iconHtml}
-            <div style="font-weight:600;color:#4caf50">You're invited to #${UI.escHtml(data.room_name)}</div>
-            <div style="color:#888;font-size:13px;margin-top:4px">Login or register to join!</div>
+            <div style="font-weight:600;color:var(--accent-color)">You're invited to #${UI.escHtml(data.room_name)}</div>
+            <div style="color:var(--text-muted);font-size:13px;margin-top:4px">Login or register to join!</div>
           </div>
         `;
         const authBox = document.querySelector('.auth-box');
@@ -2796,7 +2796,7 @@ async function showActiveDevicesDialog(opts) {
     // server-info / about modals): subtle dark-green vertical gradient with
     // an accent-green border. This makes the active-devices dialog feel
     // native to FrogTalk instead of a neutral grey popover.
-    card.style.cssText = 'background:linear-gradient(180deg,#173027 0%,#13271f 56%,#102018 100%);color:var(--text-color,#e9ecf3);border:1px solid #3b6c59;border-radius:12px;max-width:540px;width:100%;max-height:85vh;display:flex;flex-direction:column;box-shadow:0 20px 46px rgba(0,0,0,.58),inset 0 1px 0 rgba(255,255,255,.08),0 0 0 1px rgba(76,175,80,.1);overflow:hidden;font:14px/1.45 var(--font-family,system-ui),-apple-system,Segoe UI,Roboto,sans-serif;animation:adPop .22s cubic-bezier(.2,.7,.3,1);position:relative;';
+    card.style.cssText = 'background:linear-gradient(180deg,color-mix(in srgb, var(--surface-color) 80%, var(--accent-color) 20%) 0%,color-mix(in srgb, var(--surface-color) 88%, var(--accent-color) 12%) 56%,color-mix(in srgb, var(--bg-color) 88%, var(--accent-color) 12%) 100%);color:var(--text-color,#e9ecf3);border:1px solid color-mix(in srgb, var(--accent-color) 45%, var(--border-color));border-radius:12px;max-width:540px;width:100%;max-height:85vh;display:flex;flex-direction:column;box-shadow:0 20px 46px rgba(0,0,0,.58),inset 0 1px 0 rgba(255,255,255,.08),0 0 0 1px color-mix(in srgb, var(--accent-color) 10%, transparent);overflow:hidden;font:14px/1.45 var(--font-family,system-ui),-apple-system,Segoe UI,Roboto,sans-serif;animation:adPop .22s cubic-bezier(.2,.7,.3,1);position:relative;';
 
     const headerTitle = opts.takeover
       ? 'Another device is signed in'
@@ -2821,7 +2821,7 @@ async function showActiveDevicesDialog(opts) {
         return `<div class="ad-row" data-id="${_activeDev_esc(s.id)}" style="display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid rgba(59,108,89,.35);transition:background .15s;">
           <div style="font-size:24px;line-height:1;width:36px;text-align:center;flex-shrink:0;filter:${isLegacy?'grayscale(.4) opacity(.85)':'none'};">${flag}</div>
           <div style="flex:1;min-width:0;">
-            <div style="font-weight:600;color:#dff5e8;font-size:13.5px;">${_activeDev_esc(dev)}</div>
+            <div style="font-weight:600;color:var(--text-color);font-size:13.5px;">${_activeDev_esc(dev)}</div>
             <div style="color:#a8c9b8;font-size:12px;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${_activeDev_esc(place)}${ip ? ' · ' + ip : ''}</div>
             <div style="color:#7fa492;font-size:11px;margin-top:2px;opacity:.85;">${_activeDev_esc(last || 'unknown')}</div>
           </div>
@@ -2835,18 +2835,18 @@ async function showActiveDevicesDialog(opts) {
       : '';
 
     card.innerHTML = `
-      <div style="height:3px;background:linear-gradient(90deg,transparent,#4caf50,transparent);opacity:.9;"></div>
+      <div style="height:3px;background:linear-gradient(90deg,transparent,var(--accent-color),transparent);opacity:.9;"></div>
       <div style="padding:18px 20px 14px;border-bottom:1px solid rgba(59,108,89,.5);display:flex;gap:14px;align-items:flex-start;">
-        <div style="font-size:22px;line-height:1;flex-shrink:0;color:#7fd28a;">🔐</div>
+        <div style="font-size:22px;line-height:1;flex-shrink:0;color:var(--accent-color);">🔐</div>
         <div style="flex:1;min-width:0;">
-          <div style="font-size:16px;font-weight:700;color:#dff5e8;letter-spacing:-.1px;">${_activeDev_esc(headerTitle)}</div>
+          <div style="font-size:16px;font-weight:700;color:var(--text-color);letter-spacing:-.1px;">${_activeDev_esc(headerTitle)}</div>
           <div style="color:#a8c9b8;font-size:13px;margin-top:6px;line-height:1.5;">${_activeDev_esc(headerNote)}</div>
         </div>
       </div>
       <div class="ad-list" style="overflow:auto;flex:1;background:linear-gradient(180deg,rgba(13,29,23,.6),rgba(10,22,17,.6));">${rowsHtml}</div>
       <div style="padding:14px 18px;border-top:1px solid rgba(59,108,89,.5);display:flex;justify-content:flex-end;gap:10px;align-items:center;background:linear-gradient(180deg,rgba(16,35,27,.55),rgba(13,29,23,.65));">
         ${footerActions}
-        <button class="ad-continue" type="button" style="background:#4caf50;color:#0a1a0d;border:0;padding:9px 22px;border-radius:8px;font-size:13.5px;font-weight:700;cursor:pointer;letter-spacing:.2px;box-shadow:0 4px 14px rgba(76,175,80,.3);transition:all .15s;">Continue</button>
+        <button class="ad-continue" type="button" style="background:var(--accent-color);color:color-mix(in srgb, var(--accent-color) 14%, #000);border:0;padding:9px 22px;border-radius:8px;font-size:13.5px;font-weight:700;cursor:pointer;letter-spacing:.2px;box-shadow:0 4px 14px color-mix(in srgb, var(--accent-color) 30%, transparent);transition:all .15s;">Continue</button>
       </div>`;
 
     backdrop.appendChild(card);
@@ -2889,9 +2889,9 @@ async function showActiveDevicesDialog(opts) {
             row.style.opacity = '0.5';
             btn.dataset.done = '1';
             btn.textContent = 'Signed out';
-            btn.style.background = 'rgba(76,175,80,.12)';
-            btn.style.color = '#7fd28a';
-            btn.style.borderColor = 'rgba(76,175,80,.55)';
+            btn.style.background = 'color-mix(in srgb, var(--accent-color) 12%, transparent)';
+            btn.style.color = 'var(--accent-color)';
+            btn.style.borderColor = 'color-mix(in srgb, var(--accent-color) 55%, transparent)';
           } else {
             btn.disabled = false;
             btn.textContent = 'Sign out';
@@ -2922,13 +2922,13 @@ async function showActiveDevicesDialog(opts) {
                 b.dataset.done = '1';
                 b.disabled = true;
                 b.textContent = 'Signed out';
-                b.style.color = '#7fd28a';
-                b.style.borderColor = 'rgba(76,175,80,.55)';
+                b.style.color = 'var(--accent-color)';
+                b.style.borderColor = 'color-mix(in srgb, var(--accent-color) 55%, transparent)';
               }
             });
             allBtn.textContent = 'All signed out';
-            allBtn.style.color = '#7fd28a';
-            allBtn.style.borderColor = 'rgba(76,175,80,.55)';
+            allBtn.style.color = 'var(--accent-color)';
+            allBtn.style.borderColor = 'color-mix(in srgb, var(--accent-color) 55%, transparent)';
           } else {
             allBtn.disabled = false;
             allBtn.textContent = orig;

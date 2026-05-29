@@ -425,7 +425,7 @@ function finaliseVideoNote () {
   const durTxt = formatRecDuration(_recSeconds).replace('● REC ', '');
   thumb.innerHTML = `
     <div class="att-preview-item att-preview-vidnote" style="display:flex;align-items:center;gap:12px">
-      <div class="att-vn-wrap" style="position:relative;width:72px;height:72px;flex:0 0 72px;cursor:pointer;border-radius:50%;overflow:hidden;border:2px solid #4caf50;background:#0c1612"
+      <div class="att-vn-wrap" style="position:relative;width:72px;height:72px;flex:0 0 72px;cursor:pointer;border-radius:50%;overflow:hidden;border:2px solid var(--accent-color);background:color-mix(in srgb, var(--bg-color) 85%, var(--accent-color) 15%)"
            onclick="_attPreviewPlayVidNote(this, event)">
         <video class="att-vn-video" src="${url}" preload="auto" muted playsinline
                style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:50%;background:#000"></video>
@@ -1136,23 +1136,23 @@ function openCameraCapture (onReady) {
     modal.id = 'cam-capture-modal';
     modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.85);backdrop-filter:blur(4px);z-index:9999;display:none;align-items:center;justify-content:center;padding:10px';
     modal.innerHTML = `
-      <div style="background:linear-gradient(180deg,#12231d,#0f1d18);border:1px solid #2f5548;border-radius:12px;max-width:520px;width:100%;max-height:92vh;overflow:auto;display:flex;flex-direction:column;box-shadow:0 2px 12px rgba(0,0,0,.35)">
+      <div style="background:linear-gradient(180deg,color-mix(in srgb, var(--surface-color) 82%, var(--accent-color) 18%),color-mix(in srgb, var(--bg-color) 86%, var(--accent-color) 14%));border:1px solid color-mix(in srgb, var(--accent-color) 35%, var(--border-color));border-radius:12px;max-width:520px;width:100%;max-height:92vh;overflow:auto;display:flex;flex-direction:column;box-shadow:0 2px 12px rgba(0,0,0,.35)">
         <div style="padding:12px 14px;border-bottom:1px solid #222;display:flex;align-items:center;justify-content:space-between">
-          <strong style="color:#4caf50">📷 Capture & Filter</strong>
+          <strong style="color:var(--accent-color)">📷 Capture & Filter</strong>
           <button onclick="closeCameraCapture()" style="background:none;border:none;color:#85a89a;font-size:20px;cursor:pointer;transition:color .15s">✕</button>
         </div>
         <div id="cam-stage" style="padding:12px;display:flex;flex-direction:column;gap:10px;align-items:center">
           <div id="cam-empty" style="display:flex;flex-direction:column;gap:10px;align-items:center;padding:28px 0;width:100%">
             <div style="color:#85a89a;font-size:13px;text-align:center">Take a new photo or pick one from your gallery</div>
-            <button onclick="_camOpenLiveCamera()" style="background:#4caf50;color:#000;border:0;padding:12px 20px;border-radius:10px;font-size:15px;font-weight:700;cursor:pointer;width:100%;max-width:280px">📷 Take photo</button>
-            <button onclick="document.getElementById('cam-input-gallery').click()" style="background:linear-gradient(180deg,#1a3a2d,#143027);color:#dff5e8;border:1px solid #2f5548;padding:10px 20px;border-radius:10px;font-size:14px;cursor:pointer;width:100%;max-width:280px;transition:background .15s">🖼️ Pick from gallery</button>
+            <button onclick="_camOpenLiveCamera()" style="background:var(--accent-color);color:color-mix(in srgb, var(--accent-color) 12%, #000);border:0;padding:12px 20px;border-radius:10px;font-size:15px;font-weight:700;cursor:pointer;width:100%;max-width:280px">📷 Take photo</button>
+            <button onclick="document.getElementById('cam-input-gallery').click()" style="background:linear-gradient(180deg,color-mix(in srgb, var(--surface-color) 78%, var(--accent-color) 22%),color-mix(in srgb, var(--bg-color) 84%, var(--accent-color) 16%));color:var(--text-color);border:1px solid color-mix(in srgb, var(--accent-color) 30%, var(--border-color));padding:10px 20px;border-radius:10px;font-size:14px;cursor:pointer;width:100%;max-width:280px;transition:background .15s">🖼️ Pick from gallery</button>
           </div>
           <img id="cam-preview" style="display:none;max-width:100%;max-height:52vh;border-radius:10px;background:#000">
           <div id="cam-filters" style="display:none;flex-wrap:wrap;gap:6px;justify-content:center;width:100%"></div>
           <div id="cam-sliders" style="display:none;flex-direction:column;gap:6px;width:100%;padding:0 6px;font-size:12px;color:#85a89a"></div>
           <div id="cam-actions" style="display:none;gap:8px;width:100%;padding:4px 0 2px">
-            <button onclick="_camRetake()" style="flex:1;background:linear-gradient(180deg,#1a3a2d,#143027);color:#dff5e8;border:1px solid #2f5548;padding:10px;border-radius:8px;cursor:pointer;transition:background .15s">↺ Retake</button>
-            <button onclick="_camAttach()" style="flex:2;background:#4caf50;color:#000;border:0;padding:10px;border-radius:8px;font-weight:700;cursor:pointer">✓ Attach</button>
+            <button onclick="_camRetake()" style="flex:1;background:linear-gradient(180deg,color-mix(in srgb, var(--surface-color) 78%, var(--accent-color) 22%),color-mix(in srgb, var(--bg-color) 84%, var(--accent-color) 16%));color:var(--text-color);border:1px solid color-mix(in srgb, var(--accent-color) 30%, var(--border-color));padding:10px;border-radius:8px;cursor:pointer;transition:background .15s">↺ Retake</button>
+            <button onclick="_camAttach()" style="flex:2;background:var(--accent-color);color:color-mix(in srgb, var(--accent-color) 12%, #000);border:0;padding:10px;border-radius:8px;font-weight:700;cursor:pointer">✓ Attach</button>
           </div>
         </div>
         <input type="file" id="cam-input-gallery" accept="image/*" style="display:none" onchange="_camOnFile(this)">
@@ -1165,7 +1165,7 @@ function openCameraCapture (onReady) {
       b.className = 'cam-filter-btn';
       b.textContent = key === 'bw' ? 'B&W' : (key[0].toUpperCase() + key.slice(1));
       b.dataset.preset = key;
-      b.style.cssText = 'background:linear-gradient(180deg,#1a3a2d,#143027);color:#dff5e8;border:1px solid #2f5548;padding:6px 10px;border-radius:14px;cursor:pointer;font-size:12px';
+      b.style.cssText = 'background:linear-gradient(180deg,color-mix(in srgb, var(--surface-color) 78%, var(--accent-color) 22%),color-mix(in srgb, var(--bg-color) 84%, var(--accent-color) 16%));color:var(--text-color);border:1px solid color-mix(in srgb, var(--accent-color) 30%, var(--border-color));padding:6px 10px;border-radius:14px;cursor:pointer;font-size:12px';
       b.onclick = () => _camApplyPreset(key);
       fs.appendChild(b);
     });
@@ -1253,8 +1253,8 @@ async function _camOpenLiveCamera () {
     live.innerHTML = `
       <div id="cam-live-stage" style="position:relative;width:100%;max-width:420px;aspect-ratio:3/4;background:#000;border-radius:10px;overflow:hidden;touch-action:none;user-select:none">
         <video id="cam-live-video" autoplay playsinline muted style="width:100%;height:100%;object-fit:cover;background:#000;transform-origin:center center"></video>
-        <button id="cam-live-flip" title="Flip camera" style="position:absolute;top:8px;right:8px;background:rgba(12,28,22,.7);color:#dff5e8;border:1px solid #2f5548;border-radius:50%;width:36px;height:36px;font-size:16px;cursor:pointer;z-index:3;transition:background .15s">🔄</button>
-        <button id="cam-live-flash" title="Flash" style="position:absolute;top:8px;right:52px;background:rgba(12,28,22,.7);color:#dff5e8;border:1px solid #2f5548;border-radius:18px;min-width:36px;height:36px;padding:0 10px;font-size:13px;font-weight:700;cursor:pointer;z-index:3;display:none;gap:4px;align-items:center;justify-content:center;white-space:nowrap;transition:background .15s">⚡ Off</button>
+        <button id="cam-live-flip" title="Flip camera" style="position:absolute;top:8px;right:8px;background:rgba(12,28,22,.7);color:var(--text-color);border:1px solid color-mix(in srgb, var(--accent-color) 30%, var(--border-color));border-radius:50%;width:36px;height:36px;font-size:16px;cursor:pointer;z-index:3;transition:background .15s">🔄</button>
+        <button id="cam-live-flash" title="Flash" style="position:absolute;top:8px;right:52px;background:rgba(12,28,22,.7);color:var(--text-color);border:1px solid color-mix(in srgb, var(--accent-color) 30%, var(--border-color));border-radius:18px;min-width:36px;height:36px;padding:0 10px;font-size:13px;font-weight:700;cursor:pointer;z-index:3;display:none;gap:4px;align-items:center;justify-content:center;white-space:nowrap;transition:background .15s">⚡ Off</button>
         <div id="cam-zoom-badge" style="position:absolute;top:8px;left:8px;background:rgba(0,0,0,.55);color:#fff;border:1px solid #333;border-radius:14px;padding:4px 10px;font-size:12px;font-weight:600;display:none;z-index:3">1.0×</div>
         <div id="cam-rec-badge" style="position:absolute;bottom:10px;left:50%;transform:translateX(-50%);background:rgba(220,40,40,.85);color:#fff;border-radius:14px;padding:4px 12px;font-size:12px;font-weight:700;display:none;z-index:3;letter-spacing:.5px"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#fff;margin-right:6px;animation:cam-rec-pulse 1s infinite"></span><span id="cam-rec-timer">0:00</span></div>
       </div>
@@ -1263,7 +1263,7 @@ async function _camOpenLiveCamera () {
       </div>
       <div style="display:flex;gap:10px;width:100%;max-width:420px">
         <button id="cam-live-cancel" style="flex:1;background:#1e1e1e;color:#e0e0e0;border:1px solid #333;padding:10px;border-radius:8px;cursor:pointer">Cancel</button>
-        <button id="cam-live-shutter" style="flex:2;background:#4caf50;color:#000;border:0;padding:10px;border-radius:8px;font-weight:700;cursor:pointer;touch-action:manipulation;user-select:none">\ud83d\udcf8 Capture</button>
+        <button id="cam-live-shutter" style="flex:2;background:var(--accent-color);color:color-mix(in srgb, var(--accent-color) 12%, #000);border:0;padding:10px;border-radius:8px;font-weight:700;cursor:pointer;touch-action:manipulation;user-select:none">\ud83d\udcf8 Capture</button>
       </div>`;
     m.querySelector('#cam-stage').appendChild(live);
     // Inject rec-pulse keyframes once
@@ -1627,7 +1627,7 @@ function _camStartVideoRecording () {
       if (_camRecInterval) { clearInterval(_camRecInterval); _camRecInterval = null; }
       // Reset shutter label
       const shutter = document.getElementById('cam-live-shutter');
-      if (shutter) { shutter.textContent = '\ud83d\udcf8 Capture'; shutter.style.background = '#4caf50'; }
+      if (shutter) { shutter.textContent = '\ud83d\udcf8 Capture'; shutter.style.background = 'var(--accent-color)'; }
       if (!blob.size) { toast('Recording was empty', 'error'); return; }
       const name = 'video-' + Date.now() + (mime.includes('mp4') ? '.mp4' : '.webm');
       _camShowVideoReview(blob, name);
@@ -1676,7 +1676,7 @@ function _camAbortRecordingSilent () {
   const badge = document.getElementById('cam-rec-badge');
   if (badge) badge.style.display = 'none';
   const shutter = document.getElementById('cam-live-shutter');
-  if (shutter) { shutter.textContent = '\ud83d\udcf8 Capture'; shutter.style.background = '#4caf50'; shutter.style.color = '#000'; }
+  if (shutter) { shutter.textContent = '\ud83d\udcf8 Capture'; shutter.style.background = 'var(--accent-color)'; shutter.style.color = 'color-mix(in srgb, var(--accent-color) 12%, #000)'; }
 }
 
 // Show a post-record video preview inside the camera modal with Retake /
@@ -1723,7 +1723,7 @@ function _camShowVideoReview (blob, name) {
     review.style.cssText = 'display:flex;gap:10px;width:100%;max-width:420px';
     review.innerHTML = `
       <button id="cam-vrev-retake" style="flex:1;background:#1e1e1e;color:#e0e0e0;border:1px solid #333;padding:10px;border-radius:8px;cursor:pointer">\ud83d\udd01 Retake</button>
-      <button id="cam-vrev-use" style="flex:2;background:#4caf50;color:#000;border:0;padding:10px;border-radius:8px;font-weight:700;cursor:pointer">\u2705 Use video</button>`;
+      <button id="cam-vrev-use" style="flex:2;background:var(--accent-color);color:color-mix(in srgb, var(--accent-color) 12%, #000);border:0;padding:10px;border-radius:8px;font-weight:700;cursor:pointer">\u2705 Use video</button>`;
     live.appendChild(review);
     review.querySelector('#cam-vrev-retake').onclick = () => _camVideoReviewRetake();
     review.querySelector('#cam-vrev-use').onclick    = () => _camVideoReviewUse();
@@ -2024,7 +2024,7 @@ function _camSetActivePreset (preset) {
   const m = document.getElementById('cam-capture-modal');
   m.querySelectorAll('.cam-filter-btn').forEach(b => {
     if (b.dataset.preset === preset) {
-      b.style.background = '#4caf50'; b.style.color = '#000'; b.style.borderColor = '#4caf50';
+      b.style.background = 'var(--accent-color)'; b.style.color = 'color-mix(in srgb, var(--accent-color) 12%, #000)'; b.style.borderColor = 'var(--accent-color)';
     } else {
       b.style.background = '#1e1e1e'; b.style.color = '#e0e0e0'; b.style.borderColor = '#333';
     }
@@ -2188,7 +2188,7 @@ async function openStoryCapture (onReady) {
       </div>
       <div id="story-cap-review" style="position:absolute;bottom:28px;left:0;right:0;display:none;justify-content:center;align-items:center;gap:16px;z-index:2">
         <button id="story-cap-retake" style="background:rgba(0,0,0,.6);color:#fff;border:1px solid #555;border-radius:20px;padding:10px 22px;font-size:14px;cursor:pointer">↺ Retake</button>
-        <button id="story-cap-use" style="background:#4caf50;color:#000;border:0;border-radius:20px;padding:12px 28px;font-size:15px;font-weight:700;cursor:pointer">✓ Use this</button>
+        <button id="story-cap-use" style="background:var(--accent-color);color:color-mix(in srgb, var(--accent-color) 12%, #000);border:0;border-radius:20px;padding:12px 28px;font-size:15px;font-weight:700;cursor:pointer">✓ Use this</button>
       </div>
       <div id="story-cap-hint" style="position:absolute;bottom:120px;left:0;right:0;text-align:center;color:#eee;font-size:12px;text-shadow:0 1px 3px rgba(0,0,0,.8);z-index:2;pointer-events:none">
         Tap to capture photo · Hold to record video (up to 15s)
@@ -2201,7 +2201,7 @@ async function openStoryCapture (onReady) {
       b.className = 'story-cap-filter-btn';
       b.textContent = key === 'bw' ? 'B&W' : (key[0].toUpperCase() + key.slice(1));
       b.dataset.preset = key;
-      b.style.cssText = 'background:linear-gradient(180deg,#1a3a2d,#143027);color:#dff5e8;border:1px solid #2f5548;padding:6px 12px;border-radius:14px;cursor:pointer;font-size:12px';
+      b.style.cssText = 'background:linear-gradient(180deg,color-mix(in srgb, var(--surface-color) 78%, var(--accent-color) 22%),color-mix(in srgb, var(--bg-color) 84%, var(--accent-color) 16%));color:var(--text-color);border:1px solid color-mix(in srgb, var(--accent-color) 30%, var(--border-color));padding:6px 12px;border-radius:14px;cursor:pointer;font-size:12px';
       b.onclick = () => _storyApplyFilter(key);
       fs.appendChild(b);
     });
@@ -2320,9 +2320,9 @@ function _storyApplyFilter (key) {
   const m = document.getElementById('story-cap-modal');
   m.querySelectorAll('.story-cap-filter-btn').forEach(b => {
     const active = b.dataset.preset === key;
-    b.style.background = active ? '#4caf50' : 'rgba(0,0,0,.6)';
+    b.style.background = active ? 'var(--accent-color)' : 'rgba(0,0,0,.6)';
     b.style.color = active ? '#000' : '#fff';
-    b.style.borderColor = active ? '#4caf50' : '#333';
+    b.style.borderColor = active ? 'var(--accent-color)' : 'var(--border-color)';
   });
 }
 

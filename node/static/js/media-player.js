@@ -125,7 +125,7 @@ const MediaPlayer = (() => {
       .media-player-container:hover .media-player-header { opacity: 1; }
       
       .media-player-info { display: flex; flex-direction: column; gap: 2px; }
-      .media-player-sender { font-weight: 600; color: #4caf50; font-size: 14px; }
+      .media-player-sender { font-weight: 600; color: var(--accent-color); font-size: 14px; }
       .media-player-time { color: #666; font-size: 12px; }
       
       .media-player-actions { display: flex; gap: 8px; }
@@ -195,7 +195,7 @@ const MediaPlayer = (() => {
         justify-content: center;
         transition: all 0.15s;
       }
-      .mp-nav-btn:hover { background: #4caf50; color: #000; }
+      .mp-nav-btn:hover { background: var(--accent-color); color: color-mix(in srgb, var(--accent-color) 12%, #000); }
       .mp-nav-btn:disabled { opacity: 0.3; cursor: not-allowed; }
       .mp-nav-btn:disabled:hover { background: rgba(255,255,255,0.1); color: #e0e0e0; }
       
@@ -229,7 +229,7 @@ const MediaPlayer = (() => {
         justify-content: center;
         transition: color 0.15s;
       }
-      .mp-ctrl-btn:hover { color: #4caf50; }
+      .mp-ctrl-btn:hover { color: var(--accent-color); }
       
       .mp-progress-wrap {
         flex: 1;
@@ -243,7 +243,7 @@ const MediaPlayer = (() => {
       .mp-progress-bar {
         position: absolute;
         left: 0; top: 0; bottom: 0;
-        background: #4caf50;
+        background: var(--accent-color);
         width: 0;
         border-radius: 3px;
         transition: width 0.1s linear;
@@ -275,7 +275,7 @@ const MediaPlayer = (() => {
       #mp-volume::-webkit-slider-thumb {
         -webkit-appearance: none;
         width: 12px; height: 12px;
-        background: #4caf50;
+        background: var(--accent-color);
         border-radius: 50%;
         cursor: pointer;
       }
@@ -316,7 +316,7 @@ const MediaPlayer = (() => {
       }
       .mp-wave-bar {
         width: 4px;
-        background: #4caf50;
+        background: var(--accent-color);
         border-radius: 2px;
         animation: mp-wave 1s ease-in-out infinite;
       }

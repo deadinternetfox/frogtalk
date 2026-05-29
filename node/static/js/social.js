@@ -310,13 +310,13 @@ const Social = (() => {
         // mostly invisible padding that acts as the hover bridge.
         pop.dataset.bridged = '1';
         const removeChip = myEmoji
-          ? `<button type="button" data-emoji="__remove__" style="background:#1a2e1a;border:1px solid #2a3a2a;color:#8bd48b;border-radius:999px;padding:4px 10px;font-size:12px;cursor:pointer">Remove ${myEmoji}</button>`
+          ? `<button type="button" data-emoji="__remove__" style="background:color-mix(in srgb, var(--accent-color) 22%, var(--bg-color));border:1px solid color-mix(in srgb, var(--accent-color) 30%, var(--border-color));color:color-mix(in srgb, var(--accent-color) 80%, var(--text-color));border-radius:999px;padding:4px 10px;font-size:12px;cursor:pointer">Remove ${myEmoji}</button>`
           : '';
         // Wrap the chips in an inner pill so the visible styling sits
         // above the bridge padding.
-        const innerStyle = 'display:flex;gap:4px;padding:6px;background:#101710;border-radius:999px;border:1px solid #2a3a2a;box-shadow:0 6px 18px rgba(0,0,0,.5)';
+        const innerStyle = 'display:flex;gap:4px;padding:6px;background:color-mix(in srgb, var(--surface-color) 88%, var(--accent-color) 12%);border-radius:999px;border:1px solid color-mix(in srgb, var(--accent-color) 18%, var(--border-color));box-shadow:0 6px 18px rgba(0,0,0,.5)';
         pop.innerHTML = `<div style="${innerStyle}">` + removeChip + QUICK.map(e =>
-          `<button type="button" data-emoji="${e}" style="background:none;border:none;font-size:20px;cursor:pointer;padding:2px 6px;border-radius:999px;line-height:1;transition:transform .12s,background .12s" onmouseover="this.style.background='#1a2e1a';this.style.transform='scale(1.25)'" onmouseout="this.style.background='none';this.style.transform='scale(1)'">${e}</button>`
+          `<button type="button" data-emoji="${e}" style="background:none;border:none;font-size:20px;cursor:pointer;padding:2px 6px;border-radius:999px;line-height:1;transition:transform .12s,background .12s" onmouseover="this.style.background='color-mix(in srgb, var(--accent-color) 22%, var(--bg-color))';this.style.transform='scale(1.25)'" onmouseout="this.style.background='none';this.style.transform='scale(1)'">${e}</button>`
         ).join('') + '</div>';
         pop.addEventListener('mouseenter', () => {
           if (btn._rxHideTimer) { clearTimeout(btn._rxHideTimer); btn._rxHideTimer = null; }
@@ -2850,7 +2850,7 @@ const Social = (() => {
             <img id="add-story-img" style="display:none;max-width:100%;max-height:300px;border-radius:8px">
             <video id="add-story-vid" style="display:none;max-width:100%;max-height:300px;border-radius:8px;background:#000" controls playsinline></video>
           </div>
-          <button type="button" onclick="Social.openStoryCamera()" style="display:block;width:100%;padding:16px;text-align:center;border:none;background:linear-gradient(135deg,#4caf50,#2e7d32);border-radius:12px;cursor:pointer;color:#000;font-weight:700;margin-bottom:10px;font-size:15px">
+          <button type="button" onclick="Social.openStoryCamera()" style="display:block;width:100%;padding:16px;text-align:center;border:none;background:linear-gradient(135deg,var(--accent-color),color-mix(in srgb, var(--accent-color) 65%, #000));border-radius:12px;cursor:pointer;color:color-mix(in srgb, var(--accent-color) 12%, #000);font-weight:700;margin-bottom:10px;font-size:15px">
             📷 Open Camera · Tap for photo · Hold for video
           </button>
           <label style="display:block;padding:16px;text-align:center;border:1px dashed #333;border-radius:10px;cursor:pointer;color:#888;margin-bottom:10px;font-size:13px">
@@ -2862,7 +2862,7 @@ const Social = (() => {
           <div style="display:flex;gap:10px;justify-content:flex-end;align-items:center">
             <button type="button" id="story-priv-chip" class="ft-inline-chip" onclick="Social.cycleStoryPrivacy()" title="Change audience" style="margin-right:auto">🌍 Everyone</button>
             <button type="button" id="add-story-cancel-btn" onclick="Social.closeAddStory()" style="background:#1a1a1a;border:none;color:#888;padding:8px 16px;border-radius:8px;cursor:pointer">Cancel</button>
-            <button type="button" id="add-story-share-btn" onclick="Social.handleStoryShareTap(event);return false" ontouchstart="Social.handleStoryShareTap(event);return false" onpointerdown="Social.handleStoryShareTap(event);return false" style="background:#4caf50;border:none;color:#000;font-weight:600;padding:8px 20px;border-radius:8px;cursor:pointer;touch-action:manipulation">Share</button>
+            <button type="button" id="add-story-share-btn" onclick="Social.handleStoryShareTap(event);return false" ontouchstart="Social.handleStoryShareTap(event);return false" onpointerdown="Social.handleStoryShareTap(event);return false" style="background:var(--accent-color);border:none;color:color-mix(in srgb, var(--accent-color) 12%, #000);font-weight:600;padding:8px 20px;border-radius:8px;cursor:pointer;touch-action:manipulation">Share</button>
           </div>
         </div>`;
       document.body.appendChild(modal);
@@ -2893,9 +2893,9 @@ const Social = (() => {
       const btn = document.getElementById('story-priv-' + k);
       if (!btn) return;
       if (k === _addStoryPrivacy) {
-        btn.style.background = 'linear-gradient(135deg,#4caf50,#2e7d32)';
+        btn.style.background = 'linear-gradient(135deg,var(--accent-color),color-mix(in srgb, var(--accent-color) 65%, #000))';
         btn.style.color = '#000';
-        btn.style.borderColor = '#4caf50';
+        btn.style.borderColor = 'var(--accent-color)';
       } else {
         btn.style.background = '#1a1a1a';
         btn.style.color = '#ddd';
@@ -2942,7 +2942,7 @@ const Social = (() => {
     el.style.display = 'block';
     el.textContent = msg;
     if (type === 'error') el.style.color = '#f87171';
-    else if (type === 'success') el.style.color = '#4caf50';
+    else if (type === 'success') el.style.color = 'var(--accent-color)';
     else el.style.color = '#9ca3af';
   }
 
@@ -3431,14 +3431,14 @@ const Social = (() => {
         html += `<div class="social-empty">
           <div class="se-icon se-icon--lg">🐸</div>
           <div class="se-title se-title--lg">Your feed is empty on this node</div>
-          <div style="color:#888;font-size:14px">Follow graph and posts may live on your home node. Re-sync to import them here, or open <a href="#" onclick="Social.switchTab('explore');return false" style="color:#4caf50">Explore</a>.</div>
+          <div style="color:var(--text-muted);font-size:14px">Follow graph and posts may live on your home node. Re-sync to import them here, or open <a href="#" onclick="Social.switchTab('explore');return false" style="color:var(--accent-color)">Explore</a>.</div>
           ${_socialSyncResyncButtonHtml()}
         </div>`;
       } else {
         html += `<div class="social-empty">
           <div class="se-icon se-icon--lg">🐸</div>
           <div class="se-title se-title--lg">Your feed is empty</div>
-          <div style="color:#888;font-size:14px">Follow people to see their posts here, or check out <a href="#" onclick="Social.switchTab('explore');return false" style="color:#4caf50">Explore</a>.</div>
+          <div style="color:var(--text-muted);font-size:14px">Follow people to see their posts here, or check out <a href="#" onclick="Social.switchTab('explore');return false" style="color:var(--accent-color)">Explore</a>.</div>
         </div>`;
       }
     } else {
@@ -3948,7 +3948,7 @@ const Social = (() => {
         : (_badgeUser.federated
           ? `<span class="ft-fed-home-badge">🌐 Federated</span>`
           : '');
-      let spBannerBg = 'linear-gradient(135deg,#1a3a1a 0%,#0d1f0d 50%,#1a2a1a 100%)';
+      let spBannerBg = 'linear-gradient(135deg,color-mix(in srgb, var(--surface-color) 80%, var(--accent-color) 20%) 0%,var(--bg-color) 50%,color-mix(in srgb, var(--surface-color) 86%, var(--accent-color) 14%) 100%)';
       if (typeof UI !== 'undefined' && UI.profileBannerBackground) {
         spBannerBg = UI.profileBannerBackground(u.banner);
       } else if (u.banner) {
@@ -3990,7 +3990,7 @@ const Social = (() => {
                      ? `<button class="sp-action-btn primary" onclick="Social.acceptFriendFromProfile('${esc(u.nickname)}',this)">Accept Friend</button>`
                      : `<button class="sp-action-btn secondary" onclick="Social.addFriendFromProfile('${esc(u.nickname)}',this)">+ Add Friend</button>`
                    }
-                   <button class="sp-action-btn primary" onclick="Social.dmUser('${esc(u.nickname)}')" style="background:#4caf50;color:#000;font-weight:600">💬 Message</button>
+                   <button class="sp-action-btn primary" onclick="Social.dmUser('${esc(u.nickname)}')" style="background:var(--accent-color);color:color-mix(in srgb, var(--accent-color) 12%, #000);font-weight:600">💬 Message</button>
                    <button class="sp-share-btn" onclick="Social.shareProfile('${esc(u.nickname)}',this)" title="Copy share link">🔗 Share</button>`
               }
             </div>
@@ -6379,7 +6379,7 @@ const Social = (() => {
             <div class="sp-channel-meta">
               ${ch.category ? `<span class="sp-channel-cat">${catIcons[ch.category]||''} ${esc(ch.category)}</span>` : ''}
               <span>👥 ${ch.member_count || 0} members</span>
-              ${ch.is_public ? '<span style="color:#4caf50">🌐 Public</span>' : '<span style="color:#888">🔒 Private</span>'}
+              ${ch.is_public ? '<span style="color:var(--accent-color)">🌐 Public</span>' : '<span style="color:var(--text-muted)">🔒 Private</span>'}
             </div>
             ${desc ? `<div class="sp-channel-desc">${esc(desc.substring(0, 120))}${desc.length > 120 ? '…' : ''}</div>` : ''}
             ${tags.length ? `<div class="sp-channel-tags">${tags.slice(0, 4).map(t => `<span class="dir-tag">${esc(t)}</span>`).join('')}</div>` : ''}
@@ -9219,9 +9219,9 @@ const Social = (() => {
       const btn = document.getElementById('snp-priv-' + k);
       if (!btn) return;
       if (k === p) {
-        btn.style.background = 'linear-gradient(135deg,#4caf50,#2e7d32)';
+        btn.style.background = 'linear-gradient(135deg,var(--accent-color),color-mix(in srgb, var(--accent-color) 65%, #000))';
         btn.style.color = '#000';
-        btn.style.borderColor = '#4caf50';
+        btn.style.borderColor = 'var(--accent-color)';
       } else {
         btn.style.background = '#1a1a1a';
         btn.style.color = '#ddd';
@@ -9711,7 +9711,7 @@ const Social = (() => {
       const el = document.querySelector(`[data-post-id="${postId}"]`);
       if (el) {
         el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        el.style.outline = '2px solid #4caf50';
+        el.style.outline = '2px solid var(--accent-color)';
         setTimeout(() => { el.style.outline = ''; }, 2000);
         toggleComments(postId);
       }

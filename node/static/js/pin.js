@@ -1077,7 +1077,7 @@
       c.type = 'checkbox';
       c.id = id;
       c.checked = !!checked;
-      c.style.cssText = 'width:18px;height:18px;cursor:pointer;accent-color:#4caf50';
+      c.style.cssText = 'width:18px;height:18px;cursor:pointer;accent-color:var(--accent-color)';
       c.addEventListener('change', _commitOptions);
       return c;
     }
