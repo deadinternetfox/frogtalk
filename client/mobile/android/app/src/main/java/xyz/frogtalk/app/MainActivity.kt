@@ -42,7 +42,7 @@ class MainActivity : AppCompatActivity() {
     companion object {
         private const val TAG = "FrogTalk"
         private const val SETUP_ASSET_URL = "file:///android_asset/mobile_node_setup.html"
-        private const val WEB_CACHE_REV = "20260522-fed-sync-v241"
+        private const val WEB_CACHE_REV = "20260529-theme-savefile-v244"
         private const val PREFS = "frogtalk_prefs"
         private const val PREF_SERVER_BASE_URL = "server_base_url"
         private const val PREF_PERMISSIONS_WIZARD_DONE = "permissions_wizard_done"
@@ -1442,6 +1442,55 @@ class MainActivity : AppCompatActivity() {
                 activity.showNativeNotification(title, body)
             } catch (e: Throwable) {
                 Log.e(TAG, "showNotification failed", e)
+            }
+        }
+
+        // Persist a base64 blob to the device's Downloads. Needed because the
+        // WebView silently ignores <a download> on data: URLs, so web flows like
+        // the account recovery key couldn't produce a file. Returns true on success.
+        @android.webkit.JavascriptInterface
+        fun saveFile(filename: String, base64: String, mime: String): Boolean {
+            return try {
+                val safeName = filename.substringAfterLast('/').ifBlank { "frogtalk-download" }
+                val bytes = android.util.Base64.decode(base64, android.util.Base64.DEFAULT)
+                val mimeType = mime.ifBlank { "application/octet-stream" }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    val values = android.content.ContentValues().apply {
+                        put(android.provider.MediaStore.Downloads.DISPLAY_NAME, safeName)
+                        put(android.provider.MediaStore.Downloads.MIME_TYPE, mimeType)
+                        put(android.provider.MediaStore.Downloads.RELATIVE_PATH, android.os.Environment.DIRECTORY_DOWNLOADS)
+                        put(android.provider.MediaStore.Downloads.IS_PENDING, 1)
+                    }
+                    val resolver = activity.contentResolver
+                    val uri = resolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                        ?: return false
+                    resolver.openOutputStream(uri)?.use { it.write(bytes) } ?: return false
+                    values.clear()
+                    values.put(android.provider.MediaStore.Downloads.IS_PENDING, 0)
+                    resolver.update(uri, values, null, null)
+                } else {
+                    // Pre-Q: try the public Downloads dir (works when WRITE_EXTERNAL_STORAGE
+                    // is granted), otherwise fall back to the app's external files dir so a
+                    // file is always produced without a runtime permission prompt.
+                    try {
+                        val dir = android.os.Environment
+                            .getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS)
+                        if (!dir.exists()) dir.mkdirs()
+                        java.io.FileOutputStream(java.io.File(dir, safeName)).use { it.write(bytes) }
+                    } catch (se: Throwable) {
+                        val fallback = activity.getExternalFilesDir(android.os.Environment.DIRECTORY_DOWNLOADS)
+                        java.io.FileOutputStream(java.io.File(fallback, safeName)).use { it.write(bytes) }
+                    }
+                }
+                activity.runOnUiThread {
+                    android.widget.Toast.makeText(
+                        activity, "Saved to Downloads/$safeName", android.widget.Toast.LENGTH_LONG
+                    ).show()
+                }
+                true
+            } catch (e: Throwable) {
+                Log.e(TAG, "saveFile failed", e)
+                false
             }
         }
 

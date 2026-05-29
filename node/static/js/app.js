@@ -1410,9 +1410,12 @@ const App = {
     // until the bottom of launch() while channel sidebars already shimmer.
     try { this._paintBootLoadingChrome(); } catch {}
 
-    // Apply saved theme. Default is 'frog'; 'dark' is a real distinct theme and
-    // is applied as-is (no longer remapped to frog).
-    const savedTheme = State.user?.theme || localStorage.getItem('frogtalk-theme') || 'frog';
+    // Apply saved theme. The account's server theme is authoritative (default
+    // 'frog'); 'dark' is a real distinct theme applied as-is. We deliberately do
+    // NOT fall back to the device-global localStorage 'frogtalk-theme' here — on
+    // the APK that value is never cleared and would otherwise leak a previous
+    // session's Dark onto a brand-new account.
+    const savedTheme = State.user?.theme || 'frog';
     if (savedTheme === 'custom' && typeof applyStoredCustomThemeJson === 'function') {
       applyStoredCustomThemeJson(State.user?.custom_theme_json || localStorage.getItem('frogtalk-custom-theme'));
     } else if (typeof applyTheme === 'function') {

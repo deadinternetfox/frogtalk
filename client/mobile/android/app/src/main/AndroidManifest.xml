@@ -30,6 +30,10 @@
     <!-- File uploads -->
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
+    <!-- Saving downloads (recovery key, etc.) to public Downloads on pre-Q.
+         API 29+ uses scoped MediaStore and needs no permission. -->
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28" />
 
     <!-- Foreground service for in-call notification.
          NOTE: We use microphone+camera types (not phoneCall) because phoneCall on

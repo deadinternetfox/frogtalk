@@ -10015,10 +10015,40 @@ function _populateRecoveryKeyModal(payload, opts = {}) {
   }
 }
 
+function _markRecoveryKeySaved() {
+  const hint = document.getElementById('recovery-key-saved-hint');
+  if (hint) hint.style.display = '';
+  const contBtn = document.getElementById('recovery-key-continue-btn');
+  if (contBtn) {
+    contBtn.disabled = false;
+    contBtn.style.opacity = '1';
+    contBtn.style.cursor  = 'pointer';
+  }
+}
+
 function downloadRecoveryKeyFile() {
   const payload = window._pendingRecoveryKey;
   if (!payload || !payload.file_content) {
     _setRecoveryKeyError('No recovery file to download. Try again.');
+    return;
+  }
+  // Android WebView can't trigger an <a download> on a data: URL — it silently
+  // no-ops. Route through the native saveFile bridge (writes to Downloads) when
+  // present; fall back to the anchor download on web/desktop.
+  try {
+    if (window.Android && typeof window.Android.saveFile === 'function') {
+      const filename = payload.filename || 'frogtalk-recovery.json';
+      const b64 = String(payload.file_content).split(',')[1] || '';
+      const ok = window.Android.saveFile(filename, b64, 'application/json');
+      if (ok) {
+        _markRecoveryKeySaved();
+      } else {
+        _setRecoveryKeyError('Could not save the file. Check storage permission and try again.');
+      }
+      return;
+    }
+  } catch (e) {
+    _setRecoveryKeyError('Could not save the file. Try again.');
     return;
   }
   try {
@@ -10028,14 +10058,7 @@ function downloadRecoveryKeyFile() {
     document.body.appendChild(a);
     a.click();
     a.remove();
-    const hint = document.getElementById('recovery-key-saved-hint');
-    if (hint) hint.style.display = '';
-    const contBtn = document.getElementById('recovery-key-continue-btn');
-    if (contBtn) {
-      contBtn.disabled = false;
-      contBtn.style.opacity = '1';
-      contBtn.style.cursor  = 'pointer';
-    }
+    _markRecoveryKeySaved();
   } catch (e) {
     _setRecoveryKeyError('Browser blocked the download. Allow downloads and try again.');
   }
