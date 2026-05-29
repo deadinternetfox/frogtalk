@@ -338,7 +338,7 @@ def _load_user_sync_row(user_id: int) -> dict:
 
 
 _SYNC_THEME_ALLOWLIST = frozenset({
-    "frog", "light", "midnight", "forest", "cyberpunk", "ocean", "sunset",
+    "frog", "dark", "light", "midnight", "forest", "cyberpunk", "ocean", "sunset",
     "rose", "solarized", "mono", "custom", "golden", "lava", "retrowave", "sakura",
 })
 _CUSTOM_THEME_JSON_KEYS = frozenset({
@@ -692,8 +692,6 @@ def _apply_sync_pin_from_self_profile(uid: int, self_profile: dict) -> None:
 
 def _normalize_sync_theme(raw: str) -> str:
     theme = str(raw or "frog").strip().lower()
-    if theme == "dark":
-        theme = "frog"
     if theme not in _SYNC_THEME_ALLOWLIST:
         theme = "frog"
     return theme

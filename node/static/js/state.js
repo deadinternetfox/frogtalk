@@ -53,6 +53,9 @@ const State = {
     localStorage.removeItem('fc_token');
     localStorage.removeItem('fc_user');
     localStorage.removeItem('fc_last_room');
+    // Drop the theme so a previous account's choice can't bleed into the next
+    // login on this device — new users must fall back to the server default (frog).
+    try { localStorage.removeItem('frogtalk-theme'); localStorage.removeItem('frogtalk-custom-theme'); } catch {}
     this.token = null;
     this.user = null;
   }

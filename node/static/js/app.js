@@ -1408,9 +1408,9 @@ const App = {
     // until the bottom of launch() while channel sidebars already shimmer.
     try { this._paintBootLoadingChrome(); } catch {}
 
-    // Apply saved theme
-    const savedThemeRaw = State.user?.theme || localStorage.getItem('frogtalk-theme') || 'frog';
-    const savedTheme = (String(savedThemeRaw || '').toLowerCase() === 'dark') ? 'frog' : savedThemeRaw;
+    // Apply saved theme. Default is 'frog'; 'dark' is a real distinct theme and
+    // is applied as-is (no longer remapped to frog).
+    const savedTheme = State.user?.theme || localStorage.getItem('frogtalk-theme') || 'frog';
     if (savedTheme === 'custom' && typeof applyStoredCustomThemeJson === 'function') {
       applyStoredCustomThemeJson(State.user?.custom_theme_json || localStorage.getItem('frogtalk-custom-theme'));
     } else if (typeof applyTheme === 'function') {

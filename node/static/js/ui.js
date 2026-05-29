@@ -5120,8 +5120,8 @@ function _showThemePreviewBar(theme) {
         color-mix(in srgb,var(--surface-color) 92%,black),
         color-mix(in srgb,var(--bg-color) 88%,black));
       border-top:2px solid var(--accent-color);
-      color:var(--text-color);
-      padding:12px 20px;display:flex;align-items:center;justify-content:center;gap:16px;
+      color:var(--text-color);box-sizing:border-box;
+      padding:12px 20px calc(12px + var(--safe-bottom)) 20px;display:flex;align-items:center;justify-content:center;gap:16px;
       box-shadow:0 -6px 28px rgba(0,0,0,.55);animation:slideUpBar .25s ease`;
     document.body.appendChild(bar);
   }

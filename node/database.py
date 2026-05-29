@@ -1798,10 +1798,10 @@ def _migrate():
             con.execute("ALTER TABLE users ADD COLUMN custom_theme_json TEXT DEFAULT ''")
         if "client_prefs_json" not in cols:
             con.execute("ALTER TABLE users ADD COLUMN client_prefs_json TEXT DEFAULT ''")
-        # One-time migration: 'dark' was the old default palette name; it is
-        # identical to 'frog'.  Normalise all legacy rows so the theme system
-        # only needs to reason about a single canonical name.
-        con.execute("UPDATE users SET theme='frog' WHERE theme='dark' OR theme IS NULL OR theme=''")
+        # Backfill the default palette for rows with no theme set. 'dark' is a
+        # real, distinct, user-selectable theme, so it must NOT be collapsed to
+        # 'frog' here — only NULL/empty rows get the default.
+        con.execute("UPDATE users SET theme='frog' WHERE theme IS NULL OR theme=''")
         if "notify_sounds" not in cols:
             con.execute("ALTER TABLE users ADD COLUMN notify_sounds INTEGER DEFAULT 1")
         if "notify_desktop" not in cols:
