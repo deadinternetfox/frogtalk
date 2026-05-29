@@ -529,7 +529,7 @@ def emit_room_presence(
     uid = int(user.get("id") or 0)
     gid = str(user.get("global_user_id") or "").strip()
     room = str(room_name or "").strip().lower()
-    if uid <= 0 or not gid or not room or room.startswith("dm-"):
+    if uid <= 0 or not gid or not room or room.startswith("dm-") or room.startswith("dm:"):
         return {"ok": False, "skipped": True}
     p = str(presence or "offline").strip().lower()
     if p not in {"online", "away", "dnd", "invisible", "offline"}:

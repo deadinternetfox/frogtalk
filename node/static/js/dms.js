@@ -2593,12 +2593,22 @@ async function openDMChannel (id, nickname, avatar) {
     }
   } catch {}
 
-  // NOTE: do NOT disconnect the WebSocket when opening a DM. DM delivery and
-  // presence are keyed by user id server-side (send_to_user), so the existing
-  // room socket is what keeps us "online" to friends and streams live DMs.
-  // A 2026-05 "transition polish" change closed the socket here with no
-  // reconnect, which made users appear offline the moment they opened a DM and
-  // dropped realtime DMs until a manual refresh.
+  // Connect the WebSocket to this DM's pseudo-room. DM sends, typing, presence
+  // and CALL signaling all ride this socket (wsSend); the server keys DM + call
+  // delivery by user id. Without a live socket here a DM-only / brand-new
+  // account (one that never opened a channel) can neither appear online to
+  // friends nor place/receive calls — which is why calling a freshly-added
+  // account rang into the void. The server treats "dm:"-prefixed rooms as
+  // pseudo-rooms (no rooms-table access check), so this connects cleanly.
+  try {
+    const _meNick = State?.user?.nickname;
+    if (_meNick && nickname && typeof WS !== 'undefined' && WS.connect) {
+      const _dmRoom = `dm:${[String(_meNick), String(nickname)].sort().join(':')}`;
+      WS.connect(_dmRoom, { keepHistoryCache: true });
+    } else {
+      try { WS?.disconnect?.(); } catch {}
+    }
+  } catch {}
   try { State._roomSwitchInProgress = `dm:${id}`; } catch {}
   try { if (typeof clearChannelThemeOverride === 'function') clearChannelThemeOverride(); } catch {}
 

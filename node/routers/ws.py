@@ -167,6 +167,20 @@ def _validate_call_participant(call_id: int, sender_id: int, to_id: int) -> bool
     return False
 
 
+def _is_dm_pseudo_room(room_name: str) -> bool:
+    """True for DM pseudo-rooms, which live outside the rooms table.
+
+    The client names DM rooms ``dm:nickA:nickB`` (colon). Historically these
+    guards only matched a ``dm-`` (dash) prefix that the client never actually
+    produces, so a real DM-room WS connect fell through to the channel access
+    check, failed ``user_can_access_room`` (no rows row), and closed with 4003 —
+    which blocked presence and call signaling for DM-only / brand-new accounts.
+    Accept both prefixes so DM sockets connect cleanly.
+    """
+    r = str(room_name or "")
+    return r.startswith("dm-") or r.startswith("dm:")
+
+
 def _resolve_to_id(data: dict) -> int:
     """Resolve callee/call peer local user id from WS payload.
 
@@ -350,7 +364,7 @@ async def websocket_endpoint(
 
     # Authoritative room access check. DM pseudo-rooms (dm-*) are handled by
     # the dedicated DM endpoints/manager and don't live in the rooms table.
-    if not room_name.startswith("dm-"):
+    if not _is_dm_pseudo_room(room_name):
         if not db.user_can_access_room(
             user["id"], room_name, is_admin=bool(user.get("is_admin"))
         ):
@@ -529,7 +543,7 @@ async def websocket_endpoint(
 
     # Auto-add to room_members on connect so they appear in the offline list
     # when they're not connected. Skip DM channels (prefixed with "dm-").
-    if not room_name.startswith("dm-"):
+    if not _is_dm_pseudo_room(room_name):
         try:
             _room_data = db.get_room_by_name(room_name)
             if _room_data:
@@ -603,7 +617,7 @@ async def websocket_endpoint(
 
     # Send recent history on connect (strip media_data to keep payload small)
     cw_required, cw_flags = cw_ack_is_required(room_name, session_tok)
-    if cw_required and not room_name.startswith("dm-"):
+    if cw_required and not _is_dm_pseudo_room(room_name):
         await manager.send_personal(websocket, {
             "type": "content_warning_required",
             "room": room_name,
@@ -731,7 +745,7 @@ async def websocket_endpoint(
                 # on every send so a fresh `room_bans` row takes effect
                 # immediately. DM pseudo-rooms (`dm-*`) live outside the
                 # rooms table and are handled by the DM endpoints.
-                if not room_name.startswith("dm-"):
+                if not _is_dm_pseudo_room(room_name):
                     if not db.user_can_access_room(
                         user["id"], room_name, is_admin=bool(user.get("is_admin"))
                     ):
@@ -747,7 +761,7 @@ async def websocket_endpoint(
                             pass
                         break
 
-                if not room_name.startswith("dm-"):
+                if not _is_dm_pseudo_room(room_name):
                     cw_req, cw_fl = cw_ack_is_required(room_name, session_tok)
                     if cw_req:
                         await manager.send_personal(websocket, {
@@ -883,7 +897,7 @@ async def websocket_endpoint(
                 # Federation: room chat is sent over WebSocket in the app;
                 # REST /messages also enqueues — without this, peers never
                 # see cross-node history for the same channel.
-                if not room_name.startswith("dm-"):
+                if not _is_dm_pseudo_room(room_name):
                     try:
                         from routers import federation as federation_mod
                         federation_mod.enqueue_room_message_created(
