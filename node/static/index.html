@@ -3079,14 +3079,14 @@ html.ft-kb-open #input-area{
 /* Reserve room on the right of the voice bubble so the chip row never sits
    on top of the duration text. */
 .att-preview-voice .att-voice-bubble{padding-right:54px}
-/* Video-note preview: ✕ and 🔥 sit as overlay badges INSIDE the round bubble
-   at true mid-height. Bubble is 72px wide, left-aligned in the item, with 6px
-   left padding → spans x≈6..78. Tuck ✕ near the right edge (left:62), 🔥 near
-   the left edge (left:22); top:50% centres them vertically. translate(-50%,-50%)
-   centres each chip on its point, so neither spills off-screen on mobile. */
+/* Video-note preview: 🔥 left, round bubble centre, ✕ right — flex row so chips
+   sit beside the circle without overlapping its green ring. */
 .att-preview-vidnote{padding-left:6px}
-.att-preview-chip.att-vn-remove{position:absolute;top:50%;left:62px;transform:translate(-50%,-50%);z-index:4}
-.att-preview-chip.att-vn-fire{position:absolute;top:50%;left:22px;transform:translate(-50%,-50%);z-index:4}
+.att-vn-frame{display:flex;align-items:center;gap:6px;flex:0 0 auto}
+.att-preview-vidnote .att-preview-chip.att-vn-remove,
+.att-preview-vidnote .att-preview-chip.att-vn-fire{
+  position:static;top:auto;left:auto;transform:none;z-index:4
+}
 /* View-once message overlay in chat */
 .view-once-wrap{
   position:relative;

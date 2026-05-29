@@ -425,26 +425,28 @@ function finaliseVideoNote () {
   const durTxt = formatRecDuration(_recSeconds).replace('● REC ', '');
   // Burn (view-once) is a DM-only feature — same as voice notes & images.
   const _inDM = typeof isDMView === 'function' && isDMView();
-  // Burn (view-once) is DM-only. ✕ and 🔥 frame the round bubble at its top
-  // corners — ✕ top-right (corner side), 🔥 mirrored at top-left.
+  // Burn (view-once) is DM-only. 🔥 sits left of the circle, ✕ on the right —
+  // flanking the bubble in normal flex flow so neither chip overlaps the ring.
   const _vnFire = _inDM
     ? `<button type="button" class="att-preview-chip att-viewonce-fire att-vn-fire" title="View once — disappears after viewing" aria-pressed="false" onclick="toggleMediaFlag('view_once',0)">🔥</button>`
     : '';
   thumb.innerHTML = `
     <div class="att-preview-item att-preview-vidnote" id="att-preview-item" style="position:relative;display:flex;align-items:center;gap:12px">
-      <div class="att-vn-wrap" style="position:relative;width:72px;height:72px;flex:0 0 72px;cursor:pointer;border-radius:50%;overflow:hidden;border:2px solid var(--accent-color);background:color-mix(in srgb, var(--bg-color) 85%, var(--accent-color) 15%)"
-           onclick="_attPreviewPlayVidNote(this, event)">
-        <video class="att-vn-video" src="${url}" preload="auto" muted playsinline
-               style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:50%;background:#000"></video>
-        <div class="att-vn-poster" style="position:absolute;inset:0;background-size:cover;background-position:center;border-radius:50%;opacity:0;transition:opacity .2s ease"></div>
-        <div class="att-vn-play" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.35);color:#fff;font-size:22px;border-radius:50%;pointer-events:none">▶</div>
+      <div class="att-vn-frame">
+        ${_vnFire}
+        <div class="att-vn-wrap" style="position:relative;width:72px;height:72px;flex:0 0 72px;cursor:pointer;border-radius:50%;overflow:hidden;border:2px solid var(--accent-color);background:color-mix(in srgb, var(--bg-color) 85%, var(--accent-color) 15%)"
+             onclick="_attPreviewPlayVidNote(this, event)">
+          <video class="att-vn-video" src="${url}" preload="auto" muted playsinline
+                 style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:50%;background:#000"></video>
+          <div class="att-vn-poster" style="position:absolute;inset:0;background-size:cover;background-position:center;border-radius:50%;opacity:0;transition:opacity .2s ease"></div>
+          <div class="att-vn-play" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.35);color:#fff;font-size:22px;border-radius:50%;pointer-events:none">▶</div>
+        </div>
+        <button type="button" class="att-preview-chip att-preview-remove att-vn-remove" title="Remove this attachment" aria-label="Remove this attachment" onclick="_removePendingAttachment(0)">✕</button>
       </div>
       <span style="font-size:12px;color:#85a89a;display:flex;flex-direction:column;gap:4px">
         <span style="color:#cfeedb;font-weight:600">🎥 Video note</span>
         <span>${durTxt}</span>
       </span>
-      ${_vnFire}
-      <button type="button" class="att-preview-chip att-preview-remove att-vn-remove" title="Remove this attachment" aria-label="Remove this attachment" onclick="_removePendingAttachment(0)">✕</button>
     </div>`;
   prev.style.display = 'flex';
   // Capture a first-frame poster off the canvas (works around Android
