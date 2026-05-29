@@ -793,17 +793,29 @@ function _renderPendingAttachmentList () {
       img.alt = '';
       mediaWrap.appendChild(img);
     } else if (item.type && item.type.startsWith('video/')) {
-      const vid = document.createElement('video');
-      vid.src = URL.createObjectURL(item.blob);
-      vid.muted = true;
-      vid.playsInline = true;
-      vid.preload = 'metadata';
+      const url = URL.createObjectURL(item.blob);
       if (isLoopingGifVideo(item.type, item.name)) {
+        const vid = document.createElement('video');
+        vid.src = url;
+        vid.muted = true;
+        vid.playsInline = true;
         vid.autoplay = true;
         vid.loop = true;
         vid.preload = 'auto';
+        mediaWrap.appendChild(vid);
+      } else {
+        // Captured still frame instead of a live <video> — see
+        // _attCaptureVideoStillImg / _renderAttachmentPreview for why.
+        const img = document.createElement('img');
+        img.className = 'att-vid-frame';
+        img.alt = '';
+        mediaWrap.appendChild(img);
+        const play = document.createElement('span');
+        play.className = 'att-vid-play';
+        play.textContent = '▶';
+        mediaWrap.appendChild(play);
+        mediaWrap.dataset.vidStillUrl = url;
       }
-      mediaWrap.appendChild(vid);
     } else {
       const icon = document.createElement('div');
       icon.className = 'att-preview-icon';
@@ -815,8 +827,9 @@ function _renderPendingAttachmentList () {
     }
 
     _mountAttPreviewControls(mediaWrap, item, index, isDM);
-    if (item.type && item.type.startsWith('video/') && !isLoopingGifVideo(item.type, item.name)) {
-      _attMountVideoPoster(mediaWrap);
+    if (mediaWrap.dataset.vidStillUrl) {
+      const frameImg = mediaWrap.querySelector('.att-vid-frame');
+      if (frameImg) _attCaptureVideoStillImg(mediaWrap.dataset.vidStillUrl, frameImg);
     }
 
     const sub = document.createElement('div');
@@ -923,6 +936,57 @@ function _attMountVideoPoster (mediaWrap) {
   try { _attVidNoteCapturePoster(v, ps); } catch {}
 }
 
+/* Capture a still first frame from a video blob URL into an <img> for the
+   composer preview. We deliberately DON'T render a live <video> in the
+   preview: on Android WebView a <video> paints on a hardware surface that
+   covers our HTML control chips (✕ / 👁️ / 🔥) and any overlay, so the user
+   saw a grey box with no controls and no frame. An <img> behaves exactly
+   like an image attachment. An offscreen <video> grabs the frame, then is
+   torn down. */
+function _attCaptureVideoStillImg (url, imgEl) {
+  if (!url || !imgEl) return;
+  const v = document.createElement('video');
+  v.muted = true; v.playsInline = true; v.preload = 'auto';
+  v.style.cssText = 'position:fixed;left:-99999px;top:0;width:8px;height:8px;opacity:.01;pointer-events:none';
+  v.src = url;
+  document.body.appendChild(v);
+  let done = false;
+  const cleanup = () => {
+    try { v.pause(); } catch {}
+    try { v.removeAttribute('src'); v.load(); } catch {}
+    try { v.remove(); } catch {}
+  };
+  const draw = () => {
+    if (done) return;
+    const w = v.videoWidth, h = v.videoHeight;
+    if (!w || !h) return;
+    done = true;
+    try {
+      const c = document.createElement('canvas');
+      const s = Math.min(1, 480 / Math.max(w, h));
+      c.width  = Math.max(2, Math.round(w * s));
+      c.height = Math.max(2, Math.round(h * s));
+      c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
+      imgEl.src = c.toDataURL('image/jpeg', 0.75);
+      imgEl.classList.add('att-vid-frame-ready');
+    } catch {}
+    cleanup();
+  };
+  v.addEventListener('seeked', draw);
+  v.addEventListener('loadeddata', () => { try { v.currentTime = 0.05; } catch { draw(); } });
+  v.addEventListener('loadedmetadata', () => {
+    // MediaRecorder webm/mp4 report duration=Infinity until forced past the
+    // end; same seek dance the chat video player uses.
+    if (!isFinite(v.duration) || v.duration <= 0) {
+      const onDur = () => { v.removeEventListener('durationchange', onDur); try { v.currentTime = 0.05; } catch { draw(); } };
+      v.addEventListener('durationchange', onDur, { once: true });
+      try { v.currentTime = 1e9; } catch { try { v.currentTime = 0.05; } catch { draw(); } }
+    }
+  });
+  setTimeout(() => { if (!done) { draw(); cleanup(); } }, 3000);
+  try { v.load(); } catch {}
+}
+
 /* Shared attachment preview renderer. Produces:
    - image/video thumbnail with an eye-button overlay (spoiler toggle)
    - filename + size on a smaller line below
@@ -952,19 +1016,24 @@ function _renderAttachmentPreview ({ blob, name, type, sizeBytes }) {
 
   const _inDM = typeof isDMView === 'function' && isDMView();
   let mediaHtml = '';
+  let _vidStillUrl = '';
   if (isImg) {
     const url = URL.createObjectURL(blob);
     mediaHtml = `<div class="att-media-wrap"><img src="${url}" alt=""></div>`;
   } else if (isVid) {
     const url = URL.createObjectURL(blob);
     const loopGif = isLoopingGifVideo(type, name);
-    const vidAttrs = loopGif
-      ? 'autoplay loop muted playsinline preload="auto"'
-      : 'muted playsinline preload="metadata"';
-    // Non-looping videos get a captured first-frame poster overlay so the
-    // preview shows the real frame instead of a grey box (see _attMountVideoPoster).
-    const posterEl = loopGif ? '' : '<div class="att-vid-poster"></div>';
-    mediaHtml = `<div class="att-media-wrap"><video src="${url}" ${vidAttrs}></video>${posterEl}</div>`;
+    if (loopGif) {
+      // Animated GIF-as-video: keep it live so it loops.
+      mediaHtml = `<div class="att-media-wrap"><video src="${url}" autoplay loop muted playsinline preload="auto"></video></div>`;
+    } else {
+      // Regular video: render a captured STILL frame as an <img>, not a live
+      // <video>. Android WebView paints <video> on a hardware surface that
+      // covers our HTML control chips, so a live video preview showed a grey
+      // box with no ✕/👁️/🔥. _vidStillUrl is captured into the <img> below.
+      _vidStillUrl = url;
+      mediaHtml = `<div class="att-media-wrap att-vid-stillwrap"><img class="att-vid-frame" alt=""><span class="att-vid-play">▶</span></div>`;
+    }
   } else {
     const icon = /pdf/.test(type || '') ? '📕'
                : /audio/.test(type || '') ? '🎵'
@@ -987,7 +1056,10 @@ function _renderAttachmentPreview ({ blob, name, type, sizeBytes }) {
       viewOnce: !!window._pendingViewOnce,
     };
     _mountAttPreviewControls(singleWrap, att, 0, _inDM);
-    if (isVid && !isLoopingGifVideo(type, name)) _attMountVideoPoster(singleWrap);
+    if (_vidStillUrl) {
+      const frameImg = singleWrap.querySelector('.att-vid-frame');
+      if (frameImg) _attCaptureVideoStillImg(_vidStillUrl, frameImg);
+    }
   }
 
   // Fire button is always visible on images/videos (no DM-only restriction)

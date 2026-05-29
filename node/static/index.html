@@ -3048,6 +3048,13 @@ html.ft-kb-open #input-area{
 /* Captured first-frame poster overlay for composer video previews — covers
    the grey/black <video> until (and after) the real frame is drawn. */
 .att-vid-poster{position:absolute;inset:0;background-size:cover;background-position:center;border-radius:inherit;opacity:0;transition:opacity .2s ease;pointer-events:none}
+/* Video attachment previews render as a captured still <img> (not a live
+   <video>, which on Android WebView paints over the control chips). Give the
+   empty <img> a dark placeholder size, and a centred play glyph. */
+.att-vid-frame{background:#0d0d0d;border-radius:8px}
+#attachment-thumb:not(.is-multi) .att-vid-frame{min-width:150px;min-height:100px}
+#attachment-thumb.is-multi .att-vid-frame{width:100%;min-height:80px}
+.att-vid-play{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:30px;color:rgba(255,255,255,.92);pointer-events:none;text-shadow:0 2px 8px rgba(0,0,0,.7);z-index:2}
 .att-viewonce-fire{position:absolute;top:10px;left:8px;z-index:3}
 .att-spoiler-eye.active{
   background:linear-gradient(135deg,var(--accent-color),color-mix(in srgb, var(--accent-color) 70%, #000));color:#fff;
@@ -12257,7 +12264,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoa
   <script src="/static/js/rooms.js?v=__APP_ASSET_VERSION__"></script>
 <script src="/static/js/sticker-fx.js?v=18"></script>
 <script src="/static/js/text_format.js?v=2"></script>
-<script src="/static/js/media.js?v=428"></script>
+<script src="/static/js/media.js?v=429"></script>
 <script src="/static/js/messages.js?v=__APP_ASSET_VERSION__"></script>
 <script src="/static/js/format_toolbar.js?v=2"></script>
 <script src="/static/js/users.js?v=__APP_ASSET_VERSION__"></script>
