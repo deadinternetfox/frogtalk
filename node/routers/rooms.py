@@ -888,7 +888,7 @@ async def get_room(room_name: str, current_user: dict = Depends(get_current_user
     mods = db.get_room_moderators(room["id"])
     
     # Check if current user can edit
-    can_edit = db.can_moderate_room(room_name, current_user["id"], bool(current_user.get("is_admin")))
+    can_edit = db.can_moderate_room(resolved, current_user["id"], bool(current_user.get("is_admin")))
     
     out = {
         "room": _room_with_content_warning(room),
