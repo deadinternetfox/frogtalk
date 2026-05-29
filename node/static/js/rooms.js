@@ -3942,6 +3942,20 @@ const Rooms = (() => {
         try { applyChannelTypeUi(name, newChType); } catch {}
       }
       syncActiveRoomHeader(name, { icon, description: desc, channelType: newChType });
+      // Repaint the theme for the saver right away (don't wait for the WS
+      // echo). Mirrors the payload built above; private channels never carry
+      // bgImage/css.
+      try {
+        const _isPriv = (_currentRoomData?.room?.type === 'private');
+        clearChannelThemeOverride();
+        applyChannelThemeOverride({
+          bg: document.getElementById('ch-theme-bg')?.value,
+          text: document.getElementById('ch-theme-text')?.value,
+          accent: document.getElementById('ch-theme-accent')?.value,
+          bgImage: _isPriv ? '' : (document.getElementById('ch-theme-bg-image')?.value.trim() || ''),
+          css: _isPriv ? '' : (document.getElementById('ch-theme-css')?.value.trim().slice(0, 4096) || ''),
+        });
+      } catch {}
       const cwSaved = (_currentRoomData?.room?.type === 'public') ? _readContentWarningForm('ch-cw') : null;
       if (cwSaved?.enabled && cwSaved.flags?.length && window.ContentWarning?.gate) {
         void ContentWarning.gate(name).then((ok) => {
@@ -6140,7 +6154,16 @@ function applyChannelThemeOverride(t) {
   let css = '';
   if (t.bg) css += `#main { background: ${t.bg} !important; }\n`;
   if (t.text) css += `#messages-area .msg-content { color: ${t.text} !important; }\n`;
-  if (t.accent) css += `.msg-author { color: ${t.accent} !important; }\n`;
+  // A pure-black accent is almost always the old `<input type=color>` default
+  // bug (value="var(--accent-color)" coerced to #000000), which painted every
+  // username unreadable black. Treat #000/#000000 as "unset" so the username
+  // inherits the real green --accent-color. This heals already-saved broken
+  // channels without a DB migration. (A genuinely black username on the dark
+  // default background would be invisible anyway.)
+  const _accent = String(t.accent || '').trim().toLowerCase();
+  if (_accent && _accent !== '#000' && _accent !== '#000000') {
+    css += `.msg-author { color: ${t.accent} !important; }\n`;
+  }
   if (t.bgImage) {
     // Sanitize: only allow http(s) URLs OR same-origin absolute paths
     // (which is what /api/rooms/<name>/theme-bg?v=<mtime> uploads return).

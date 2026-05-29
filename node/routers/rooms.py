@@ -1131,6 +1131,10 @@ async def update_room(request: Request, room_name: str, body: UpdateRoomRequest,
                 "description": room_row.get("description") or "",
                 "about": room_row.get("about") or "",
                 "banner_changed": body.banner is not None,
+                # Ride the (capped 20KB) theme JSON along so every connected
+                # viewer repaints colors / bg / CSS live, without re-entering
+                # the channel. Only included when the theme actually changed.
+                "channel_theme": (room_row.get("channel_theme") or "") if body.channel_theme is not None else None,
             }
             if renamed_to:
                 ws_evt["renamed_from"] = room_name
