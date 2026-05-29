@@ -771,6 +771,22 @@ async function startCall (type, nick, uid) {
 }
 
 async function _startCallBody (type, nick, uid) {
+  _callType     = type;
+  _callPeerNick = nick  || STATE.dmPeerNick;
+  _callPeerUID  = uid   || _activeDM?.user_id;
+  _callPeerAvatar = _activeDM?.avatar || null;
+  _callId       = null;
+  if (!_callPeerNick) {
+    // Usually means they tapped call outside a DM. Phrase it so it actually
+    // points at the cause instead of confusing "no peer connected" language.
+    toast('Open a direct message to start a call', 'error');
+    return;
+  }
+  // Paint the call overlay immediately so pressing "call" feels instant. The
+  // WS reconnect wait, peer-id resolution and getUserMedia below all run
+  // behind the "Calling…" screen instead of blocking before any UI appears.
+  _callState = 'calling';
+  showCallOverlay(type, _callPeerNick, 'Calling…', _callPeerAvatar);
   // If WS is mid-reconnect, give it a brief window to come back so the
   // call_offer rides a live socket. Don't abort if it's still not open —
   // _sendCallSignal() buffers into _outboundCallQueue and ws:open flushes,
@@ -778,11 +794,6 @@ async function _startCallBody (type, nick, uid) {
   if (!_wsLooksOpen()) {
     try { await _waitForWsOpen(8_000); } catch {}
   }
-  _callType     = type;
-  _callPeerNick = nick  || STATE.dmPeerNick;
-  _callPeerUID  = uid   || _activeDM?.user_id;
-  _callPeerAvatar = _activeDM?.avatar || null;
-  _callId       = null;
   if (!_callPeerUID && _callPeerNick) {
     try {
       const ch = (typeof _dmChannels !== 'undefined' && Array.isArray(_dmChannels))
@@ -817,17 +828,7 @@ async function _startCallBody (type, nick, uid) {
       }
     } catch {}
   }
-  if (!_callPeerNick) {
-    // Usually means they tapped call outside a DM. Phrase it so it actually
-    // points at the cause instead of confusing "no peer connected" language.
-    toast('Open a direct message to start a call', 'error');
-    return;
-  }
-
   await _ensureCallPeerAvatar();
-
-  _callState = 'calling';
-  showCallOverlay(type, _callPeerNick, 'Calling…', _callPeerAvatar);
 
   try {
     _localStream = await navigator.mediaDevices.getUserMedia(
@@ -898,7 +899,9 @@ async function _startCallBody (type, nick, uid) {
 /* ── Called from friends panel shortcut ────────────────────────────────────── */
 async function callNick (nick, type) {
   await openDMWithNick(nick);
-  setTimeout(() => startCall(type, nick), 800);
+  // startCall paints the overlay instantly and waits for the WS itself, so
+  // there's no need for an artificial pre-dial delay here.
+  startCall(type, nick);
 }
 
 /* ── Receive offer (incoming) ──────────────────────────────────────────────── */
@@ -1885,6 +1888,14 @@ function showCallOverlay (type, peerNick, status, avatar) {
   _renderPeerAvatar(peerNick, avatar);
   _ensureCallPeerAvatar(true).catch(() => {});
   document.getElementById('call-overlay')?.classList.remove('hidden');
+  // Every call opens un-muted. Reset the mute button + indicator so a muted
+  // state from a previous call (or a stale default) never bleeds into a fresh
+  // call and makes the user look muted when they never pressed mute.
+  _mutedAudio = false;
+  const _bMuteEl = document.getElementById('btn-call-mute');
+  if (_bMuteEl) { _bMuteEl.textContent = '🎤'; _bMuteEl.classList.remove('muted'); }
+  const _muteIndEl = document.getElementById('call-mute-indicator');
+  if (_muteIndEl) _muteIndEl.style.display = 'none';
   // Show all control buttons immediately
   const bCam = document.getElementById('btn-call-cam');
   const bSc  = document.getElementById('btn-call-screen');
@@ -2111,7 +2122,7 @@ function callUserInfo (type) {
   const nick = document.getElementById('userinfo-name').dataset.nick;
   if (!nick) return;
   closeModal('modal-user-info');
-  openDMWithNick(nick).then(() => setTimeout(() => startCall(type, nick), 300));
+  openDMWithNick(nick).then(() => startCall(type, nick));
 }
 
 
