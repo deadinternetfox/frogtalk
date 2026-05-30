@@ -237,11 +237,18 @@ def _admin_node_view(node: dict) -> dict:
     onion_url = str(raw.get("onion_url") or "").strip()
     route_mode = "tor" if federation_router._url_uses_tor(target) else "clearnet"
     _policy = db.get_federation_policy_settings()
-    _redact_ips = False
-    display_endpoint = _safe_host_label(
-        onion_url if route_mode == "tor" and onion_url else target,
-        redact_clearnet_ips=_redact_ips,
-    )
+    _redact_ips = bool(_policy.get("redact_clearnet_ips"))
+    _label_target = onion_url if route_mode == "tor" and onion_url else target
+    display_endpoint = _safe_host_label(_label_target, redact_clearnet_ips=_redact_ips)
+    _host_is_ip = False
+    if route_mode != "tor":
+        try:
+            _eh = (urllib.parse.urlparse(_label_target).hostname or "").strip()
+            if _eh:
+                ipaddress.ip_address(_eh)
+                _host_is_ip = True
+        except Exception:
+            _host_is_ip = False
     transport_preference = str(raw.get("transport_preference") or "auto").strip().lower() or "auto"
     base_url = str(raw.get("base_url") or "").strip()
     tls_insecure = bool(base_url) and url_is_http_only_clearnet(base_url)
@@ -268,6 +275,8 @@ def _admin_node_view(node: dict) -> dict:
         "privacy_label": (
             "IP hidden (Tor)"
             if route_mode == "tor"
+            else "Clearnet address redacted"
+            if (_redact_ips and _host_is_ip)
             else "Public host"
         ),
         "policy_tor_blocked": policy_tor_blocked,

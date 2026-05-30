@@ -32,7 +32,7 @@ class TorModeTests(unittest.TestCase):
         server = {
             "server_id": "srv_tor_mirror",
             "display_name": "FrogTalk Tor Mirror",
-            "base_url": "http://161.97.182.73",
+            "base_url": "http://203.0.113.30",
             "onion_url": "http://icn3a43nb6byhdmon4rqzeqswkskk2bnvf54l6at3iskmqlture3blqd.onion",
             "official": 1,
             "transport_preference": "auto",
@@ -60,7 +60,7 @@ class TorModeTests(unittest.TestCase):
             federation._public_server_view_for_client({
                 "server_id": "srv_tor_mirror",
                 "display_name": "FrogTalk Tor Mirror",
-                "base_url": "http://161.97.182.73",
+                "base_url": "http://203.0.113.30",
                 "onion_url": "http://mirror.onion",
                 "official": 1,
             }),
@@ -148,7 +148,7 @@ class TorModeTests(unittest.TestCase):
         view = server_admin._admin_node_view({
             "server_id": "srv_test",
             "display_name": "Test",
-            "base_url": "http://31.220.92.120",
+            "base_url": "http://203.0.113.10",
             "onion_url": "http://examplehiddenserviceabcdefghijklmnop.onion",
             "transport_preference": "onion",
             "trust_tier": "community",
@@ -166,7 +166,7 @@ class TorModeTests(unittest.TestCase):
         view = server_admin._admin_node_view({
             "server_id": "srv_test",
             "display_name": "Test",
-            "base_url": "http://31.220.92.120",
+            "base_url": "http://203.0.113.10",
             "onion_url": "",
             "trust_tier": "community",
             "enabled": 1,
@@ -174,7 +174,7 @@ class TorModeTests(unittest.TestCase):
             "capabilities": [],
         })
         self.assertEqual(view["route_mode"], "clearnet")
-        self.assertEqual(view["display_endpoint"], "31.220.*.*")
+        self.assertEqual(view["display_endpoint"], "203.0.*.*")
         self.assertEqual(view["privacy_label"], "Clearnet address redacted")
 
     @mock.patch("database.get_federation_policy_settings", return_value={"block_tor_peers": False, "block_http_only_peers": False, "redact_clearnet_ips": False})
@@ -182,14 +182,14 @@ class TorModeTests(unittest.TestCase):
         view = server_admin._admin_node_view({
             "server_id": "srv_test",
             "display_name": "Test",
-            "base_url": "http://31.220.92.120",
+            "base_url": "http://203.0.113.10",
             "onion_url": "",
             "trust_tier": "community",
             "enabled": 1,
             "official": 0,
             "capabilities": [],
         })
-        self.assertEqual(view["display_endpoint"], "31.220.92.120")
+        self.assertEqual(view["display_endpoint"], "203.0.113.10")
         self.assertEqual(view["privacy_label"], "Public host")
 
     def test_easter_egg_sanitizer_removes_script_and_handlers(self):
@@ -225,7 +225,7 @@ class TorModeTests(unittest.TestCase):
         self.assertEqual(auth._peer_target(row), "https://example.com")
 
     def test_peer_uses_http_only_clearnet(self):
-        self.assertTrue(federation.peer_uses_http_only_clearnet({"base_url": "http://31.220.92.120"}))
+        self.assertTrue(federation.peer_uses_http_only_clearnet({"base_url": "http://203.0.113.10"}))
         self.assertFalse(federation.peer_uses_http_only_clearnet({"base_url": "https://frogtalk.xyz"}))
         self.assertFalse(federation.peer_uses_http_only_clearnet({"base_url": "http://abcdefghijklmnop.onion"}))
 

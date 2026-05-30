@@ -122,8 +122,8 @@ Production clearnet nodes often terminate TLS at Cloudflare and run `cloudflared
 
 | Domain | VPS | Tunnel | `FROGTALK_HOME_PAGE` |
 |--------|-----|--------|----------------------|
-| frogtalk.app | 31.220.92.120 (Main) | Main tunnel connector | `main` |
-| frogtalk.xyz | 46.250.244.184 (AU) | **Separate** dev tunnel | `dev` |
+| your-main-domain | `<MAIN_VPS_IP>` (Main) | Main tunnel connector | `main` |
+| your-dev-domain | `<DEV_VPS_IP>` (dev) | **Separate** dev tunnel | `dev` |
 
 Use **two tunnels** in Zero Trust (one hostname set per tunnel). Do not run two connectors for the same tunnel ID on different VPSes — Cloudflare load-balances between them.
 

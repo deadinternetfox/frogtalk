@@ -24,7 +24,7 @@
     {
       "server_id": "srv_de0e973c9d1d46da91a1",
       "canonical_base_url": "https://frogtalk.xyz",
-      "legacy_base_url_hosts": ["46.250.244.184", "nip.io"],
+      "legacy_base_url_hosts": ["<DEV_VPS_IP>", "nip.io"],
       "display_name": "FrogTalk Dev",
       "region": "Australia"
     }

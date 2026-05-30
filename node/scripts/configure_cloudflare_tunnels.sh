@@ -19,7 +19,7 @@ if [[ -z "${CF_API_TOKEN:-}" ]]; then
   echo "     Public Hostname: frogtalk.app + www → http://localhost:8080" >&2
   echo "     Remove frogtalk.xyz from this tunnel when dev tunnel is live." >&2
   echo "  2. Create tunnel '$CF_TUNNEL_DEV_NAME' → frogtalk.xyz + www → http://localhost:8080" >&2
-  echo "     Install token on AU VPS (46.250.244.184)." >&2
+  echo "     Install token on the dev VPS." >&2
   exit 1
 fi
 

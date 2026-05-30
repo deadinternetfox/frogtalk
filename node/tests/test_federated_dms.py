@@ -146,18 +146,18 @@ class FederatedDMsTests(unittest.TestCase):
 
     @mock.patch("federation_dms.db.get_or_create_local_server_identity", return_value={
         "server_id": "srv_au",
-        "base_url": "https://46.250.244.184.nip.io",
+        "base_url": "https://203.0.113.20.nip.io",
     })
     @mock.patch("federation_dms.db.list_federation_servers", return_value=[
-        {"server_id": "srv_au", "base_url": "https://46.250.244.184.nip.io", "enabled": 1},
-        {"server_id": "srv_ip_alias", "base_url": "http://46.250.244.184", "enabled": 1},
+        {"server_id": "srv_au", "base_url": "https://203.0.113.20.nip.io", "enabled": 1},
+        {"server_id": "srv_ip_alias", "base_url": "http://203.0.113.20", "enabled": 1},
         {"server_id": "srv_home", "base_url": "https://frogtalk.xyz", "enabled": 1},
     ])
     def test_remote_targets_skip_local_ip_alias(self, _peers, _local):
         import federation_calls as fc
 
-        alias = {"server_id": "srv_ip_alias", "base_url": "http://46.250.244.184"}
-        local = {"server_id": "srv_au", "base_url": "https://46.250.244.184.nip.io"}
+        alias = {"server_id": "srv_ip_alias", "base_url": "http://203.0.113.20"}
+        local = {"server_id": "srv_au", "base_url": "https://203.0.113.20.nip.io"}
         self.assertTrue(fc.federation_peer_is_local_alias(alias, local))
         remote = fd.dm_message_federation_remote_targets(
             {"id": 1, "global_user_id": "00000000-0000-4000-8000-000000000001"},

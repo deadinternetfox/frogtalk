@@ -69,7 +69,7 @@
 <section class="privacy-hero">
   <h1>Privacy Policy</h1>
   <p>FrogTalk is built privacy-first. Your messages are encrypted before they leave your device, we run no analytics, and we sell nothing to anyone. This page explains exactly what that means in plain English.</p>
-  <div class="updated">Last updated: 23 May 2026</div>
+  <div class="updated">Last updated: 30 May 2026</div>
 </section>
 
 <!-- BODY -->
@@ -142,7 +142,7 @@
           <li><em>On every request</em> the IP is held in memory by the rate-limiter (slowapi) to enforce per-IP caps on registration, login, federation provisioning, and abuse-prone endpoints. These counters live only in process memory and are not persisted.</li>
         </ul>
         Connection access logs (nginx) keep the IP for at most <strong>30 days</strong>, then are rotated and discarded. We do not sell, share, or use IPs for advertising or analytics. If you connect through a VPN or Tor, only that exit address is what we ever see.</li>
-      <li><strong>Device push tokens</strong> (FCM on Android, APNs on iOS) when you opt into push notifications. Used only to deliver notifications.</li>
+      <li><strong>Device push tokens</strong> (FCM on Android, APNs on iOS) when you opt into push notifications. Used only to deliver notifications. Push payloads for direct messages <strong>never carry the message body or its ciphertext</strong> — a DM notification shows only the sender's nickname and a fixed "Sent you a direct message" line; tapping it opens the thread and fetches the real message in-app. This single chokepoint covers web push, FCM, and APNs, so message content never reaches Apple's or Google's push services or a lock screen.</li>
       <li><strong>WebRTC ICE candidates</strong> are exchanged through our signalling channel during call setup, then call media flows directly between peers.</li>
     </ul>
 

@@ -40,6 +40,9 @@ build/
 deploy.tar.gz
 *.tar.gz
 node/builds/
+# Desktop packaging output (multi-GB artifacts; keep only the README)
+client/desktop/builds/*
+!client/desktop/builds/README.md
 
 # ── Release binaries (served at runtime, not stored in git) ────
 node/static/*.AppImage
@@ -117,6 +120,12 @@ node/scripts/sync_tor_mirror_from_main.sh
 node/scripts/reset_travel_nodes.sh
 node/scripts/deploy_nodes.sh
 node/scripts/deploy_board.sh
+# Internal fleet-ops helpers — hardcode the production fleet (IPs/roles) and
+# require gitignored deploy_fleet.local.sh; never publish.
+node/scripts/apply_fleet_board_identity.sh
+node/scripts/sync_board_peers_fleet.sh
+# Internal engineering roadmap — spotlights an in-progress hardening item; keep local.
+docs/csp-migration.md
 
 # Internal operator / planning docs (not for public repo)
 docs/internal/
