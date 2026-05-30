@@ -120,6 +120,28 @@
     </ul>
   </section>
 
+  <section class="block" id="hardening">
+    <h2>How nodes are hardened</h2>
+    <p>
+      End-to-end encryption protects message <em>contents</em> even if a server is seized. Around that,
+      the official nodes run defence-in-depth at the operating-system layer — and every operator gets the
+      same playbook free (<a href="https://github.com/deadinternetfox/frogtalk/blob/master/docs/NODE_SECURITY.md" target="_blank" rel="noopener">NODE_SECURITY.md</a>):
+    </p>
+    <ul>
+      <li><strong>Default-deny firewall</strong> (ufw) — only SSH and the web/TURN ports a node actually serves are open.</li>
+      <li><strong>Intrusion detection + auto-ban</strong> — <strong>CrowdSec</strong> (behavioural detection + crowd-sourced blocklists) with an nftables bouncer, alongside <strong>fail2ban</strong>. Optional nginx / PHP / Cloudflare-edge bouncers add application-layer blocking.</li>
+      <li><strong>Automatic security patching</strong> via unattended-upgrades.</li>
+      <li><strong>Least privilege</strong> — the app runs as an unprivileged user, never root; SSH prefers keys.</li>
+      <li><strong>Minimal surface</strong> — official nodes are stripped to "just a FrogTalk node": no desktop packages, no unrelated proxy/VPN software.</li>
+      <li><strong>Privacy-respecting peer display</strong> — the admin federation view can redact peers' clearnet IPs, and push notifications never carry message content or ciphertext.</li>
+    </ul>
+    <div class="callout">
+      <strong>Operator panic button:</strong> the node admin panel has a gated <strong>Danger Zone → Nuke this node</strong>
+      that securely shreds the database, keys and the install itself, best-effort wipes RAM, and powers the box off —
+      for decommission, seizure risk, or a confirmed compromise.
+    </div>
+  </section>
+
   <section class="block" id="scope">
     <h2>What counts as a vulnerability</h2>
     <ul>

@@ -259,6 +259,7 @@
       <li><strong>Public room messages</strong> are kept indefinitely so that history persists for new members; channel admins can purge messages.</li>
       <li><strong>Connection logs</strong> (IP, user-agent) are retained for at most <strong>30 days</strong>, then discarded.</li>
       <li><strong>Backups</strong> roll over within 30 days; deleted content is unrecoverable thereafter.</li>
+      <li><strong>Operator data destruction.</strong> A node operator can trigger a secure self-destruct from the admin panel that overwrites and deletes the database, keys, uploads and the install itself (and best-effort wipes RAM) — used for decommissioning, seizure risk, or a confirmed compromise. Self-hosted instances are governed by their own operators' practices.</li>
     </ul>
     <p>You can delete your account at any time from <em>Settings → Account → Delete account</em>. This permanently removes your profile, messages, uploads, friend list, and keys from our servers.</p>
   </section>

@@ -318,6 +318,50 @@ FROGTALK_TOR_SOCKS_PROXY=socks5h://127.0.0.1:9050</code></pre>
       <p class="hint">Clients open <code>http://….onion/app</code>. Clearnet hubs need Tor SOCKS for onion peers.</p>
     </section>
 
+    <section class="step" id="security">
+      <h2>7) Secure your node (free, do all of these)</h2>
+      <p class="hint">On a public Linux server, hardening, firewalling, patching and intrusion detection matter far more than antivirus. None of this costs anything. Full reference: <code>docs/NODE_SECURITY.md</code> in the repo.</p>
+
+      <h3>Firewall — default-deny inbound</h3>
+      <pre><code>apt-get install -y ufw
+ufw allow 22/tcp            # your SSH port
+ufw allow 80/tcp; ufw allow 443/tcp
+ufw allow 8080/tcp         # nginx app/board upstream (skip if Cloudflare-tunnelled)
+# coturn (only if this node runs calls):
+ufw allow 3478/tcp; ufw allow 3478/udp; ufw allow 49152:65535/udp
+ufw default deny incoming; ufw default allow outgoing
+ufw --force enable</code></pre>
+      <p class="hint"><strong>Don't lock yourself out:</strong> allow your SSH port <em>before</em> <code>enable</code>, and arm an auto-revert while you test —
+      <code>systemd-run --on-active=300 --unit=ufw-safety --collect ufw --force disable</code>, then open a fresh SSH session and <code>systemctl stop ufw-safety.timer</code> once it works.</p>
+
+      <h3>Brute-force defence + intrusion detection</h3>
+      <pre><code>apt-get install -y fail2ban && systemctl enable --now fail2ban
+
+# CrowdSec: behavioural detection + crowd-sourced blocklists + a bouncer that bans
+curl -s https://install.crowdsec.net | sh
+apt-get install -y crowdsec crowdsec-firewall-bouncer-nftables
+cscli collections install crowdsecurity/linux crowdsecurity/sshd crowdsecurity/nginx
+systemctl enable --now crowdsec crowdsec-firewall-bouncer</code></pre>
+      <p class="hint"><strong>Gotcha:</strong> CrowdSec's local API defaults to <code>127.0.0.1:8080</code>, which clashes with FrogTalk's nginx. Move it to <code>127.0.0.1:8083</code> in <code>/etc/crowdsec/config.yaml</code>, <code>local_api_credentials.yaml</code> and the bouncer yaml, then restart CrowdSec.</p>
+      <p class="hint">App-layer bouncers (optional, all free): <strong>nginx</strong> bouncer (block/challenge at the proxy), <strong>PHP</strong> bouncer (protects the <code>/board/</code> imageboard), and the <strong>Cloudflare / Cloudflare Workers</strong> bouncer if your zone is on Cloudflare (blocks at the edge — needs a Workers-scoped API token).</p>
+
+      <h3>Patch automatically + run least-privilege</h3>
+      <pre><code>apt-get install -y unattended-upgrades
+dpkg-reconfigure -plow unattended-upgrades</code></pre>
+      <p class="hint">Run FrogTalk as a <strong>non-root</strong> user (the installer uses <code>deploy</code>; the systemd unit should never be <code>User=root</code>). Prefer SSH keys and, once your key works, <code>PasswordAuthentication no</code>.</p>
+
+      <h3>Strip the box to "just a FrogTalk node"</h3>
+      <p class="hint">Fewer packages = smaller attack surface. Remove desktop/bloat (<code>apt purge snapd xserver-common</code>), disable hardware daemons useless on a VPS (<code>systemctl disable --now ModemManager fwupd multipathd udisks2 upower</code>), and remove anything that isn't FrogTalk. If you find Docker containers or VPN/proxy software you didn't install, treat it as a possible compromise.</p>
+
+      <h3>Danger Zone — node self-destruct</h3>
+      <p class="hint">The <code>/server</code> admin panel has a <strong>Danger Zone → Nuke this node</strong> for decommission / seizure / confirmed-compromise. It securely shreds the database, secrets, keys, uploads and Tor identity, removes the install itself, best-effort wipes free RAM, then powers off. It's gated by your admin session + a fresh PIN (or password) + typing the node's exact name. Install the helper for the full wipe:</p>
+      <pre><code>install -o root -g root -m 0500 node/deploy/frogtalk-nuke.sh /usr/local/sbin/frogtalk-nuke.sh
+install -o root -g root -m 0440 node/deploy/frogtalk-nuke.sudoers /etc/sudoers.d/frogtalk-nuke
+visudo -cf /etc/sudoers.d/frogtalk-nuke
+apt-get install -y secure-delete   # sdmem / sfill for RAM + free-space wipe</code></pre>
+      <p class="hint">Honest limits: on SSD/NVMe an in-place overwrite isn't guaranteed (wear-levelling) — pair it with a provider disk-destroy; "shred RAM" only covers free RAM + cache, and power-off clears the rest.</p>
+    </section>
+
     <section class="step" id="updates">
       <h2>Updates</h2>
       <pre><code>bash node/scripts/install.sh update

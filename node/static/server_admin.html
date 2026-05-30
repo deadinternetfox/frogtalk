@@ -6,23 +6,27 @@
 <title>FrogTalk Server Manager</title>
 <style>
 :root {
-  --bg: #08110b;
-  --bg-soft: #0f1d13;
-  --surface: #13261a;
-  --surface-2: #1b3324;
-  --text: #e8f2eb;
-  --muted: #93ab9a;
-  --accent: #56d16d;
+  /* App appearance-theme tokens. server_admin.js sets these from the user's
+     saved theme so the panel follows Settings → Appearance; the values here
+     are the Frog (default) fallback for when no theme has been applied yet. */
+  --bg-color: #08110b;
+  --surface-color: #13261a;
+  --text-color: #e8f2eb;
+  --text-muted: #93ab9a;
+  --border-color: #284635;
+  --accent-color: #56d16d;
+  /* Admin tokens DERIVE from the theme tokens above, so changing the
+     appearance theme re-tints the whole admin panel. */
+  --bg: var(--bg-color);
+  --bg-soft: color-mix(in srgb, var(--bg-color) 86%, var(--accent-color) 14%);
+  --surface: var(--surface-color);
+  --surface-2: color-mix(in srgb, var(--surface-color) 78%, var(--accent-color) 22%);
+  --text: var(--text-color);
+  --muted: var(--text-muted);
+  --accent: var(--accent-color);
   --warn: #ffb347;
   --danger: #ff6a6a;
-  --line: #284635;
-  /* pin.js lock screen (same tokens as main /app theme) */
-  --bg-color: var(--bg);
-  --surface-color: var(--surface);
-  --text-color: var(--text);
-  --text-muted: var(--muted);
-  --border-color: var(--line);
-  --accent-color: var(--accent);
+  --line: var(--border-color);
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-right: env(safe-area-inset-right, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);

@@ -1,4 +1,45 @@
 (() => {
+  // ── Follow the user's appearance theme ───────────────────────────────────
+  // The admin panel's colors derive from these tokens (see server_admin.html
+  // :root). Apply the saved theme so Settings → Appearance re-tints the panel.
+  // Compact palette for the built-ins; custom themes read their stored JSON;
+  // an unknown theme keeps the Frog (green) fallback from the CSS :root.
+  (function applyAdminTheme() {
+    try {
+      const root = document.documentElement;
+      const setVar = (k, v) => { if (v) root.style.setProperty(k, v); };
+      const apply = (p) => {
+        setVar('--bg-color', p.bg); setVar('--surface-color', p.surface);
+        setVar('--text-color', p.text); setVar('--text-muted', p.muted);
+        setVar('--accent-color', p.accent); setVar('--border-color', p.border);
+      };
+      const PALETTE = {
+        frog:      { bg:'#08110b', surface:'#13261a', text:'#e8f2eb', muted:'#93ab9a', accent:'#56d16d', border:'#284635' },
+        dark:      { bg:'#0d0d0d', surface:'#1a1a1a', text:'#ededed', muted:'#9a9a9a', accent:'#56d16d', border:'#343434' },
+        light:     { bg:'#eef3f0', surface:'#ffffff', text:'#203227', muted:'#5a6b60', accent:'#2f9e44', border:'#c5d8cd' },
+        midnight:  { bg:'#0b0e1a', surface:'#161a2e', text:'#d7dcff', muted:'#8a90b5', accent:'#6f8cff', border:'#3a4373' },
+        forest:    { bg:'#0a140b', surface:'#16271a', text:'#dcf3de', muted:'#93ab95', accent:'#4caf50', border:'#355f3a' },
+        cyberpunk: { bg:'#140820', surface:'#1d1028', text:'#f0ddff', muted:'#b79ad0', accent:'#c061ff', border:'#6f4390' },
+        ocean:     { bg:'#07172a', surface:'#11243d', text:'#d6e8ff', muted:'#8aa6c5', accent:'#2f9ee0', border:'#2a4d70' },
+      };
+      const theme = (localStorage.getItem('frogtalk-theme') || 'frog').toLowerCase();
+      if (theme === 'custom') {
+        let c = {};
+        try { c = JSON.parse(localStorage.getItem('frogtalk-custom-theme') || '{}'); } catch {}
+        apply({
+          bg:      c.bg || c.background || c['--bg-color'],
+          surface: c.surface || c.panel || c['--surface-color'],
+          text:    c.text || c['--text-color'],
+          muted:   c.muted || c.textMuted || c['--text-muted'],
+          accent:  c.accent || c.accentColor || c['--accent-color'],
+          border:  c.border || c.line || c['--border-color'],
+        });
+      } else if (PALETTE[theme]) {
+        apply(PALETTE[theme]);
+      }
+    } catch {}
+  })();
+
   const loginScreen = document.getElementById('login-screen');
   const app = document.getElementById('app');
   const loginMsg = document.getElementById('login-msg');
