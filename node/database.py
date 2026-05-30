@@ -129,6 +129,62 @@ def _decrypt_bridge_token(stored: Optional[str]) -> Optional[str]:
 DB_PATH = Path(os.getenv("DB_PATH", "data/frogtalk.db"))
 
 
+_CSRF_SECRET_CACHE = None
+
+
+def get_or_create_csrf_secret() -> bytes:
+    """Canonical CSRF/session HMAC secret, shared by the token issuer
+    (routers/auth.py) and the validator (main.py) so they never disagree.
+
+    Order: explicit env (FROGTALK_CSRF_SECRET, then FROGTALK_SESSION_SECRET)
+    -> a random secret persisted to ``<data dir>/.csrf_secret`` (0600,
+    survives restarts) -> an ephemeral random secret as a last resort.
+    We no longer fall back to a shipped constant: a default install would
+    otherwise run on a globally-known secret, letting anyone forge CSRF
+    tokens. Mirrors the persisted-key pattern used for the bridge Fernet
+    key above.
+    """
+    env = (os.getenv("FROGTALK_CSRF_SECRET") or os.getenv("FROGTALK_SESSION_SECRET") or "").strip()
+    if env:
+        # Explicit secret: return fresh every call (no caching) so env
+        # changes / per-test secrets take effect immediately.
+        return env.encode("utf-8")
+    global _CSRF_SECRET_CACHE
+    if _CSRF_SECRET_CACHE is not None:
+        return _CSRF_SECRET_CACHE
+    val = ""
+    if not val:
+        path = DB_PATH.parent / ".csrf_secret"
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            if path.exists():
+                val = path.read_text(encoding="utf-8").strip()
+            if not val:
+                val = secrets.token_urlsafe(32)
+                # O_EXCL so we never clobber a secret another worker just
+                # wrote; the FileExistsError branch reads theirs back.
+                fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                try:
+                    os.write(fd, val.encode("utf-8"))
+                finally:
+                    os.close(fd)
+        except FileExistsError:
+            try:
+                val = path.read_text(encoding="utf-8").strip()
+            except Exception:
+                val = ""
+        except Exception:
+            val = ""
+        if not val:
+            val = secrets.token_urlsafe(32)
+            logging.getLogger("frogtalk.database").warning(
+                "Could not persist .csrf_secret; using an ephemeral CSRF secret "
+                "(tokens reset on restart). Set FROGTALK_CSRF_SECRET to fix."
+            )
+    _CSRF_SECRET_CACHE = val.encode("utf-8")
+    return _CSRF_SECRET_CACHE
+
+
 # ── Session token at-rest hardening ───────────────────────────────────
 # Session tokens used to be stored as the raw `secrets.token_urlsafe(32)`
 # string that the cookie carries. A DB dump leak therefore handed the

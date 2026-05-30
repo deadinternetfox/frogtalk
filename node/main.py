@@ -38,7 +38,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
-from database import init_db
+from database import init_db, get_or_create_csrf_secret
 from public_url_policy import (
     OFFICIAL_HUB_URL_DEFAULT,
     official_hub_url,
@@ -975,6 +975,7 @@ app.add_middleware(GZipMiddleware, minimum_size=1024)
 # Set FROGTALK_CSP_ENFORCE=0 to temporarily roll back to report-only if a
 # regression is found in production.
 _CSP_ENFORCE = os.getenv("FROGTALK_CSP_ENFORCE", "1").strip().lower() in ("1", "true", "yes", "on")
+_CSP_STRICT_REPORT = os.getenv("FROGTALK_CSP_STRICT_REPORT", "1").strip().lower() in ("1", "true", "yes", "on")
 _CSP_HEADER_NAME = (
     "Content-Security-Policy" if _CSP_ENFORCE else "Content-Security-Policy-Report-Only"
 )
@@ -1017,6 +1018,50 @@ def _build_csp_header(nonce: str) -> str:
     )
 
 
+def _build_strict_csp_header(nonce: str) -> str:
+    """Report-only TARGET policy for the CSP migration: same as the
+    enforced policy except script-src drops 'unsafe-inline' and adds the
+    per-request nonce, so browsers REPORT (never block) every inline
+    <script>/on*= handler lacking the nonce. See docs/csp-migration.md."""
+    return (
+        "default-src 'self'; "
+        f"script-src 'self' 'nonce-{nonce}' https://frogtalk.app https://frogtalk.xyz; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+        "font-src 'self' https://fonts.gstatic.com data:; "
+        "img-src 'self' data: blob: https:; "
+        "media-src 'self' data: blob: https:; "
+        "connect-src 'self' wss: https://api.klipy.com https://media.klipy.com https://cdn.klipy.com https://static.klipy.com https://tenor.googleapis.com https://media.tenor.com; "
+        "frame-src 'self' https://www.youtube.com https://open.spotify.com https://platform.twitter.com; "
+        "frame-ancestors 'self'; "
+        "base-uri 'self'; "
+        "form-action 'self'; "
+        "object-src 'none'; "
+        "worker-src 'self' blob:; "
+        "report-uri /api/csp-report"
+    )
+
+
+_CSP_REPORT_LOGGED = 0
+_CSP_REPORT_MAX = 500
+
+
+@app.post("/api/csp-report")
+async def _csp_report_collector(request: Request):
+    """Bounded collector for CSP report-only violations during the
+    script-src migration. Logs a sample at WARNING; returns 204. Body is
+    attacker-influenced telemetry -- only logged, never trusted."""
+    global _CSP_REPORT_LOGGED
+    try:
+        if _CSP_REPORT_LOGGED < _CSP_REPORT_MAX:
+            body = (await request.body())[:2000].decode("utf-8", "replace")
+            if body:
+                _CSP_REPORT_LOGGED += 1
+                logging.getLogger("frogtalk.csp").warning("csp-report %d: %s", _CSP_REPORT_LOGGED, body)
+    except Exception:
+        pass
+    return Response(status_code=204)
+
+
 @app.middleware("http")
 async def _security_headers(request: Request, call_next):
     # Per-request CSP nonce (24 url-safe chars = 144 bits entropy). Stored
@@ -1036,6 +1081,10 @@ async def _security_headers(request: Request, call_next):
         "geolocation=(self), microphone=(self), camera=(self), payment=(), usb=()",
     )
     response.headers.setdefault(_CSP_HEADER_NAME, _build_csp_header(nonce))
+    if _CSP_ENFORCE and _CSP_STRICT_REPORT:
+        response.headers.setdefault(
+            "Content-Security-Policy-Report-Only", _build_strict_csp_header(nonce)
+        )
     if request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https":
         response.headers.setdefault(
             "Strict-Transport-Security",
@@ -1107,8 +1156,9 @@ _CSRF_EXEMPT_PATH_PREFIXES = (
 
 
 def _expected_csrf_for_token(token: str) -> str:
-    secret = (os.getenv("FROGTALK_CSRF_SECRET") or os.getenv("FROGTALK_SESSION_SECRET") or "frogtalk-csrf-derive-v1").encode("utf-8")
-    return _csrf_hmac.new(secret, token.encode("utf-8"), _csrf_hashlib.sha256).hexdigest()
+    # Shared resolver in database.py so the issuer (routers/auth.py) and
+    # this validator never disagree. No shipped-constant fallback.
+    return _csrf_hmac.new(get_or_create_csrf_secret(), token.encode("utf-8"), _csrf_hashlib.sha256).hexdigest()
 
 
 @app.middleware("http")

@@ -14,7 +14,7 @@
   const DEFAULT_POLICY = 'fresh_keys';
   const KEYFILE_MAGIC = 'FROGTALK-KEY-v1';
   const KEYFILE_MAGIC_FROG = 'FROGTALK-FROG-v1';
-  const KEYFILE_KDF_ITERS = 210000;
+  const KEYFILE_KDF_ITERS = 600000;
   const KEYFILE_MAX_BYTES = 12 * 1024 * 1024;
   const KEYFILE_EXT = '.FrogTalk';
 
@@ -864,7 +864,7 @@
     return importFromSwitch(ticket);
   }
 
-  async function _deriveKeyFromPassphrase(passphrase, saltU8) {
+  async function _deriveKeyFromPassphrase(passphrase, saltU8, iters) {
     const enc = new TextEncoder();
     const baseKey = await crypto.subtle.importKey(
       'raw',
@@ -877,7 +877,7 @@
       {
         name: 'PBKDF2',
         salt: saltU8,
-        iterations: KEYFILE_KDF_ITERS,
+        iterations: iters || KEYFILE_KDF_ITERS,
         hash: 'SHA-256',
       },
       baseKey,
@@ -900,7 +900,7 @@
     const salt = _bytesFromB64(wrap.salt_b64);
     const iv = _bytesFromB64(wrap.iv_b64);
     const ct = _bytesFromB64(wrap.ciphertext_b64);
-    const key = await _deriveKeyFromPassphrase(passphrase, salt);
+    const key = await _deriveKeyFromPassphrase(passphrase, salt, wrap.kdf_iters || 210000);
     const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, ct);
     return JSON.parse(new TextDecoder().decode(plain));
   }

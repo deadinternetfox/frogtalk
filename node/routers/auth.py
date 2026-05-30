@@ -7008,7 +7008,7 @@ def _attach_session_cookies(response, request: Request, token: str) -> None:
     try:
         import hmac as _hmac
         import hashlib as _hashlib
-        secret = (_auth_os.getenv("FROGTALK_CSRF_SECRET") or _auth_os.getenv("FROGTALK_SESSION_SECRET") or "frogtalk-csrf-derive-v1").encode("utf-8")
+        secret = db.get_or_create_csrf_secret()  # shared resolver; must match main.py validator
         csrf = _hmac.new(secret, token.encode("utf-8"), _hashlib.sha256).hexdigest()
         response.set_cookie(
             key=_CSRF_COOKIE_NAME,

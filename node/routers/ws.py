@@ -11,6 +11,29 @@ import database as db
 from deps import cw_ack_is_required, cw_http_detail
 from ws_manager import manager, voice_manager
 
+
+async def _db(fn, *args, **kwargs):
+    """Run a blocking SQLite call in a worker thread so the single event
+    loop never stalls on the 5s busy_timeout when a write contends with
+    the federation inbox writer. Under WAL only writers serialize, so we
+    use this for the hot-path *writes* below; reads stay inline (cheap and
+    non-blocking under WAL). Mirrors the federation inbox offload."""
+    return await asyncio.to_thread(fn, *args, **kwargs)
+
+
+def _link_reply_sync(msg_id, reply_to):
+    """Reply linkage write + lookup, run off-loop via _db()."""
+    with db._conn() as con:
+        con.execute("UPDATE messages SET reply_to=? WHERE id=?", (reply_to, msg_id))
+        con.commit()
+        row = con.execute(
+            "SELECT nickname, substr(content,1,120) AS content FROM messages WHERE id=?",
+            (reply_to,),
+        ).fetchone()
+        if row:
+            return row["nickname"], row["content"]
+    return None, None
+
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["websocket"])
 
@@ -709,7 +732,7 @@ async def websocket_endpoint(
                 _frame_times.append(_fr_now)
 
             try:
-                db.update_last_seen(user["id"])
+                await _db(db.update_last_seen, user["id"])
             except Exception:
                 pass
             try:
@@ -826,23 +849,18 @@ async def websocket_endpoint(
                 if view_once and not room_name.startswith("dm:"):
                     view_once = 0
 
-                msg_id = db.save_message(
+                msg_id = await _db(
+                    db.save_message,
                     room_name, user["id"], user["nickname"],
                     content, media_data, media_type,
                     media_blur, view_once,
                     key_version=int(data.get("key_version") or 0),
                 )
-                # Store reply linkage if provided
+                # Store reply linkage if provided (off-loop: it writes)
                 reply_nickname = None
                 reply_content = None
                 if reply_to:
-                    with db._conn() as con:
-                        con.execute("UPDATE messages SET reply_to=? WHERE id=?", (reply_to, msg_id))
-                        con.commit()
-                        row = con.execute("SELECT nickname, substr(content,1,120) AS content FROM messages WHERE id=?", (reply_to,)).fetchone()
-                        if row:
-                            reply_nickname = row["nickname"]
-                            reply_content = row["content"]
+                    reply_nickname, reply_content = await _db(_link_reply_sync, msg_id, reply_to)
 
                 payload = {
                     "type": "message",

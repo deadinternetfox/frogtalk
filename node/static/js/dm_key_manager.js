@@ -658,8 +658,8 @@
     _setErr('');
     const p1 = String(_el('ft-key-export-pass')?.value || '');
     const p2 = String(_el('ft-key-export-pass2')?.value || '');
-    if (p1.length < 8) {
-      _setErr('Use a passphrase of at least 8 characters.');
+    if (p1.length < 12) {
+      _setErr('Use a passphrase of at least 12 characters.');
       return;
     }
     if (p1 !== p2) {
