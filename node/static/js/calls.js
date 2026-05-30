@@ -2017,9 +2017,23 @@ function showCallOverlay (type, peerNick, status, avatar) {
   setText('call-tile-local-name', State.user?.nickname || 'You');
   // Set avatars
   const selfAv = document.getElementById('call-self-avatar');
-  if (selfAv) selfAv.innerHTML = State.user?.avatar
-    ? `<img src="${esc(State.user.avatar)}" alt="">`
-    : `<div class="call-avatar-initial">${esc(String(State.user?.nickname||'?')[0].toUpperCase())}</div>`;
+  if (selfAv) {
+    // Avatars can be an emoji, not just a URL. The old code rendered ANY
+    // truthy avatar as <img src=…>, so an emoji (or any non-URL) avatar
+    // produced the browser's broken-image "torn file" box in the call tile.
+    // Route through UI.avatarEl, which is URL-aware (img | emoji | tinted
+    // default frog) exactly like the remote tile (_renderPeerAvatar).
+    const _selfNick = State.user?.nickname || 'You';
+    if (typeof UI !== 'undefined' && typeof UI.avatarEl === 'function') {
+      selfAv.innerHTML = UI.avatarEl(State.user?.avatar || null, _selfNick, 96);
+    } else {
+      const s = String(State.user?.avatar || '');
+      const isUrl = s.startsWith('data:image/') || s.startsWith('http://') || s.startsWith('https://') || s.startsWith('/');
+      if (s && isUrl) selfAv.innerHTML = `<img src="${esc(s)}" alt="">`;
+      else if (s) selfAv.innerHTML = `<span class="call-avatar-emoji">${esc(s.slice(0, 2))}</span>`;
+      else selfAv.innerHTML = `<div class="call-avatar-initial">${esc(String(_selfNick)[0].toUpperCase())}</div>`;
+    }
+  }
   _renderPeerAvatar(peerNick, avatar);
   _ensureCallPeerAvatar(true).catch(() => {});
   document.getElementById('call-overlay')?.classList.remove('hidden');

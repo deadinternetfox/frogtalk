@@ -79,7 +79,7 @@ and private channels (AES-GCM) before data reaches your disk.
 | Branch | Default client node | Live host | Role |
 |--------|---------------------|-----------|------|
 | **`master`** | `frogtalk.app` | [frogtalk.app](https://frogtalk.app) | Pre-alpha **production hub** — official directory, stable line for operators |
-| **`dev`** | `dev branch` | `dev` branch docs | **Active development** — features land here first; may break without notice |
+| **`dev`** | `frogtalk.xyz` | [frogtalk.xyz](https://frogtalk.xyz) | **Active development** — features land here first; deploys to the dev server; may break without notice |
 | **Tor** (any branch) | varies | `.onion` | Hidden service; `FROGTALK_HOME_PAGE=tor` — vanity search via `node/scripts/tor_vanity_onion.sh` |
 
 **Workflow:** fork and PR into **`dev`**. After testing, maintainers merge **`dev` → `master`** for production deploys. The only intentional code diff between branches in git is usually `client/official-node.json` (see [client/README.md](client/README.md)); **`dev`** also carries a contributor-focused root README.

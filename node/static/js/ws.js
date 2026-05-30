@@ -1002,8 +1002,15 @@ const WS = (() => {
       }
       // ── Friend notifications ──────────────────────
       case 'friend_notify': {
-        Notifications.notifyFriend(data);
-        if (typeof handleFriendNotify === 'function') handleFriendNotify(data);
+        // Isolate the two side effects: a throw inside notifyFriend (e.g. an
+        // AudioContext/Notification quirk) must NOT prevent handleFriendNotify
+        // from running — that's what raises the red request badge on the
+        // Friends icon. Previously a failure here left the badge stale until
+        // the user opened the Friends panel.
+        try { Notifications.notifyFriend(data); } catch (e) { console.warn('notifyFriend failed', e); }
+        if (typeof handleFriendNotify === 'function') {
+          try { handleFriendNotify(data); } catch (e) { console.warn('handleFriendNotify failed', e); }
+        }
         break;
       }
       // ── Music channel events ──────────────────────

@@ -286,10 +286,15 @@ async def accept_request(request: Request, nickname: str, current_user: dict = D
         a_id = int(current_user["id"])      # accepter
         b_id = int(profile["id"])           # original requester
         channel_id = db.get_or_create_dm(a_id, b_id)
+        # Name who added whom. `profile` sent the request (the adder); the
+        # current user just accepted it (the one who was added). Both sides see
+        # the same neutral line, e.g. "alice added bob — say hi! 👋".
+        adder = str(profile.get("nickname") or "Someone")
+        added = str(current_user.get("nickname") or "you")
         content = dm_sys_content(
             kind="friends_added",
             title="You're now friends \U0001F438",
-            subtitle="Say hi to start the conversation.",
+            subtitle=f"{adder} added {added} — say hi! \U0001F44B",
             icon="\U0001F91D",
         )
         msg_id = db.send_dm_message(channel_id, a_id, content)
@@ -340,7 +345,12 @@ async def decline_request(request: Request, nickname: str, current_user: dict = 
     profile = db.get_user_profile(nickname)
     if not profile:
         return JSONResponse(status_code=404, content={"error": "User not found"})
-    if db.friend_request_status(profile["id"], current_user["id"]) != "received":
+    # Perspective matters: friend_request_status(viewer, other) reports from the
+    # viewer's side. The decliner (current_user) RECEIVED the request from
+    # `profile`, so we must check from current_user's perspective. Passing the
+    # requester first returned "sent" here and made decline always 404 — the
+    # request row was never deleted, so the row "came back" on the next refresh.
+    if db.friend_request_status(current_user["id"], profile["id"]) != "received":
         return JSONResponse(status_code=404, content={"error": "No pending request from that user"})
     db.decline_friend_request(profile["id"], current_user["id"])
     _emit_friend_graph_event(

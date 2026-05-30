@@ -3362,8 +3362,32 @@ html.ft-kb-open #input-area{
   33%{transform:rotate(7deg) scale(1.16)}
   66%{transform:rotate(-6deg) scale(1.12)}
 }
+/* Second, slower counter-drifting accent layer adds gentle life to the call
+   backdrop without distracting from the call itself. Same theme-var recipe as
+   ::before, lower opacity, opposite drift, GPU-promoted (transform/opacity
+   only). screen blend lets the accent glow softly over the dark overlay. */
+#call-overlay::after{
+  content:'';
+  position:absolute;
+  inset:-50%;
+  z-index:-1;
+  pointer-events:none;
+  background:
+    radial-gradient(40% 40% at 70% 18%, color-mix(in srgb, var(--accent-color) 20%, transparent), transparent 60%),
+    radial-gradient(46% 46% at 18% 74%, color-mix(in srgb, var(--accent-color) 14%, transparent), transparent 64%);
+  opacity:.4;
+  mix-blend-mode:screen;
+  animation:callAuroraDrift2 38s ease-in-out infinite;
+  will-change:transform;
+  transform:translateZ(0);
+}
+@keyframes callAuroraDrift2{
+  0%,100%{transform:rotate(0deg) scale(1.12) translate(0,0)}
+  50%{transform:rotate(-8deg) scale(1.2) translate(2%,-2%)}
+}
 @media (prefers-reduced-motion: reduce){
   #call-overlay::before{animation:none;opacity:.42}
+  #call-overlay::after{animation:none;opacity:.3}
 }
 #call-overlay.hidden{display:none!important}
 /* Voice-only calls: keep a live media element for WebKit (not display:none). */
@@ -12350,7 +12374,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoa
 <script src="/static/js/format_toolbar.js?v=2"></script>
 <script src="/static/js/users.js?v=__APP_ASSET_VERSION__"></script>
 <script src="/static/js/emoji.js?v=__APP_ASSET_VERSION__"></script>
-<script src="/static/js/friends.js?v=425"></script>
+<script src="/static/js/friends.js?v=__APP_ASSET_VERSION__"></script>
 <script src="/static/js/dms.js?v=__APP_ASSET_VERSION__"></script>
 <script src="/static/js/calls.js?v=__APP_ASSET_VERSION__"></script>
 <script src="/static/js/gifs.js?v=219"></script>

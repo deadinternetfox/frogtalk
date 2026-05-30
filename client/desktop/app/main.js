@@ -38,6 +38,15 @@ const DESKTOP_SETTINGS_PATH = path.join(app.getPath('userData'), 'desktop-settin
 
 // Ensure incoming call audio can start reliably without a fresh user gesture.
 try { app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required'); } catch {}
+// Linux/Wayland: desktopCapturer screen enumeration for "Share screen" goes
+// through xdg-desktop-portal + PipeWire. Enable the PipeWire capturer so the
+// source list is populated on Wayland sessions. No effect on X11 (where
+// desktopCapturer enumerates screens/windows directly) or other platforms.
+try {
+  if (process.platform === 'linux' && process.env.WAYLAND_DISPLAY) {
+    app.commandLine.appendSwitch('enable-features', 'WebRTCPipeWireCapturer');
+  }
+} catch {}
 
 let mainWindow = null;
 let tray = null;
@@ -858,18 +867,32 @@ async function createWindow() {
             fetchWindowIcons: true,
           })
           .then(async (sources) => {
-            if (!sources || !sources.length) { try { callback(); } catch {} return; }
+            const list = sources || [];
+            if (!list.length) {
+              // On Wayland without a working xdg-desktop-portal, getSources can
+              // return empty. Still open the picker (it shows a clear "No
+              // shareable screens or windows were found" message + Cancel) so
+              // the user gets feedback instead of the share silently doing
+              // nothing — which read as "screen share is broken on Linux".
+              console.warn('screen share: desktopCapturer returned no sources');
+            }
             try {
-              const chosenId = await showScreenSharePicker(sources, mainWindow);
-              const src = chosenId ? sources.find((s) => s.id === chosenId) : null;
-              // No source → user cancelled. callback() with no video cancels
-              // the request, which the renderer sees as NotAllowedError (handled
-              // silently in calls.js toggleScreenShare).
+              const chosenId = await showScreenSharePicker(list, mainWindow);
+              const src = chosenId ? list.find((s) => s.id === chosenId) : null;
+              // No source → user cancelled / nothing to share. callback() with
+              // no video cancels the request (renderer sees NotAllowedError,
+              // handled silently in calls.js toggleScreenShare).
               if (src) callback({ video: src });
               else callback();
-            } catch { try { callback(); } catch {} }
+            } catch (err) {
+              console.warn('screen share picker failed:', err && err.message ? err.message : err);
+              try { callback(); } catch {}
+            }
           })
-          .catch(() => { try { callback(); } catch {} });
+          .catch((err) => {
+            console.warn('screen share getSources failed:', err && err.message ? err.message : err);
+            try { callback(); } catch {}
+          });
         // useSystemPicker only works on macOS today; forcing it on Linux/Windows
         // made Electron skip this handler (and try a portal picker that isn't
         // wired on X11), so the share silently never started. Keep it macOS-only

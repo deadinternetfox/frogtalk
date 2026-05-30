@@ -450,8 +450,20 @@ function handleFriendNotify (data) {
       } catch {}
     };
     if (!isDnd) toast('👥 ' + msg, 'info', 6000, onClick);
-    loadFriends(); // refresh badge
-    updateFrogBadge();
+    // Optimistically reflect a NEW incoming request in the badge right away.
+    // loadFriends() below reconciles against the server, but seeding the count
+    // here makes the red dot appear the instant the request arrives instead of
+    // only after the user opens the Friends panel.
+    if (data.action === 'request') {
+      try {
+        const from = String(data.from || '');
+        if (from && !_pendingFriends.some(f => f.nickname === from)) {
+          _pendingFriends.push({ nickname: from, display_name: from, avatar: data.from_avatar || '' });
+        }
+      } catch {}
+    }
+    updateFrogBadge(); // show immediately with the optimistic count
+    loadFriends();     // reconcile with server (re-runs updateFrogBadge)
     // Show system notification (browser / Electron / Android)
     if (!isDnd) _showFriendNotification(data.from, data.action, data.from_avatar);
   }
