@@ -1150,8 +1150,10 @@ async def websocket_endpoint(
                         "FrogTalk",
                         f"💬 New message from {user['nickname']}",
                         "/app",
+                        kind="dm",
                         extra={
                             "sender_name": user["nickname"],
+                            "from_nickname": user["nickname"],
                             "conversation_id": str(channel_id),
                             "conversation_name": user["nickname"],
                         },

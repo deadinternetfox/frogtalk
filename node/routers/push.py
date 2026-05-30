@@ -367,6 +367,18 @@ def send_push(user_id: int, title: str, body: str, url: str = "/app",
     `tag` groups/replaces related notifications (use per-call id so ringing pushes
     don't stack). `require_interaction` keeps the notification on screen until the
     user acts on it — essential for incoming calls."""
+    # PRIVACY: a DM body is E2E ciphertext on the server (and even plaintext
+    # shouldn't land on a lock screen / shared device). Never put DM content in
+    # any push — standardize every kind="dm" notification to a contentless line.
+    # Tapping it opens the thread and fetches the real message in-app. This is
+    # the single chokepoint for web push, FCM and APNs, so it also covers the
+    # REST DM path that used to forward the raw (encrypted) message body.
+    if str(kind) == "dm":
+        _dm_sender = ""
+        if extra:
+            _dm_sender = str(extra.get("from_nickname") or extra.get("sender_name") or "").strip()
+        title = _dm_sender or "FrogTalk"
+        body = "Sent you a direct message"
     try:
         from pywebpush import webpush
     except ImportError:

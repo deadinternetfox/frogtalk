@@ -1120,21 +1120,18 @@ const Notifications = (() => {
             return `${icon} ${t}${sub}`;
           } catch { return '📞 Call'; }
         }
-        const stripped = raw.replace(/<[^>]+>/g, '').slice(0, 140);
-        if (stripped) return stripped;
-        // Media-only DM: pick a friendly icon by media_type.
-        const mt = String(msg.media_type || '').toLowerCase();
-        if (mt.startsWith('image')) return '🖼️ Image';
-        if (mt.startsWith('video')) return '🎬 Video';
-        if (mt.startsWith('audio')) return '🎵 Voice note';
-        if (msg.has_media || mt) return '📎 Media';
-        return 'New message';
+        // PRIVACY: never surface DM content (or its undecryptable ciphertext)
+        // in the tray/lock screen — just announce that a message arrived; the
+        // thread opens and fetches the real message on tap. (Call-log system
+        // lines handled above are not private content, so they keep their
+        // friendly one-liner.)
+        return 'Sent you a direct message';
       })();
       if (_pref('notify_desktop', true) &&
           typeof Notification !== 'undefined' &&
           Notification.permission === 'granted') {
         try {
-          new Notification(`${msg.sender_nickname || msg.sender_nick || msg.nickname || 'Someone'} sent you a message`, {
+          new Notification(`${msg.sender_nickname || msg.sender_nick || msg.nickname || 'Someone'}`, {
             body: _bodyForPush.slice(0, 100),
             icon: '/static/icons/icon-192.png',
             tag: 'frogtalk-dm-' + (msg.sender_nickname || 'dm'),
@@ -1145,7 +1142,7 @@ const Notifications = (() => {
       // usually a no-op inside a WebView, so we push through Android directly.
       try {
         if (window.Android && typeof window.Android.showNotification === 'function') {
-          const title = `${msg.sender_nickname || msg.sender_nick || msg.nickname || 'Someone'} sent you a message`;
+          const title = `${msg.sender_nickname || msg.sender_nick || msg.nickname || 'Someone'}`;
           window.Android.showNotification(title, _bodyForPush);
         }
       } catch {}
