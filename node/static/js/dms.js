@@ -2453,6 +2453,46 @@ async function hideDMChannel (channelId) {
   } catch (e) { console.error('hideDMChannel', e); }
 }
 
+/** True for the persisted "[[DMSYS]] chat_wiped" ("Conversation cleared") card. */
+function _dmIsChatWipedNotice (m) {
+  if (!m || typeof m.content !== 'string' || !m.content.startsWith('[[DMSYS]]')) return false;
+  try { return JSON.parse(m.content.slice('[[DMSYS]]'.length))?.kind === 'chat_wiped'; }
+  catch { return false; }
+}
+
+/**
+ * Apply a conversation wipe to the local view deterministically.
+ *
+ * The actor's own DELETE response and the `dm_messages_wiped` socket push both
+ * land here, in any order, racing an in-flight history fetch and the server's
+ * "Conversation cleared" notice (which arrives as a separate dm_message).
+ * Without one funnel the late writer wins: a history page snapshotted before
+ * the delete committed repaints the old messages, or a late clear nukes the
+ * freshly-arrived notice — leaving the actor stuck on old, unscrollable
+ * messages until they reopen the thread.
+ *
+ * So: invalidate any in-flight non-silent load (bump the req seq so it bails),
+ * drop the loading flags that make renderDMChat early-return on stale DOM, and
+ * rebuild the list as just the wipe notice if it already arrived, else empty
+ * (the live notice append fills it in). End state is the same for every order.
+ */
+function _applyDmWipeLocally (channelId) {
+  const chId = Number(channelId) || 0;
+  if (!chId) return;
+  // Invalidate any history fetch in flight so its pre-delete page can't repaint.
+  _dmLoadReqSeq++;
+  if (_activeDM?.id === chId) {
+    _dmMessagesLoading = false;
+    _dmSilentFetch = false;
+    const notice = _dmMessages.find(_dmIsChatWipedNotice);
+    _dmMessages = notice ? [notice] : [];
+    _dmHistoryCache.set(chId, _dmMessages.map(x => ({ ...x })));
+    renderDMChat();
+  } else {
+    _dmHistoryCache.set(chId, []);
+  }
+}
+
 async function wipeDMMessages () {
   if (!_activeDM) return;
   const ok = await UI.confirm({
@@ -2465,9 +2505,7 @@ async function wipeDMMessages () {
   try {
     const r = await apiFetch(`/api/dms/${_activeDM.id}/messages`, 'DELETE');
     if (r.ok) {
-      _dmMessages = [];
-      _dmHistoryCache.set(_activeDM.id, []);
-      renderDMChat();
+      _applyDmWipeLocally(_activeDM.id);
       renderDMChannels();
       const peerId = Number(_activeDM.user_id) || 0;
       if (peerId && window.Signal?.requestDmCryptoHeal) {
@@ -5886,11 +5924,7 @@ function handleWSDMMessagesWiped(data) {
   const myId = Number(STATE.user?.id) || 0;
   if (!chId) return;
 
-  _dmHistoryCache.set(chId, []);
-  if (_activeDM?.id === chId) {
-    _dmMessages = [];
-    renderDMChat();
-  }
+  _applyDmWipeLocally(chId);
   for (const ch of _dmChannels) {
     if (ch.id === chId) {
       ch.last_msg = null;

@@ -509,6 +509,14 @@ async function _verifyCallFp(envelope, callId, fromId, sdp, opts) {
   if (!fp) return { ok: 'unverified', reason: 'no_fp_in_sdp' };
 
   const federated = !!(opts?.federated || opts?.originServerId);
+  // The signed envelope carries the *signer's* local numeric call_id, which is
+  // the DB row id on their node. Across federated nodes the same call has a
+  // DIFFERENT local id on each side (only global_call_id matches), so binding
+  // expectedCallId to our local id guarantees a spurious 'call_id_mismatch' —
+  // a FATAL verify reason that tears the call down the instant the answer
+  // arrives. Never bind the local call_id for federated calls; the Ed25519
+  // signature over {fingerprint, identity, peer} still prevents tampering.
+  const bindCallId = !(opts && opts.bindCallId === false) && !federated;
   const keysServerId = String(
     opts?.keysServerId || opts?.originServerId || opts?.peerHomeServerId || _peerHomeServerId || '',
   ).trim();
@@ -539,7 +547,7 @@ async function _verifyCallFp(envelope, callId, fromId, sdp, opts) {
           federated: true,
         };
         if (myGid) laneOpts.expectedPeerGlobalUserId = myGid;
-        if (!(opts && opts.bindCallId === false)) laneOpts.expectedCallId = Number(callId);
+        if (bindCallId) laneOpts.expectedCallId = Number(callId);
         const sigRes = await Signal.verifyCallFingerprint(envelope, laneOpts);
         if (sigRes && sigRes.ok) {
           return { ok: 'unverified', reason: 'identity_lane_mismatch' };
@@ -565,7 +573,7 @@ async function _verifyCallFp(envelope, callId, fromId, sdp, opts) {
     } else if (!federated && myId) {
       vopts.expectedPeerUserId = Number(myId);
     }
-    if (!(opts && opts.bindCallId === false)) {
+    if (bindCallId) {
       vopts.expectedCallId = Number(callId);
     }
     return vopts;
@@ -1185,9 +1193,11 @@ async function handleCallAnswer (data) {
     _peerHomeServerId = String(data.peer_home_server_id || data.origin_server_id || _peerHomeServerId);
   }
   // Track E: verify callee's signed DTLS fingerprint envelope against the
-  // SDP we're about to apply. Callee signs with the real call_id, so we
-  // bind it here. Fatal verify reasons → tear down before the DTLS
-  // handshake can start with a tampered fingerprint.
+  // SDP we're about to apply. For same-node calls the callee signs with the
+  // shared call_id so it's bound here; for federated calls the local ids
+  // differ per node, so _verifyCallFp skips the call_id binding (otherwise a
+  // structural 'call_id_mismatch' would fatally end every cross-node call).
+  // Fatal verify reasons → tear down before the DTLS handshake can start.
   try {
     const callIdForVerify = data.call_id || _callId || 0;
     const fromIdForVerify = data.from_id || _callPeerUID || 0;
@@ -1608,11 +1618,11 @@ async function createPC () {
         _ensureMediaPlayback(document.getElementById('remote-audio'), 'call-connected-audio');
         // Clear any pending reconnect timer — we're back.
         clearTimeout(_reconnectTimer); _reconnectTimer = null;
-        // Always show cam/screen buttons — user can enable mid-call
+        // Always show cam — user can enable mid-call. Screen-share button only
+        // where getDisplayMedia exists (not the Android WebView).
         const bCam = document.getElementById('btn-call-cam');
-        const bSc  = document.getElementById('btn-call-screen');
         if (bCam) bCam.style.display = '';
-        if (bSc)  bSc.style.display  = '';
+        _applyScreenShareButtonVisibility();
         _startLocalVAD();
       } else if (s === 'disconnected') {
         // Transient network hiccup — give ICE 15s to recover before tearing down.
@@ -1736,10 +1746,27 @@ async function toggleCallCamera () {
   }
 }
 
+// Android System WebView does not implement getDisplayMedia()/screen capture
+// (there is no screen-capture resource in android.webkit.PermissionRequest, and
+// the page's RTCPeerConnection can't be fed a native MediaProjection track), so
+// the screen-share control is unavailable in the Android shell. Hide rather
+// than present a button that can only ever error.
+function _isAndroidWebView () {
+  return /Android/i.test(navigator.userAgent || '') && !!window.Android;
+}
+function _screenShareSupported () {
+  return !_isAndroidWebView()
+    && !!(navigator.mediaDevices && typeof navigator.mediaDevices.getDisplayMedia === 'function');
+}
+function _applyScreenShareButtonVisibility () {
+  const bSc = document.getElementById('btn-call-screen');
+  if (bSc) bSc.style.display = _screenShareSupported() ? '' : 'none';
+}
+
 async function toggleScreenShare () {
   const btn = document.getElementById('btn-call-screen');
   if (!_pc) { toast('No active call', 'error'); return; }
-  const isAndroidWebView = /Android/i.test(navigator.userAgent || '') && !!window.Android;
+  const isAndroidWebView = _isAndroidWebView();
   // Already sharing — stop and revert.
   if (_screenStream) {
     _screenStream.getTracks().forEach(t => t.stop());
@@ -1760,12 +1787,15 @@ async function toggleScreenShare () {
   }
   // Start sharing.
   try {
+    if (isAndroidWebView) {
+      // Android System WebView has no getDisplayMedia/screen-capture API, and
+      // there's no way to inject a native MediaProjection track into the page's
+      // RTCPeerConnection. Updating the WebView won't help — it's a platform gap.
+      toast('Screen sharing is not available on Android — this is a system WebView limitation. Use the desktop app to share your screen.', 'info', 6000);
+      return;
+    }
     if (!navigator.mediaDevices || typeof navigator.mediaDevices.getDisplayMedia !== 'function') {
-      if (isAndroidWebView) {
-        toast('Screen share is not supported by this Android WebView build', 'error');
-      } else {
-        toast('Screen share is not supported on this device/browser', 'error');
-      }
+      toast('Screen share is not supported on this device/browser', 'error');
       return;
     }
     _screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
@@ -1785,11 +1815,7 @@ async function toggleScreenShare () {
     // User cancelled the picker — silent.
     if (e && e.name !== 'NotAllowedError') {
       console.warn('screen share failed', e);
-      if (isAndroidWebView) {
-        toast('Screen share failed in Android WebView. Update Android System WebView/Chrome.', 'error');
-      } else {
-        toast('Screen share failed', 'error');
-      }
+      toast('Screen share failed', 'error');
     }
   }
 }
@@ -1898,9 +1924,10 @@ function showCallOverlay (type, peerNick, status, avatar) {
   if (_muteIndEl) _muteIndEl.style.display = 'none';
   // Show all control buttons immediately
   const bCam = document.getElementById('btn-call-cam');
-  const bSc  = document.getElementById('btn-call-screen');
   if (bCam) bCam.style.display = '';
-  if (bSc)  bSc.style.display  = '';
+  // Screen share is desktop/standard-browser only (no getDisplayMedia in the
+  // Android WebView), so only show the button where it can actually work.
+  _applyScreenShareButtonVisibility();
   // Start voice activity detection on local stream (safe if no stream yet)
   try { _startLocalVAD(); } catch (e) { console.warn('VAD start failed', e); }
   // NOTE: Android call notification is now started AFTER getUserMedia resolves

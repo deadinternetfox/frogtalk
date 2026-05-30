@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, Tray, Notification, shell, ipcMain, dialog } = require('electron');
+const { app, BrowserWindow, Menu, Tray, Notification, shell, ipcMain, dialog, desktopCapturer } = require('electron');
 const fs = require('fs');
 const path = require('path');
 
@@ -256,6 +256,90 @@ document.getElementById('url').addEventListener('keydown',function(e){ if(e.key=
 document.getElementById('url').focus(); document.getElementById('url').select();
 </script></body></html>`)}`);
     win.show();
+  });
+}
+
+// ── Screen-share source picker ───────────────────────────────────────────────
+// Electron does NOT wire up getDisplayMedia() automatically: a renderer call
+// rejects unless the main process installs a setDisplayMediaRequestHandler.
+// That missing handler is why "Share screen" silently failed in the desktop
+// app. We grab the available screens/windows via desktopCapturer and show a
+// small native picker so the user can choose what to share.
+function _screenSharePickerHtml(sources) {
+  const cards = sources.map((s) => `
+    <button type="button" class="src" data-id="${encodeURIComponent(s.id)}" title="${String(s.name || '').replace(/"/g, '&quot;')}">
+      <img src="${s.thumb || ''}" alt="">
+      <span class="label">${String(s.name || 'Source').replace(/</g, '&lt;')}</span>
+    </button>`).join('');
+  return `<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Share your screen</title>
+<style>
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+    background:linear-gradient(180deg,#12231e 0%,#0a1411 100%);color:#dff5e8}
+  .wrap{padding:16px 18px;height:100%;display:flex;flex-direction:column}
+  h2{margin:0 0 4px;font-size:17px}
+  p{margin:0 0 12px;color:#85a89a;font-size:12px}
+  .grid{flex:1;overflow:auto;display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px;align-content:start}
+  .src{display:flex;flex-direction:column;gap:6px;padding:8px;border:1px solid #2f5548;border-radius:10px;
+    background:rgba(20,36,29,.6);color:#dff5e8;cursor:pointer;text-align:left}
+  .src:hover{border-color:#7fd2a7;background:rgba(127,210,167,.10)}
+  .src img{width:100%;height:120px;object-fit:cover;border-radius:6px;background:#000}
+  .src .label{font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .actions{display:flex;justify-content:flex-end;margin-top:12px}
+  button.cancel{padding:9px 16px;border-radius:9px;border:1px solid #2a4038;background:rgba(255,255,255,.04);color:#b7d9cb;cursor:pointer;font-weight:600}
+</style></head>
+<body><div class="wrap">
+  <h2>Share your screen</h2>
+  <p>Choose a screen or window to share with the other person in the call.</p>
+  <div class="grid">${cards || '<p>No shareable screens or windows were found.</p>'}</div>
+  <div class="actions"><button class="cancel" id="cancel" type="button">Cancel</button></div>
+</div>
+<script>
+  const { ipcRenderer } = require('electron');
+  document.querySelectorAll('.src').forEach((el) => {
+    el.addEventListener('click', () => {
+      ipcRenderer.send('desktop:screen-share-pick', decodeURIComponent(el.getAttribute('data-id')));
+    });
+  });
+  document.getElementById('cancel').addEventListener('click', () => {
+    ipcRenderer.send('desktop:screen-share-pick', '');
+  });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') ipcRenderer.send('desktop:screen-share-pick', ''); });
+</script></body></html>`;
+}
+
+function showScreenSharePicker(sources, parentWin) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (id) => {
+      if (settled) return;
+      settled = true;
+      ipcMain.removeListener('desktop:screen-share-pick', onPick);
+      try { if (picker && !picker.isDestroyed()) picker.close(); } catch {}
+      resolve(id || '');
+    };
+    const onPick = (_event, id) => finish(id);
+    ipcMain.on('desktop:screen-share-pick', onPick);
+
+    const picker = new BrowserWindow({
+      width: 760,
+      height: 540,
+      modal: !!parentWin,
+      parent: parentWin || undefined,
+      title: 'Share your screen',
+      autoHideMenuBar: true,
+      minimizable: false,
+      maximizable: false,
+      webPreferences: { nodeIntegration: true, contextIsolation: false },
+    });
+    const slim = sources.map((s) => ({
+      id: s.id,
+      name: s.name,
+      thumb: (() => { try { return s.thumbnail ? s.thumbnail.toDataURL() : ''; } catch { return ''; } })(),
+    }));
+    picker.on('closed', () => finish(''));
+    picker.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(_screenSharePickerHtml(slim))}`);
   });
 }
 
@@ -736,12 +820,12 @@ async function createWindow() {
   // Allow camera/mic + notifications permissions needed by calls and alerts.
   try {
     mainWindow.webContents.session.setPermissionCheckHandler((webContents, permission) => {
-      const allowed = ['media', 'mediaKeySystem', 'notifications', 'clipboard-read'];
+      const allowed = ['media', 'mediaKeySystem', 'notifications', 'clipboard-read', 'display-capture'];
       return allowed.includes(permission);
     });
   } catch {}
   mainWindow.webContents.session.setPermissionRequestHandler((webContents, permission, callback) => {
-    const allowed = ['media', 'mediaKeySystem', 'notifications', 'clipboard-read'];
+    const allowed = ['media', 'mediaKeySystem', 'notifications', 'clipboard-read', 'display-capture'];
     callback(allowed.includes(permission));
   });
 
@@ -753,6 +837,38 @@ async function createWindow() {
       });
     }
   } catch {}
+
+  // Screen sharing: without this handler getDisplayMedia() rejects in Electron,
+  // which is why "Share screen" did nothing in the desktop app. Prefer the OS
+  // native picker where available (Wayland/PipeWire, macOS 15+, Windows); fall
+  // back to our own picker window (e.g. Linux X11) listing screens + windows.
+  try {
+    if (typeof mainWindow.webContents.session.setDisplayMediaRequestHandler === 'function') {
+      mainWindow.webContents.session.setDisplayMediaRequestHandler((request, callback) => {
+        desktopCapturer
+          .getSources({
+            types: ['screen', 'window'],
+            thumbnailSize: { width: 320, height: 200 },
+            fetchWindowIcons: true,
+          })
+          .then(async (sources) => {
+            if (!sources || !sources.length) { try { callback(); } catch {} return; }
+            try {
+              const chosenId = await showScreenSharePicker(sources, mainWindow);
+              const src = chosenId ? sources.find((s) => s.id === chosenId) : null;
+              // No source → user cancelled. callback() with no video cancels
+              // the request, which the renderer sees as NotAllowedError (handled
+              // silently in calls.js toggleScreenShare).
+              if (src) callback({ video: src });
+              else callback();
+            } catch { try { callback(); } catch {} }
+          })
+          .catch(() => { try { callback(); } catch {} });
+      }, { useSystemPicker: true });
+    }
+  } catch (e) {
+    console.warn('setDisplayMediaRequestHandler failed:', e && e.message ? e.message : e);
+  }
 
   // If tray mode is enabled, X hides to tray; otherwise quit.
   // Before full quit, force-stop media and flush auth/session snapshot.
