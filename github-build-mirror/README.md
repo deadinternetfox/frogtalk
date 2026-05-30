@@ -1,31 +1,26 @@
 # FrogTalk Build Mirror
 
-Mirrored release artifacts for FrogTalk **v1.6.37-alpha** (Android `versionCode` **242**).
+Mirrored Android release artifacts for FrogTalk **v1.6.43-alpha** (Android `versionCode` **249**).
 
 Default home node: **frogtalk.app** (`client/official-node.json` on `master`).
 
-## Download Artifacts
+This folder carries only the current Android build (it backs each node's
+`/download/android` fallback). **Desktop builds** (Windows / AppImage / .deb) and
+older versions live on the [GitHub Releases](https://github.com/deadinternetfox/frogtalk/releases) page.
 
-### Android (v1.6.37-alpha / 242)
+## Download artifacts
+
+### Android (v1.6.43-alpha / 249)
 
 | Artifact | File | Use |
 |----------|------|-----|
-| **APK (sideload)** | [frogtalk-v242-alpha.apk](./frogtalk-v242-alpha.apk) | Direct install, `/download/android` |
-| **AAB (Play Store)** | [FrogTalk-1.6.37-alpha-242.aab](./FrogTalk-1.6.37-alpha-242.aab) | Google Play Console upload |
-
-### Desktop (v1.6.37-alpha)
-
-| Platform | File |
-|----------|------|
-| Linux AppImage | [FrogTalk-1.6.37-alpha.AppImage](./FrogTalk-1.6.37-alpha.AppImage) |
-| Linux .deb | [FrogTalk-1.6.37-alpha.deb](./FrogTalk-1.6.37-alpha.deb) |
-| Windows portable | [FrogTalk-1.6.37-alpha-win-x64-portable.exe](./FrogTalk-1.6.37-alpha-win-x64-portable.exe) |
-| Windows .zip | [FrogTalk-1.6.37-alpha-win-x64.zip](./FrogTalk-1.6.37-alpha-win-x64.zip) |
+| **APK (sideload)** | [frogtalk-v249-alpha.apk](./frogtalk-v249-alpha.apk) | Direct install, `/download/android` |
+| **AAB (Play Store)** | [FrogTalk-1.6.43-alpha-249.aab](./FrogTalk-1.6.43-alpha-249.aab) | Google Play Console upload |
 
 ### Verify integrity
 
 ```bash
-sha256sum -c SHA256SUMS-v242-alpha.txt
+sha256sum -c SHA256SUMS.txt
 ```
 
 ## Website download endpoints
