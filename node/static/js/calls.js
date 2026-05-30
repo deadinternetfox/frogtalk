@@ -69,7 +69,11 @@ function _requireWebRtc() {
 /** Play remote media; Safari often blocks autoplay until play() + user gesture retry. */
 function _ensureMediaPlayback(el, label) {
   if (!el) return;
-  try { el.muted = false; } catch {}
+  // Respect an intentional mute (speaker-mute / per-peer mute). This keeper
+  // runs on every track event and on reconnect; unconditionally forcing
+  // muted=false here is what silently undid the speaker button the instant a
+  // track arrived — the root cause of "speaker mute doesn't work".
+  try { if (!(el.dataset && el.dataset.userMuted === '1')) el.muted = false; } catch {}
   try { el.volume = 1; } catch {}
   try {
     el.playsInline = true;
@@ -92,6 +96,88 @@ function _ensureMediaPlayback(el, label) {
     }
   };
   run();
+}
+
+/* ── Call-quality reception meter ───────────────────────────────────────────
+ * Polls RTCPeerConnection.getStats() and maps round-trip-time, jitter and
+ * incremental packet loss to a 0–4 bar reception meter beside the settings cog.
+ * Cheap: one getStats() every 2.5s only while a call is active. */
+function _setCallQuality(level) {
+  const el = document.getElementById('call-quality');
+  if (!el) return;
+  const q = Math.max(0, Math.min(4, level | 0));
+  el.classList.remove('cq-reconnect');
+  el.dataset.q = String(q);
+  el.classList.toggle('has-data', q > 0);
+  el.querySelectorAll('.cq-bar').forEach((b, i) => b.classList.toggle('on', i < q));
+  el.title = ['Connecting…', 'Poor connection', 'Weak connection', 'Good connection', 'Excellent connection'][q] || 'Connection quality';
+}
+function _setCallQualityReconnecting() {
+  const el = document.getElementById('call-quality');
+  if (!el) return;
+  el.classList.add('has-data', 'cq-reconnect');
+  el.querySelectorAll('.cq-bar').forEach(b => b.classList.remove('on'));
+  el.title = 'Reconnecting…';
+}
+async function _sampleCallQuality() {
+  if (!_pc || typeof _pc.getStats !== 'function' || _callState !== 'active') return;
+  let stats;
+  try { stats = await _pc.getStats(); } catch { return; }
+  let rtt = null, jitter = 0, lost = 0, recv = 0, haveInbound = false;
+  stats.forEach(r => {
+    if (r.type === 'candidate-pair' && r.nominated && r.currentRoundTripTime != null) {
+      rtt = r.currentRoundTripTime;
+    } else if (r.type === 'remote-inbound-rtp') {
+      if (rtt == null && r.roundTripTime != null) rtt = r.roundTripTime;
+      if (r.jitter != null) jitter = Math.max(jitter, r.jitter);
+    } else if (r.type === 'inbound-rtp' && !r.isRemote) {
+      haveInbound = true;
+      if (r.packetsLost != null) lost += r.packetsLost;
+      if (r.packetsReceived != null) recv += r.packetsReceived;
+      if (r.jitter != null) jitter = Math.max(jitter, r.jitter);
+    }
+  });
+  let lossFrac = 0;
+  if (_cqPrev) {
+    const dLost = Math.max(0, lost - _cqPrev.lost);
+    const dRecv = Math.max(0, recv - _cqPrev.recv);
+    if (dLost + dRecv > 0) lossFrac = dLost / (dLost + dRecv);
+  }
+  _cqPrev = { lost, recv };
+  // First second of a fresh connection — no usable signal yet.
+  if (rtt == null && !haveInbound) { _setCallQuality(0); return; }
+  let level = 4;
+  if (rtt != null) {
+    const ms = rtt * 1000;
+    if (ms > 500) level = Math.min(level, 1);
+    else if (ms > 300) level = Math.min(level, 2);
+    else if (ms > 180) level = Math.min(level, 3);
+  }
+  if (jitter > 0.06) level = Math.min(level, 2);
+  else if (jitter > 0.03) level = Math.min(level, 3);
+  if (lossFrac > 0.10) level = Math.min(level, 1);
+  else if (lossFrac > 0.04) level = Math.min(level, 2);
+  else if (lossFrac > 0.015) level = Math.min(level, 3);
+  _setCallQuality(level);
+}
+function _startCallQualityMonitor() {
+  _stopCallQualityMonitor();
+  _cqPrev = null;
+  _setCallQuality(0);
+  if (!_pc) return;
+  _sampleCallQuality();
+  _callQualityTimer = setInterval(_sampleCallQuality, 2500);
+}
+function _stopCallQualityMonitor() {
+  if (_callQualityTimer) { clearInterval(_callQualityTimer); _callQualityTimer = null; }
+  _cqPrev = null;
+  const el = document.getElementById('call-quality');
+  if (el) {
+    el.classList.remove('has-data', 'cq-reconnect');
+    el.dataset.q = '0';
+    el.querySelectorAll('.cq-bar').forEach(b => b.classList.remove('on'));
+    el.title = 'Connection quality';
+  }
 }
 
 function _mediaStreamFromTrackEvent(e, existing) {
@@ -191,6 +277,8 @@ let _callSeconds  = 0;
 let _mutedAudio   = false;
 let _mutedVideo   = false;
 let _speakerMuted = false;
+let _callQualityTimer = null;
+let _cqPrev = null;
 let _callRingTimeout = null;
 let _startCallInFlight = false;
 let _callTamperToastAt = 0;
@@ -1516,6 +1604,7 @@ function resetCall () {
     _callPeerAvatar = null;
     _mutedAudio = false; _mutedVideo = false; _speakerMuted = false;
     try { _stopVAD(); } catch {}
+    try { _stopCallQualityMonitor(); } catch {}
     const rv = document.getElementById('remote-video');
     const remoteAudio = document.getElementById('remote-audio');
     const lv = document.getElementById('local-video');
@@ -1523,8 +1612,14 @@ function resetCall () {
       rv.srcObject = null;
       rv.style.display = 'none';
       rv.classList.remove('ft-remote-audio-sink');
+      try { rv.muted = false; rv.dataset.userMuted = '0'; } catch {}
     }
-    if (remoteAudio) remoteAudio.srcObject = null;
+    if (remoteAudio) {
+      remoteAudio.srcObject = null;
+      try { remoteAudio.muted = false; remoteAudio.dataset.userMuted = '0'; } catch {}
+    }
+    const _spkBtn = document.getElementById('btn-call-speaker');
+    if (_spkBtn) { _spkBtn.textContent = '🔊'; _spkBtn.classList.remove('muted'); _spkBtn.title = 'Speaker'; }
     if (lv) { lv.srcObject = null; lv.style.display = 'none'; }
     // Show avatars again
     const ra = document.getElementById('call-remote-avatar');
@@ -1624,9 +1719,11 @@ async function createPC () {
         if (bCam) bCam.style.display = '';
         _applyScreenShareButtonVisibility();
         _startLocalVAD();
+        _startCallQualityMonitor();
       } else if (s === 'disconnected') {
         // Transient network hiccup — give ICE 15s to recover before tearing down.
         if (st) st.textContent = 'Reconnecting…';
+        try { _setCallQualityReconnecting(); } catch {}
         clearTimeout(_reconnectTimer);
         _reconnectTimer = setTimeout(() => {
           if (_pc && (_pc.connectionState === 'disconnected' || _pc.connectionState === 'failed')) {
@@ -1821,13 +1918,25 @@ async function toggleScreenShare () {
 }
 
 function toggleCallSpeaker () {
-  const rv = document.getElementById('remote-video');
-  const ra = document.getElementById('remote-audio');
-  if (!rv && !ra) return;
+  // Remote audio plays through BOTH #remote-video (the audio sink on voice
+  // calls) and #remote-audio, so mute them together. Tag each with
+  // data-user-muted so _ensureMediaPlayback's autoplay keeper won't un-mute
+  // them on the next track event or reconnect.
+  const els = ['remote-video', 'remote-audio']
+    .map(id => document.getElementById(id))
+    .filter(Boolean);
+  if (!els.length) return;
   _speakerMuted = !_speakerMuted;
-  if (rv) rv.muted = _speakerMuted;
-  if (ra) ra.muted = _speakerMuted;
-  document.getElementById('btn-call-speaker').textContent = _speakerMuted ? '🔈' : '🔊';
+  els.forEach(el => {
+    el.muted = _speakerMuted;
+    try { el.dataset.userMuted = _speakerMuted ? '1' : '0'; } catch {}
+  });
+  const btn = document.getElementById('btn-call-speaker');
+  if (btn) {
+    btn.textContent = _speakerMuted ? '🔈' : '🔊';
+    btn.classList.toggle('muted', _speakerMuted);
+    btn.title = _speakerMuted ? 'Unmute speaker' : 'Mute speaker';
+  }
 }
 
 /* ── Track E Phase 2 — Safety Number panel ─────────────────────────────────
@@ -2559,7 +2668,7 @@ function toggleMutePeer(peerKey) {
   _voicePeerMuted.set(peerKey, next);
   peer.muted = next;
   const audioEl = document.getElementById(`voice-audio-${peerKey}`);
-  if (audioEl) audioEl.muted = next;
+  if (audioEl) { audioEl.muted = next; try { audioEl.dataset.userMuted = next ? '1' : '0'; } catch {} }
   toast(next ? `Muted ${peer.nickname}` : `Unmuted ${peer.nickname}`);
   _updateVoiceBarParticipants();
 }
@@ -2626,6 +2735,7 @@ function _bindVoicePeerRemoteTrack(peerKey, e) {
   }
   audio.srcObject = stream;
   audio.muted = !!peer.muted;
+  try { audio.dataset.userMuted = peer.muted ? '1' : '0'; } catch {}
   _ensureMediaPlayback(audio, `voice-${peerKey}`);
   _updateVoiceBarParticipants();
 }
