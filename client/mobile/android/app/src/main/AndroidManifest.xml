@@ -97,6 +97,11 @@
             android:exported="false" />
 
         <service
+            android:name=".screenshare.ScreenCaptureService"
+            android:foregroundServiceType="mediaProjection"
+            android:exported="false" />
+
+        <service
             android:name=".FrogTalkFirebaseMessagingService"
             android:exported="false">
             <intent-filter>

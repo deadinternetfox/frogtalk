@@ -967,6 +967,23 @@ const WS = (() => {
         if (typeof handleIceCandidate === 'function') handleIceCandidate(data);
         break;
       }
+      // ── Native screen-share signaling (separate one-way PC) ────────
+      case 'screen_offer': {
+        if (typeof handleScreenOffer === 'function') handleScreenOffer(data);
+        break;
+      }
+      case 'screen_answer': {
+        if (typeof handleScreenAnswer === 'function') handleScreenAnswer(data);
+        break;
+      }
+      case 'screen_ice': {
+        if (typeof handleScreenIce === 'function') handleScreenIce(data);
+        break;
+      }
+      case 'screen_end': {
+        if (typeof handleScreenEnd === 'function') handleScreenEnd(data);
+        break;
+      }
       // ── Group voice channel signaling ─────────────
       case 'voice_joined': {
         if (typeof handleVoiceJoined === 'function') handleVoiceJoined(data);

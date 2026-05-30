@@ -14,6 +14,15 @@
 # Keep Material Components
 -keep class com.google.android.material.** { *; }
 
+# Keep WebRTC (org.webrtc) — JNI-bound native bridge for the screen-share peer.
+# Release isn't minified today, but this future-proofs the JNI symbol names.
+-keep class org.webrtc.** { *; }
+-dontwarn org.webrtc.**
+
+# OkHttp (screen-share signaling WebSocket)
+-dontwarn okhttp3.**
+-dontwarn okio.**
+
 # Strip logging in release
 -assumenosideeffects class android.util.Log {
     public static *** d(...);

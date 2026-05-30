@@ -616,6 +616,57 @@ def enqueue_call_ice(
     return _enqueue("call.ice", payload, targets)
 
 
+def enqueue_screen_signal(
+    msg_type: str,
+    from_user: dict,
+    to_gid: str,
+    *,
+    global_call_id: str,
+    local_call_id: int,
+    sdp: str = "",
+    candidate: str = "",
+    force_relay: bool = False,
+) -> dict:
+    """Cross-node relay for native screen-share signaling.
+
+    Mirrors ``enqueue_call_*`` but for the one-way screen PeerConnection. The
+    four WS types (``screen_offer`` / ``screen_answer`` / ``screen_ice`` /
+    ``screen_end``) ride as ``call.screen_*`` federation events so they reuse
+    the existing ``call.`` inbox dispatch. No call rows are touched on either
+    side — the screen channel is attached to an already-established call.
+    """
+    from_gid = str(from_user.get("global_user_id") or "").strip()
+    to_gid_clean = str(to_gid or "").strip()
+    gid_call = str(global_call_id or "").strip()
+    if not from_gid or not to_gid_clean or not gid_call:
+        return {"ok": False, "error": "invalid_screen_payload"}
+    if msg_type not in ("screen_offer", "screen_answer", "screen_ice", "screen_end"):
+        return {"ok": False, "error": "bad_screen_type"}
+    targets = call_signal_target_servers(None, recipient_gid=to_gid_clean)
+    if not targets:
+        return {"ok": False, "error": "no_screen_route"}
+    payload = {
+        "global_call_id": gid_call,
+        "local_call_id_origin": int(local_call_id or 0),
+        "from_global_user_id": from_gid,
+        "to_global_user_id": to_gid_clean,
+        "screen_type": msg_type,
+    }
+    if msg_type in ("screen_offer", "screen_answer"):
+        clip = _clip_sdp(sdp)
+        if not clip:
+            return {"ok": False, "error": "invalid_screen_sdp"}
+        payload["sdp"] = clip
+    if msg_type == "screen_offer":
+        payload["force_relay"] = bool(force_relay)
+    if msg_type == "screen_ice":
+        cand = _clip_ice(candidate)
+        if not cand:
+            return {"ok": False, "error": "invalid_screen_ice"}
+        payload["candidate"] = cand
+    return _enqueue("call.screen", payload, targets)
+
+
 def enqueue_call_end(
     from_user: dict,
     to_gid: str,
@@ -738,6 +789,8 @@ async def apply_call_event(event: dict) -> None:
         await _apply_call_end(payload, origin, gid_call, _fed_global_id)
     elif event_type == "call.reject":
         await _apply_call_reject(payload, origin, gid_call, _fed_global_id)
+    elif event_type == "call.screen":
+        await _apply_screen_signal(payload, origin, gid_call, _fed_global_id)
 
 
 async def _apply_call_offer(payload, origin, gid_call, _fed_nickname, _fed_global_id, _fed_clip):
@@ -1027,6 +1080,64 @@ async def _apply_call_ice(payload, origin, gid_call, _fed_global_id):
             )
         except Exception:
             _log.exception("queue_ice_candidate(fed) failed")
+
+
+async def _apply_screen_signal(payload, origin, gid_call, _fed_global_id):
+    """Inbound native screen-share signal from a federated peer.
+
+    Validates the same way as call.ice (sender home == origin, both gids are
+    participants of the local call row), then relays the screen_* frame to the
+    local recipient's WS. Ephemeral — never queued offline, never touches call
+    rows.
+    """
+    from ws_manager import manager
+
+    screen_type = str(payload.get("screen_type") or "").strip()
+    if screen_type not in ("screen_offer", "screen_answer", "screen_ice", "screen_end"):
+        return
+    to_gid = _fed_global_id(payload.get("to_global_user_id"))
+    from_gid = _fed_global_id(payload.get("from_global_user_id"))
+    if not to_gid or not from_gid:
+        return
+    if _call_home_origin_mismatch(from_gid, origin):
+        _log.info("federation: drop call.screen — sender home != origin %s", origin)
+        return
+    local_id = db.resolve_local_call_id(gid_call)
+    if not local_id:
+        return
+    if not _participants_match_gid(local_id, from_gid):
+        return
+    if not _participants_match_gid(local_id, to_gid):
+        return
+    to_user = _lookup_local_user_by_gid(to_gid)
+    from_user = _lookup_local_user_by_gid(from_gid)
+    if not to_user or not from_user:
+        return
+    out = {
+        "type": screen_type,
+        "from_id": int(from_user["id"]),
+        "from_nickname": from_user.get("nickname") or "",
+        "from_global_user_id": from_gid,
+        "call_id": local_id,
+        "global_call_id": gid_call,
+        "peer_home_server_id": origin,
+        "federated": True,
+    }
+    if screen_type in ("screen_offer", "screen_answer"):
+        sdp = str(payload.get("sdp") or "")[:_FED_CALL_SDP_MAX]
+        if not sdp:
+            return
+        out["sdp"] = sdp
+    if screen_type == "screen_offer":
+        out["force_relay"] = bool(payload.get("force_relay"))
+    if screen_type == "screen_ice":
+        cand = _clip_ice(payload.get("candidate") or "")
+        if not cand:
+            return
+        out["candidate"] = cand
+    # Ephemeral: if the recipient isn't connected, the screen share just fails
+    # and the sharer re-presses — do not queue.
+    await manager.send_to_user(int(to_user["id"]), out)
 
 
 async def _apply_call_end(payload, origin, gid_call, _fed_global_id):

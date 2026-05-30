@@ -6,6 +6,7 @@ import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.media.projection.MediaProjectionManager
 import android.net.Uri
 import android.graphics.Bitmap
 import android.net.ConnectivityManager
@@ -42,7 +43,7 @@ class MainActivity : AppCompatActivity() {
     companion object {
         private const val TAG = "FrogTalk"
         private const val SETUP_ASSET_URL = "file:///android_asset/mobile_node_setup.html"
-        private const val WEB_CACHE_REV = "20260530-build-v247"
+        private const val WEB_CACHE_REV = "20260531-build-v248"
         private const val PREFS = "frogtalk_prefs"
         private const val PREF_SERVER_BASE_URL = "server_base_url"
         private const val PREF_PERMISSIONS_WIZARD_DONE = "permissions_wizard_done"
@@ -87,6 +88,16 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             return true
+        }
+
+        /** Run a snippet of JS in the WebView from anywhere (e.g. the screen
+         *  capture service reporting share start/stop/error back to calls.js). */
+        @JvmStatic
+        fun runJsOnWebView(js: String) {
+            val act = activeInstance ?: return
+            act.runOnUiThread {
+                try { act.webView?.evaluateJavascript(js, null) } catch (_: Throwable) {}
+            }
         }
     }
 
@@ -475,6 +486,56 @@ class MainActivity : AppCompatActivity() {
             } catch (_: Throwable) {}
             finishPendingWizardNativeStep("battery")
         }
+
+    // ── Native screen share (MediaProjection) ──────────────────────────────
+    // Args captured when JS calls startScreenShare(); consumed when the system
+    // consent dialog returns. The actual WebRTC peer lives in ScreenCaptureService.
+    private var pendingScreenShareArgs: String? = null
+    private val screenCaptureLauncher: ActivityResultLauncher<Intent> =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            val args = pendingScreenShareArgs
+            pendingScreenShareArgs = null
+            if (result.resultCode == Activity.RESULT_OK && result.data != null && args != null) {
+                try {
+                    val base = getServerBaseUrl()
+                    xyz.frogtalk.app.screenshare.ScreenCaptureService.start(
+                        this, result.data!!, args, base
+                    )
+                } catch (e: Throwable) {
+                    Log.e(TAG, "screen capture start failed", e)
+                    MainActivity.runJsOnWebView(
+                        "if(typeof onNativeScreenShareError==='function')onNativeScreenShareError('start_failed');"
+                    )
+                }
+            } else {
+                // User dismissed the system consent dialog.
+                MainActivity.runJsOnWebView(
+                    "if(typeof onNativeScreenShareError==='function')onNativeScreenShareError('cancelled');"
+                )
+            }
+        }
+
+    /** Launch the MediaProjection consent dialog; ScreenCaptureService takes
+     *  over once the user grants. Called from the CallBridge. */
+    fun startScreenShare(argsJson: String) {
+        runOnUiThread {
+            try {
+                pendingScreenShareArgs = argsJson
+                val mpm = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+                screenCaptureLauncher.launch(mpm.createScreenCaptureIntent())
+            } catch (e: Throwable) {
+                Log.e(TAG, "startScreenShare failed", e)
+                pendingScreenShareArgs = null
+                MainActivity.runJsOnWebView(
+                    "if(typeof onNativeScreenShareError==='function')onNativeScreenShareError('no_projection');"
+                )
+            }
+        }
+    }
+
+    fun stopScreenShare() {
+        try { xyz.frogtalk.app.screenshare.ScreenCaptureService.stop(this) } catch (_: Throwable) {}
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -1378,6 +1439,27 @@ class MainActivity : AppCompatActivity() {
                 activity.requestServerBaseUrlChange(url, markSetup = true)
             } catch (e: Throwable) {
                 Log.e(TAG, "connectToServer failed", e)
+            }
+        }
+
+        // ── Native screen share (MediaProjection) ──────────────────────────
+        // calls.js calls these when the user taps 🖥️ during a call. The web
+        // side feature-detects via isScreenShareSupported() before showing the
+        // button, and learns start/stop/error via window.onNativeScreenShare*.
+        @android.webkit.JavascriptInterface
+        fun isScreenShareSupported(): Boolean = true
+
+        @android.webkit.JavascriptInterface
+        fun startScreenShare(argsJson: String) {
+            try { activity.startScreenShare(argsJson) } catch (e: Throwable) {
+                Log.e(TAG, "bridge startScreenShare failed", e)
+            }
+        }
+
+        @android.webkit.JavascriptInterface
+        fun stopScreenShare() {
+            try { activity.stopScreenShare() } catch (e: Throwable) {
+                Log.e(TAG, "bridge stopScreenShare failed", e)
             }
         }
 

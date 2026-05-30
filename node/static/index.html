@@ -3449,6 +3449,28 @@ body.ft-incoming-call-active #incoming-call{z-index:20000}
   overflow:auto;
   flex-wrap:wrap;
 }
+/* Screen-share layout: a peer is sharing, so the screen tile becomes the
+   primary surface and the face tiles shrink to a side strip. The screen tile
+   keeps the source's aspect ratio (object-fit:contain) on a black mat. */
+.call-tile-screen{
+  width:min(72vw, 920px);
+  height:auto;
+  aspect-ratio:16 / 9;
+  max-height:62vh;
+}
+.call-tile-screen #call-tile-screen-name{
+  background:rgba(0,0,0,.62);
+}
+#call-participants.has-screen .call-tile{
+  width:160px;height:160px;
+}
+#call-participants.has-screen .call-tile-screen{
+  width:min(72vw, 920px);height:auto;
+}
+@media (max-width:760px){
+  .call-tile-screen{width:94vw;max-height:46vh}
+  #call-participants.has-screen .call-tile{width:108px;height:108px}
+}
 #call-controls{
   display:flex;
   gap:10px;
@@ -11774,6 +11796,13 @@ window.ConnErr = (function(){
       <div class="call-tile-name" id="call-tile-local-name">You</div>
       <div class="call-tile-speaking" id="local-speaking"></div>
       <div id="call-mute-indicator" style="display:none;position:absolute;top:8px;right:8px;background:rgba(0,0,0,.6);border-radius:50%;width:28px;height:28px;align-items:center;justify-content:center;font-size:14px">🔇</div>
+    </div>
+    <!-- Shared-screen tile: shown only while a peer is sharing their screen
+         (native Android MediaProjection over the dedicated _screenPc). Spans the
+         wide cell so faces stay visible alongside it. -->
+    <div id="call-tile-screen" class="call-tile call-tile-screen" style="display:none">
+      <video id="screen-video" autoplay playsinline webkit-playsinline style="width:100%;height:100%;object-fit:contain;border-radius:12px;background:#000;display:none"></video>
+      <div class="call-tile-name" id="call-tile-screen-name">📺 Screen</div>
     </div>
   </div>
 

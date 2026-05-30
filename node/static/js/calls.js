@@ -286,6 +286,17 @@ let _reconnectTimer = null;
 let _callPeerAvatar = null;
 let _callGlobalId = null;
 let _peerHomeServerId = '';
+// ── Native screen-share receive state ──────────────────────────────────────
+// A peer (currently only the Android native shell) can push their screen over
+// a SEPARATE one-way PeerConnection that joins the active call via screen_*
+// signaling. We answer on _screenPc and render into the dedicated #screen tile,
+// leaving the main call PC (_pc) and #remote-video untouched.
+let _screenPc = null;            // inbound screen RTCPeerConnection (we answer)
+let _screenActive = false;       // a remote screen is being displayed
+let _screenFromUid = null;       // uid of the peer sharing (the call peer)
+let _screenPendingIce = [];      // ICE buffered until screen remote-desc applied
+let _screenRemoteDescApplied = false;
+let _nativeScreenSharing = false; // we (Android) are sharing our screen natively
 // Inbound ICE candidates that arrive before setRemoteDescription resolves
 // would throw on addIceCandidate and be lost forever. Buffer them and drain
 // once the remote description is applied.
@@ -1585,6 +1596,13 @@ function resetCall () {
     }
     if (_localStream) { try { _localStream.getTracks().forEach(t => t.stop()); } catch {} _localStream = null; }
     if (_screenStream) { try { _screenStream.getTracks().forEach(t => t.stop()); } catch {} _screenStream = null; }
+    // Tear down both directions of native screen share: the inbound _screenPc
+    // (remote sharing to us) and our own native capture (if we were sharing).
+    try { _teardownScreen(); } catch {}
+    if (_nativeScreenSharing) {
+      try { window.Android && window.Android.stopScreenShare && window.Android.stopScreenShare(); } catch {}
+      _nativeScreenSharing = false;
+    }
     clearInterval(_callTimer); _callTimer = null; _callSeconds = 0;
     clearTimeout(_callRingTimeout); _callRingTimeout = null;
     clearTimeout(_reconnectTimer); _reconnectTimer = null;
@@ -1843,15 +1861,199 @@ async function toggleCallCamera () {
   }
 }
 
+/* ── Inbound native screen share (receive side) ─────────────────────────────
+ * The sharer runs a one-way sendonly screen PeerConnection (Android native via
+ * MediaProjection). It offers; we answer on a dedicated _screenPc and render the
+ * incoming track in the #call-tile-screen tile so the call's own faces/video on
+ * _pc / #remote-video stay untouched. Signaling rides screen_offer/answer/ice/
+ * end, relayed by the server exactly like the call_* frames.
+ *
+ * Routing fields for replies reuse _callPeerRoutingFields() (we always reply to
+ * the same call peer). We never initiate from the web side in v1 — the web
+ * client only answers — so handleScreenAnswer is a defensive stub.
+ */
+function _selfUid () {
+  try { return Number((typeof State !== 'undefined' && State.user?.id) || 0); } catch { return 0; }
+}
+function _screenForThisCall (data) {
+  // Must reference the active call and not our own echo (send_to_user fans out
+  // to all of the sharer's own sockets too).
+  if (!data) return false;
+  if (_callState !== 'active') return false;
+  if (Number(data.from_id) === _selfUid()) return false;
+  if (!_callId || String(data.call_id) !== String(_callId)) return false;
+  return true;
+}
+
+async function handleScreenOffer (data) {
+  try {
+    if (!_screenForThisCall(data)) return;
+    // Replace any prior screen PC (sharer re-pressed / restarted).
+    _teardownScreen({ keepTile: true });
+    _screenFromUid = Number(data.from_id) || _callPeerUID || null;
+    const peerHome = String(data.peer_home_server_id || data.origin_server_id || _peerHomeServerId || '').trim();
+    const ice = await buildIceServers(peerHome);
+    _screenPc = new RTCPeerConnection({ iceServers: ice });
+    _screenRemoteDescApplied = false;
+    _screenPendingIce.length = 0;
+    if (data.force_relay) {
+      try { _screenPc.setConfiguration({ iceServers: ice, iceTransportPolicy: 'relay' }); } catch {}
+    }
+    _screenPc.onicecandidate = e => {
+      if (!e.candidate) return;
+      _sendCallSignal({
+        type: 'screen_ice',
+        ..._callPeerRoutingFields(),
+        call_id: _callId || undefined,
+        candidate: JSON.stringify(e.candidate),
+      });
+    };
+    _screenPc.ontrack = e => {
+      try {
+        const stream = (e.streams && e.streams[0]) || new MediaStream([e.track]);
+        if (e.track && e.track.kind === 'video') _renderRemoteScreen(stream);
+      } catch (err) { console.warn('screen ontrack failed', err); }
+    };
+    _screenPc.onconnectionstatechange = () => {
+      const s = _screenPc && _screenPc.connectionState;
+      if (s === 'failed' || s === 'closed') _teardownScreen();
+    };
+    await _screenPc.setRemoteDescription({ type: 'offer', sdp: data.sdp });
+    _screenRemoteDescApplied = true;
+    // Drain any ICE that arrived before the remote desc was applied.
+    const q = _screenPendingIce.slice(); _screenPendingIce.length = 0;
+    for (const c of q) { try { await _screenPc.addIceCandidate(c); } catch {} }
+    const ans = await _screenPc.createAnswer();
+    await _screenPc.setLocalDescription(ans);
+    _sendCallSignal({
+      type: 'screen_answer',
+      ..._callPeerRoutingFields(),
+      call_id: _callId || undefined,
+      sdp: ans.sdp,
+    });
+  } catch (e) {
+    console.warn('handleScreenOffer failed', e);
+    _teardownScreen();
+  }
+}
+
+async function handleScreenAnswer (data) {
+  // v1: the web client never offers screen share, so this only fires if a
+  // future client does. Apply defensively if we have an unanswered _screenPc.
+  try {
+    if (!_screenForThisCall(data) || !_screenPc) return;
+    if (_screenPc.signalingState === 'have-local-offer') {
+      await _screenPc.setRemoteDescription({ type: 'answer', sdp: data.sdp });
+    }
+  } catch (e) { console.warn('handleScreenAnswer failed', e); }
+}
+
+async function handleScreenIce (data) {
+  try {
+    if (Number(data.from_id) === _selfUid()) return;
+    if (!_screenPc || !data.candidate) return;
+    let parsed; try { parsed = JSON.parse(data.candidate); } catch { return; }
+    if (!_screenRemoteDescApplied) { _screenPendingIce.push(parsed); return; }
+    try { await _screenPc.addIceCandidate(parsed); } catch {}
+  } catch (e) { console.warn('handleScreenIce failed', e); }
+}
+
+function handleScreenEnd (data) {
+  if (data && Number(data.from_id) === _selfUid()) return;
+  _teardownScreen();
+}
+
+// ── Callbacks invoked by the Android native shell (evaluateJavascript) ──────
+// The native MediaProjection peer reports its own state so the button + toast
+// reflect reality (consent granted, user cancelled, capture failed/ended).
+function onNativeScreenShareStarted () {
+  _nativeScreenSharing = true;
+  const btn = document.getElementById('btn-call-screen');
+  if (btn) btn.textContent = '⏹️';
+  try { toast('Sharing your screen', 'info'); } catch {}
+}
+function onNativeScreenShareStopped () {
+  _nativeScreenSharing = false;
+  const btn = document.getElementById('btn-call-screen');
+  if (btn) btn.textContent = '🖥️';
+}
+function onNativeScreenShareError (msg) {
+  _nativeScreenSharing = false;
+  const btn = document.getElementById('btn-call-screen');
+  if (btn) btn.textContent = '🖥️';
+  const m = String(msg || '').trim();
+  // "cancelled" = user dismissed the system consent dialog → stay silent.
+  if (m && m.toLowerCase() !== 'cancelled') {
+    try { toast('Screen share failed: ' + m, 'error', 6000); } catch {}
+  }
+}
+
+function _renderRemoteScreen (stream) {
+  const tile = document.getElementById('call-tile-screen');
+  const sv = document.getElementById('screen-video');
+  if (!tile || !sv) return;
+  sv.srcObject = stream;
+  sv.style.display = '';
+  tile.style.display = '';
+  _screenActive = true;
+  try {
+    const nm = document.getElementById('call-tile-screen-name');
+    if (nm) nm.textContent = '📺 ' + (_callPeerNick || 'Peer') + "'s screen";
+  } catch {}
+  // Switch the participants area into screen layout (CSS grid handles the rest).
+  try { document.getElementById('call-participants')?.classList.add('has-screen'); } catch {}
+  _ensureMediaPlayback(sv, 'screen-share');
+}
+
+function _teardownScreen (opts) {
+  try {
+    if (_screenPc) {
+      try {
+        _screenPc.onicecandidate = null;
+        _screenPc.ontrack = null;
+        _screenPc.onconnectionstatechange = null;
+        _screenPc.close();
+      } catch {}
+      _screenPc = null;
+    }
+  } catch {}
+  _screenRemoteDescApplied = false;
+  _screenPendingIce.length = 0;
+  _screenActive = false;
+  _screenFromUid = null;
+  if (opts && opts.keepTile) return;
+  try {
+    const tile = document.getElementById('call-tile-screen');
+    const sv = document.getElementById('screen-video');
+    if (sv) { sv.srcObject = null; sv.style.display = 'none'; }
+    if (tile) tile.style.display = 'none';
+    document.getElementById('call-participants')?.classList.remove('has-screen');
+  } catch {}
+}
+
 // Android System WebView does not implement getDisplayMedia()/screen capture
 // (there is no screen-capture resource in android.webkit.PermissionRequest, and
 // the page's RTCPeerConnection can't be fed a native MediaProjection track), so
-// the screen-share control is unavailable in the Android shell. Hide rather
-// than present a button that can only ever error.
+// browser-style screen share is impossible in the WebView. Instead, when the
+// native shell exposes window.Android.startScreenShare (newer APKs), the 🖥️
+// button drives a NATIVE MediaProjection peer that joins the call over screen_*
+// signaling. Older shells without the bridge keep the button hidden.
 function _isAndroidWebView () {
   return /Android/i.test(navigator.userAgent || '') && !!window.Android;
 }
+function _androidNativeScreenShareAvailable () {
+  try {
+    return _isAndroidWebView()
+      && !!window.Android
+      && typeof window.Android.startScreenShare === 'function'
+      && (typeof window.Android.isScreenShareSupported !== 'function'
+          || !!window.Android.isScreenShareSupported());
+  } catch { return false; }
+}
 function _screenShareSupported () {
+  // Either a real getDisplayMedia (desktop/browser) OR the Android native
+  // MediaProjection bridge (newer APKs).
+  if (_androidNativeScreenShareAvailable()) return true;
   return !_isAndroidWebView()
     && !!(navigator.mediaDevices && typeof navigator.mediaDevices.getDisplayMedia === 'function');
 }
@@ -1860,10 +2062,63 @@ function _applyScreenShareButtonVisibility () {
   if (bSc) bSc.style.display = _screenShareSupported() ? '' : 'none';
 }
 
+// Build the JSON args the native shell needs to open its own authed WS and
+// route screen_* signals to the call peer.
+function _nativeScreenArgs () {
+  const r = _callPeerRoutingFields();
+  let token = '';
+  try { token = String((typeof State !== 'undefined' && (State.token || State.sessionToken)) || ''); } catch {}
+  let room = '';
+  try { room = String((typeof State !== 'undefined' && State.currentRoom) || ''); } catch {}
+  let ice = [];
+  try { ice = _iceConfigCache && Array.isArray(_iceConfigCache.servers) ? _iceConfigCache.servers : []; } catch {}
+  return {
+    call_id: _callId || 0,
+    to_id: r.to_id || 0,
+    to_global_user_id: r.to_global_user_id || '',
+    to_nickname: _callPeerNick || '',
+    peer_home_server_id: _peerHomeServerId || '',
+    global_call_id: _callGlobalId || '',
+    ice_servers: ice,
+    token,
+    room,
+  };
+}
+
 async function toggleScreenShare () {
   const btn = document.getElementById('btn-call-screen');
   if (!_pc) { toast('No active call', 'error'); return; }
   const isAndroidWebView = _isAndroidWebView();
+
+  // ── Android native MediaProjection path ──────────────────────────────────
+  if (isAndroidWebView && _androidNativeScreenShareAvailable()) {
+    if (_nativeScreenSharing) {
+      try { window.Android.stopScreenShare(); } catch {}
+      _nativeScreenSharing = false;
+      if (btn) btn.textContent = '🖥️';
+      toast('Screen share stopped', 'info');
+      return;
+    }
+    try {
+      // Native side shows the system consent dialog, starts the foreground
+      // capture service + WebRTC peer, and signals over its own WS. We learn
+      // success/cancel via window.onNativeScreenShare* callbacks below.
+      window.Android.startScreenShare(JSON.stringify(_nativeScreenArgs()));
+      if (btn) btn.textContent = '⏹️';
+      toast('Starting screen share…', 'info');
+    } catch (e) {
+      console.warn('native startScreenShare failed', e);
+      toast('Could not start screen share', 'error');
+    }
+    return;
+  }
+  if (isAndroidWebView) {
+    // Old shell without the native bridge — be honest.
+    toast('Screen sharing needs the latest FrogTalk app update on Android.', 'info', 6000);
+    return;
+  }
+
+  // ── Desktop / browser getDisplayMedia path ───────────────────────────────
   // Already sharing — stop and revert.
   if (_screenStream) {
     _screenStream.getTracks().forEach(t => t.stop());
@@ -1880,14 +2135,6 @@ async function toggleScreenShare () {
     }
     if (btn) btn.textContent = '🖥️';
     toast('Screen share stopped', 'info');
-    return;
-  }
-  // Start sharing.
-  if (isAndroidWebView) {
-    // Android System WebView has no getDisplayMedia/screen-capture API, and
-    // there's no way to inject a native MediaProjection track into the page's
-    // RTCPeerConnection. Updating the WebView won't help — it's a platform gap.
-    toast('Screen sharing is not available on Android — this is a system WebView limitation. Use the desktop app to share your screen.', 'info', 6000);
     return;
   }
   if (!navigator.mediaDevices || typeof navigator.mediaDevices.getDisplayMedia !== 'function') {
@@ -3308,6 +3555,15 @@ try {
   window.ensureCallSignalingReady = ensureCallSignalingReady;
   window.isCallSignalingReady = () => _wsLooksOpen();
   window.isCallSessionBusy = isCallSessionBusy;
+  // Native screen-share receive handlers (dispatched from ws.js) + the
+  // bridge callbacks the Android shell invokes via evaluateJavascript.
+  window.handleScreenOffer = handleScreenOffer;
+  window.handleScreenAnswer = handleScreenAnswer;
+  window.handleScreenIce = handleScreenIce;
+  window.handleScreenEnd = handleScreenEnd;
+  window.onNativeScreenShareStarted = onNativeScreenShareStarted;
+  window.onNativeScreenShareStopped = onNativeScreenShareStopped;
+  window.onNativeScreenShareError = onNativeScreenShareError;
 } catch {}
 
 function _maybeRecoverPendingIncomingCall () {
