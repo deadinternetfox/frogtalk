@@ -2862,6 +2862,10 @@ function switchSettingsTab(tab) {
   if (tab === 'application') {
     _loadDesktopAppSettingsIntoProfile();
   }
+  // Account tab owns the panic-delete shortcut — repaint its current combo.
+  if (tab === 'account') {
+    try { PanicHotkey.renderSettings(); } catch {}
+  }
   // Pre-fill custom theme color inputs and highlight the saved theme button
   if (tab === 'appear') {
     try { loadCustomThemeIntoInputs(); } catch {}
@@ -5677,40 +5681,260 @@ async function confirmDeleteAccount() {
     }
     goBtn.disabled = true;
     goBtn.textContent = 'Deleting\u2026';
-    try {
-      const res = await fetch('/api/auth/account', {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json', 'X-Session-Token': State.token },
-        body: JSON.stringify({ password })
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        if (errEl) {
-          errEl.textContent = data.error || `Failed (HTTP ${res.status})`;
-          errEl.style.display = 'block';
-        }
-        goBtn.disabled = false;
-        goBtn.textContent = 'Delete forever';
-        return;
-      }
-      UI.showToast('Account deleted. Goodbye! \ud83d\udc38', 'success');
-      setTimeout(() => {
-        try { State.clear(); } catch {}
-        location.reload();
-      }, 1500);
-    } catch (e) {
+    const r = await _accountDeleteRequest(password);
+    if (!r.ok) {
       if (errEl) {
-        errEl.textContent = 'Network error';
+        errEl.textContent = r.error;
         errEl.style.display = 'block';
       }
       goBtn.disabled = false;
       goBtn.textContent = 'Delete forever';
+      return;
     }
+    _onAccountDeleted();
   };
   goBtn?.addEventListener('click', submit);
   pwInp?.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
   setTimeout(() => pwInp?.focus(), 30);
 }
+
+// Shared account-deletion plumbing, used by both the inline confirm
+// (confirmDeleteAccount, Account tab) and the panic-shortcut modal
+// (PanicHotkey). Keeping one request path means the server contract and
+// the post-delete teardown can never drift apart between the two UIs.
+async function _accountDeleteRequest(password) {
+  try {
+    const res = await fetch('/api/auth/account', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json', 'X-Session-Token': State.token },
+      body: JSON.stringify({ password })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return { ok: false, error: data.error || `Failed (HTTP ${res.status})` };
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: 'Network error' };
+  }
+}
+
+function _onAccountDeleted() {
+  try { UI.showToast('Account deleted. Goodbye! \ud83d\udc38', 'success'); } catch {}
+  setTimeout(() => {
+    try { State.clear(); } catch {}
+    location.reload();
+  }, 1500);
+}
+
+// \u2500\u2500 Panic delete shortcut \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+//
+// A user-configured 3-key combo that, when all three keys are held at once,
+// opens the account-delete confirmation from anywhere in the app. The combo
+// NEVER deletes on its own \u2014 it only opens the modal; deletion still requires
+// the account password. That guards against a stray key-mash wiping an
+// account while keeping a fast "panic" path for someone who needs to drop
+// their account instantly under duress.
+//
+// Combo is stored as an array of layout-stable tokens in localStorage:
+//   - modifiers as side-agnostic e.key  ('control' / 'shift' / 'alt' / 'meta')
+//   - everything else as e.code         ('keyk' / 'digit5' / 'space' / ...)
+// so the same physical keys match regardless of keyboard layout or which
+// Shift/Ctrl is used. Three DISTINCT tokens are required.
+const PanicHotkey = (() => {
+  const LS_KEY = 'ft_panic_delete_hotkey';
+  let _combo = _load();          // array of tokens, e.g. ['control','shift','keyk']
+  const _down = new Set();       // tokens currently held
+  let _recording = false;
+  let _recordKeys = [];          // distinct tokens captured this recording, in press order
+
+  function _load() {
+    try {
+      const v = JSON.parse(localStorage.getItem(LS_KEY) || '[]');
+      return Array.isArray(v) ? v.filter(t => typeof t === 'string') : [];
+    } catch { return []; }
+  }
+  function _save() {
+    try {
+      if (_combo.length) localStorage.setItem(LS_KEY, JSON.stringify(_combo));
+      else localStorage.removeItem(LS_KEY);
+    } catch {}
+  }
+
+  function _norm(e) {
+    const k = e.key;
+    if (k === 'Control' || k === 'Shift' || k === 'Alt' || k === 'Meta') return k.toLowerCase();
+    if (e.code) return e.code.toLowerCase();
+    return String(k || '').toLowerCase();
+  }
+
+  const _isMac = () => {
+    try { return /mac|iphone|ipad|ipod/i.test(navigator.platform || navigator.userAgent || ''); }
+    catch { return false; }
+  };
+  function _labelToken(t) {
+    if (t === 'control') return 'Ctrl';
+    if (t === 'shift') return 'Shift';
+    if (t === 'alt') return _isMac() ? 'Option' : 'Alt';
+    if (t === 'meta') return _isMac() ? '\u2318' : 'Win';
+    if (t.startsWith('key')) return t.slice(3).toUpperCase();
+    if (t.startsWith('digit')) return t.slice(5);
+    if (t.startsWith('numpad')) return 'Num ' + t.slice(6).toUpperCase();
+    if (t.startsWith('arrow')) return t.slice(5).replace(/^\w/, c => c.toUpperCase());
+    if (t === 'space') return 'Space';
+    return t.replace(/^\w/, c => c.toUpperCase());
+  }
+  const _label = (tokens) => (tokens || []).map(_labelToken).join(' + ');
+
+  function _setHint(msg) {
+    const el = document.getElementById('panic-hotkey-hint');
+    if (el) el.textContent = msg || '';
+  }
+
+  function renderSettings() {
+    const disp = document.getElementById('panic-hotkey-display');
+    if (disp) {
+      disp.textContent = _combo.length ? _label(_combo) : 'Not set';
+      disp.style.color = _combo.length ? 'var(--text-color)' : 'var(--text-muted)';
+    }
+    const clr = document.getElementById('panic-hotkey-clear');
+    if (clr) clr.style.display = _combo.length ? '' : 'none';
+    if (!_recording) {
+      const rec = document.getElementById('panic-hotkey-record');
+      if (rec) rec.textContent = _combo.length ? 'Change shortcut' : 'Record shortcut';
+    }
+  }
+
+  // \u2500\u2500 Recording \u2500\u2500
+  function startRecording() {
+    if (_recording) return;
+    _recording = true;
+    _recordKeys = [];
+    _down.clear();
+    const rec = document.getElementById('panic-hotkey-record');
+    if (rec) rec.textContent = 'Press 3 keys\u2026 (cancel)';
+    _setHint('Press three keys together. Esc, or click cancel, to stop.');
+  }
+  function _toggleRecording() {
+    if (_recording) cancelRecording();
+    else startRecording();
+  }
+  function cancelRecording() {
+    _recording = false;
+    _recordKeys = [];
+    renderSettings();
+    _setHint('Recording cancelled.');
+  }
+  function _finishRecording() {
+    _combo = _recordKeys.slice(0, 3);
+    _save();
+    _recording = false;
+    _recordKeys = [];
+    _down.clear();
+    renderSettings();
+    _setHint('Saved \u2014 press ' + _label(_combo) + ' together anywhere to open the delete prompt.');
+  }
+
+  // \u2500\u2500 Live trigger detection \u2500\u2500
+  function _maybeTrigger() {
+    if (_recording || !_combo.length) return;
+    if (_down.size !== _combo.length) return;          // exact match: fewer false positives
+    for (const t of _combo) if (!_down.has(t)) return;
+    const modal = document.getElementById('modal-panic-delete');
+    if (modal && !modal.classList.contains('hidden')) return; // already open
+    openPanicDelete();
+  }
+
+  function _onKeyDown(e) {
+    if (_recording) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.key === 'Escape') { cancelRecording(); return; }
+      if (e.repeat) return;
+      const t = _norm(e);
+      if (!_recordKeys.includes(t)) _recordKeys.push(t);
+      _setHint('Captured: ' + _label(_recordKeys) + (_recordKeys.length < 3 ? ' \u2026' : ''));
+      if (_recordKeys.length >= 3) _finishRecording();
+      return;
+    }
+    _down.add(_norm(e));
+    _maybeTrigger();
+  }
+  function _onKeyUp(e) {
+    if (_recording) { e.preventDefault(); e.stopPropagation(); return; }
+    _down.delete(_norm(e));
+  }
+
+  // \u2500\u2500 Confirmation modal \u2500\u2500
+  function openPanicDelete() {
+    const modal = document.getElementById('modal-panic-delete');
+    if (!modal || !modal.classList.contains('hidden')) return;
+    const pw = document.getElementById('panic-delete-pw');
+    const err = document.getElementById('panic-delete-err');
+    const go = document.getElementById('panic-delete-go');
+    if (pw) pw.value = '';
+    if (err) { err.style.display = 'none'; err.textContent = ''; }
+    if (go) { go.disabled = false; go.textContent = 'Delete forever'; }
+    try { openModal('modal-panic-delete'); } catch {}
+    setTimeout(() => pw?.focus(), 30);
+  }
+
+  function _wireModal() {
+    const modal = document.getElementById('modal-panic-delete');
+    if (!modal) return;
+    const pw = document.getElementById('panic-delete-pw');
+    const err = document.getElementById('panic-delete-err');
+    const go = document.getElementById('panic-delete-go');
+    const cancel = document.getElementById('panic-delete-cancel');
+    const showErr = (m) => { if (err) { err.textContent = m; err.style.display = 'block'; } };
+    const close = () => { _down.clear(); try { closeModal('modal-panic-delete'); } catch {} };
+    const submit = async () => {
+      const password = (pw?.value || '').trim();
+      if (!password) { showErr('Password required'); pw?.focus(); return; }
+      if (go) { go.disabled = true; go.textContent = 'Deleting\u2026'; }
+      const r = await _accountDeleteRequest(password);
+      if (!r.ok) {
+        showErr(r.error);
+        if (go) { go.disabled = false; go.textContent = 'Delete forever'; }
+        return;
+      }
+      try { closeModal('modal-panic-delete'); } catch {}
+      _onAccountDeleted();
+    };
+    cancel?.addEventListener('click', close);
+    go?.addEventListener('click', submit);
+    pw?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); submit(); }
+      else if (e.key === 'Escape') { e.preventDefault(); close(); }
+    });
+  }
+
+  function init() {
+    // Capture phase so the combo works even while a text field is focused.
+    document.addEventListener('keydown', _onKeyDown, true);
+    document.addEventListener('keyup', _onKeyUp, true);
+    // A missed keyup (window/tab switch) would leave keys "stuck" down and
+    // could mis-fire the combo; clear the held set whenever focus leaves.
+    window.addEventListener('blur', () => _down.clear());
+    _wireModal();
+    document.getElementById('panic-hotkey-record')?.addEventListener('click', _toggleRecording);
+    document.getElementById('panic-hotkey-clear')?.addEventListener('click', clearCombo);
+    renderSettings();
+  }
+  function clearCombo() {
+    _combo = [];
+    _save();
+    renderSettings();
+    _setHint('Shortcut cleared.');
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init, { once: true });
+  } else {
+    init();
+  }
+
+  return { renderSettings, openPanicDelete, startRecording, clearCombo, cancelRecording };
+})();
+try { window.PanicHotkey = PanicHotkey; } catch {}
 
 // ── Custom profile CSS — inline-style application (Track B) ───────────────
 //

@@ -11200,8 +11200,9 @@ window.ConnErr = (function(){
       </div>
     </div>
 
-    <!-- Account Tab — install-app prompt + delete-account only. All
-         password / PIN / recovery-key controls now live on the Security tab. -->
+    <!-- Account Tab — install-app prompt, delete-account, and the panic
+         delete shortcut. All password / PIN / recovery-key controls live on
+         the Security tab. -->
     <div id="set-pane-account" style="display:none">
       <!-- Install App Section (hidden by default; revealed only when the
            browser fires beforeinstallprompt — Chrome/Edge/Brave on a non-
@@ -11211,11 +11212,6 @@ window.ConnErr = (function(){
         <div style="font-size:12px;color:#666;margin-bottom:12px">Install FrogTalk as a native app for the best experience. Gets its own icon, works offline, and no browser UI!</div>
         <button class="modal-btn primary" id="install-app-btn" onclick="Notifications.promptInstall()" style="width:100%">🐸 Install FrogTalk App</button>
         <div id="install-app-note" style="font-size:11px;color:#666;margin-top:6px;text-align:center;display:none">Already installed or not supported in this browser</div>
-      </div>
-
-      <div style="font-size:12px;color:var(--text-muted);line-height:1.55;margin-bottom:16px;padding:10px 12px;background:#0d0d0d;border:1px solid #1e1e1e;border-radius:8px">
-        Password, App PIN and recovery-key controls have moved to the
-        <a href="#" onclick="switchSettingsTab('security');return false" style="color:var(--accent-color);font-weight:600;text-decoration:none">Security</a> tab.
       </div>
 
       <div style="margin:24px 0 8px;padding-top:16px;border-top:1px solid #2a2a2a">
@@ -11228,11 +11224,59 @@ window.ConnErr = (function(){
              prompt()-based flow silently no-op'd on desktop. -->
         <div id="delete-account-inline"></div>
       </div>
+
+      <!-- Panic delete shortcut — a user-chosen 3-key combo that opens the
+           delete-account confirmation from anywhere in the app. Wired by
+           PanicHotkey (ui.js). The shortcut only OPENS the prompt; deletion
+           still requires the account password, so a stray key-mash can't
+           wipe an account. -->
+      <div style="margin:24px 0 8px;padding-top:16px;border-top:1px solid #2a2a2a">
+        <div style="font-size:13px;color:#f44336;font-weight:600;margin-bottom:8px">⌨️ Panic delete shortcut</div>
+        <div style="font-size:12px;color:#666;margin-bottom:12px">
+          Set a combo of <strong>three keys</strong> that opens the delete-account
+          confirmation instantly, from anywhere in the app. You'll still have to
+          enter your password to confirm — the shortcut never deletes on its own.
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+          <span style="font-size:11px;color:var(--text-muted)">Current:</span>
+          <span id="panic-hotkey-display" style="font-size:13px;font-weight:600;color:var(--text-muted);font-family:var(--mono-font,monospace)">Not set</span>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="modal-btn secondary" id="panic-hotkey-record" type="button" style="flex:1">Record shortcut</button>
+          <button class="modal-btn secondary" id="panic-hotkey-clear" type="button" style="flex:1;display:none">Clear</button>
+        </div>
+        <div id="panic-hotkey-hint" style="font-size:11px;color:var(--text-muted);margin-top:8px;min-height:14px;line-height:1.45"></div>
+      </div>
     </div>
     <div id="profile-error" class="auth-error"></div>
     <div class="modal-actions">
       <button class="modal-btn secondary" onclick="closeModal('modal-profile')">Cancel</button>
       <button class="modal-btn primary" onclick="saveProfile()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Panic delete confirmation — opened by the user-configured 3-key
+     "nuke my account" shortcut (PanicHotkey, ui.js). The shortcut only OPENS
+     this dialog; deletion still requires the account password, so a stray
+     key-mash can't wipe an account. Backdrop click is disabled — Cancel or a
+     deliberate password entry are the only ways out. -->
+<div class="modal-overlay hidden" id="modal-panic-delete" data-dismiss-on-backdrop="false">
+  <div class="modal" style="max-width:420px;width:min(420px,94vw)">
+    <div style="text-align:center;margin-bottom:14px">
+      <div style="font-size:40px;line-height:1;margin-bottom:6px">🗑️</div>
+      <div style="font-size:17px;font-weight:700;color:#f44336">Delete your account?</div>
+      <div style="font-size:12px;color:var(--text-muted);margin-top:6px;line-height:1.5;max-width:340px;margin-left:auto;margin-right:auto">
+        You triggered the panic-delete shortcut. This permanently removes your
+        profile, messages, friends, uploads and keys. It <strong>cannot be undone.</strong>
+      </div>
+    </div>
+    <input type="password" autocomplete="current-password" id="panic-delete-pw"
+           class="modal-input" placeholder="Enter your password to confirm">
+    <div id="panic-delete-err" style="display:none;color:#f44336;font-size:12px;margin-bottom:8px"></div>
+    <div style="display:flex;gap:8px">
+      <button class="modal-btn secondary" id="panic-delete-cancel" type="button" style="flex:1">Cancel</button>
+      <button class="modal-btn danger" id="panic-delete-go" type="button" style="flex:1">Delete forever</button>
     </div>
   </div>
 </div>
