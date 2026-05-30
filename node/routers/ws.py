@@ -80,7 +80,7 @@ _WS_RATE_EXEMPT_TYPES = frozenset({
     "call_offer", "call_answer", "call_reject", "call_end", "ice_candidate",
     "screen_offer", "screen_answer", "screen_ice", "screen_end",
     "voice_join", "voice_leave", "voice_offer", "voice_answer", "voice_ice",
-    "voice_mute",
+    "voice_mute", "voice_video",
 })
 
 
@@ -2202,6 +2202,21 @@ async def websocket_endpoint(
                     "user_id": user["id"],
                     "nickname": user["nickname"],
                     "muted": muted,
+                }, exclude=websocket)
+
+            elif msg_type == "voice_video":
+                # Cosmetic camera / screen-share state for the in-call tray
+                # badges. Like voice_mute this is a hint only (the actual video
+                # rides the voice_offer/answer SDP) and carries cam-vs-screen,
+                # which SDP can't express. Local-room broadcast, same as mute.
+                await manager.broadcast_room(room_name, {
+                    "type": "voice_video",
+                    "room": room_name,
+                    "user_id": user["id"],
+                    "global_user_id": user.get("global_user_id") or "",
+                    "nickname": user["nickname"],
+                    "video": bool(data.get("video")),
+                    "screen": bool(data.get("screen")),
                 }, exclude=websocket)
 
             # ── Friend request notification ───────────────────────────

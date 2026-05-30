@@ -1645,6 +1645,9 @@ function resetCall () {
     if (ra) ra.style.display = '';
     if (la) la.style.display = '';
     const tm = document.getElementById('call-timer'); if (tm) tm.textContent = '';
+    // Tear down the minimized call pill alongside the overlay.
+    document.getElementById('call-minibar')?.classList.remove('active');
+    const mtm = document.getElementById('call-mini-timer'); if (mtm) mtm.textContent = '00:00';
     document.getElementById('call-tile-remote')?.classList.remove('speaking');
     document.getElementById('call-tile-local')?.classList.remove('speaking');
     const bMute = document.getElementById('btn-call-mute');
@@ -1790,6 +1793,8 @@ function toggleCallMute () {
   btn.classList.toggle('muted', _mutedAudio);
   const ind = document.getElementById('call-mute-indicator');
   if (ind) ind.style.display = _mutedAudio ? 'flex' : 'none';
+  // Mirror into the minimized pill (its mute button may be the visible one).
+  if (typeof _syncMiniMuteButton === 'function') _syncMiniMuteButton();
 }
 
 /* Renegotiate with peer after adding/replacing a track mid-call (voice→video, screen-share, etc.). */
@@ -2267,7 +2272,12 @@ function startCallTimer () {
     _callSeconds++;
     const m = Math.floor(_callSeconds / 60).toString().padStart(2,'0');
     const s = (_callSeconds % 60).toString().padStart(2,'0');
-    document.getElementById('call-timer').textContent = m + ':' + s;
+    const txt = m + ':' + s;
+    const el = document.getElementById('call-timer');
+    if (el) el.textContent = txt;
+    // Keep the minimized pill's timer ticking in lockstep.
+    const mel = document.getElementById('call-mini-timer');
+    if (mel) mel.textContent = txt;
   }, 1000);
 }
 
@@ -2300,6 +2310,8 @@ function showCallOverlay (type, peerNick, status, avatar) {
   _renderPeerAvatar(peerNick, avatar);
   _ensureCallPeerAvatar(true).catch(() => {});
   document.getElementById('call-overlay')?.classList.remove('hidden');
+  // Showing the full overlay supersedes any minimized pill.
+  document.getElementById('call-minibar')?.classList.remove('active');
   // Every call opens un-muted. Reset the mute button + indicator so a muted
   // state from a previous call (or a stale default) never bleeds into a fresh
   // call and makes the user look muted when they never pressed mute.
@@ -2337,9 +2349,57 @@ function _startAndroidCallNotification(peerNick) {
 
 function closeCallOverlay () {
   document.getElementById('call-overlay').classList.add('hidden');
+  // The call is over — clear the minimized pill too.
+  document.getElementById('call-minibar')?.classList.remove('active');
   _stopVAD();
   // Android: dismiss call notification
   try { if (window.Android?.endCallNotification) window.Android.endCallNotification(); } catch {}
+}
+
+/* ── Minimize ↔ restore ───────────────────────────────────────────────────── */
+// Collapse the full-screen 1-on-1 call into the sidebar pill WITHOUT ending the
+// call, stopping media/VAD, or dismissing the Android notification — it's purely
+// a view toggle. Mirrors how #voice-channel-bar floats near the self panel.
+function minimizeCall () {
+  if (_callState === 'idle') return;
+  const overlay = document.getElementById('call-overlay');
+  const bar = document.getElementById('call-minibar');
+  if (!overlay || !bar) return;
+  overlay.classList.add('hidden');
+  const nameEl = document.getElementById('call-mini-name');
+  if (nameEl) nameEl.textContent = _callPeerNick || 'In call';
+  // Avatar — reuse the URL/emoji-aware renderer the call tiles use.
+  const avEl = document.getElementById('call-mini-avatar');
+  if (avEl) {
+    try {
+      if (typeof UI !== 'undefined' && typeof UI.avatarEl === 'function') {
+        avEl.innerHTML = UI.avatarEl(_callPeerAvatar || null, _callPeerNick || '', 38);
+      } else {
+        avEl.textContent = '🐸';
+      }
+    } catch { avEl.textContent = '🐸'; }
+  }
+  // Seed the pill timer from the live overlay timer so it doesn't flash 00:00.
+  const t = document.getElementById('call-timer');
+  const mt = document.getElementById('call-mini-timer');
+  if (mt) mt.textContent = (t && t.textContent) ? t.textContent : '00:00';
+  _syncMiniMuteButton();
+  bar.classList.add('active');
+}
+
+// Restore the full call overlay from the minimized pill.
+function maximizeCall () {
+  document.getElementById('call-minibar')?.classList.remove('active');
+  if (_callState === 'idle') return;
+  document.getElementById('call-overlay')?.classList.remove('hidden');
+}
+
+// Keep the pill mute button in sync with the overlay mute state.
+function _syncMiniMuteButton () {
+  const mb = document.getElementById('call-mini-mute');
+  if (!mb) return;
+  mb.textContent = _mutedAudio ? '🔇' : '🎤';
+  mb.classList.toggle('muted', !!_mutedAudio);
 }
 
 function showIncomingCall (nick, type, avatar) {
@@ -2813,6 +2873,12 @@ function getVoiceParticipantNicks() {
   return nicks;
 }
 let _voiceMuted = false;
+// Group-call video state (camera OR screen-share share one local video m-line).
+let _voiceCamOn = false;
+let _voiceScreenOn = false;
+// Draggable always-on-top video popout (single instance, re-points srcObject).
+let _popoutPeerKey = null;
+let _popoutDragBound = false;
 
 /** Sync Android tray notification while connected to a room voice channel. */
 function _syncVoiceTrayNotification(statusText) {
@@ -2828,6 +2894,10 @@ function _syncVoiceTrayNotification(statusText) {
       || document.getElementById('voice-bar-status')?.textContent
       || 'Connected';
     android.updateVoiceChannel(_voiceRoom, count, !!_voiceMuted, true, status);
+    // Camera / screen-share state goes through a SEPARATE bridge method so the
+    // call above stays signature-compatible with older (v248) native builds
+    // that lack the media flags — those WebViews simply skip this.
+    try { android.updateVoiceMedia?.(!!_voiceCamOn, !!_voiceScreenOn); } catch {}
   } catch {}
 }
 
@@ -2915,6 +2985,10 @@ function leaveVoiceChannel() {
 
   _voiceRoom = null;
   _voiceMuted = false;
+  _voiceCamOn = false;
+  _voiceScreenOn = false;
+  closeVideoPopout();
+  _updateVoiceCamButton();
 
   // Hide voice channel bar
   document.getElementById('voice-channel-bar').classList.remove('active');
@@ -2993,6 +3067,245 @@ function handleVoiceMute(data) {
   _updateVoiceBarParticipants();
 }
 
+/* ── Group-call camera / screen-share (mesh video) ─────────────────────────── */
+
+/** Stable per-peer key for OUR identity (for deterministic glare tie-break). */
+function _voiceMyKey() {
+  const gid = State.user?.global_user_id || '';
+  if (gid) return `g:${gid}`;
+  const uid = State.user?.id || 0;
+  return uid ? `u:${uid}` : 'self';
+}
+
+function _voiceHasLiveVideo(stream) {
+  try {
+    return !!stream && stream.getVideoTracks().some(t => t.readyState === 'live' && t.enabled !== false);
+  } catch { return false; }
+}
+
+/** Reflect cam/screen state on the voice bar control buttons. */
+function _updateVoiceCamButton() {
+  const cam = document.getElementById('voice-cam-btn');
+  if (cam) {
+    cam.classList.toggle('active', _voiceCamOn);
+    cam.title = _voiceCamOn ? 'Turn camera off' : 'Turn camera on';
+  }
+  const scr = document.getElementById('voice-screen-btn');
+  if (scr) {
+    scr.classList.toggle('active', _voiceScreenOn);
+    scr.title = _voiceScreenOn ? 'Stop sharing screen' : 'Share your screen';
+  }
+}
+
+/** Cosmetic broadcast so peers can badge cam/screen before the first frame and
+ *  distinguish camera from screen-share (SDP alone can't tell them apart). */
+function _broadcastVoiceVideoState() {
+  try { wsSend({ type: 'voice_video', video: !!_voiceCamOn, screen: !!_voiceScreenOn }); } catch {}
+}
+
+/** WS: a participant toggled camera / screen-share (cosmetic hint). */
+function handleVoiceVideo(data) {
+  if (!data) return;
+  const key = _voicePeerKey(data) || (data.user_id ? `u:${data.user_id}` : '');
+  if (!key) return;
+  const peer = _voicePeers.get(key);
+  if (peer) {
+    peer.screenOn = !!data.screen;
+    if (!data.video && !data.screen) {
+      // Authoritative "video off" — the inbound track may just mute, not end.
+      peer.videoOn = false;
+      if (_popoutPeerKey === key) closeVideoPopout();
+    }
+  }
+  _updateVoiceBarParticipants();
+}
+
+/** Add (or hot-swap) our local video track across every mesh peer. Only peers
+ *  that gain a NEW sender (first time) need renegotiation; replaceTrack does not. */
+async function _voiceAddOrReplaceVideoTrack(track) {
+  try {
+    _voiceStream.getVideoTracks().forEach(t => {
+      if (t !== track) { try { t.stop(); } catch {} try { _voiceStream.removeTrack(t); } catch {} }
+    });
+  } catch {}
+  try { _voiceStream.addTrack(track); } catch {}
+  const toReneg = [];
+  for (const [peerKey, peer] of _voicePeers) {
+    try {
+      if (peer.videoSender) {
+        await peer.videoSender.replaceTrack(track);
+      } else {
+        peer.videoSender = peer.pc.addTrack(track, _voiceStream);
+        toReneg.push(peerKey);
+      }
+    } catch (e) { console.warn('voice add video failed', e); }
+  }
+  for (const peerKey of toReneg) { await _renegotiateVoicePeer(peerKey); }
+}
+
+/** Stop our local camera/screen video and drop it from every peer (m-line kept). */
+function _voiceStopLocalVideo() {
+  try {
+    _voiceStream?.getVideoTracks().forEach(t => { try { t.stop(); } catch {} try { _voiceStream.removeTrack(t); } catch {} });
+  } catch {}
+  for (const [, peer] of _voicePeers) {
+    try { if (peer.videoSender) peer.videoSender.replaceTrack(null); } catch {}
+  }
+  _voiceCamOn = false;
+  _voiceScreenOn = false;
+  if (_popoutPeerKey === 'self') closeVideoPopout();
+  _updateVoiceCamButton();
+  _broadcastVoiceVideoState();
+  _updateVoiceBarParticipants();
+  _syncVoiceTrayNotification();
+}
+
+/** Re-offer to a single mesh peer after adding a new (video) sender. */
+async function _renegotiateVoicePeer(peerKey) {
+  const peer = _voicePeers.get(peerKey);
+  if (!peer || !peer.pc) return;
+  try {
+    const offer = await peer.pc.createOffer();
+    await peer.pc.setLocalDescription(offer);
+    _sendVoiceSignal({
+      type: 'voice_offer',
+      to_id: peer.userId || undefined,
+      to_global_user_id: peer.globalUserId || undefined,
+      sdp: offer.sdp,
+    });
+  } catch (e) { console.warn('voice renegotiate failed', e); }
+}
+
+/** Toggle the local camera in the group voice channel (works on Android WebView). */
+async function toggleVoiceCamera() {
+  if (!_voiceRoom || !_voiceStream) { toast('Join voice first', 'error'); return; }
+  if (_voiceCamOn) { _voiceStopLocalVideo(); return; }
+  if (_voiceScreenOn) { toast('Stop screen share first', 'error'); return; }
+  let camStream;
+  try {
+    camStream = await navigator.mediaDevices.getUserMedia({
+      video: { width: { ideal: 640 }, height: { ideal: 640 }, facingMode: 'user' },
+      audio: false,
+    });
+  } catch (e) { toast('Camera permission denied', 'error'); return; }
+  const track = camStream.getVideoTracks()[0];
+  if (!track) { toast('No camera found', 'error'); return; }
+  _voiceCamOn = true;
+  track.onended = () => { if (_voiceCamOn) _voiceStopLocalVideo(); };
+  await _voiceAddOrReplaceVideoTrack(track);
+  _updateVoiceCamButton();
+  _broadcastVoiceVideoState();
+  _updateVoiceBarParticipants();
+  _syncVoiceTrayNotification();
+}
+
+/** Toggle screen-share in the group voice channel (desktop getDisplayMedia;
+ *  Android uses a native path delivered in a later app build). */
+async function toggleVoiceScreenShare() {
+  if (!_voiceRoom || !_voiceStream) { toast('Join voice first', 'error'); return; }
+  if (_voiceScreenOn) { _voiceStopLocalVideo(); return; }
+  if (_voiceCamOn) { toast('Turn off your camera first', 'error'); return; }
+  if (!navigator.mediaDevices?.getDisplayMedia) {
+    toast(window.Android
+      ? 'Sharing your screen in group calls is coming to Android soon — use a desktop browser to share for now'
+      : 'Screen share is not supported on this device', 'info');
+    return;
+  }
+  let scrStream;
+  try {
+    scrStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+  } catch (e) { return; /* user cancelled the picker */ }
+  const track = scrStream.getVideoTracks()[0];
+  if (!track) return;
+  _voiceScreenOn = true;
+  track.onended = () => { if (_voiceScreenOn) _voiceStopLocalVideo(); };
+  await _voiceAddOrReplaceVideoTrack(track);
+  _updateVoiceCamButton();
+  _broadcastVoiceVideoState();
+  _updateVoiceBarParticipants();
+  _syncVoiceTrayNotification();
+}
+
+/* ── Draggable always-on-top video popout ──────────────────────────────────── */
+
+function openVideoPopout(peerKey) {
+  const pop = document.getElementById('call-popout');
+  const vid = document.getElementById('call-popout-video');
+  const nameEl = document.getElementById('call-popout-name');
+  if (!pop || !vid) return;
+  let stream, name, mirror = false;
+  if (peerKey === 'self') {
+    stream = _voiceStream;
+    name = (State.user?.nickname || 'You') + (_voiceScreenOn ? ' · screen' : '');
+    mirror = _voiceCamOn && !_voiceScreenOn;
+  } else {
+    const peer = _voicePeers.get(peerKey);
+    if (!peer) return;
+    stream = peer.stream;
+    name = (peer.nickname || 'Peer') + (peer.screenOn ? ' · screen' : '');
+  }
+  if (!_voiceHasLiveVideo(stream)) { toast('No video to show', 'info'); return; }
+  _popoutPeerKey = peerKey;
+  vid.muted = true; // audio routes through the hidden per-peer <audio> sink
+  vid.srcObject = stream;
+  vid.classList.toggle('mirror', mirror);
+  if (nameEl) nameEl.textContent = name;
+  pop.classList.remove('hidden');
+  try { vid.play?.().catch(() => {}); } catch {}
+  if (!_popoutDragBound) { _bindPopoutDrag(pop); _popoutDragBound = true; }
+}
+
+function closeVideoPopout() {
+  const pop = document.getElementById('call-popout');
+  const vid = document.getElementById('call-popout-video');
+  if (vid) { try { vid.srcObject = null; } catch {} }
+  if (pop) pop.classList.add('hidden');
+  _popoutPeerKey = null;
+}
+
+/** Pointer-drag the popout by its header (ported from rooms.js _bindChannelDrag). */
+function _bindPopoutDrag(pop) {
+  const header = document.getElementById('call-popout-header');
+  if (!header) return;
+  let startX = 0, startY = 0, baseLeft = 0, baseTop = 0, lastX = 0, lastY = 0, dragging = false, rafId = 0;
+  const apply = () => {
+    rafId = 0;
+    const w = pop.offsetWidth, h = pop.offsetHeight;
+    let nl = Math.max(4, Math.min(window.innerWidth - w - 4, baseLeft + (lastX - startX)));
+    let nt = Math.max(4, Math.min(window.innerHeight - h - 4, baseTop + (lastY - startY)));
+    pop.style.left = nl + 'px';
+    pop.style.top = nt + 'px';
+    pop.style.right = 'auto';
+    pop.style.bottom = 'auto';
+  };
+  header.addEventListener('pointerdown', (e) => {
+    if (e.target.closest && e.target.closest('#call-popout-close')) return;
+    if (e.button && e.button !== 0) return;
+    const r = pop.getBoundingClientRect();
+    baseLeft = r.left; baseTop = r.top;
+    startX = lastX = e.clientX; startY = lastY = e.clientY;
+    dragging = true;
+    pop.style.left = r.left + 'px'; pop.style.top = r.top + 'px';
+    pop.style.right = 'auto'; pop.style.bottom = 'auto';
+    try { header.setPointerCapture(e.pointerId); } catch {}
+    if (e.cancelable) e.preventDefault();
+  });
+  header.addEventListener('pointermove', (e) => {
+    if (!dragging) return;
+    lastX = e.clientX; lastY = e.clientY;
+    if (!rafId) rafId = requestAnimationFrame(apply);
+    if (e.cancelable) e.preventDefault();
+  });
+  const end = (e) => {
+    if (!dragging) return;
+    dragging = false;
+    if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
+    try { header.releasePointerCapture(e.pointerId); } catch {}
+  };
+  header.addEventListener('pointerup', end);
+  header.addEventListener('pointercancel', end);
+}
+
 function _bindVoicePeerRemoteTrack(peerKey, e) {
   const peer = _voicePeers.get(peerKey);
   if (!peer) return;
@@ -3032,12 +3345,42 @@ async function _createVoicePeer(userId, nickname, avatar, isOfferer, globalUserI
   _enrichPeerFromRoster(peerKey);
 
   pc.ontrack = (e) => {
-    if (e.track?.kind !== 'audio') return;
+    // Audio routes to the hidden <audio> sink; video is consumed by the tray
+    // tile + popout (read from peer.stream). Both kinds bind into peer.stream.
     _bindVoicePeerRemoteTrack(peerKey, e);
+    if (e.track && e.track.kind === 'video') {
+      const p = _voicePeers.get(peerKey);
+      if (p) p.videoOn = true;
+      e.track.onended = () => {
+        const pp = _voicePeers.get(peerKey);
+        if (pp) pp.videoOn = false;
+        if (_popoutPeerKey === peerKey) closeVideoPopout();
+        _updateVoiceBarParticipants();
+      };
+      e.track.onmute = () => {
+        const pp = _voicePeers.get(peerKey);
+        if (pp) pp.videoOn = false;
+        _updateVoiceBarParticipants();
+      };
+      e.track.onunmute = () => {
+        const pp = _voicePeers.get(peerKey);
+        if (pp) pp.videoOn = true;
+        _updateVoiceBarParticipants();
+      };
+    }
+    _updateVoiceBarParticipants();
   };
 
   if (_voiceStream) {
-    _voiceStream.getTracks().forEach(t => pc.addTrack(t, _voiceStream));
+    _voiceStream.getTracks().forEach(t => {
+      const sender = pc.addTrack(t, _voiceStream);
+      // Remember the video sender so a later cam toggle hot-swaps via
+      // replaceTrack (no renegotiation) instead of adding a second m-line.
+      if (t.kind === 'video') {
+        const p = _voicePeers.get(peerKey);
+        if (p) p.videoSender = sender;
+      }
+    });
   }
 
   pc.onicecandidate = (e) => {
@@ -3100,7 +3443,27 @@ function _updateVoiceBarParticipants() {
       ? (locallyMuted ? 'Unmute yourself' : 'Mute yourself')
       : `${nickname} — tap to ${locallyMuted ? 'unmute' : 'mute'} locally`;
     btn.setAttribute('aria-label', btn.title);
-    _appendVoiceBarAvatar(btn, avatar, nickname);
+    // Live video circle when this participant has camera/screen on; else avatar.
+    const selfHasVideo = isSelf && (_voiceCamOn || _voiceScreenOn) && _voiceHasLiveVideo(_voiceStream);
+    const peerHasVideo = !isSelf && !!peer?.videoOn && _voiceHasLiveVideo(peer?.stream);
+    const hasVideo = selfHasVideo || peerHasVideo;
+    if (hasVideo) {
+      const v = document.createElement('video');
+      v.className = 'voice-bar-video';
+      v.autoplay = true; v.muted = true;
+      v.setAttribute('playsinline', ''); v.setAttribute('webkit-playsinline', '');
+      if (isSelf && _voiceCamOn && !_voiceScreenOn) v.classList.add('mirror');
+      v.srcObject = isSelf ? _voiceStream : peer.stream;
+      btn.appendChild(v);
+      try { v.play?.().catch(() => {}); } catch {}
+      const camBadge = document.createElement('span');
+      camBadge.className = 'voice-bar-cam-badge';
+      camBadge.setAttribute('aria-hidden', 'true');
+      camBadge.textContent = (isSelf ? _voiceScreenOn : peer?.screenOn) ? '🖥️' : '📷';
+      btn.appendChild(camBadge);
+    } else {
+      _appendVoiceBarAvatar(btn, avatar, nickname);
+    }
     if (locallyMuted) {
       const badge = document.createElement('span');
       badge.className = 'voice-bar-mute-badge';
@@ -3108,7 +3471,15 @@ function _updateVoiceBarParticipants() {
       badge.textContent = '🔇';
       btn.appendChild(badge);
     }
-    btn.onclick = () => toggleMutePeer(peerKey);
+    if (hasVideo) {
+      // A video tile pops out the large draggable view; mute stays available
+      // on the non-video tiles (tap) and via the per-participant menu.
+      btn.onclick = () => openVideoPopout(peerKey);
+      btn.title = isSelf ? 'Your video — tap to expand' : `${nickname} — tap to expand`;
+      btn.setAttribute('aria-label', btn.title);
+    } else {
+      btn.onclick = () => toggleMutePeer(peerKey);
+    }
     tile.appendChild(btn);
 
     const label = document.createElement('span');
@@ -3245,6 +3616,8 @@ function handleVoiceUserLeft(data) {
     const audio = document.getElementById(`voice-audio-${peerKey}`);
     if (audio) audio.remove();
   }
+  // Close the popout if it was showing the departing peer.
+  if (peerKey && _popoutPeerKey === peerKey) closeVideoPopout();
   if (peerKey) {
     _voicePeers.delete(peerKey);
     _voicePeerMuted.delete(peerKey);
@@ -3284,6 +3657,14 @@ async function handleVoiceOffer(data) {
     );
   } else {
     pc = peer.pc;
+    // Renegotiation glare (both sides added video at once): only the "polite"
+    // side — lower stable identity key — rolls back and accepts the remote
+    // offer; the impolite side ignores it so its own offer wins.
+    if (pc.signalingState !== 'stable') {
+      const amPolite = _voiceMyKey() < peerKey;
+      if (!amPolite) return;
+      try { await pc.setLocalDescription({ type: 'rollback' }); } catch {}
+    }
   }
 
   await pc.setRemoteDescription({ type: 'offer', sdp: data.sdp });

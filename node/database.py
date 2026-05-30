@@ -750,7 +750,8 @@ def get_user_by_token(token: str) -> Optional[Dict]:
                    u.theme, u.custom_theme_json, u.notify_sounds, u.notify_desktop,
                    u.notify_dms, u.notify_mentions, u.allow_dms_from,
                    u.show_last_seen, u.show_read_receipts,
-                   u.hide_active_channels, u.mood, u.custom_style, u.room_order,
+                   u.hide_active_channels, u.hide_dm_history_notice,
+                   u.mood, u.custom_style, u.room_order,
                    -- PIN privacy: surface only the *flags*, never the hash
                    CASE WHEN u.pin_hash IS NULL OR u.pin_hash='' THEN 0 ELSE 1 END AS has_pin,
                    u.pin_require_on_unlock, u.pin_require_for_admin,
@@ -771,7 +772,8 @@ def get_user_by_token(token: str) -> Optional[Dict]:
                        u.theme, u.custom_theme_json, u.notify_sounds, u.notify_desktop,
                        u.notify_dms, u.notify_mentions, u.allow_dms_from,
                        u.show_last_seen, u.show_read_receipts,
-                       u.hide_active_channels, u.mood, u.custom_style, u.room_order,
+                       u.hide_active_channels, u.hide_dm_history_notice,
+                       u.mood, u.custom_style, u.room_order,
                        CASE WHEN u.pin_hash IS NULL OR u.pin_hash='' THEN 0 ELSE 1 END AS has_pin,
                        u.pin_require_on_unlock, u.pin_require_for_admin,
                        u.pin_require_after_autologin, u.pin_idle_timeout_sec
@@ -1876,6 +1878,10 @@ def _migrate():
         # Privacy: hide which channels the user is active in from profile viewers.
         if "hide_active_channels" not in cols:
             con.execute("ALTER TABLE users ADD COLUMN hide_active_channels INTEGER DEFAULT 0")
+        # UX: suppress the "older messages stay locked on this node" DM history
+        # notice once the user has acknowledged it (federated like privacy flags).
+        if "hide_dm_history_notice" not in cols:
+            con.execute("ALTER TABLE users ADD COLUMN hide_dm_history_notice INTEGER DEFAULT 0")
         # ── PIN-lock (privacy) ─────────────────────────────────────────────
         # Local app-lock: a numeric PIN gates app re-entry after idle /
         # auto-login / opening the admin panel. The hash is bcrypt of the
@@ -3245,6 +3251,7 @@ def _migrate():
             ("allow_dms_from", "ALTER TABLE federation_user_profiles ADD COLUMN allow_dms_from TEXT DEFAULT ''"),
             ("show_last_seen", "ALTER TABLE federation_user_profiles ADD COLUMN show_last_seen TEXT DEFAULT ''"),
             ("show_read_receipts", "ALTER TABLE federation_user_profiles ADD COLUMN show_read_receipts INTEGER"),
+            ("hide_dm_history_notice", "ALTER TABLE federation_user_profiles ADD COLUMN hide_dm_history_notice INTEGER"),
         ):
             if fed_profile_cols and _col not in fed_profile_cols:
                 try:
@@ -6305,6 +6312,7 @@ def apply_federation_user_privacy(
     allow_dms_from: str | None = None,
     show_last_seen: str | None = None,
     show_read_receipts: int | None = None,
+    hide_dm_history_notice: int | None = None,
 ) -> bool:
     """Persist privacy snapshot on federation_user_profiles (+ local users if homed)."""
     gid = str(global_user_id or "").strip()
@@ -6333,6 +6341,9 @@ def apply_federation_user_privacy(
     if show_read_receipts is not None:
         sets.append("show_read_receipts=?")
         vals.append(1 if int(show_read_receipts) else 0)
+    if hide_dm_history_notice is not None:
+        sets.append("hide_dm_history_notice=?")
+        vals.append(1 if int(hide_dm_history_notice) else 0)
     if not sets:
         return False
     try:
@@ -6383,6 +6394,11 @@ def apply_federation_user_privacy(
                     con.execute(
                         "UPDATE users SET show_read_receipts=? WHERE id=?",
                         (1 if int(show_read_receipts) else 0, uid),
+                    )
+                if hide_dm_history_notice is not None:
+                    con.execute(
+                        "UPDATE users SET hide_dm_history_notice=? WHERE id=?",
+                        (1 if int(hide_dm_history_notice) else 0, uid),
                     )
                 con.commit()
     except Exception:

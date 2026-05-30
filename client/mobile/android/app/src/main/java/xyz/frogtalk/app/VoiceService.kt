@@ -26,6 +26,7 @@ class VoiceService : Service() {
         const val NOTIFICATION_ID = 43002
 
         const val ACTION_UPDATE = "xyz.frogtalk.app.ACTION_UPDATE_VOICE"
+        const val ACTION_UPDATE_MEDIA = "xyz.frogtalk.app.ACTION_UPDATE_VOICE_MEDIA"
         const val ACTION_TOGGLE_MUTE = "xyz.frogtalk.app.ACTION_TOGGLE_VOICE_MUTE"
         const val ACTION_LEAVE = "xyz.frogtalk.app.ACTION_LEAVE_VOICE"
         const val ACTION_STOP = "xyz.frogtalk.app.ACTION_STOP_VOICE"
@@ -36,6 +37,8 @@ class VoiceService : Service() {
         const val EXTRA_MUTED = "muted"
         const val EXTRA_ACTIVE = "active"
         const val EXTRA_STATUS = "status"
+        const val EXTRA_CAMERA = "camera"
+        const val EXTRA_SCREEN = "screen"
     }
 
     private var roomName: String = ""
@@ -43,6 +46,11 @@ class VoiceService : Service() {
     private var muted: Boolean = false
     private var active: Boolean = false
     private var statusText: String = "Connected"
+    // Camera / screen-share state, patched independently via ACTION_UPDATE_MEDIA
+    // so they persist across mute/participant updates (and old web clients that
+    // never send them simply leave these false).
+    private var cameraOn: Boolean = false
+    private var screenOn: Boolean = false
 
     override fun onCreate() {
         super.onCreate()
@@ -83,6 +91,29 @@ class VoiceService : Service() {
                     )
                     stopSelf()
                     return START_NOT_STICKY
+                }
+                ACTION_UPDATE_MEDIA -> {
+                    // Patch camera / screen-share flags without touching the rest
+                    // of the voice state, then refresh the ongoing notification.
+                    cameraOn = intent.getBooleanExtra(EXTRA_CAMERA, false)
+                    screenOn = intent.getBooleanExtra(EXTRA_SCREEN, false)
+                    if (active) {
+                        try {
+                            val notification = buildNotification()
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                                startForeground(
+                                    NOTIFICATION_ID,
+                                    notification,
+                                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+                                )
+                            } else {
+                                startForeground(NOTIFICATION_ID, notification)
+                            }
+                        } catch (e: Throwable) {
+                            Log.w(TAG, "media notification refresh failed", e)
+                        }
+                    }
+                    return START_STICKY
                 }
             }
 
@@ -170,10 +201,14 @@ class VoiceService : Service() {
         val displayRoom = roomName.ifBlank { "channel" }
         val title = "In voice · #$displayRoom"
         val micLabel = if (muted) "Mic muted" else "Mic on"
+        val mediaSuffix = buildString {
+            if (cameraOn) append(" · Camera on")
+            if (screenOn) append(" · Sharing screen")
+        }
         val body = when {
             statusText.equals("Connecting…", ignoreCase = true) -> "Connecting to #$displayRoom…"
-            participantCount <= 1 -> "$micLabel · just you"
-            else -> "$participantCount in voice · $micLabel"
+            participantCount <= 1 -> "$micLabel · just you$mediaSuffix"
+            else -> "$participantCount in voice · $micLabel$mediaSuffix"
         }
 
         val openIntent = Intent(this, MainActivity::class.java).apply {

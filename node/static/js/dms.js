@@ -2132,13 +2132,23 @@ async function _decryptDMPreviewContent(cipher, peerId, _peerNick, opts = {}) {
       if (!_dmDecryptWarned.has(warnKey)) {
         _dmDecryptWarned.add(warnKey);
         try {
-          let msg = 'Could not decrypt — ask your contact to send a new message.';
-          if (_dmSkipHistoricalDecrypt()) {
-            msg = 'Older messages from your home node stay locked here — send a new message to start a fresh encrypted thread on this node.';
-          } else if (opts.federated) {
-            msg = 'Encrypted message from another node — open your home node or wait for sync.';
+          const _historical = _dmSkipHistoricalDecrypt();
+          // Respect the user's federated "don't show the history notice again" choice.
+          if (!(_historical && STATE.user?.hide_dm_history_notice)) {
+            let msg = 'Could not decrypt — ask your contact to send a new message.';
+            if (_historical) {
+              msg = 'Older messages from your home node stay locked here — send a new message to start a fresh encrypted thread on this node.';
+            } else if (opts.federated) {
+              msg = 'Encrypted message from another node — open your home node or wait for sync.';
+            }
+            // The history notice must never stack on top of a call surface —
+            // the toast layer (z 9999) sits above the active call overlay (z 900).
+            const _callUp = (typeof window.isCallSessionBusy === 'function' && window.isCallSessionBusy())
+              || document.getElementById('call-overlay')?.classList.contains('hidden') === false;
+            if (!(_historical && _callUp)) {
+              window.UI?.showToast?.(msg, 'warning', 7000);
+            }
           }
-          window.UI?.showToast?.(msg, 'warning', 7000);
         } catch {}
       }
     }
@@ -3683,6 +3693,10 @@ function _renderDmSysLogCard(meta, msgId, time) {
   const subtitle = esc(_dmSysLogEffectiveSubtitle(meta));
   const icon = esc(meta?.icon || 'ℹ️');
   const actions = _dmSysLogActionsHtml(kind);
+  // Only the "previous messages" history notice gets a dismiss-forever tick.
+  const dismiss = (kind === 'history_locked' || kind === 'history_import_ok')
+    ? `<label class="dm-sys-log-hide"><input type="checkbox" onchange="dmHideHistoryNotice(this.checked)"> Don't show this again</label>`
+    : '';
   const idAttr = msgId ? `msg-${msgId}` : `dm-lock-${Date.now()}`;
   const dmid = msgId ? ` data-dmid="${msgId}"` : '';
   const liveKinds = new Set(['unlocking', 'signal_boot', 'sync_in_progress']);
@@ -3694,11 +3708,41 @@ function _renderDmSysLogCard(meta, msgId, time) {
         <div class="dm-sys-log-title">${title}</div>
         ${subtitle ? `<div class="dm-sys-log-sub">${subtitle}</div>` : ''}
         ${actions}
+        ${dismiss}
         <div class="dm-sys-log-time">${time}</div>
       </div>
     </div>
   </div>`;
 }
+
+/**
+ * Acknowledge the DM "previous messages" history notice and never show it again.
+ * Persists a federated boolean (hide_dm_history_notice) via the same secure
+ * settings endpoint as the privacy flags (session + CSRF gated, home-node
+ * authoritative federation). Optimistic so the cards vanish instantly.
+ */
+async function dmHideHistoryNotice(checked) {
+  if (!checked) return;
+  try { if (STATE.user) STATE.user.hide_dm_history_notice = 1; } catch {}
+  // Collapse every history notice currently on screen.
+  try {
+    document.querySelectorAll('.dm-sys-log-card.dm-sys-log-history').forEach((card) => {
+      const wrap = card.closest('.dm-sys-log-wrap');
+      (wrap || card).remove();
+    });
+  } catch {}
+  try {
+    await apiFetch('/api/auth/profile', 'PATCH', { hide_dm_history_notice: true });
+    if (typeof UI !== 'undefined' && UI.showToast) {
+      UI.showToast("You won't see the history notice again", 'success', 4000);
+    }
+  } catch {
+    if (typeof UI !== 'undefined' && UI.showToast) {
+      UI.showToast('Saved locally — could not sync the setting', 'warning', 4000);
+    }
+  }
+}
+window.dmHideHistoryNotice = dmHideHistoryNotice;
 
 function renderDMMessage (m) {
   // Loose numeric compare — server may send sender_id as string in some paths.
@@ -3716,6 +3760,12 @@ function renderDMMessage (m) {
   if (typeof m.content === 'string' && m.content.startsWith('[[DMSYS]]')) {
     let meta = null;
     try { meta = JSON.parse(m.content.slice('[[DMSYS]]'.length)); } catch {}
+    // "Don't show this again": once acknowledged, suppress the previous-messages
+    // history notice entirely (federated setting; other kinds are unaffected).
+    const _k = String(meta?.kind || '');
+    if ((_k === 'history_locked' || _k === 'history_import_ok') && STATE.user?.hide_dm_history_notice) {
+      return '';
+    }
     return _renderDmSysLogCard(meta || {}, m.id, time);
   }
 

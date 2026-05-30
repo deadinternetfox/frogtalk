@@ -5055,6 +5055,7 @@ function _mergeUserSettingsFromMe(data) {
   if (data.show_last_seen !== undefined) State.user.show_last_seen = data.show_last_seen;
   if (data.show_read_receipts !== undefined) State.user.show_read_receipts = data.show_read_receipts ? 1 : 0;
   if (data.hide_active_channels !== undefined) State.user.hide_active_channels = data.hide_active_channels ? 1 : 0;
+  if (data.hide_dm_history_notice !== undefined) State.user.hide_dm_history_notice = data.hide_dm_history_notice ? 1 : 0;
   if (data.notify_sounds !== undefined) State.user.notify_sounds = data.notify_sounds ? 1 : 0;
   if (data.notify_desktop !== undefined) State.user.notify_desktop = data.notify_desktop ? 1 : 0;
   if (data.notify_dms !== undefined) State.user.notify_dms = data.notify_dms ? 1 : 0;
@@ -6692,6 +6693,8 @@ async function showProfile() {
   if (rrEl) rrEl.checked = u.show_read_receipts !== 0;
   const hacEl = document.getElementById('profile-hide-active-channels');
   if (hacEl) hacEl.checked = !!u.hide_active_channels;
+  const hdhEl = document.getElementById('profile-hide-dm-history-notice');
+  if (hdhEl) hdhEl.checked = !!u.hide_dm_history_notice;
   // Auto-login
   const autoLoginEl = document.getElementById('profile-auto-login');
   if (autoLoginEl) {
@@ -7100,6 +7103,7 @@ async function saveProfile() {
   const showLastSeen  = document.getElementById('profile-show-last-seen')?.value || 'everyone';
   const showReadRx    = document.getElementById('profile-show-read-receipts')?.checked ?? true;
   const hideActiveCh  = document.getElementById('profile-hide-active-channels')?.checked ?? false;
+  const hideDmHistNote = document.getElementById('profile-hide-dm-history-notice')?.checked ?? false;
   // Auto-login preference (local only)
   const autoLogin = document.getElementById('profile-auto-login')?.checked ?? true;
   localStorage.setItem('frogtalk-auto-login', autoLogin ? 'true' : 'false');
@@ -7191,6 +7195,7 @@ async function saveProfile() {
     show_last_seen: showLastSeen,
     show_read_receipts: showReadRx,
     hide_active_channels: hideActiveCh,
+    hide_dm_history_notice: hideDmHistNote,
     notify_sounds: notifySounds,
     notify_desktop: notifyDesktop,
     notify_dms: notifyDms,
@@ -7271,6 +7276,7 @@ async function saveProfile() {
     State.user.show_last_seen = showLastSeen;
     State.user.show_read_receipts = showReadRx ? 1 : 0;
     State.user.hide_active_channels = hideActiveCh ? 1 : 0;
+    State.user.hide_dm_history_notice = hideDmHistNote ? 1 : 0;
     State.user.notify_sounds = notifySounds ? 1 : 0;
     State.user.notify_desktop = notifyDesktop ? 1 : 0;
     State.user.notify_dms = notifyDms ? 1 : 0;

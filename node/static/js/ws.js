@@ -1017,6 +1017,10 @@ const WS = (() => {
         if (typeof handleVoiceMute === 'function') handleVoiceMute(data);
         break;
       }
+      case 'voice_video': {
+        if (typeof handleVoiceVideo === 'function') handleVoiceVideo(data);
+        break;
+      }
       // ── Friend notifications ──────────────────────
       case 'friend_notify': {
         // Isolate the two side effects: a throw inside notifyFriend (e.g. an

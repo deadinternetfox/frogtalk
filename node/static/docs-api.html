@@ -836,6 +836,17 @@ POST   /api/server-admin/control/ban
 POST   /api/server-admin/control/unban
 POST   /api/server-admin/control/mute
 POST   /api/server-admin/control/unmute</code></pre>
+          <h3 class="h-mt-14">Danger zone — node self-destruct</h3>
+          <div class="muted">
+            <span class="warn">Irreversible.</span> Securely wipes this node — database,
+            keys, uploads, Tor identity, the install itself — and powers off. Triple-gated:
+            authenticated server-admin <em>and</em> a confirmation matching the node's own name
+            <em>and</em> the admin's App PIN (or account password if no PIN is set). Rate-limited
+            to 3/hour. See the operator guide on the <a href="/docs/run-a-node#security">run-a-node</a>
+            page and <code>docs/NODE_SECURITY.md</code>.
+          </div>
+<pre><code>GET    /api/server-admin/nuke-info     # node name + whether the secure-wipe helper is installed
+POST   /api/server-admin/nuke          # { confirm: "&lt;node name&gt;", secret: "&lt;pin|password&gt;", paranoid?: bool }</code></pre>
         </article>
 
         <article class="panel" id="misc">

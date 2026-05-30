@@ -3570,6 +3570,9 @@ body.ft-incoming-call-active #incoming-call{z-index:20000}
 .dm-sys-log-sub{font-size:12px;color:var(--text-muted);margin-top:5px;line-height:1.45}
 .dm-sys-log-time{font-size:11px;color:var(--text-muted);margin-top:6px;opacity:.85}
 .dm-sys-log-actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.dm-sys-log-hide{display:inline-flex;align-items:center;gap:6px;margin-top:9px;font-size:11.5px;color:var(--text-muted);cursor:pointer;user-select:none}
+.dm-sys-log-hide input{accent-color:var(--accent-color);cursor:pointer;width:13px;height:13px;margin:0}
+.dm-sys-log-hide:hover{color:var(--text-color)}
 .dm-sys-log-btn{
   font-family:inherit;
   font-size:11px;font-weight:600;padding:6px 12px;border-radius:8px;cursor:pointer;
@@ -3914,6 +3917,35 @@ body.ft-incoming-call-active #incoming-call{z-index:20000}
   position:absolute;bottom:0;right:0;font-size:11px;line-height:1;
   background:rgba(0,0,0,.65);border-radius:50%;padding:2px 3px;pointer-events:none
 }
+/* Live circular video inside a voice-bar avatar (camera/screen on). */
+.voice-bar-video{width:100%;height:100%;object-fit:cover;display:block;border-radius:50%;background:#000}
+.voice-bar-video.mirror{transform:scaleX(-1)}
+.voice-bar-cam-badge{
+  position:absolute;top:-1px;left:-1px;font-size:10px;line-height:1;
+  background:rgba(0,0,0,.7);border-radius:50%;padding:2px 3px;pointer-events:none
+}
+/* Draggable, always-on-top video pop-out (above FrogSocial/modals; yields to
+   the incoming-call ring at z 20000 and the PIN lock). */
+#call-popout{
+  position:fixed;z-index:1600;right:24px;bottom:96px;width:min(340px,82vw);
+  background:#000;border:1px solid color-mix(in srgb, var(--accent-color) 42%, #000);
+  border-radius:14px;overflow:hidden;box-shadow:0 16px 50px rgba(0,0,0,.6);
+  display:flex;flex-direction:column;touch-action:none
+}
+#call-popout.hidden{display:none!important}
+#call-popout-header{
+  display:flex;align-items:center;justify-content:space-between;gap:8px;
+  padding:7px 8px 7px 12px;cursor:move;user-select:none;font-size:13px;font-weight:600;color:var(--text-color);
+  background:color-mix(in srgb, var(--surface-color) 78%, var(--accent-color) 22%);touch-action:none
+}
+#call-popout-name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0}
+#call-popout-close{
+  background:rgba(0,0,0,.3);border:none;color:var(--text-color);width:26px;height:26px;border-radius:50%;
+  cursor:pointer;font-size:13px;flex-shrink:0;display:flex;align-items:center;justify-content:center
+}
+#call-popout-close:hover{background:#c0392b;color:#fff}
+#call-popout-video{width:100%;display:block;background:#000;max-height:70vh;object-fit:contain}
+#call-popout-video.mirror{transform:scaleX(-1)}
 #voice-presence-bar .vp-join{
   padding:5px 12px;border-radius:14px;border:none;cursor:pointer;
   background:var(--accent-color);color:#000;font-size:12px;font-weight:600
@@ -3937,6 +3969,31 @@ body.ft-incoming-call-active #incoming-call{z-index:20000}
 .voice-ctl-btn.disconnect:hover{background:#ff6b63}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
 .voice-pulse{animation:pulse 1.5s ease-in-out infinite}
+
+/* Minimized 1-on-1 call pill — collapses #call-overlay into the sidebar near
+   the self panel, mirroring #voice-channel-bar. Click the body to restore. */
+#call-minibar{display:none;align-items:center;gap:10px;padding:10px 12px;cursor:pointer;
+  background:linear-gradient(135deg,color-mix(in srgb, var(--surface-color) 76%, var(--accent-color) 24%),color-mix(in srgb, var(--surface-color) 88%, var(--accent-color) 12%));
+  border-top:1px solid color-mix(in srgb, var(--surface-color) 68%, var(--accent-color) 32%);
+  transition:background .15s}
+#call-minibar.active{display:flex}
+#call-minibar:hover{background:linear-gradient(135deg,color-mix(in srgb, var(--surface-color) 68%, var(--accent-color) 32%),color-mix(in srgb, var(--surface-color) 82%, var(--accent-color) 18%))}
+#call-minibar:focus-visible{outline:2px solid var(--accent-color);outline-offset:-2px}
+.call-mini-avatar{width:38px;height:38px;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:20px;line-height:1;overflow:hidden;
+  background:color-mix(in srgb, var(--accent-color) 70%, #000);border:2px solid color-mix(in srgb, var(--surface-color) 70%, var(--accent-color) 30%)}
+.call-mini-avatar img{width:100%;height:100%;object-fit:cover;display:block}
+.call-mini-info{flex:1;min-width:0}
+.call-mini-name{font-size:13px;font-weight:700;color:var(--text-color);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.call-mini-status{font-size:11px;color:var(--text-muted);display:flex;align-items:center;gap:5px;margin-top:1px}
+.call-mini-pulse{font-size:8px;animation:pulse 1.5s ease-in-out infinite}
+.call-mini-timer{color:var(--accent-color);font-weight:600;font-variant-numeric:tabular-nums}
+.call-mini-controls{display:flex;gap:6px;flex-shrink:0}
+.call-mini-btn{width:30px;height:30px;border-radius:50%;background:rgba(0,0,0,.28);border:none;color:var(--text-color);font-size:14px;cursor:pointer;transition:background .15s,transform .1s;display:flex;align-items:center;justify-content:center;padding:0}
+.call-mini-btn:hover{background:rgba(0,0,0,.46)}
+.call-mini-btn:active{transform:scale(.92)}
+.call-mini-btn.muted{background:#c0392b;color:#fff}
+.call-mini-btn.end{background:#c0392b;color:#fff}
+.call-mini-btn.end:hover{background:#e74c3c}
 
 /* ─── Theme Preview Bar ─────────────────────────────────────── */
 @keyframes slideUpBar{from{transform:translateY(100%)}to{transform:translateY(0)}}
@@ -9549,10 +9606,28 @@ window.ConnErr = (function(){
         </div>
         <div class="voice-bar-controls">
           <button class="voice-ctl-btn" id="voice-mute-btn" onclick="toggleVoiceMute()" data-tip="Mute">🎤</button>
+          <button class="voice-ctl-btn" id="voice-cam-btn" onclick="toggleVoiceCamera()" data-tip="Camera">📷</button>
+          <button class="voice-ctl-btn" id="voice-screen-btn" onclick="toggleVoiceScreenShare()" data-tip="Share screen">🖥️</button>
           <button class="voice-ctl-btn disconnect" onclick="leaveVoiceChannel()" data-tip="Disconnect">📵</button>
         </div>
       </div>
       <div class="voice-bar-participants" id="voice-bar-participants"></div>
+    </div>
+    <!-- Minimized 1-on-1 call pill (collapsed call overlay). Click to restore. -->
+    <div id="call-minibar" role="button" tabindex="0" aria-label="Return to call" title="Return to call" onclick="maximizeCall()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();maximizeCall();}">
+      <div class="call-mini-avatar" id="call-mini-avatar">🐸</div>
+      <div class="call-mini-info">
+        <div class="call-mini-name" id="call-mini-name">In call</div>
+        <div class="call-mini-status">
+          <span class="call-mini-pulse">🟢</span>
+          <span class="call-mini-timer" id="call-mini-timer">00:00</span>
+        </div>
+      </div>
+      <div class="call-mini-controls">
+        <button class="call-mini-btn" id="call-mini-mute" onclick="event.stopPropagation(); toggleCallMute()" title="Mute">🎤</button>
+        <button class="call-mini-btn expand" onclick="event.stopPropagation(); maximizeCall()" title="Expand call">⬆️</button>
+        <button class="call-mini-btn end" onclick="event.stopPropagation(); endCall()" title="End call">📵</button>
+      </div>
     </div>
   </div>
 
@@ -10855,6 +10930,13 @@ window.ConnErr = (function(){
         </div>
         <input type="checkbox" id="profile-hide-active-channels" style="width:18px;height:18px;cursor:pointer;accent-color:var(--accent-color)">
       </label>
+      <label style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid #1e1e1e;cursor:pointer">
+        <div>
+          <div style="font-size:14px;color:#e0e0e0">Hide DM history notice</div>
+          <div style="font-size:12px;color:#666;margin-top:2px">Don't show the "older messages stay locked on this node" note when opening a DM</div>
+        </div>
+        <input type="checkbox" id="profile-hide-dm-history-notice" style="width:18px;height:18px;cursor:pointer;accent-color:var(--accent-color)">
+      </label>
       <div class="ft-privacy-keys-panel">
         <div style="font-size:14px;font-weight:600;color:var(--accent-color)">🗝️ Encryption key manager</div>
         <p style="font-size:12px;color:var(--text-muted);line-height:1.55;margin:8px 0 0">
@@ -11853,6 +11935,7 @@ window.ConnErr = (function(){
 
   <!-- Bottom controls -->
   <div id="call-controls">
+    <button id="btn-call-minimize" onclick="minimizeCall()" class="call-ctl-btn" title="Minimize call">⬇️</button>
     <button id="btn-call-mute" onclick="toggleCallMute()" class="call-ctl-btn" title="Mute">🎤</button>
     <button id="btn-call-cam" onclick="toggleCallCamera()" class="call-ctl-btn" title="Camera">📷</button>
     <button id="btn-call-screen" onclick="toggleScreenShare()" class="call-ctl-btn" title="Screen Share">🖥️</button>
@@ -11860,6 +11943,15 @@ window.ConnErr = (function(){
     <button id="btn-call-safety" onclick="showCallSafetyNumber()" class="call-ctl-btn" title="Safety Number">🔒</button>
     <button onclick="endCall()" class="call-ctl-btn call-ctl-end" title="End Call">📵</button>
   </div>
+</div>
+
+<!-- ═══════════ DRAGGABLE VIDEO POP-OUT (group call) ══════════════════════════ -->
+<div id="call-popout" class="hidden" role="dialog" aria-label="Video pop-out">
+  <div id="call-popout-header">
+    <span id="call-popout-name">Video</span>
+    <button id="call-popout-close" onclick="closeVideoPopout()" title="Close" aria-label="Close">✕</button>
+  </div>
+  <video id="call-popout-video" autoplay playsinline webkit-playsinline></video>
 </div>
 
 <!-- ═══════════ INCOMING CALL POPUP ══════════════════════════════════════════ -->

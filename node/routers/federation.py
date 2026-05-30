@@ -458,6 +458,7 @@ def enqueue_user_privacy_updated(user: dict) -> dict:
         "allow_dms_from": str(user.get("allow_dms_from") or "everyone").strip().lower()[:32],
         "show_last_seen": str(user.get("show_last_seen") or "everyone").strip().lower()[:32],
         "show_read_receipts": 1 if int(user.get("show_read_receipts") or 0) else 0,
+        "hide_dm_history_notice": 1 if int(user.get("hide_dm_history_notice") or 0) else 0,
     }
     if payload["allow_dms_from"] not in ("everyone", "friends", "nobody"):
         payload["allow_dms_from"] = "everyone"
@@ -6736,6 +6737,7 @@ async def _handle_user_privacy_updated(event: dict) -> None:
         allow_dms_from=allow_dm if allow_dm in ("everyone", "friends", "nobody") else None,
         show_last_seen=show_ls if show_ls in ("everyone", "friends", "nobody") else None,
         show_read_receipts=int(payload.get("show_read_receipts") or 0),
+        hide_dm_history_notice=int(payload.get("hide_dm_history_notice") or 0),
     )
 
 

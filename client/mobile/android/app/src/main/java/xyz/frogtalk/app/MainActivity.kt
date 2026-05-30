@@ -43,7 +43,7 @@ class MainActivity : AppCompatActivity() {
     companion object {
         private const val TAG = "FrogTalk"
         private const val SETUP_ASSET_URL = "file:///android_asset/mobile_node_setup.html"
-        private const val WEB_CACHE_REV = "20260531-build-v248"
+        private const val WEB_CACHE_REV = "20260531-build-v249"
         private const val PREFS = "frogtalk_prefs"
         private const val PREF_SERVER_BASE_URL = "server_base_url"
         private const val PREF_PERMISSIONS_WIZARD_DONE = "permissions_wizard_done"
@@ -1695,6 +1695,18 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        /** Camera / screen-share state for the voice tray. Separate from
+         *  updateVoiceChannel so that call stays signature-stable; older web
+         *  clients simply never invoke this. */
+        @android.webkit.JavascriptInterface
+        fun updateVoiceMedia(cameraActive: Boolean, screenShareActive: Boolean) {
+            try {
+                activity.updateVoiceMedia(cameraActive, screenShareActive)
+            } catch (e: Throwable) {
+                Log.e(TAG, "updateVoiceMedia failed", e)
+            }
+        }
+
         @android.webkit.JavascriptInterface
         fun registerFcmToken(sessionToken: String?) {
             try {
@@ -1979,6 +1991,23 @@ class MainActivity : AppCompatActivity() {
             }
         } catch (e: Throwable) {
             Log.e(TAG, "updateVoiceChannel dispatch failed", e)
+        }
+    }
+
+    /** Patch the camera / screen-share badge on the running voice notification.
+     *  The voice service is already foreground (started by updateVoiceChannel),
+     *  so a plain startService delivering ACTION_UPDATE_MEDIA is sufficient. */
+    private fun updateVoiceMedia(cameraActive: Boolean, screenShareActive: Boolean) {
+        if (!voiceChannelActive) return
+        try {
+            val intent = Intent(this, VoiceService::class.java).apply {
+                action = VoiceService.ACTION_UPDATE_MEDIA
+                putExtra(VoiceService.EXTRA_CAMERA, cameraActive)
+                putExtra(VoiceService.EXTRA_SCREEN, screenShareActive)
+            }
+            startService(intent)
+        } catch (e: Throwable) {
+            Log.e(TAG, "updateVoiceMedia dispatch failed", e)
         }
     }
 

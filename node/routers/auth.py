@@ -1411,6 +1411,7 @@ def _upsert_profile_cache_from_payload(payload: dict) -> None:
             allow_dms_from=allow_dm if allow_dm in ("everyone", "friends", "nobody") else None,
             show_last_seen=show_ls if show_ls in ("everyone", "friends", "nobody") else None,
             show_read_receipts=int(payload["show_read_receipts"]) if payload.get("show_read_receipts") is not None else None,
+            hide_dm_history_notice=int(payload["hide_dm_history_notice"]) if payload.get("hide_dm_history_notice") is not None else None,
         )
     except Exception:
         pass
@@ -3612,6 +3613,7 @@ def _build_sync_export_for_user(
         "show_last_seen": str(me.get("show_last_seen") or "everyone")[:32],
         "show_read_receipts": 1 if int(me.get("show_read_receipts") or 0) else 0,
         "hide_active_channels": 1 if int(me.get("hide_active_channels") or 0) else 0,
+        "hide_dm_history_notice": 1 if int(me.get("hide_dm_history_notice") or 0) else 0,
         "mood": str(me.get("mood") or "")[:200],
         "custom_style": _sanitize_inline_style(str(me.get("custom_style") or "")[:12000]),
         "custom_css": str(me.get("custom_css") or "")[:_SYNC_CUSTOM_CSS_MAX],
@@ -4551,6 +4553,7 @@ def _apply_sync_export_to_user(
                 show_last_seen = "everyone"
             show_read_receipts = 1 if int(self_profile.get("show_read_receipts") or 0) else 0
             hide_active_channels = 1 if int(self_profile.get("hide_active_channels") or 0) else 0
+            hide_dm_history_notice = 1 if int(self_profile.get("hide_dm_history_notice") or 0) else 0
             mood = str(self_profile.get("mood") or "")[:200]
             raw_css = str(self_profile.get("custom_css") or "")[:_SYNC_CUSTOM_CSS_MAX]
             custom_style = _sanitize_inline_style(
@@ -4595,6 +4598,7 @@ def _apply_sync_export_to_user(
                         show_last_seen=?,
                         show_read_receipts=?,
                         hide_active_channels=?,
+                        hide_dm_history_notice=?,
                         mood=?,
                         custom_style=?,
                         custom_css=?,
@@ -4624,6 +4628,7 @@ def _apply_sync_export_to_user(
                         show_last_seen,
                         show_read_receipts,
                         hide_active_channels,
+                        hide_dm_history_notice,
                         mood,
                         custom_style,
                         raw_css,
@@ -4643,6 +4648,7 @@ def _apply_sync_export_to_user(
                         allow_dms_from=allow_dms_from,
                         show_last_seen=show_last_seen,
                         show_read_receipts=show_read_receipts,
+                        hide_dm_history_notice=hide_dm_history_notice,
                     )
                     if _user_at_account_home(uid):
                         from routers import federation as federation_mod
@@ -6419,6 +6425,7 @@ class ProfileUpdateRequest(BaseModel):
     show_last_seen: str | None = Field(default=None, max_length=32)
     show_read_receipts: bool | None = None
     hide_active_channels: bool | None = None
+    hide_dm_history_notice: bool | None = None
 
 
 class ClientPrefsUpdateRequest(BaseModel):
@@ -8657,6 +8664,7 @@ async def update_profile(request: Request, body: ProfileUpdateRequest, current_u
             "allow_dms_from",
             "show_last_seen",
             "show_read_receipts",
+            "hide_dm_history_notice",
         )
     )
     # Update user settings
@@ -8692,6 +8700,9 @@ async def update_profile(request: Request, body: ProfileUpdateRequest, current_u
         if body.hide_active_channels is not None:
             con.execute("UPDATE users SET hide_active_channels=? WHERE id=?",
                         (1 if body.hide_active_channels else 0, current_user["id"]))
+        if body.hide_dm_history_notice is not None:
+            con.execute("UPDATE users SET hide_dm_history_notice=? WHERE id=?",
+                        (1 if body.hide_dm_history_notice else 0, current_user["id"]))
         con.commit()
     # Broadcast profile update so open clients refresh member-list caches.
     if status_or_presence_changed:
@@ -8736,7 +8747,15 @@ async def update_profile(request: Request, body: ProfileUpdateRequest, current_u
         if _user_at_account_home(int(current_user["id"])):
             federation_mod.enqueue_user_profile_updated(merged)
             if privacy_changed:
-                fresh_priv = db.get_user_by_id(current_user["id"]) or {}
+                # get_user_by_id only returns identity columns — re-fetch the
+                # full row (token path includes every privacy flag) so the
+                # federated snapshot carries the actual values, not defaults.
+                _ptok = session_token_from_request(request)
+                fresh_priv = (
+                    (db.get_user_by_token(_ptok) if _ptok else None)
+                    or db.get_user_by_id(current_user["id"])
+                    or {}
+                )
                 federation_mod.enqueue_user_privacy_updated(fresh_priv)
         else:
             # Away from the account home: a user.profile.updated signed by this

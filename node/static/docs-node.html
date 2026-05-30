@@ -343,7 +343,18 @@ apt-get install -y crowdsec crowdsec-firewall-bouncer-nftables
 cscli collections install crowdsecurity/linux crowdsecurity/sshd crowdsecurity/nginx
 systemctl enable --now crowdsec crowdsec-firewall-bouncer</code></pre>
       <p class="hint"><strong>Gotcha:</strong> CrowdSec's local API defaults to <code>127.0.0.1:8080</code>, which clashes with FrogTalk's nginx. Move it to <code>127.0.0.1:8083</code> in <code>/etc/crowdsec/config.yaml</code>, <code>local_api_credentials.yaml</code> and the bouncer yaml, then restart CrowdSec.</p>
-      <p class="hint">App-layer bouncers (optional, all free): <strong>nginx</strong> bouncer (block/challenge at the proxy), <strong>PHP</strong> bouncer (protects the <code>/board/</code> imageboard), and the <strong>Cloudflare / Cloudflare Workers</strong> bouncer if your zone is on Cloudflare (blocks at the edge — needs a Workers-scoped API token).</p>
+      <h3>App-layer bouncers — block at nginx and the board (free)</h3>
+      <p class="hint">The firewall bouncer drops attackers at the network layer. Add the <strong>nginx</strong> bouncer to block or CAPTCHA bad IPs at the proxy — this covers <code>/app</code> <em>and</em> the <code>/board/</code> imageboard — and (optionally) a <strong>PHP</strong> bouncer for defence-in-depth inside the board:</p>
+      <pre><code># nginx bouncer — registers itself with the local API
+apt-get install -y crowdsec-nginx-bouncer
+# if you relocated the LAPI off :8080 (see gotcha above), point the bouncer at it:
+sed -i 's#API_URL.*#API_URL = http://127.0.0.1:8083#' /etc/crowdsec/bouncers/crowdsec-nginx-bouncer.conf
+nginx -t &amp;&amp; systemctl reload nginx        # ALWAYS test before reload
+
+# make CrowdSec read the board/app access log so it can detect abuse there
+cscli collections install crowdsecurity/nginx
+cscli bouncers list                          # confirm the bouncer is registered + valid</code></pre>
+      <p class="hint"><strong>Cloudflare:</strong> if your zone is on Cloudflare, the <strong>Cloudflare Workers</strong> bouncer blocks at the edge before traffic reaches the box (needs a Workers-scoped API token). <strong>CTI enrichment:</strong> add a free <a href="https://app.crowdsec.net" rel="noopener noreferrer">CrowdSec console</a> CTI key to score IP reputation. Verify everything with <code>cscli bouncers list</code> and <code>cscli metrics</code>.</p>
 
       <h3>Patch automatically + run least-privilege</h3>
       <pre><code>apt-get install -y unattended-upgrades
