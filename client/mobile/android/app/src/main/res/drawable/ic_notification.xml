@@ -1,23 +1,25 @@
-<!-- White-on-transparent monochrome chat bubble.
-     Required so Android 5+ status bar shows a real glyph instead of a flat
-     gray square (which is what `android.R.drawable.ic_*` renders as in the
-     status bar tint pipeline). -->
+<!-- White-on-transparent monochrome FROG face for the status bar.
+     Status-bar icons are drawn as a tinted alpha glyph, so this is a flat
+     silhouette: a wide head with two bulging eyes (pupils punched out via
+     evenOdd so they read as eyes). Replaces the old chat-bubble glyph. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"
     android:viewportWidth="24"
     android:viewportHeight="24"
     android:tint="?attr/colorControlNormal">
+    <!-- Head -->
     <path
         android:fillColor="#FFFFFFFF"
-        android:pathData="M4,4h16a2,2 0 0 1 2,2v10a2,2 0 0 1 -2,2H8l-4,4V6a2,2 0 0 1 2,-2z" />
+        android:pathData="M3,13 C3,9.5 7,8 12,8 C17,8 21,9.5 21,13 C21,17.2 17.5,19.6 12,19.6 C6.5,19.6 3,17.2 3,13 Z" />
+    <!-- Left eye with pupil hole -->
     <path
-        android:fillColor="#FF000000"
-        android:pathData="M7.5,10.5m-1.25,0a1.25,1.25 0 1,0 2.5,0a1.25,1.25 0 1,0 -2.5,0" />
+        android:fillColor="#FFFFFFFF"
+        android:fillType="evenOdd"
+        android:pathData="M7.8,6.2 m-3,0 a3,3 0 1,0 6,0 a3,3 0 1,0 -6,0 Z M7.8,6.2 m-1.25,0 a1.25,1.25 0 1,0 2.5,0 a1.25,1.25 0 1,0 -2.5,0 Z" />
+    <!-- Right eye with pupil hole -->
     <path
-        android:fillColor="#FF000000"
-        android:pathData="M12,10.5m-1.25,0a1.25,1.25 0 1,0 2.5,0a1.25,1.25 0 1,0 -2.5,0" />
-    <path
-        android:fillColor="#FF000000"
-        android:pathData="M16.5,10.5m-1.25,0a1.25,1.25 0 1,0 2.5,0a1.25,1.25 0 1,0 -2.5,0" />
+        android:fillColor="#FFFFFFFF"
+        android:fillType="evenOdd"
+        android:pathData="M16.2,6.2 m-3,0 a3,3 0 1,0 6,0 a3,3 0 1,0 -6,0 Z M16.2,6.2 m-1.25,0 a1.25,1.25 0 1,0 2.5,0 a1.25,1.25 0 1,0 -2.5,0 Z" />
 </vector>
