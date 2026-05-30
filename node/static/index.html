@@ -3987,11 +3987,12 @@ body.ft-incoming-call-active #incoming-call{z-index:20000}
 .call-mini-status{font-size:11px;color:var(--text-muted);display:flex;align-items:center;gap:5px;margin-top:1px}
 .call-mini-pulse{font-size:8px;animation:pulse 1.5s ease-in-out infinite}
 .call-mini-timer{color:var(--accent-color);font-weight:600;font-variant-numeric:tabular-nums}
-.call-mini-controls{display:flex;gap:6px;flex-shrink:0}
+.call-mini-controls{display:flex;gap:6px;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end}
 .call-mini-btn{width:30px;height:30px;border-radius:50%;background:rgba(0,0,0,.28);border:none;color:var(--text-color);font-size:14px;cursor:pointer;transition:background .15s,transform .1s;display:flex;align-items:center;justify-content:center;padding:0}
 .call-mini-btn:hover{background:rgba(0,0,0,.46)}
 .call-mini-btn:active{transform:scale(.92)}
 .call-mini-btn.muted{background:#c0392b;color:#fff}
+.call-mini-btn.active{background:var(--accent-color);color:#000}
 .call-mini-btn.end{background:#c0392b;color:#fff}
 .call-mini-btn.end:hover{background:#e74c3c}
 
@@ -9625,6 +9626,8 @@ window.ConnErr = (function(){
       </div>
       <div class="call-mini-controls">
         <button class="call-mini-btn" id="call-mini-mute" onclick="event.stopPropagation(); toggleCallMute()" title="Mute">🎤</button>
+        <button class="call-mini-btn" id="call-mini-cam" onclick="event.stopPropagation(); toggleCallCamera()" title="Turn camera on">🚫</button>
+        <button class="call-mini-btn" id="call-mini-screen" onclick="event.stopPropagation(); toggleScreenShare()" title="Share screen">🖥️</button>
         <button class="call-mini-btn expand" onclick="event.stopPropagation(); maximizeCall()" title="Expand call">⬆️</button>
         <button class="call-mini-btn end" onclick="event.stopPropagation(); endCall()" title="End call">📵</button>
       </div>

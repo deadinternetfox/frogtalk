@@ -1652,6 +1652,8 @@ function resetCall () {
     document.getElementById('call-tile-local')?.classList.remove('speaking');
     const bMute = document.getElementById('btn-call-mute');
     if (bMute) { bMute.textContent = '🎤'; bMute.classList.remove('muted'); }
+    try { _syncCamButton(); } catch {}
+    try { _syncMiniScreenButton(); } catch {}
     try { window.Android?.dismissRing?.(); } catch {}
     try { window.Android?.endCallNotification?.(); } catch {}
     // If launch() skipped WS.connect while a call was active, resync now.
@@ -1830,7 +1832,7 @@ async function toggleCallCamera () {
   if (existingVideo && !_screenStream) {
     _mutedVideo = !_mutedVideo;
     existingVideo.enabled = !_mutedVideo;
-    if (btn) btn.textContent = _mutedVideo ? '🚫' : '📷';
+    _syncCamButton();
     return;
   }
   // Case 2: voice call — acquire camera on demand and add/replace track.
@@ -1858,7 +1860,7 @@ async function toggleCallCamera () {
     }
     _callType = 'video';   // upgrade label
     _mutedVideo = false;
-    if (btn) btn.textContent = '📷';
+    _syncCamButton();
     toast('Camera on', 'info');
   } catch (e) {
     console.error('camera enable failed', e);
@@ -2326,6 +2328,9 @@ function showCallOverlay (type, peerNick, status, avatar) {
   // Screen share is desktop/standard-browser only (no getDisplayMedia in the
   // Android WebView), so only show the button where it can actually work.
   _applyScreenShareButtonVisibility();
+  // Camera defaults OFF for a voice call — paint the off (🚫) state so the
+  // button is honest, and hide the empty local-video tile.
+  _syncCamButton();
   // Start voice activity detection on local stream (safe if no stream yet)
   try { _startLocalVAD(); } catch (e) { console.warn('VAD start failed', e); }
   // NOTE: Android call notification is now started AFTER getUserMedia resolves
@@ -2384,6 +2389,8 @@ function minimizeCall () {
   const mt = document.getElementById('call-mini-timer');
   if (mt) mt.textContent = (t && t.textContent) ? t.textContent : '00:00';
   _syncMiniMuteButton();
+  _syncCamButton();
+  _syncMiniScreenButton();
   bar.classList.add('active');
 }
 
@@ -2400,6 +2407,40 @@ function _syncMiniMuteButton () {
   if (!mb) return;
   mb.textContent = _mutedAudio ? '🔇' : '🎤';
   mb.classList.toggle('muted', !!_mutedAudio);
+}
+
+// Reflect camera on/off on BOTH the overlay and the pill camera buttons, and
+// show the local video tile only while the camera is actually on — otherwise the
+// avatar, so a disabled track never leaves a frozen/black "broken" tile.
+function _syncCamButton () {
+  const camOn = !!(_localStream && _localStream.getVideoTracks().some(t => t.enabled && t.readyState === 'live'));
+  for (const id of ['btn-call-cam', 'call-mini-cam']) {
+    const b = document.getElementById(id);
+    if (!b) continue;
+    b.textContent = camOn ? '📷' : '🚫';
+    b.classList.toggle('muted', !camOn);
+    b.title = camOn ? 'Turn camera off' : 'Turn camera on';
+  }
+  const lv = document.getElementById('local-video');
+  const la = document.getElementById('call-local-avatar');
+  if (camOn) {
+    if (lv) lv.style.display = '';
+    if (la) la.style.display = 'none';
+  } else {
+    if (lv) lv.style.display = 'none';
+    if (la) la.style.display = '';
+  }
+}
+
+// Reflect screen-share state on the pill screen button (and hide it where
+// screen share isn't supported, mirroring the overlay button).
+function _syncMiniScreenButton () {
+  const mb = document.getElementById('call-mini-screen');
+  if (!mb) return;
+  const sharing = !!(_screenStream || _nativeScreenSharing);
+  mb.classList.toggle('active', sharing);
+  mb.title = sharing ? 'Stop sharing screen' : 'Share screen';
+  mb.style.display = (typeof _screenShareSupported === 'function' && _screenShareSupported()) ? '' : 'none';
 }
 
 function showIncomingCall (nick, type, avatar) {
