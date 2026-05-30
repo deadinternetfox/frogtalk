@@ -1904,10 +1904,17 @@ async def websocket_endpoint(
                 if not to_id:
                     continue
                 call_id = int(data.get("call_id") or 0)
-                # Same call-row binding check as ICE/renegotiate: only the two
-                # participants of a live call may exchange screen signals.
-                if not _validate_call_participant(call_id, user["id"], to_id):
-                    continue
+                # 1-on-1 call: only the two participants of a live call row may
+                # exchange screen signals. Group voice (no call_id): both peers
+                # must be in the SAME voice channel — this is how native Android
+                # group screen-share fans its capture to each participant.
+                if call_id:
+                    if not _validate_call_participant(call_id, user["id"], to_id):
+                        continue
+                else:
+                    if not (voice_manager.is_in_voice(room_name, user["id"])
+                            and voice_manager.is_in_voice(room_name, to_id)):
+                        continue
                 try:
                     _ident_scr = db.get_or_create_local_server_identity() or {}
                     _local_sid_scr = str(_ident_scr.get("server_id") or "").strip()
@@ -1919,6 +1926,7 @@ async def websocket_endpoint(
                     "from_nickname": user["nickname"],
                     "from_global_user_id": str(user.get("global_user_id") or ""),
                     "call_id": call_id,
+                    "room": room_name if not call_id else "",
                     "peer_home_server_id": _local_sid_scr,
                 }
                 if msg_type in ("screen_offer", "screen_answer"):

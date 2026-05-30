@@ -1893,6 +1893,10 @@ function _screenForThisCall (data) {
 }
 
 async function handleScreenOffer (data) {
+  // Group voice screen-share (native sharer, no 1-on-1 call row) → per-sharer rx.
+  if (_voiceRoom && Number(data.call_id || 0) === 0 && Number(data.from_id) !== _selfUid()) {
+    return _handleVoiceScreenOffer(data);
+  }
   try {
     if (!_screenForThisCall(data)) return;
     // Replace any prior screen PC (sharer re-pressed / restarted).
@@ -1958,6 +1962,7 @@ async function handleScreenAnswer (data) {
 async function handleScreenIce (data) {
   try {
     if (Number(data.from_id) === _selfUid()) return;
+    if (_voiceRoom && Number(data.call_id || 0) === 0) return _handleVoiceScreenIce(data);
     if (!_screenPc || !data.candidate) return;
     let parsed; try { parsed = JSON.parse(data.candidate); } catch { return; }
     if (!_screenRemoteDescApplied) { _screenPendingIce.push(parsed); return; }
@@ -1967,24 +1972,128 @@ async function handleScreenIce (data) {
 
 function handleScreenEnd (data) {
   if (data && Number(data.from_id) === _selfUid()) return;
+  if (_voiceRoom && Number(data.call_id || 0) === 0) return _handleVoiceScreenEnd(data);
   _teardownScreen();
+}
+
+/* ── Group voice screen-share: RECEIVE side (native sharer → each participant) ─
+ * A participant sharing their screen via native MediaProjection offers a
+ * dedicated sendonly screen PC to each peer. We answer here (per sharer) and
+ * render their screen in their voice tile + the draggable popout. */
+async function _handleVoiceScreenOffer (data) {
+  try {
+    const key = _voicePeerKey(data) || (data.from_id ? `u:${data.from_id}` : '');
+    if (!key) return;
+    _teardownVoiceScreenRx(key);                       // replace any prior PC
+    const peerHome = String(data.peer_home_server_id || data.origin_server_id || '').trim();
+    const ice = await buildIceServers(peerHome);
+    const pc = new RTCPeerConnection({ iceServers: ice });
+    const rx = { pc, remoteApplied: false, pendingIce: [] };
+    _voiceScreenRx.set(key, rx);
+    if (data.force_relay) { try { pc.setConfiguration({ iceServers: ice, iceTransportPolicy: 'relay' }); } catch {} }
+    const routeBack = { to_id: data.from_id || undefined, to_global_user_id: data.from_global_user_id || undefined, call_id: 0 };
+    pc.onicecandidate = e => {
+      if (!e.candidate) return;
+      _sendCallSignal({ type: 'screen_ice', ...routeBack, candidate: JSON.stringify(e.candidate) });
+    };
+    pc.ontrack = e => {
+      try {
+        const stream = (e.streams && e.streams[0]) || new MediaStream([e.track]);
+        if (e.track && e.track.kind === 'video') {
+          const peer = _voicePeers.get(key);
+          if (peer) { peer.screenStream = stream; peer.screenOn = true; }
+          e.track.onended = () => _clearVoicePeerScreen(key);
+          e.track.onmute = () => _updateVoiceBarParticipants();
+          _updateVoiceBarParticipants();
+        }
+      } catch (err) { console.warn('voice screen ontrack failed', err); }
+    };
+    pc.onconnectionstatechange = () => {
+      const s = pc.connectionState;
+      if (s === 'failed' || s === 'closed') { _teardownVoiceScreenRx(key); _clearVoicePeerScreen(key); }
+    };
+    await pc.setRemoteDescription({ type: 'offer', sdp: data.sdp });
+    rx.remoteApplied = true;
+    const q = rx.pendingIce.slice(); rx.pendingIce.length = 0;
+    for (const c of q) { try { await pc.addIceCandidate(c); } catch {} }
+    const ans = await pc.createAnswer();
+    await pc.setLocalDescription(ans);
+    _sendCallSignal({ type: 'screen_answer', ...routeBack, sdp: ans.sdp });
+  } catch (e) { console.warn('_handleVoiceScreenOffer failed', e); }
+}
+
+async function _handleVoiceScreenIce (data) {
+  const key = _voicePeerKey(data) || (data.from_id ? `u:${data.from_id}` : '');
+  const rx = key && _voiceScreenRx.get(key);
+  if (!rx || !data.candidate) return;
+  let parsed; try { parsed = JSON.parse(data.candidate); } catch { return; }
+  if (!rx.remoteApplied) { rx.pendingIce.push(parsed); return; }
+  try { await rx.pc.addIceCandidate(parsed); } catch {}
+}
+
+function _handleVoiceScreenEnd (data) {
+  const key = _voicePeerKey(data) || (data.from_id ? `u:${data.from_id}` : '');
+  if (!key) return;
+  _teardownVoiceScreenRx(key);
+  _clearVoicePeerScreen(key);
+}
+
+function _teardownVoiceScreenRx (key) {
+  const rx = _voiceScreenRx.get(key);
+  if (!rx) return;
+  try { rx.pc.onicecandidate = null; rx.pc.ontrack = null; rx.pc.onconnectionstatechange = null; rx.pc.close(); } catch {}
+  _voiceScreenRx.delete(key);
+}
+
+function _clearVoicePeerScreen (key) {
+  const peer = _voicePeers.get(key);
+  if (peer) { peer.screenStream = null; peer.screenOn = false; }
+  if (_popoutPeerKey === key) closeVideoPopout();
+  _updateVoiceBarParticipants();
 }
 
 // ── Callbacks invoked by the Android native shell (evaluateJavascript) ──────
 // The native MediaProjection peer reports its own state so the button + toast
 // reflect reality (consent granted, user cancelled, capture failed/ended).
 function onNativeScreenShareStarted () {
+  if (_voiceRoom) {  // group voice screen-share
+    _nativeVoiceScreenSharing = true;
+    _voiceScreenOn = true;
+    _updateVoiceCamButton();
+    _broadcastVoiceVideoState();
+    _updateVoiceBarParticipants();
+    _syncVoiceTrayNotification();
+    try { toast('Sharing your screen', 'info'); } catch {}
+    return;
+  }
   _nativeScreenSharing = true;
   const btn = document.getElementById('btn-call-screen');
   if (btn) btn.textContent = '⏹️';
   try { toast('Sharing your screen', 'info'); } catch {}
 }
 function onNativeScreenShareStopped () {
+  if (_nativeVoiceScreenSharing || _voiceRoom) {
+    _nativeVoiceScreenSharing = false;
+    _voiceScreenOn = false;
+    if (_popoutPeerKey === 'self') closeVideoPopout();
+    _updateVoiceCamButton();
+    _broadcastVoiceVideoState();
+    _updateVoiceBarParticipants();
+    _syncVoiceTrayNotification();
+  }
   _nativeScreenSharing = false;
   const btn = document.getElementById('btn-call-screen');
   if (btn) btn.textContent = '🖥️';
 }
 function onNativeScreenShareError (msg) {
+  if (_nativeVoiceScreenSharing) {
+    _nativeVoiceScreenSharing = false;
+    _voiceScreenOn = false;
+    _updateVoiceCamButton();
+    _broadcastVoiceVideoState();
+    _updateVoiceBarParticipants();
+    _syncVoiceTrayNotification();
+  }
   _nativeScreenSharing = false;
   const btn = document.getElementById('btn-call-screen');
   if (btn) btn.textContent = '🖥️';
@@ -2917,6 +3026,11 @@ let _voiceMuted = false;
 // Group-call video state (camera OR screen-share share one local video m-line).
 let _voiceCamOn = false;
 let _voiceScreenOn = false;
+// We (Android) are sharing our screen to the group via the native MediaProjection
+// peer (separate transport from the mesh video track desktop uses).
+let _nativeVoiceScreenSharing = false;
+// Inbound group screen-share receive PCs, keyed by sharer (g:…/u:…).
+const _voiceScreenRx = new Map();
 // Draggable always-on-top video popout (single instance, re-points srcObject).
 let _popoutPeerKey = null;
 let _popoutDragBound = false;
@@ -3028,6 +3142,9 @@ function leaveVoiceChannel() {
   _voiceMuted = false;
   _voiceCamOn = false;
   _voiceScreenOn = false;
+  // Stop our native screen share + tear down every inbound screen receive PC.
+  if (_nativeVoiceScreenSharing) { try { window.Android?.stopScreenShare?.(); } catch {} _nativeVoiceScreenSharing = false; }
+  for (const k of [..._voiceScreenRx.keys()]) _teardownVoiceScreenRx(k);
   closeVideoPopout();
   _updateVoiceCamButton();
 
@@ -3243,13 +3360,36 @@ async function toggleVoiceCamera() {
 /** Toggle screen-share in the group voice channel (desktop getDisplayMedia;
  *  Android uses a native path delivered in a later app build). */
 async function toggleVoiceScreenShare() {
-  if (!_voiceRoom || !_voiceStream) { toast('Join voice first', 'error'); return; }
-  if (_voiceScreenOn) { _voiceStopLocalVideo(); return; }
+  if (!_voiceRoom) { toast('Join voice first', 'error'); return; }
+  if (_voiceScreenOn || _nativeVoiceScreenSharing) { _stopVoiceScreenShare(); return; }
   if (_voiceCamOn) { toast('Turn off your camera first', 'error'); return; }
-  if (!navigator.mediaDevices?.getDisplayMedia) {
-    toast(window.Android
-      ? 'Sharing your screen in group calls is coming to Android soon — use a desktop browser to share for now'
-      : 'Screen share is not supported on this device', 'info');
+
+  // Android: native MediaProjection fanned to every voice participant (the
+  // WebView has no getDisplayMedia). Each peer gets its own screen PC natively.
+  if (window.Android && typeof window.Android.startScreenShare === 'function') {
+    let supported = true;
+    try { if (typeof window.Android.isScreenShareSupported === 'function') supported = !!window.Android.isScreenShareSupported(); } catch {}
+    if (!supported) { toast('Screen share is not supported on this device', 'info'); return; }
+    const recips = _voiceScreenRecipients();
+    if (!recips.length) { toast('No one to share with yet', 'info'); return; }
+    try {
+      _nativeVoiceScreenSharing = true;
+      _voiceScreenOn = true;
+      window.Android.startScreenShare(JSON.stringify(_nativeGroupScreenArgs(recips)));
+      _updateVoiceCamButton();
+      _broadcastVoiceVideoState();
+      _updateVoiceBarParticipants();
+      _syncVoiceTrayNotification();
+    } catch (e) {
+      _nativeVoiceScreenSharing = false; _voiceScreenOn = false;
+      toast('Could not start screen share', 'error');
+    }
+    return;
+  }
+
+  // Desktop browser: getDisplayMedia rides the voice mesh as a video track.
+  if (!_voiceStream || !navigator.mediaDevices?.getDisplayMedia) {
+    toast('Screen share is not supported on this device', 'info');
     return;
   }
   let scrStream;
@@ -3259,12 +3399,47 @@ async function toggleVoiceScreenShare() {
   const track = scrStream.getVideoTracks()[0];
   if (!track) return;
   _voiceScreenOn = true;
-  track.onended = () => { if (_voiceScreenOn) _voiceStopLocalVideo(); };
+  track.onended = () => { if (_voiceScreenOn && !_nativeVoiceScreenSharing) _stopVoiceScreenShare(); };
   await _voiceAddOrReplaceVideoTrack(track);
   _updateVoiceCamButton();
   _broadcastVoiceVideoState();
   _updateVoiceBarParticipants();
   _syncVoiceTrayNotification();
+}
+
+/** Stop our outgoing group screen-share (native or mesh path). */
+function _stopVoiceScreenShare() {
+  if (_nativeVoiceScreenSharing) {
+    try { window.Android?.stopScreenShare?.(); } catch {}
+    _nativeVoiceScreenSharing = false;
+    _voiceScreenOn = false;
+    if (_popoutPeerKey === 'self') closeVideoPopout();
+    _updateVoiceCamButton();
+    _broadcastVoiceVideoState();
+    _updateVoiceBarParticipants();
+    _syncVoiceTrayNotification();
+  } else {
+    _voiceStopLocalVideo(); // mesh path already resets _voiceScreenOn + broadcasts
+  }
+}
+
+/** Recipients = every current voice peer (for the native screen fan-out). */
+function _voiceScreenRecipients() {
+  const out = [];
+  for (const [, peer] of _voicePeers) {
+    if (!peer) continue;
+    out.push({ to_id: peer.userId || 0, to_global_user_id: peer.globalUserId || '', to_nickname: peer.nickname || '' });
+  }
+  return out;
+}
+
+/** Args for window.Android.startScreenShare in a group voice channel. */
+function _nativeGroupScreenArgs(recips) {
+  let token = '';
+  try { token = String((typeof State !== 'undefined' && (State.token || State.sessionToken)) || ''); } catch {}
+  let ice = [];
+  try { ice = (_iceConfigCache && Array.isArray(_iceConfigCache.servers)) ? _iceConfigCache.servers : []; } catch {}
+  return { call_id: 0, room: _voiceRoom || '', token, ice_servers: ice, recipients: recips };
 }
 
 /* ── Draggable always-on-top video popout ──────────────────────────────────── */
@@ -3282,8 +3457,9 @@ function openVideoPopout(peerKey) {
   } else {
     const peer = _voicePeers.get(peerKey);
     if (!peer) return;
-    stream = peer.stream;
-    name = (peer.nickname || 'Peer') + (peer.screenOn ? ' · screen' : '');
+    const screenLive = peer.screenStream && _voiceHasLiveVideo(peer.screenStream);
+    stream = screenLive ? peer.screenStream : peer.stream;
+    name = (peer.nickname || 'Peer') + (screenLive || peer.screenOn ? ' · screen' : '');
   }
   if (!_voiceHasLiveVideo(stream)) { toast('No video to show', 'info'); return; }
   _popoutPeerKey = peerKey;
@@ -3436,15 +3612,53 @@ async function _createVoicePeer(userId, nickname, avatar, isOfferer, globalUserI
   };
 
   pc.onconnectionstatechange = () => {
-    if (pc.connectionState === 'connected') {
+    const st = pc.connectionState;
+    const peer = _voicePeers.get(peerKey);
+    if (st === 'connected') {
+      if (peer) { clearTimeout(peer._discTimer); peer._discTimer = null; }
       _updateVoiceBarParticipants();
-      const peer = _voicePeers.get(peerKey);
       const audio = document.getElementById(`voice-audio-${peerKey}`);
       if (peer?.stream && audio) _ensureMediaPlayback(audio, `voice-${peerKey}-connected`);
+    } else if (st === 'failed' || st === 'closed') {
+      // A peer (incl. cross-node) dropped without a clean voice_leave — remove
+      // them now so they don't sit frozen in the roster / on a stale frame.
+      _dropVoicePeer(peerKey, 'pc_' + st);
+    } else if (st === 'disconnected') {
+      // A transient ICE blip can recover; drop only if it stays down.
+      if (peer && !peer._discTimer) {
+        peer._discTimer = setTimeout(() => {
+          const p = _voicePeers.get(peerKey);
+          if (p && p.pc && (p.pc.connectionState === 'disconnected' || p.pc.connectionState === 'failed')) {
+            _dropVoicePeer(peerKey, 'pc_disconnected_timeout');
+          }
+        }, 9000);
+      }
     }
   };
 
   return pc;
+}
+
+/** Remove a single voice peer (clean teardown + repaint). Used for real-time
+ *  cross-node leave/drop detection when no voice_leave signal arrives. */
+function _dropVoicePeer(peerKey, reason) {
+  const peer = _voicePeers.get(peerKey);
+  if (!peer) return;
+  try { clearTimeout(peer._discTimer); } catch {}
+  try { peer.pc && peer.pc.close(); } catch {}
+  try { _teardownVoiceScreenRx(peerKey); } catch {}
+  const audio = document.getElementById(`voice-audio-${peerKey}`);
+  if (audio) { try { audio.srcObject = null; } catch {} audio.remove(); }
+  if (_popoutPeerKey === peerKey) closeVideoPopout();
+  _voicePeers.delete(peerKey);
+  _voicePeerMuted.delete(peerKey);
+  // Also drop from the presence roster so the tile disappears immediately.
+  try {
+    const room = _voiceRoom || _presenceRoom;
+    if (room) _presenceRemove(room, { user_id: peer.userId, global_user_id: peer.globalUserId });
+  } catch {}
+  _updateVoiceBarParticipants();
+  try { if (typeof renderUsers === 'function') renderUsers(); } catch {}
 }
 
 /**
@@ -3485,25 +3699,38 @@ function _updateVoiceBarParticipants() {
       : `${nickname} — tap to ${locallyMuted ? 'unmute' : 'mute'} locally`;
     btn.setAttribute('aria-label', btn.title);
     // Live video circle when this participant has camera/screen on; else avatar.
+    // A received native screen (peer.screenStream) takes priority over camera.
+    const peerScreenLive = !isSelf && peer?.screenStream && _voiceHasLiveVideo(peer.screenStream);
     const selfHasVideo = isSelf && (_voiceCamOn || _voiceScreenOn) && _voiceHasLiveVideo(_voiceStream);
     const peerHasVideo = !isSelf && !!peer?.videoOn && _voiceHasLiveVideo(peer?.stream);
-    const hasVideo = selfHasVideo || peerHasVideo;
+    const hasVideo = selfHasVideo || peerHasVideo || peerScreenLive;
+    // Self sharing the screen natively has no local preview stream, but should
+    // still badge as screen-sharing.
+    const selfSharingScreen = isSelf && (_nativeVoiceScreenSharing || (_voiceScreenOn && !selfHasVideo));
+    const showingScreen = peerScreenLive || (isSelf && _voiceScreenOn);
     if (hasVideo) {
       const v = document.createElement('video');
       v.className = 'voice-bar-video';
       v.autoplay = true; v.muted = true;
       v.setAttribute('playsinline', ''); v.setAttribute('webkit-playsinline', '');
       if (isSelf && _voiceCamOn && !_voiceScreenOn) v.classList.add('mirror');
-      v.srcObject = isSelf ? _voiceStream : peer.stream;
+      v.srcObject = isSelf ? _voiceStream : (peerScreenLive ? peer.screenStream : peer.stream);
       btn.appendChild(v);
       try { v.play?.().catch(() => {}); } catch {}
       const camBadge = document.createElement('span');
       camBadge.className = 'voice-bar-cam-badge';
       camBadge.setAttribute('aria-hidden', 'true');
-      camBadge.textContent = (isSelf ? _voiceScreenOn : peer?.screenOn) ? '🖥️' : '📷';
+      camBadge.textContent = showingScreen ? '🖥️' : '📷';
       btn.appendChild(camBadge);
     } else {
       _appendVoiceBarAvatar(btn, avatar, nickname);
+      if (selfSharingScreen) {
+        const camBadge = document.createElement('span');
+        camBadge.className = 'voice-bar-cam-badge';
+        camBadge.setAttribute('aria-hidden', 'true');
+        camBadge.textContent = '🖥️';
+        btn.appendChild(camBadge);
+      }
     }
     if (locallyMuted) {
       const badge = document.createElement('span');
@@ -3657,6 +3884,7 @@ function handleVoiceUserLeft(data) {
     const audio = document.getElementById(`voice-audio-${peerKey}`);
     if (audio) audio.remove();
   }
+  if (peerKey) { try { _teardownVoiceScreenRx(peerKey); } catch {} }
   // Close the popout if it was showing the departing peer.
   if (peerKey && _popoutPeerKey === peerKey) closeVideoPopout();
   if (peerKey) {

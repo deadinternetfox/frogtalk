@@ -10,16 +10,14 @@ import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
 /**
- * Minimal WebSocket client that speaks FrogTalk's call-signaling protocol for
- * the native screen-share peer. It connects as the SAME user as the WebView
- * (same session token) to `wss://{host}/ws/{room}?token=…`, then exchanges the
- * dedicated `screen_offer` / `screen_answer` / `screen_ice` / `screen_end`
- * frames. The server relays them to the call peer exactly like the call_*
- * signals (see node/routers/ws.py).
+ * One WebSocket that speaks FrogTalk's screen-share signaling for the native
+ * peer, MULTIPLEXED across every recipient. It connects as the same user as the
+ * WebView and exchanges `screen_offer` / `screen_answer` / `screen_ice` /
+ * `screen_end`, routing each outbound frame to a specific recipient and
+ * dispatching each inbound frame back to the right peer by its sender id.
  *
- * Independent of the WebView's socket: `manager.send_to_user` fans a peer's
- * reply out to all of that user's connections, and the WebView drops screen
- * frames whose `from_id` is itself, so the two coexist cleanly.
+ * For a 1-on-1 call there is a single recipient, so behaviour matches the
+ * original single-peer signaling.
  */
 class ScreenShareSignaling(
     private val cfg: ScreenShareConfig,
@@ -27,9 +25,9 @@ class ScreenShareSignaling(
 ) {
     interface Listener {
         fun onOpen()
-        fun onScreenAnswer(sdp: String)
-        fun onScreenIce(candidate: String)
-        fun onScreenEnd()
+        fun onScreenAnswer(fromKey: String, sdp: String)
+        fun onScreenIce(fromKey: String, candidate: String)
+        fun onScreenEnd(fromKey: String)
         fun onClosed(reason: String)
     }
 
@@ -53,11 +51,13 @@ class ScreenShareSignaling(
                 if (closed) return
                 try {
                     val o = JSONObject(text)
-                    when (o.optString("type")) {
-                        "screen_answer" -> listener.onScreenAnswer(o.optString("sdp"))
-                        "screen_ice" -> listener.onScreenIce(o.optString("candidate"))
-                        "screen_end" -> listener.onScreenEnd()
-                        // Other frames (presence, etc.) on this socket are ignored.
+                    val type = o.optString("type")
+                    if (type != "screen_answer" && type != "screen_ice" && type != "screen_end") return
+                    val fromKey = senderKey(o)
+                    when (type) {
+                        "screen_answer" -> listener.onScreenAnswer(fromKey, o.optString("sdp"))
+                        "screen_ice" -> listener.onScreenIce(fromKey, o.optString("candidate"))
+                        "screen_end" -> listener.onScreenEnd(fromKey)
                     }
                 } catch (e: Throwable) {
                     Log.w(TAG, "bad WS frame", e)
@@ -81,36 +81,44 @@ class ScreenShareSignaling(
         })
     }
 
-    fun sendOffer(sdp: String, forceRelay: Boolean) {
-        val o = routing()
+    fun sendOffer(recipient: Recipient, sdp: String, forceRelay: Boolean) {
+        val o = routing(recipient)
         o.put("type", "screen_offer")
         o.put("sdp", sdp)
         o.put("force_relay", forceRelay)
         send(o)
     }
 
-    fun sendIce(candidateJson: String) {
-        val o = routing()
+    fun sendIce(recipient: Recipient, candidateJson: String) {
+        val o = routing(recipient)
         o.put("type", "screen_ice")
         o.put("candidate", candidateJson)
         send(o)
     }
 
-    fun sendEnd() {
-        val o = routing()
+    fun sendEnd(recipient: Recipient) {
+        val o = routing(recipient)
         o.put("type", "screen_end")
         send(o)
     }
 
-    /** Fresh routing template (to_* + call_id + global_call_id) per frame so
-     *  every outbound message reaches the call peer. */
-    private fun routing(): JSONObject {
+    /** Key matching the web client's voice peer keys (g:… / u:…). */
+    private fun senderKey(o: JSONObject): String {
+        val gid = o.optString("from_global_user_id", "")
+        if (gid.isNotBlank()) return "g:$gid"
+        val uid = o.optLong("from_id", 0L)
+        if (uid > 0L) return "u:$uid"
+        return o.optString("from_nickname", "").let { if (it.isNotBlank()) "n:$it" else "" }
+    }
+
+    /** Per-recipient routing template (to_* + call_id + global_call_id). */
+    private fun routing(r: Recipient): JSONObject {
         val o = JSONObject()
-        if (cfg.toId > 0) o.put("to_id", cfg.toId)
-        if (cfg.toGlobalUserId.isNotBlank()) o.put("to_global_user_id", cfg.toGlobalUserId)
-        if (cfg.toNickname.isNotBlank()) o.put("to_nickname", cfg.toNickname)
-        if (cfg.globalCallId.isNotBlank()) o.put("global_call_id", cfg.globalCallId)
-        o.put("call_id", cfg.callId)
+        if (r.toId > 0L) o.put("to_id", r.toId)
+        if (r.toGlobalUserId.isNotBlank()) o.put("to_global_user_id", r.toGlobalUserId)
+        if (r.toNickname.isNotBlank()) o.put("to_nickname", r.toNickname)
+        if (r.globalCallId.isNotBlank()) o.put("global_call_id", r.globalCallId)
+        o.put("call_id", if (r.callId > 0L) r.callId else cfg.callId)
         return o
     }
 

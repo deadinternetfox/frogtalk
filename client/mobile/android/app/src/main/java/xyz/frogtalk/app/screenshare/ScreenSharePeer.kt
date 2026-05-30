@@ -22,13 +22,18 @@ import org.webrtc.VideoSource
 import org.webrtc.VideoTrack
 
 /**
- * One-way (sendonly) screen-share WebRTC peer. Captures the device screen via
- * MediaProjection, encodes it as a single video track, and offers it to the
- * call peer over [ScreenShareSignaling]. The call's own audio/video stay in the
- * WebView's RTCPeerConnection — this peer carries ONLY the screen.
+ * One-way (sendonly) screen-share. Captures the device screen via MediaProjection
+ * ONCE and fans the single encoded video track out to every recipient over its
+ * own [PeerConnection], signalled through a shared multiplexed
+ * [ScreenShareSignaling]. The call's own audio/video stay in the WebView's
+ * RTCPeerConnection — this carries ONLY the screen.
  *
- * The receiving web/desktop client answers on a dedicated `_screenPc` and
- * renders the track in the screen tile (see calls.js handleScreenOffer).
+ * For a 1-on-1 call there is exactly one recipient, so this behaves identically
+ * to the original single-peer implementation. For a group voice channel there is
+ * one peer connection per participant, all sharing the same capturer/track.
+ *
+ * Each receiving web/desktop client answers on a dedicated screen PC and renders
+ * the track (see calls.js handleScreenOffer / group screen tile).
  */
 class ScreenSharePeer(
     private val context: Context,
@@ -40,21 +45,26 @@ class ScreenSharePeer(
     interface Callback {
         /** First successful offer sent (we're live). */
         fun onSharingStarted()
-        /** Permanent failure or remote/local teardown. */
+        /** Permanent failure or full teardown. */
         fun onSharingStopped(reason: String)
+    }
+
+    private class PerPeer(val recipient: Recipient) {
+        var pc: PeerConnection? = null
+        @Volatile var remoteDescApplied = false
+        val pendingIce = ArrayList<IceCandidate>()
     }
 
     private val eglBase: EglBase = EglBase.create()
     private var factory: PeerConnectionFactory? = null
-    private var pc: PeerConnection? = null
     private var capturer: VideoCapturer? = null
     private var videoSource: VideoSource? = null
     private var videoTrack: VideoTrack? = null
     private var surfaceHelper: SurfaceTextureHelper? = null
     private var signaling: ScreenShareSignaling? = null
-    @Volatile private var remoteDescApplied = false
+    private val peers = LinkedHashMap<String, PerPeer>()   // recipient key -> PerPeer
     @Volatile private var stopped = false
-    private val pendingRemoteIce = ArrayList<IceCandidate>()
+    @Volatile private var startedNotified = false
 
     fun start() {
         try {
@@ -81,22 +91,26 @@ class ScreenSharePeer(
 
     // ── Signaling callbacks ────────────────────────────────────────────────
     override fun onOpen() {
-        // WS is up — build the PC and send the offer.
         try {
-            createPeerAndOffer()
+            ensureCapture()
+            for (r in cfg.recipients) {
+                if (stopped) break
+                try { createPeerAndOffer(r) } catch (e: Throwable) { Log.w(TAG, "offer to ${r.key()} failed", e) }
+            }
         } catch (e: Throwable) {
-            Log.e(TAG, "createPeerAndOffer failed", e)
+            Log.e(TAG, "onOpen capture/offer failed", e)
             stop("peer_failed")
         }
     }
 
-    override fun onScreenAnswer(sdp: String) {
-        val p = pc ?: return
+    override fun onScreenAnswer(fromKey: String, sdp: String) {
         if (sdp.isBlank()) return
+        val pp = resolvePeer(fromKey) ?: return
+        val p = pp.pc ?: return
         p.setRemoteDescription(object : SdpObserverAdapter() {
             override fun onSetSuccess() {
-                remoteDescApplied = true
-                drainPendingIce()
+                pp.remoteDescApplied = true
+                drainPendingIce(pp)
             }
             override fun onSetFailure(error: String?) {
                 Log.w(TAG, "setRemoteDescription(answer) failed: $error")
@@ -104,61 +118,35 @@ class ScreenSharePeer(
         }, SessionDescription(SessionDescription.Type.ANSWER, sdp))
     }
 
-    override fun onScreenIce(candidate: String) {
+    override fun onScreenIce(fromKey: String, candidate: String) {
         if (candidate.isBlank()) return
+        val pp = resolvePeer(fromKey) ?: return
         val ice = parseIce(candidate) ?: return
-        val p = pc
-        if (p == null || !remoteDescApplied) {
-            pendingRemoteIce.add(ice)
+        val p = pp.pc
+        if (p == null || !pp.remoteDescApplied) {
+            pp.pendingIce.add(ice)
         } else {
             try { p.addIceCandidate(ice) } catch (_: Throwable) {}
         }
     }
 
-    override fun onScreenEnd() {
-        stop("peer_ended")
+    override fun onScreenEnd(fromKey: String) {
+        // One receiver ended. Drop just that peer; stop entirely once none remain.
+        dropPeer(fromKey, "peer_ended")
     }
 
     override fun onClosed(reason: String) {
         stop("signaling_$reason")
     }
 
-    // ── PeerConnection + screen capture ────────────────────────────────────
-    private fun createPeerAndOffer() {
+    // ── Capture + per-peer offer ───────────────────────────────────────────
+    private fun ensureCapture() {
+        if (videoTrack != null) return
         val f = factory ?: return
-        val iceServers = parseIceServers(cfg.iceServers)
-        val rtcConfig = PeerConnection.RTCConfiguration(iceServers).apply {
-            sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
-            // The call may have forced relay; for a fresh screen offer we let
-            // ICE try direct first — the receiver mirrors force_relay if set.
-        }
-        pc = f.createPeerConnection(rtcConfig, object : PcObserverAdapter() {
-            override fun onIceCandidate(c: IceCandidate?) {
-                c ?: return
-                val obj = JSONObject().apply {
-                    put("candidate", c.sdp)
-                    put("sdpMid", c.sdpMid)
-                    put("sdpMLineIndex", c.sdpMLineIndex)
-                }
-                signaling?.sendIce(obj.toString())
-            }
-            override fun onConnectionChange(newState: PeerConnection.PeerConnectionState?) {
-                if (newState == PeerConnection.PeerConnectionState.FAILED ||
-                    newState == PeerConnection.PeerConnectionState.CLOSED
-                ) {
-                    stop("ice_${newState.name.lowercase()}")
-                }
-            }
-        }) ?: run { stop("pc_null"); return }
-
-        // Build the screen capturer and a sendonly video track.
         val capturer = ScreenCapturerAndroid(
             mediaProjectionPermissionResult,
             object : MediaProjection.Callback() {
-                override fun onStop() {
-                    // User revoked the projection from the system UI.
-                    stop("projection_revoked")
-                }
+                override fun onStop() { stop("projection_revoked") }
             }
         )
         this.capturer = capturer
@@ -167,66 +155,114 @@ class ScreenSharePeer(
         val source = f.createVideoSource(capturer.isScreencast)
         this.videoSource = source
         capturer.initialize(helper, context, source.capturerObserver)
-        // Cap resolution/fps to keep bitrate + battery sane (plan §2).
         capturer.startCapture(CAPTURE_WIDTH, CAPTURE_HEIGHT, CAPTURE_FPS)
-        val track = f.createVideoTrack("ft_screen", source)
-        this.videoTrack = track
+        this.videoTrack = f.createVideoTrack("ft_screen", source)
+    }
 
-        val transceiver = pc?.addTransceiver(
+    private fun createPeerAndOffer(recipient: Recipient) {
+        val f = factory ?: return
+        val track = videoTrack ?: return
+        val key = recipient.key()
+        if (key.isBlank()) return
+        val pp = PerPeer(recipient)
+        synchronized(peers) { peers[key] = pp }
+        val iceServers = parseIceServers(cfg.iceServers)
+        val rtcConfig = PeerConnection.RTCConfiguration(iceServers).apply {
+            sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
+        }
+        val pc = f.createPeerConnection(rtcConfig, object : PcObserverAdapter() {
+            override fun onIceCandidate(c: IceCandidate?) {
+                c ?: return
+                val obj = JSONObject().apply {
+                    put("candidate", c.sdp)
+                    put("sdpMid", c.sdpMid)
+                    put("sdpMLineIndex", c.sdpMLineIndex)
+                }
+                signaling?.sendIce(recipient, obj.toString())
+            }
+            override fun onConnectionChange(newState: PeerConnection.PeerConnectionState?) {
+                if (newState == PeerConnection.PeerConnectionState.FAILED ||
+                    newState == PeerConnection.PeerConnectionState.CLOSED
+                ) {
+                    dropPeer(key, "ice_${newState.name.lowercase()}")
+                }
+            }
+        }) ?: run { synchronized(peers) { peers.remove(key) }; return }
+        pp.pc = pc
+
+        val transceiver = pc.addTransceiver(
             track,
-            RtpTransceiver.RtpTransceiverInit(
-                RtpTransceiver.RtpTransceiverDirection.SEND_ONLY
-            )
+            RtpTransceiver.RtpTransceiverInit(RtpTransceiver.RtpTransceiverDirection.SEND_ONLY)
         )
         if (transceiver == null) {
-            // Fallback for builds where addTransceiver(track,…) isn't available.
-            pc?.addTrack(track, listOf("ft_screen_stream"))
+            pc.addTrack(track, listOf("ft_screen_stream"))
         }
 
         val constraints = MediaConstraints()
-        pc?.createOffer(object : SdpObserverAdapter() {
+        pc.createOffer(object : SdpObserverAdapter() {
             override fun onCreateSuccess(desc: SessionDescription?) {
                 desc ?: return
-                pc?.setLocalDescription(object : SdpObserverAdapter() {
+                pc.setLocalDescription(object : SdpObserverAdapter() {
                     override fun onSetSuccess() {
-                        signaling?.sendOffer(desc.description, /*forceRelay=*/false)
-                        callback.onSharingStarted()
+                        signaling?.sendOffer(recipient, desc.description, /*forceRelay=*/false)
+                        if (!startedNotified) { startedNotified = true; callback.onSharingStarted() }
                     }
                     override fun onSetFailure(error: String?) {
                         Log.w(TAG, "setLocalDescription failed: $error")
-                        stop("sld_failed")
+                        dropPeer(key, "sld_failed")
                     }
                 }, desc)
             }
             override fun onCreateFailure(error: String?) {
                 Log.w(TAG, "createOffer failed: $error")
-                stop("offer_failed")
+                dropPeer(key, "offer_failed")
             }
         }, constraints)
     }
 
-    private fun drainPendingIce() {
-        val p = pc ?: return
-        val q = ArrayList(pendingRemoteIce)
-        pendingRemoteIce.clear()
+    /** Match an inbound sender key to a peer; for a single recipient fall back to
+     *  the sole peer so a missing/garbled from-id still resolves (1-on-1 parity). */
+    private fun resolvePeer(fromKey: String): PerPeer? {
+        synchronized(peers) {
+            peers[fromKey]?.let { return it }
+            if (peers.size == 1) return peers.values.firstOrNull()
+        }
+        return null
+    }
+
+    private fun drainPendingIce(pp: PerPeer) {
+        val p = pp.pc ?: return
+        val q = ArrayList(pp.pendingIce)
+        pp.pendingIce.clear()
         for (ice in q) { try { p.addIceCandidate(ice) } catch (_: Throwable) {} }
+    }
+
+    private fun dropPeer(key: String, reason: String) {
+        val pp = synchronized(peers) { peers.remove(key) } ?: return
+        try { signaling?.sendEnd(pp.recipient) } catch (_: Throwable) {}
+        try { pp.pc?.close(); pp.pc?.dispose() } catch (_: Throwable) {}
+        val remaining = synchronized(peers) { peers.size }
+        if (remaining == 0) stop("all_peers_gone:$reason")
     }
 
     fun stop(reason: String) {
         if (stopped) return
         stopped = true
-        try { signaling?.sendEnd() } catch (_: Throwable) {}
+        val snapshot = synchronized(peers) { ArrayList(peers.values).also { peers.clear() } }
+        for (pp in snapshot) {
+            try { signaling?.sendEnd(pp.recipient) } catch (_: Throwable) {}
+            try { pp.pc?.close(); pp.pc?.dispose() } catch (_: Throwable) {}
+        }
         try { capturer?.stopCapture() } catch (_: Throwable) {}
         try { capturer?.dispose() } catch (_: Throwable) {}
         try { videoTrack?.dispose() } catch (_: Throwable) {}
         try { videoSource?.dispose() } catch (_: Throwable) {}
         try { surfaceHelper?.dispose() } catch (_: Throwable) {}
-        try { pc?.close(); pc?.dispose() } catch (_: Throwable) {}
         try { factory?.dispose() } catch (_: Throwable) {}
         try { signaling?.close() } catch (_: Throwable) {}
         try { eglBase.release() } catch (_: Throwable) {}
         capturer = null; videoTrack = null; videoSource = null
-        surfaceHelper = null; pc = null; factory = null; signaling = null
+        surfaceHelper = null; factory = null; signaling = null
         callback.onSharingStopped(reason)
     }
 
