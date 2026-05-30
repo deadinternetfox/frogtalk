@@ -296,33 +296,34 @@ function _screenSharePickerHtml(sources) {
   <div class="actions"><button class="cancel" id="cancel" type="button">Cancel</button></div>
 </div>
 <script>
-  const { ipcRenderer } = require('electron');
-  document.querySelectorAll('.src').forEach((el) => {
-    el.addEventListener('click', () => {
-      ipcRenderer.send('desktop:screen-share-pick', decodeURIComponent(el.getAttribute('data-id')));
-    });
+  /* Signal the chosen source through the window title (page-title-updated in
+     the main process). No ipcRenderer/require — Electron denies nodeIntegration
+     to data: URLs, which is why the old require('electron') picker did nothing. */
+  function ftPick(id){ document.title = 'ftpick:' + (id || ''); }
+  document.querySelectorAll('.src').forEach(function(el){
+    el.addEventListener('click', function(){ ftPick(el.getAttribute('data-id')); });
   });
-  document.getElementById('cancel').addEventListener('click', () => {
-    ipcRenderer.send('desktop:screen-share-pick', '');
-  });
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') ipcRenderer.send('desktop:screen-share-pick', ''); });
+  document.getElementById('cancel').addEventListener('click', function(){ ftPick(''); });
+  document.addEventListener('keydown', function(e){ if (e.key === 'Escape') ftPick(''); });
 </script></body></html>`;
 }
 
 function showScreenSharePicker(sources, parentWin) {
   return new Promise((resolve) => {
     let settled = false;
+    let picker = null;
     const finish = (id) => {
       if (settled) return;
       settled = true;
-      ipcMain.removeListener('desktop:screen-share-pick', onPick);
       try { if (picker && !picker.isDestroyed()) picker.close(); } catch {}
       resolve(id || '');
     };
-    const onPick = (_event, id) => finish(id);
-    ipcMain.on('desktop:screen-share-pick', onPick);
-
-    const picker = new BrowserWindow({
+    const slim = sources.map((s) => ({
+      id: s.id,
+      name: s.name,
+      thumb: (() => { try { return s.thumbnail ? s.thumbnail.toDataURL() : ''; } catch { return ''; } })(),
+    }));
+    picker = new BrowserWindow({
       width: 760,
       height: 540,
       modal: !!parentWin,
@@ -331,13 +332,18 @@ function showScreenSharePicker(sources, parentWin) {
       autoHideMenuBar: true,
       minimizable: false,
       maximizable: false,
-      webPreferences: { nodeIntegration: true, contextIsolation: false },
+      // Sandboxed: the page reports its choice via the window title, so it
+      // needs no node access (and data: URLs don't get nodeIntegration anyway).
+      webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true },
     });
-    const slim = sources.map((s) => ({
-      id: s.id,
-      name: s.name,
-      thumb: (() => { try { return s.thumbnail ? s.thumbnail.toDataURL() : ''; } catch { return ''; } })(),
-    }));
+    picker.webContents.on('page-title-updated', (e, title) => {
+      if (typeof title === 'string' && title.indexOf('ftpick:') === 0) {
+        e.preventDefault();
+        let id = title.slice('ftpick:'.length);
+        try { id = decodeURIComponent(id); } catch {}
+        finish(id);
+      }
+    });
     picker.on('closed', () => finish(''));
     picker.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(_screenSharePickerHtml(slim))}`);
   });
@@ -864,7 +870,11 @@ async function createWindow() {
             } catch { try { callback(); } catch {} }
           })
           .catch(() => { try { callback(); } catch {} });
-      }, { useSystemPicker: true });
+        // useSystemPicker only works on macOS today; forcing it on Linux/Windows
+        // made Electron skip this handler (and try a portal picker that isn't
+        // wired on X11), so the share silently never started. Keep it macOS-only
+        // and use our reliable desktopCapturer picker everywhere else.
+      }, { useSystemPicker: process.platform === 'darwin' });
     }
   } catch (e) {
     console.warn('setDisplayMediaRequestHandler failed:', e && e.message ? e.message : e);
