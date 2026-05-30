@@ -3103,7 +3103,11 @@ if ($singleThread) {
                            <?php elseif ($_sameTab): ?>
                            rel="noopener"
                            <?php else: ?>
-                           target="_blank" rel="noopener"
+                           rel="noopener"
+                           onclick="return fedPillGo(this, event);"
+                           data-peer-title="<?= htmlspecialchars($_pp['title']) ?>"
+                           data-peer-node="<?= htmlspecialchars($_pp['node_id']) ?>"
+                           data-peer-url="<?= htmlspecialchars($_peerHref) ?>"
                            <?php endif; ?>
                            title="<?= htmlspecialchars($_pp['subtitle']) ?>">
                             <?php if ($_peerTorOnly): ?><span class="fed-pill-tor-icon">🧅</span><?php endif; ?>
@@ -5448,6 +5452,105 @@ if ($singleThread) {
                 done();
             } catch(e) {}
         }
+    }
+
+    // ── Federated peer board navigation (seamless: loading + error states) ──
+    // Clearnet peer pills used to be plain target="_blank" links. In an Android
+    // WebView (and other embedded webviews) target="_blank" asks the host to
+    // open a new window; with no handler the click silently does nothing — so
+    // tapping another node's board "didn't load". Intercept here: show a
+    // loading state, probe the peer's CORS-open /board/api/info to confirm it's
+    // reachable, then navigate in the SAME tab (works on web, Android, Electron,
+    // iOS). On failure show an error with an "Open anyway" escape hatch (the
+    // probe can false-negative on a node that blocks the API but serves /board).
+    var _fedNavInFlight = false;
+    function _fedEsc(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+    function _fedNavOverlay() {
+        var ov = document.getElementById('fedNavOverlay');
+        if (ov) return ov;
+        if (!document.getElementById('fedNavStyle')) {
+            var st = document.createElement('style');
+            st.id = 'fedNavStyle';
+            st.textContent =
+                '.fed-nav-overlay{position:fixed;top:0;right:0;bottom:0;left:0;z-index:99999;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.62);-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px);padding:20px}' +
+                '.fed-nav-overlay.active{display:flex}' +
+                '.fed-nav-card{background:#0d1510;border:1px solid #1f3d28;border-radius:14px;max-width:340px;width:100%;padding:26px 22px;text-align:center;box-shadow:0 18px 60px rgba(0,0,0,.5);color:#cdebd6;font-family:inherit}' +
+                '.fed-nav-spinner{width:34px;height:34px;margin:2px auto 14px;border-radius:50%;border:3px solid rgba(0,255,65,.18);border-top-color:#00ff41;animation:fedNavSpin .8s linear infinite}' +
+                '@keyframes fedNavSpin{to{transform:rotate(360deg)}}' +
+                '.fed-nav-emoji{font-size:34px;margin-bottom:8px}' +
+                '.fed-nav-title{font-size:16px;font-weight:700;color:#eafff1}' +
+                '.fed-nav-node{font-size:12px;color:#7fb89a;margin-top:2px}' +
+                '.fed-nav-sub{font-size:13px;color:#9fc7b0;margin-top:8px;line-height:1.45}' +
+                '.fed-nav-actions{display:flex;gap:10px;justify-content:center;margin-top:18px}' +
+                '.fed-nav-btn{font:inherit;font-size:13px;font-weight:600;padding:9px 16px;border-radius:9px;cursor:pointer;border:1px solid #2a4a35;transition:transform .12s,background .18s}' +
+                '.fed-nav-btn:active{transform:scale(.97)}' +
+                '.fed-nav-btn.ghost{background:transparent;color:#bcd}' +
+                '.fed-nav-btn.primary{background:#00b34a;border-color:#00b34a;color:#04210f}';
+            document.head.appendChild(st);
+        }
+        ov = document.createElement('div');
+        ov.id = 'fedNavOverlay';
+        ov.className = 'fed-nav-overlay';
+        ov.innerHTML = '<div class="fed-nav-card" role="dialog" aria-live="polite"><div class="fed-nav-body"></div></div>';
+        ov.addEventListener('click', function(e){ if (e.target === ov) fedNavClose(); });
+        document.body.appendChild(ov);
+        return ov;
+    }
+    function fedNavShowLoading(title, node) {
+        var ov = _fedNavOverlay();
+        ov.querySelector('.fed-nav-body').innerHTML =
+            '<div class="fed-nav-spinner" aria-hidden="true"></div>' +
+            '<div class="fed-nav-title">Loading ' + _fedEsc(title) + '</div>' +
+            (node ? '<div class="fed-nav-node">@' + _fedEsc(node) + '</div>' : '') +
+            '<div class="fed-nav-sub">Connecting to the board…</div>';
+        ov.classList.add('active');
+    }
+    function fedNavShowError(title, node, url) {
+        var ov = _fedNavOverlay();
+        var body = ov.querySelector('.fed-nav-body');
+        body.innerHTML =
+            '<div class="fed-nav-emoji">📡</div>' +
+            '<div class="fed-nav-title">Couldn’t reach ' + _fedEsc(title) + '</div>' +
+            (node ? '<div class="fed-nav-node">@' + _fedEsc(node) + '</div>' : '') +
+            '<div class="fed-nav-sub">It may be offline or unreachable from here.</div>' +
+            '<div class="fed-nav-actions">' +
+              '<button type="button" class="fed-nav-btn ghost" data-act="cancel">Cancel</button>' +
+              '<button type="button" class="fed-nav-btn primary" data-act="open">Open anyway</button>' +
+            '</div>';
+        body.querySelector('[data-act="cancel"]').addEventListener('click', fedNavClose);
+        body.querySelector('[data-act="open"]').addEventListener('click', function(){
+            try { window.location.assign(url); } catch (e) { window.location.href = url; }
+        });
+        ov.classList.add('active');
+    }
+    function fedNavClose() {
+        _fedNavInFlight = false;
+        var ov = document.getElementById('fedNavOverlay');
+        if (ov) ov.classList.remove('active');
+    }
+    function fedPillGo(anchorEl, ev) {
+        try { if (ev && ev.preventDefault) ev.preventDefault(); } catch (e) {}
+        if (!anchorEl || _fedNavInFlight) return false;
+        var url   = anchorEl.getAttribute('data-peer-url') || anchorEl.getAttribute('href') || '';
+        var title = anchorEl.getAttribute('data-peer-title') || 'that board';
+        var node  = anchorEl.getAttribute('data-peer-node')  || '';
+        if (!url) return false;
+        var go = function(){ try { window.location.assign(url); } catch (e) { window.location.href = url; } };
+        _fedNavInFlight = true;
+        fedNavShowLoading(title, node);
+        // Old webviews without fetch/AbortController: skip the probe, just go.
+        if (typeof fetch !== 'function') { go(); return false; }
+        var base = (url.charAt(url.length - 1) === '/') ? url : (url + '/');
+        var infoUrl;
+        try { infoUrl = new URL('api/info', base).href; } catch (e) { go(); return false; }
+        var ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+        var timer = setTimeout(function(){ if (ctrl) { try { ctrl.abort(); } catch (e) {} } }, 7000);
+        // no-cors: any resolved response (even opaque) means the host answered,
+        // so we sidestep CORS entirely and only treat network/DNS/timeout as down.
+        fetch(infoUrl, { method: 'GET', mode: 'no-cors', cache: 'no-store', credentials: 'omit', signal: ctrl ? ctrl.signal : undefined })
+            .then(function(){ clearTimeout(timer); go(); })
+            .catch(function(){ clearTimeout(timer); _fedNavInFlight = false; fedNavShowError(title, node, url); });
+        return false;
     }
 
     async function connectPhantomForBump() {
