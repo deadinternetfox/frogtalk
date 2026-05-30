@@ -6018,6 +6018,17 @@ body[data-theme="frog"] .invite-card-icon{
 .social-activity-mark:hover{background:linear-gradient(180deg,color-mix(in srgb, var(--surface-color) 80%, var(--accent-color) 20%),color-mix(in srgb, var(--surface-color) 80%, var(--accent-color) 20%));color:var(--text-color)}
 .social-activity-mark:active{transform:scale(.97)}
 .social-activity-mark:disabled{opacity:.5;cursor:default}
+.social-activity-actions{display:flex;align-items:center;gap:8px}
+.social-activity-clear{
+  background:transparent;border:1px solid color-mix(in srgb, #ff5555 38%, var(--border-color));
+  color:#ff7b7b;font-size:12px;font-weight:600;padding:7px 12px;border-radius:8px;cursor:pointer;
+  transition:background .18s, color .18s, transform .12s
+}
+.social-activity-clear:hover{background:color-mix(in srgb, #ff5555 16%, transparent);color:#ff9b9b}
+.social-activity-clear:active{transform:scale(.97)}
+.social-activity-clear:disabled{opacity:.45;cursor:default}
+.social-activity-name{cursor:pointer}
+.social-activity-name:hover{text-decoration:underline}
 
 /* Empty state — polished even with zero activity */
 .social-activity-empty{

@@ -1645,6 +1645,21 @@ async def mark_social_notifications_read_endpoint(
     return {"ok": True, "marked": affected, "unread": unread}
 
 
+@router.delete("/notifications")
+@limiter.limit("60/hour")
+async def clear_social_notifications_endpoint(
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+):
+    """Delete ALL of the caller's social notifications (their own inbox).
+
+    Notifications from federated likes/comments/follows are stored locally on
+    the recipient's home node, so this single local delete clears every one of
+    them — there is no peer inbox to coordinate with."""
+    deleted = db.delete_all_social_notifications(current_user["id"])
+    return {"ok": True, "deleted": deleted, "unread": 0}
+
+
 def _federation_origin_allowed(origin_server_id: str) -> bool:
     sid = str(origin_server_id or "").strip()
     if not sid:

@@ -11662,6 +11662,22 @@ def mark_social_notifications_read(user_id: int,
         return cur.rowcount
 
 
+def delete_all_social_notifications(user_id: int) -> int:
+    """Delete every notification in a user's own social inbox; rows removed.
+
+    This only ever touches the caller's own rows. Notifications triggered by
+    federated engagement are mirrored into the recipient's LOCAL table on
+    their home node (see routers/federation._federated_social_notify), so a
+    single local DELETE clears local- and federated-origin alike — there is
+    no peer inbox to coordinate with (unlike a bilateral DM wipe)."""
+    with _conn() as con:
+        cur = con.execute(
+            "DELETE FROM social_notifications WHERE user_id=?",
+            (int(user_id),),
+        )
+        return cur.rowcount
+
+
 def update_user_mood(user_id: int, mood: str) -> bool:
     """Update user mood/status."""
     with _conn() as con:

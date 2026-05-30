@@ -10012,7 +10012,14 @@ const Social = (() => {
   }
 
   function _activityText(n) {
-    const nick = `<b>${esc(n.actor_nickname || 'Someone')}</b>`;
+    // Actor name links to their profile. Works for federated actors too: the
+    // notification's actor is a real local (mirrored) user, so openProfile()
+    // resolves it like any other handle. stopPropagation so the name-tap opens
+    // the profile rather than the row's openActivityItem().
+    const rawNick = n.actor_nickname || '';
+    const nick = rawNick
+      ? `<b class="social-activity-name" onclick="event.stopPropagation();Social.openProfile('${esc(rawNick)}')">${esc(rawNick)}</b>`
+      : `<b>Someone</b>`;
     if (n.kind === 'like') {
       const e = n.emoji ? ` ${esc(n.emoji)}` : '';
       return `${nick} reacted${e} to your post`;
@@ -10031,6 +10038,10 @@ const Social = (() => {
   function _renderActivityList() {
     const wrap = document.getElementById('social-activity-list');
     if (!wrap) return;
+    // "Clear all" is enabled whenever there's anything to clear (read or not),
+    // unlike "Mark all read" which keys off unread count.
+    const clearBtn = document.getElementById('social-activity-clear');
+    if (clearBtn) clearBtn.disabled = !_activityList.length;
     if (!_activityList.length) {
       wrap.innerHTML = `<div class="social-activity-empty">
         <div class="ring">🔔</div>
@@ -10071,8 +10082,12 @@ const Social = (() => {
       <div class="social-activity-wrap">
         <div class="social-activity-head">
           <div class="social-activity-title"><span class="ico">🔔</span>Activity</div>
-          <button class="social-activity-mark" id="social-activity-mark"
-                  onclick="Social.markAllActivityRead()" disabled>Mark all read</button>
+          <div class="social-activity-actions">
+            <button class="social-activity-mark" id="social-activity-mark"
+                    onclick="Social.markAllActivityRead()" disabled>Mark all read</button>
+            <button class="social-activity-clear" id="social-activity-clear"
+                    onclick="Social.clearAllActivity()" disabled>Clear all</button>
+          </div>
         </div>
         <div id="social-activity-list">
           <div class="social-activity-skel" aria-hidden="true">
@@ -10130,6 +10145,39 @@ const Social = (() => {
     _renderActivityList();
     const btn = document.getElementById('social-activity-mark');
     if (btn) btn.disabled = true;
+  }
+
+  async function clearAllActivity() {
+    if (!_activityList.length) return;
+    const ok = await UI.confirm({
+      title: 'Clear all notifications',
+      message: 'Delete all your Frog Social notifications? This removes every notification — including ones from people on other servers — and cannot be undone.',
+      confirmLabel: 'Clear all',
+      danger: true,
+    });
+    if (!ok) return;
+    // Optimistic: empty the inbox immediately; stash a copy so a failed call
+    // can restore it rather than silently wiping the user's list on a blip.
+    const prev = _activityList.slice();
+    const prevUnread = _activityUnread;
+    _activityList = [];
+    _activityUnread = 0;
+    _activityCache = { ts: Date.now(), notifications: [], unread: 0 };
+    _setSidebarBadge(0);
+    _renderActivityList();
+    const markBtn = document.getElementById('social-activity-mark');
+    if (markBtn) markBtn.disabled = true;
+    try {
+      const res = await api('/api/social/notifications', 'DELETE');
+      if (!res || !res.ok) throw new Error('clear failed');
+    } catch {
+      _activityList = prev;
+      _activityUnread = prevUnread;
+      _activityCache = { ts: Date.now(), notifications: prev.slice(), unread: prevUnread };
+      _renderActivityList();
+      if (markBtn) markBtn.disabled = _activityUnread === 0;
+      try { toast('Could not clear notifications — try again', 'error'); } catch {}
+    }
   }
 
   function openActivityItem(id) {
@@ -10318,7 +10366,7 @@ const Social = (() => {
     _reelHeartHoverEnter, _reelHeartHoverLeave,
     reelsBackToStart,
     // Activity / notifications
-    loadActivity, markAllActivityRead, openActivityItem,
+    loadActivity, markAllActivityRead, clearAllActivity, openActivityItem,
     handleSocialNotification, refreshActivityBadge, _onLogin, _onLogout,
     // Refresh inline avatars/nicknames in the Suggested-for-you bar and
     // any other rendered profile references when a user updates their
