@@ -1883,21 +1883,38 @@ async function toggleScreenShare () {
     return;
   }
   // Start sharing.
+  if (isAndroidWebView) {
+    // Android System WebView has no getDisplayMedia/screen-capture API, and
+    // there's no way to inject a native MediaProjection track into the page's
+    // RTCPeerConnection. Updating the WebView won't help — it's a platform gap.
+    toast('Screen sharing is not available on Android — this is a system WebView limitation. Use the desktop app to share your screen.', 'info', 6000);
+    return;
+  }
+  if (!navigator.mediaDevices || typeof navigator.mediaDevices.getDisplayMedia !== 'function') {
+    toast('Screen share is not supported on this device/browser', 'error');
+    return;
+  }
+  // Step 1 — capture the screen. Kept separate from the track-attach step so a
+  // capture failure (very common on Linux/Wayland when xdg-desktop-portal isn't
+  // wired) reports the REAL reason instead of a generic "failed". A genuine
+  // cancel (picker dismissed) surfaces as NotAllowedError/AbortError → silent.
+  let stream = null;
   try {
-    if (isAndroidWebView) {
-      // Android System WebView has no getDisplayMedia/screen-capture API, and
-      // there's no way to inject a native MediaProjection track into the page's
-      // RTCPeerConnection. Updating the WebView won't help — it's a platform gap.
-      toast('Screen sharing is not available on Android — this is a system WebView limitation. Use the desktop app to share your screen.', 'info', 6000);
-      return;
-    }
-    if (!navigator.mediaDevices || typeof navigator.mediaDevices.getDisplayMedia !== 'function') {
-      toast('Screen share is not supported on this device/browser', 'error');
-      return;
-    }
-    _screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+    stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+  } catch (e) {
+    const name = (e && e.name) || '';
+    if (name === 'NotAllowedError' || name === 'AbortError') return; // user cancelled
+    console.warn('screen share getDisplayMedia failed:', name, e);
+    const detail = name || (e && e.message) || 'unknown error';
+    toast('Could not start screen share: ' + detail, 'error', 7000);
+    return;
+  }
+  // Step 2 — attach the captured track to the call (replace existing video, or
+  // add + renegotiate for a voice-only call).
+  try {
+    _screenStream = stream;
     const screenTrack = _screenStream.getVideoTracks()[0];
-    if (!screenTrack) return;
+    if (!screenTrack) { toast('No screen video track was captured', 'error'); _screenStream = null; return; }
     const videoSender = _pc.getSenders().find(s => s.track && s.track.kind === 'video');
     if (videoSender) {
       await videoSender.replaceTrack(screenTrack);
@@ -1909,11 +1926,10 @@ async function toggleScreenShare () {
     toast('Sharing screen', 'info');
     screenTrack.onended = () => { toggleScreenShare().catch(()=>{}); };
   } catch (e) {
-    // User cancelled the picker — silent.
-    if (e && e.name !== 'NotAllowedError') {
-      console.warn('screen share failed', e);
-      toast('Screen share failed', 'error');
-    }
+    console.warn('screen share attach failed:', e);
+    toast('Screen share failed to attach: ' + ((e && e.name) || (e && e.message) || 'error'), 'error', 7000);
+    try { _screenStream && _screenStream.getTracks().forEach(t => t.stop()); } catch {}
+    _screenStream = null;
   }
 }
 
