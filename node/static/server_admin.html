@@ -1615,6 +1615,38 @@ input, select {
           </div>
         </div>
       </div>
+
+      <!-- ── DANGER ZONE: node self-destruct ────────────────────────── -->
+      <div class="panel" id="danger-zone-panel" style="margin-top:28px;border:2px solid #c0392b;background:rgba(192,57,43,0.05);">
+        <div style="display:flex;align-items:center;gap:10px;background:#c0392b;color:#fff;margin:-16px -16px 14px;padding:12px 16px;border-radius:8px 8px 0 0;font-weight:800;letter-spacing:.05em;">
+          <span style="font-size:20px;line-height:1;">⚠</span><span style="font-size:16px;">DANGER ZONE</span>
+        </div>
+        <div class="section-title" style="color:#c0392b;">Nuke this node</div>
+        <div class="sub" style="margin-bottom:14px;">
+          Permanently and securely destroys <strong>everything on this node</strong> — the database, all
+          messages, uploads, encryption keys, secrets, the Tor hidden-service identity, and the FrogTalk
+          install itself — then best-effort wipes free RAM and powers the box off.
+          <strong style="color:#c0392b;">This cannot be undone. No backup, no recovery, the node goes offline.</strong>
+        </div>
+        <button class="btn" id="nuke-reveal-btn" type="button" style="background:#c0392b;border-color:#c0392b;color:#fff;font-weight:700;">Nuke this node…</button>
+
+        <div id="nuke-confirm" style="display:none;margin-top:16px;border-top:1px dashed #c0392b;padding-top:14px;">
+          <div class="sub" style="margin-bottom:10px;">To confirm, type this node's name exactly:
+            <code id="nuke-node-name" style="background:#c0392b;color:#fff;padding:2px 8px;border-radius:4px;">…</code>
+          </div>
+          <input id="nuke-name-input" placeholder="Type the node name" autocomplete="off" style="margin-bottom:10px;">
+          <input id="nuke-secret-input" type="password" autocomplete="off" placeholder="Your admin PIN" style="margin-bottom:10px;">
+          <label style="display:flex;align-items:center;gap:8px;margin-bottom:12px;cursor:pointer;font-size:13px;color:#888;">
+            <input type="checkbox" id="nuke-paranoid" style="width:16px;height:16px;cursor:pointer;accent-color:#c0392b;">
+            <span>Paranoid: also overwrite free disk space (much slower)</span>
+          </label>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <button class="btn" id="nuke-cancel-btn" type="button">Cancel</button>
+            <button class="btn" id="nuke-destroy-btn" type="button" style="background:#c0392b;border-color:#c0392b;color:#fff;font-weight:800;">DESTROY THIS NODE</button>
+          </div>
+          <div class="msg" id="nuke-msg" style="margin-top:10px;"></div>
+        </div>
+      </div>
     </div>
   </div>
 

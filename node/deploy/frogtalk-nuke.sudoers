@@ -1,0 +1,7 @@
+# Allow the unprivileged FrogTalk service user to invoke ONLY the node
+# self-destruct helper, with no password. Install to /etc/sudoers.d/frogtalk-nuke
+# (mode 0440, owned root:root) and validate with `visudo -cf`.
+#
+# This grants nothing else — the helper is root:root 0500 so the deploy user
+# cannot read or modify it, only execute it via this exact rule.
+deploy ALL=(root) NOPASSWD: /usr/local/sbin/frogtalk-nuke.sh, /usr/local/sbin/frogtalk-nuke.sh --paranoid

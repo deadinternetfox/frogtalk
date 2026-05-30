@@ -2305,6 +2305,80 @@
   });
   easterPreviewBtn?.addEventListener('click', previewEasterPopup);
   easterSaveBtn?.addEventListener('click', saveEasterEgg);
+
+  // ── Danger zone: node self-destruct ──────────────────────────────
+  (function wireNuke() {
+    const reveal = document.getElementById('nuke-reveal-btn');
+    const confirmBox = document.getElementById('nuke-confirm');
+    const cancelBtn = document.getElementById('nuke-cancel-btn');
+    const destroyBtn = document.getElementById('nuke-destroy-btn');
+    const nameOut = document.getElementById('nuke-node-name');
+    const nameInput = document.getElementById('nuke-name-input');
+    const secretInput = document.getElementById('nuke-secret-input');
+    const paranoid = document.getElementById('nuke-paranoid');
+    const msg = document.getElementById('nuke-msg');
+    if (!reveal || !confirmBox || !destroyBtn) return;
+    let nodeName = '';
+
+    async function loadInfo() {
+      try {
+        const info = await api('/api/server-admin/nuke-info');
+        nodeName = info.node_name || '';
+        if (nameOut) nameOut.textContent = nodeName || 'this node';
+        if (secretInput) secretInput.placeholder = info.auth === 'pin' ? 'Your admin PIN' : 'Your account password';
+        if (!info.full_wipe_available && msg) {
+          msg.textContent = 'Note: root helper not installed — this will wipe app data only (no poweroff/RAM shred).';
+          msg.style.color = '#b8860b';
+        }
+      } catch (e) { /* will retry on reveal */ }
+    }
+
+    reveal.addEventListener('click', async () => {
+      await loadInfo();
+      confirmBox.style.display = 'block';
+      reveal.style.display = 'none';
+      nameInput?.focus();
+    });
+    cancelBtn?.addEventListener('click', () => {
+      confirmBox.style.display = 'none';
+      reveal.style.display = '';
+      if (nameInput) nameInput.value = '';
+      if (secretInput) secretInput.value = '';
+      if (msg) msg.textContent = '';
+    });
+
+    destroyBtn.addEventListener('click', async () => {
+      const typed = (nameInput?.value || '').trim();
+      const secret = secretInput?.value || '';
+      if (!typed || typed !== nodeName) {
+        if (msg) { msg.textContent = 'Node name does not match — type it exactly.'; msg.style.color = '#c0392b'; }
+        return;
+      }
+      if (!secret) {
+        if (msg) { msg.textContent = 'Enter your PIN/password to confirm.'; msg.style.color = '#c0392b'; }
+        return;
+      }
+      if (!window.confirm('FINAL WARNING: this permanently destroys this node and ALL its data. There is NO undo. Continue?')) return;
+      destroyBtn.disabled = true;
+      if (msg) { msg.textContent = 'Initiating self-destruct…'; msg.style.color = '#c0392b'; }
+      try {
+        const r = await api('/api/server-admin/nuke', {
+          method: 'POST',
+          body: JSON.stringify({ secret, confirm: typed, paranoid: !!(paranoid && paranoid.checked) }),
+        });
+        if (msg) {
+          msg.textContent = r.mode === 'degraded'
+            ? 'App data wiped (degraded mode — root helper missing). Node still powered on.'
+            : 'Self-destruct initiated. The node is wiping and powering off now.';
+          msg.style.color = '#c0392b';
+        }
+      } catch (e) {
+        destroyBtn.disabled = false;
+        const lock = e.payload && e.payload.lock_seconds ? ` (locked ${e.payload.lock_seconds}s)` : '';
+        if (msg) { msg.textContent = (e.message || 'Failed') + lock; msg.style.color = '#c0392b'; }
+      }
+    });
+  })();
   easterUploadBtn?.addEventListener('click', openEasterFilePicker);
   easterUploadInput?.addEventListener('change', (event) => {
     const file = event.target?.files?.[0];

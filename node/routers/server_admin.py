@@ -6,6 +6,7 @@ import re
 import time
 import secrets
 import shutil
+import subprocess
 import urllib.parse
 from typing import Optional
 
@@ -584,6 +585,14 @@ class OperatorSiteSettingsBody(BaseModel):
 
 class PurgeStaleNodesBody(BaseModel):
     dry_run: bool = False
+
+
+class NukeBody(BaseModel):
+    # PIN if the admin has one set, otherwise the account password.
+    secret: str = Field(default="", max_length=256)
+    # Must equal this node's name exactly (shown in the Danger Zone UI).
+    confirm: str = Field(default="", max_length=200)
+    paranoid: bool = False
 
 
 def _cfg_easter_enabled() -> bool:
@@ -1672,6 +1681,159 @@ async def server_admin_unban(body: ModerationBody, request: Request):
     if not ok:
         return JSONResponse(status_code=404, content={"error": "User was not banned"})
     return {"ok": True}
+
+
+# ── Danger zone: node self-destruct ──────────────────────────────────────────
+_NUKE_HELPER = "/usr/local/sbin/frogtalk-nuke.sh"
+
+
+def _nuke_node_name() -> str:
+    """The exact string an operator must type to confirm a nuke (this node's
+    name). Falls back to the hostname so the confirm phrase is never empty."""
+    try:
+        ident = db.get_or_create_local_server_identity() or {}
+        name = str(ident.get("display_name") or "").strip()
+        if name:
+            return name
+    except Exception:
+        pass
+    try:
+        import socket
+        return socket.gethostname() or "this node"
+    except Exception:
+        return "this node"
+
+
+def _degraded_self_wipe() -> None:
+    """Fallback when the root helper isn't installed: shred the data this app
+    owns (DB, secrets, .env, board data, uploads) as the unprivileged service
+    user, detached, then exit. No poweroff / RAM shred (needs root)."""
+    install = os.getenv("FROGTALK_INSTALL_DIR", "/opt/frogtalk")
+    targets = " ".join(
+        f"'{install}/{p}'" for p in (
+            "data", ".env", "node/.env", "node/board/.env", "secrets",
+            "node/secrets", "node/board/board_data", "node/static/uploads",
+        )
+    )
+    script = (
+        "for t in " + targets + "; do "
+        "find $t -type f -print0 2>/dev/null | xargs -0 -r -P4 shred -f -u -z -n1 2>/dev/null; "
+        "rm -rf $t 2>/dev/null; done; "
+        "sync"
+    )
+    try:
+        subprocess.Popen(
+            ["bash", "-c", script],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL, start_new_session=True,
+        )
+    except Exception:
+        pass
+
+
+@router.get("/api/server-admin/nuke-info")
+async def server_admin_nuke_info(request: Request):
+    """Tell the UI what the operator must type and whether a PIN re-auth is
+    expected (vs account password), plus whether the full root helper is wired."""
+    disabled = _require_enabled()
+    if disabled:
+        return disabled
+    _user, auth = await _require_frogtalk_admin(request)
+    if auth:
+        return auth
+    pin_set = False
+    try:
+        pin_set = bool(db.get_pin_status(_user.get("id")).get("has_pin"))
+    except Exception:
+        pin_set = False
+    return {
+        "ok": True,
+        "node_name": _nuke_node_name(),
+        "auth": "pin" if pin_set else "password",
+        "full_wipe_available": os.path.exists(_NUKE_HELPER),
+    }
+
+
+@router.post("/api/server-admin/nuke")
+@limiter.limit("3/hour")
+async def server_admin_nuke(body: NukeBody, request: Request):
+    """SELF-DESTRUCT. Wipes this node's data, the install, best-effort RAM, and
+    powers off. Gated by: admin session + fresh PIN (or password) + the node
+    name typed exactly. Irreversible by design."""
+    disabled = _require_enabled()
+    if disabled:
+        return disabled
+    _user, auth = await _require_frogtalk_admin(request)
+    if auth:
+        return auth
+    user_id = _user.get("id")
+    if not user_id:
+        return JSONResponse(status_code=401, content={"error": "Not authenticated"})
+
+    # 1) Typed confirmation must equal this node's name, exactly.
+    node_name = _nuke_node_name()
+    if (body.confirm or "").strip() != node_name:
+        return JSONResponse(
+            status_code=400,
+            content={"error": f"Type the node name exactly to confirm: {node_name}"},
+        )
+
+    # 2) Fresh re-auth: PIN if set (with its lockout), else account password.
+    pin_set = bool(db.get_pin_status(user_id).get("has_pin"))
+    if pin_set:
+        res = db.verify_user_pin(user_id, body.secret or "")
+        if not res.get("ok"):
+            return JSONResponse(
+                status_code=401,
+                content={
+                    "error": res.get("error") or "Incorrect PIN",
+                    "lock_seconds": res.get("lock_seconds", 0),
+                },
+            )
+    else:
+        ph = db.get_user_password_hash(user_id)
+        ok = False
+        try:
+            import bcrypt as _bc
+            ok = bool(ph) and _bc.checkpw((body.secret or "").encode(), ph.encode())
+        except Exception:
+            ok = False
+        if not ok:
+            return JSONResponse(status_code=401, content={"error": "Incorrect password"})
+
+    actor = _user.get("nickname") or _user.get("display_name") or "admin"
+    try:
+        import logging
+        logging.getLogger("frogtalk").critical(
+            "NODE SELF-DESTRUCT triggered by admin '%s' on node '%s'", actor, node_name
+        )
+    except Exception:
+        pass
+
+    # 3) Fire the detached root helper (survives the app being killed). Use
+    #    non-interactive sudo so it fails fast if the grant isn't installed.
+    if os.path.exists(_NUKE_HELPER):
+        cmd = ["sudo", "-n", _NUKE_HELPER]
+        if body.paranoid:
+            cmd.append("--paranoid")
+        try:
+            subprocess.Popen(
+                cmd,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                stdin=subprocess.DEVNULL, start_new_session=True,
+            )
+            return {"ok": True, "nuking": True, "mode": "full"}
+        except Exception:
+            pass
+
+    # 4) Degraded: no root helper — still destroy the data we own.
+    _degraded_self_wipe()
+    return {
+        "ok": True,
+        "nuking": True,
+        "mode": "degraded",
+        "note": "Root helper not installed; wiped app data only (no poweroff/RAM shred).",
+    }
 
 
 @router.post("/api/server-admin/control/mute")
