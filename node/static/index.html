@@ -11229,8 +11229,9 @@ window.ConnErr = (function(){
            delete-account confirmation from anywhere in the app. Wired by
            PanicHotkey (ui.js). The shortcut only OPENS the prompt; deletion
            still requires the account password, so a stray key-mash can't
-           wipe an account. -->
-      <div style="margin:24px 0 8px;padding-top:16px;border-top:1px solid #2a2a2a">
+           wipe an account. Hidden on mobile/touch (no physical keyboard) by
+           PanicHotkey.renderSettings(). -->
+      <div id="panic-hotkey-section" style="margin:24px 0 8px;padding-top:16px;border-top:1px solid #2a2a2a">
         <div style="font-size:13px;color:#f44336;font-weight:600;margin-bottom:8px">⌨️ Panic delete shortcut</div>
         <div style="font-size:12px;color:#666;margin-bottom:12px">
           Set a combo of <strong>three keys</strong> that opens the delete-account

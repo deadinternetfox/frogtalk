@@ -5789,7 +5789,25 @@ const PanicHotkey = (() => {
     if (el) el.textContent = msg || '';
   }
 
+  // Touch / no-physical-keyboard devices can't press a 3-key combo, so the
+  // whole shortcut is meaningless there. Hide it on the Android app
+  // (window.Android), small screens, and coarse-pointer (touch) devices.
+  function _noKeyboard() {
+    try {
+      if (window.Android) return true;
+      return !!(window.matchMedia &&
+        (window.matchMedia('(max-width:600px)').matches ||
+         window.matchMedia('(pointer:coarse)').matches));
+    } catch { return false; }
+  }
+
   function renderSettings() {
+    const section = document.getElementById('panic-hotkey-section');
+    if (_noKeyboard()) {
+      if (section) section.style.display = 'none';
+      return;
+    }
+    if (section) section.style.display = '';
     const disp = document.getElementById('panic-hotkey-display');
     if (disp) {
       disp.textContent = _combo.length ? _label(_combo) : 'Not set';
