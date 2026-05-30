@@ -42,7 +42,7 @@ class MainActivity : AppCompatActivity() {
     companion object {
         private const val TAG = "FrogTalk"
         private const val SETUP_ASSET_URL = "file:///android_asset/mobile_node_setup.html"
-        private const val WEB_CACHE_REV = "20260529-theme-savefile-v244"
+        private const val WEB_CACHE_REV = "20260530-build-v246"
         private const val PREFS = "frogtalk_prefs"
         private const val PREF_SERVER_BASE_URL = "server_base_url"
         private const val PREF_PERMISSIONS_WIZARD_DONE = "permissions_wizard_done"
