@@ -135,8 +135,8 @@ and private channels (AES-GCM) before data reaches your disk.
 | Platform | Latest | Notes |
 |----------|--------|-------|
 | 🌐 **Web** | [Open in browser](https://frogtalk.app) | No install needed |
-| 🤖 **Android** | [Latest APK](https://frogtalk.app/download/android) | v1.6.27 (232) — sideload; FCM incoming calls |
-| 📦 **Android (Play)** | [AAB in build mirror](github-build-mirror/frogtalk-v232.aab) | Google Play upload bundle |
+| 🤖 **Android** | [Latest APK](https://frogtalk.app/download/android) | v1.6.43-alpha (249) — sideload; calls, group video, screen share |
+| 📦 **Android (Play)** | [AAB in build mirror](github-build-mirror/FrogTalk-1.6.43-alpha-249.aab) | Google Play upload bundle |
 | 🐧 **Linux AppImage** | [Latest AppImage](https://frogtalk.app/download/linux) | `chmod +x` then run |
 | 📦 **Linux .deb** | [Latest .deb](https://frogtalk.app/download/deb) | `sudo dpkg -i <downloaded_file>.deb` |
 | 🪟 **Windows (Portable .exe)** | [Latest portable .exe](https://frogtalk.app/download/windows) | Portable single-file — just run |
