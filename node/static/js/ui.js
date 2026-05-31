@@ -1925,6 +1925,124 @@ function closeActionSheet() {
 }
 
 /* ── Long-press binder (works on both touch & mouse) ──────────────── */
+// ── Settings rail quick-menu ─────────────────────────────────────────────
+// Long-press (touch) or right-click (desktop) the ⚙️ icon in the left rail
+// (or your self-avatar) to jump straight to a settings tab — Privacy
+// especially — without opening the full settings modal and hunting for the
+// tab. Plain left-click still opens settings normally.
+function openSettingsToTab(tab) {
+  try {
+    Promise.resolve(showProfile()).then(() => {
+      setTimeout(() => { try { switchSettingsTab(tab); } catch {} }, 20);
+    }).catch(() => {});
+  } catch {}
+}
+
+const _RAIL_SETTINGS_ITEMS = [
+  ['privacy', '🔒', 'Privacy'],
+  ['security', '🛡️', 'Security'],
+  ['notif', '🔔', 'Notifications'],
+  ['appear', '🎨', 'Appearance'],
+  ['profile', '👤', 'Profile'],
+];
+let _railMenuStyled = false;
+let _railMenuAnchor = null;
+
+function _injectRailMenuStyle() {
+  if (_railMenuStyled) return;
+  _railMenuStyled = true;
+  const s = document.createElement('style');
+  s.textContent =
+    '.rail-ctx-menu{position:fixed;z-index:10060;min-width:182px;background:#161616;' +
+    'border:1px solid color-mix(in srgb,var(--accent-color) 30%,#2a2a2a);border-radius:12px;' +
+    'padding:6px;box-shadow:0 12px 32px rgba(0,0,0,.55);animation:railCtxIn .12s ease}' +
+    '@keyframes railCtxIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}' +
+    '.rail-ctx-menu .rail-ctx-title{font-size:10px;text-transform:uppercase;letter-spacing:.5px;' +
+    'color:#7a7a7a;padding:4px 8px 6px}' +
+    '.rail-ctx-menu .rail-ctx-item{display:flex;align-items:center;gap:9px;width:100%;text-align:left;' +
+    'background:none;border:0;color:var(--text-color);padding:8px 10px;border-radius:8px;cursor:pointer;' +
+    "font-size:13px;line-height:1.2;font-family:inherit}" +
+    '.rail-ctx-menu .rail-ctx-item:hover{background:color-mix(in srgb,var(--accent-color) 18%,transparent)}' +
+    '.rail-ctx-menu .rail-ctx-sep{height:1px;margin:6px 4px;background:#262626}';
+  document.head.appendChild(s);
+}
+
+function _buildRailSettingsMenu() {
+  let menu = document.getElementById('settings-rail-menu');
+  if (menu) return menu;
+  _injectRailMenuStyle();
+  menu = document.createElement('div');
+  menu.id = 'settings-rail-menu';
+  menu.className = 'rail-ctx-menu';
+  menu.setAttribute('role', 'menu');
+  menu.hidden = true;
+  menu.style.display = 'none';
+  menu.innerHTML =
+    '<div class="rail-ctx-title">Quick settings</div>' +
+    _RAIL_SETTINGS_ITEMS.map(([t, ic, lbl]) =>
+      '<button type="button" class="rail-ctx-item" role="menuitem" data-tab="' + t + '">' + ic + ' ' + lbl + '</button>'
+    ).join('') +
+    '<div class="rail-ctx-sep"></div>' +
+    '<button type="button" class="rail-ctx-item" role="menuitem" data-tab="__all">⚙️ All settings</button>';
+  menu.addEventListener('click', (e) => {
+    const btn = e.target.closest('.rail-ctx-item');
+    if (!btn) return;
+    const t = btn.dataset.tab;
+    _hideRailSettingsMenu();
+    if (t === '__all') { try { showProfile(); } catch {} }
+    else openSettingsToTab(t);
+  });
+  document.body.appendChild(menu);
+  return menu;
+}
+
+function _railMenuOutside(e) {
+  const menu = document.getElementById('settings-rail-menu');
+  if (!menu || menu.contains(e.target)) return;
+  if (_railMenuAnchor && (e.target === _railMenuAnchor || _railMenuAnchor.contains(e.target))) return;
+  _hideRailSettingsMenu();
+}
+function _railMenuEsc(e) { if (e.key === 'Escape') _hideRailSettingsMenu(); }
+function _hideRailSettingsMenu() {
+  const menu = document.getElementById('settings-rail-menu');
+  if (menu) { menu.hidden = true; menu.style.display = 'none'; }
+  _railMenuAnchor = null;
+  document.removeEventListener('pointerdown', _railMenuOutside, true);
+  document.removeEventListener('keydown', _railMenuEsc, true);
+}
+function _showRailSettingsMenu(anchor) {
+  const menu = _buildRailSettingsMenu();
+  _railMenuAnchor = anchor;
+  menu.hidden = false;
+  menu.style.display = 'block';
+  menu.style.visibility = 'hidden';
+  const r = anchor.getBoundingClientRect();
+  const mh = menu.offsetHeight, mw = menu.offsetWidth;
+  let left = r.right + 8;
+  if (left + mw > window.innerWidth - 8) left = Math.max(8, r.left - mw - 8);
+  const top = Math.max(8, Math.min(r.top, window.innerHeight - mh - 8));
+  menu.style.left = left + 'px';
+  menu.style.top = top + 'px';
+  menu.style.visibility = '';
+  setTimeout(() => {
+    document.addEventListener('pointerdown', _railMenuOutside, true);
+    document.addEventListener('keydown', _railMenuEsc, true);
+  }, 0);
+}
+function _bindSettingsRailMenu() {
+  ['settings-server-icon', 'self-avatar-el'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (!el || el._railMenuBound) return;
+    el._railMenuBound = true;
+    el.addEventListener('contextmenu', (e) => { e.preventDefault(); _showRailSettingsMenu(el); });
+    try { bindLongPress(el, () => _showRailSettingsMenu(el)); } catch {}
+  });
+}
+try {
+  if (document.readyState !== 'loading') _bindSettingsRailMenu();
+  else document.addEventListener('DOMContentLoaded', _bindSettingsRailMenu);
+} catch {}
+
 function bindLongPress(el, handler, ms = 500) {
   if (!el || el._longPressBound) return;
   el._longPressBound = true;
