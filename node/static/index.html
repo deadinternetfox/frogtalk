@@ -3932,7 +3932,7 @@ body.ft-incoming-call-active #incoming-call{z-index:20000}
   position:fixed;z-index:1600;right:24px;bottom:96px;width:min(340px,82vw);
   background:#000;border:1px solid color-mix(in srgb, var(--accent-color) 42%, #000);
   border-radius:14px;overflow:hidden;box-shadow:0 16px 50px rgba(0,0,0,.6);
-  display:flex;flex-direction:column;touch-action:none
+  display:flex;flex-direction:column;touch-action:none;min-width:180px;min-height:130px
 }
 #call-popout.hidden{display:none!important}
 #call-popout-header{
@@ -3946,8 +3946,16 @@ body.ft-incoming-call-active #incoming-call{z-index:20000}
   cursor:pointer;font-size:13px;flex-shrink:0;display:flex;align-items:center;justify-content:center
 }
 #call-popout-close:hover{background:#c0392b;color:#fff}
-#call-popout-video{width:100%;display:block;background:#000;max-height:70vh;object-fit:contain}
+#call-popout-video{width:100%;flex:1 1 auto;min-height:0;display:block;background:#000;max-height:70vh;object-fit:contain}
 #call-popout-video.mirror{transform:scaleX(-1)}
+#call-popout-resize{
+  position:absolute;right:0;bottom:0;width:26px;height:26px;z-index:3;
+  display:flex;align-items:flex-end;justify-content:flex-end;padding:2px 3px;
+  cursor:nwse-resize;touch-action:none;user-select:none;-webkit-user-select:none;
+  color:var(--accent-color);opacity:.55;font-size:13px;line-height:1;
+  text-shadow:0 1px 2px rgba(0,0,0,.7)
+}
+#call-popout-resize:hover{opacity:1}
 #voice-presence-bar .vp-join{
   padding:5px 12px;border-radius:14px;border:none;cursor:pointer;
   background:var(--accent-color);color:#000;font-size:12px;font-weight:600
@@ -11957,6 +11965,7 @@ window.ConnErr = (function(){
     <button id="call-popout-close" onclick="closeVideoPopout()" title="Close" aria-label="Close">✕</button>
   </div>
   <video id="call-popout-video" autoplay playsinline webkit-playsinline></video>
+  <div id="call-popout-resize" title="Drag to resize" aria-hidden="true">◢</div>
 </div>
 
 <!-- ═══════════ INCOMING CALL POPUP ══════════════════════════════════════════ -->

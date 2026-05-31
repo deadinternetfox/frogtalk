@@ -2011,71 +2011,122 @@ async def websocket_endpoint(
             # get queued offline — screen share is ephemeral; if the peer is
             # gone the share just fails and the sharer re-presses.
             elif msg_type in ("screen_offer", "screen_answer", "screen_ice", "screen_end"):
-                to_id = _resolve_to_id(data)
-                if not to_id:
-                    continue
                 call_id = int(data.get("call_id") or 0)
-                # 1-on-1 call: only the two participants of a live call row may
-                # exchange screen signals. Group voice (no call_id): both peers
-                # must be in the SAME voice channel — this is how native Android
-                # group screen-share fans its capture to each participant.
-                if call_id:
-                    if not _validate_call_participant(call_id, user["id"], to_id):
-                        continue
-                else:
-                    if not (voice_manager.is_in_voice(room_name, user["id"])
-                            and voice_manager.is_in_voice(room_name, to_id)):
-                        continue
                 try:
                     _ident_scr = db.get_or_create_local_server_identity() or {}
                     _local_sid_scr = str(_ident_scr.get("server_id") or "").strip()
                 except Exception:
                     _local_sid_scr = ""
-                screen_payload = {
-                    "type": msg_type,
-                    "from_id": user["id"],
-                    "from_nickname": user["nickname"],
-                    "from_global_user_id": str(user.get("global_user_id") or ""),
-                    "call_id": call_id,
-                    "room": room_name if not call_id else "",
-                    "peer_home_server_id": _local_sid_scr,
-                }
-                if msg_type in ("screen_offer", "screen_answer"):
-                    screen_payload["sdp"] = data.get("sdp")
-                if msg_type == "screen_offer":
-                    screen_payload["force_relay"] = bool(data.get("force_relay"))
-                if msg_type == "screen_ice":
-                    screen_payload["candidate"] = data.get("candidate")
-                await manager.send_to_user(to_id, screen_payload)
-                # Cross-node: forward to the peer's home server when the call is
-                # federated, mirroring the call_* enqueue paths.
-                try:
-                    import federation_calls as _fc
-                    peer = db.get_user_by_id(to_id) or {}
-                    gid = str(data.get("global_call_id") or "").strip()
-                    if not gid and call_id:
+                if call_id:
+                    # ── 1-on-1 call screen-share ──────────────────────────
+                    # Only the two participants of a live call row may exchange
+                    # screen signals; cross-node rides the call_* relay (keyed
+                    # on the call's global_call_id).
+                    to_id = _resolve_to_id(data)
+                    if not to_id:
+                        continue
+                    if not _validate_call_participant(call_id, user["id"], to_id):
+                        continue
+                    screen_payload = {
+                        "type": msg_type,
+                        "from_id": user["id"],
+                        "from_nickname": user["nickname"],
+                        "from_global_user_id": str(user.get("global_user_id") or ""),
+                        "call_id": call_id,
+                        "room": "",
+                        "peer_home_server_id": _local_sid_scr,
+                    }
+                    if msg_type in ("screen_offer", "screen_answer"):
+                        screen_payload["sdp"] = data.get("sdp")
+                    if msg_type == "screen_offer":
+                        screen_payload["force_relay"] = bool(data.get("force_relay"))
+                    if msg_type == "screen_ice":
+                        screen_payload["candidate"] = data.get("candidate")
+                    await manager.send_to_user(to_id, screen_payload)
+                    try:
+                        import federation_calls as _fc
+                        peer = db.get_user_by_id(to_id) or {}
+                        gid = str(data.get("global_call_id") or "").strip()
+                        if not gid:
+                            with db._conn() as con:
+                                crow = con.execute(
+                                    "SELECT global_call_id FROM calls WHERE id=?",
+                                    (call_id,),
+                                ).fetchone()
+                            if crow:
+                                gid = str(crow["global_call_id"] or "").strip()
+                        if gid and _fc.is_remote_peer(peer):
+                            pgid = str(peer.get("global_user_id") or "")
+                            if pgid:
+                                _fc.enqueue_screen_signal(
+                                    msg_type, user, pgid,
+                                    global_call_id=gid, local_call_id=call_id,
+                                    sdp=data.get("sdp") or "",
+                                    candidate=str(data.get("candidate") or ""),
+                                    force_relay=bool(data.get("force_relay")),
+                                )
+                    except Exception:
+                        logger.exception("federated screen signal enqueue failed")
+                else:
+                    # ── Group voice channel screen-share ──────────────────
+                    # Native Android fans its MediaProjection to each voice
+                    # participant; desktop sends per-peer too. Mirror the
+                    # voice_offer/answer/ice routing EXACTLY so the frame reaches
+                    # cross-node peers over the federated voice-signal path
+                    # (keyed on the voice room/session, not a call row). Without
+                    # this, a remote target fails is_in_voice locally and the
+                    # signal is dropped → the sharer hangs waiting for an answer.
+                    if not voice_manager.is_in_voice(room_name, user["id"]):
+                        continue
+                    to_id = int(data.get("to_id", 0))
+                    to_gid = str(data.get("to_global_user_id") or "").strip()
+                    if not to_id and to_gid:
                         with db._conn() as con:
-                            crow = con.execute(
-                                "SELECT global_call_id FROM calls WHERE id=?",
-                                (call_id,),
+                            r = con.execute(
+                                "SELECT id FROM users WHERE global_user_id=? LIMIT 1",
+                                (to_gid,),
                             ).fetchone()
-                        if crow:
-                            gid = str(crow["global_call_id"] or "").strip()
-                    if gid and _fc.is_remote_peer(peer):
-                        pgid = str(peer.get("global_user_id") or "")
-                        if pgid:
-                            _fc.enqueue_screen_signal(
-                                msg_type,
-                                user,
-                                pgid,
-                                global_call_id=gid,
-                                local_call_id=call_id,
+                        to_id = int(r["id"]) if r else 0
+                    in_voice = bool(to_id and voice_manager.is_in_voice(room_name, to_id))
+                    if not in_voice and not to_gid:
+                        continue
+                    try:
+                        import federation_voice as _fv
+                        use_federation = _fv.should_route_voice_signal_federated(
+                            room_name, to_gid, locally_in_voice=in_voice,
+                        )
+                    except Exception:
+                        use_federation = bool(to_gid and not in_voice)
+                    if in_voice and not use_federation:
+                        screen_payload = {
+                            "type": msg_type,
+                            "from_id": user["id"],
+                            "from_nickname": user["nickname"],
+                            "from_global_user_id": str(user.get("global_user_id") or ""),
+                            "call_id": 0,
+                            "room": room_name,
+                            "peer_home_server_id": _local_sid_scr,
+                        }
+                        if msg_type in ("screen_offer", "screen_answer"):
+                            screen_payload["sdp"] = data.get("sdp")
+                        if msg_type == "screen_offer":
+                            screen_payload["force_relay"] = bool(data.get("force_relay"))
+                        if msg_type == "screen_ice":
+                            screen_payload["candidate"] = data.get("candidate")
+                        await manager.send_to_user(to_id, screen_payload)
+                    if to_gid and use_federation:
+                        try:
+                            import federation_voice as _fv
+                            sid = _fv.federated_voice_registry.session_for_room(room_name)
+                            _fv.enqueue_voice_signal(
+                                user, to_gid, session_id=sid, room_name=room_name,
+                                kind=msg_type,
                                 sdp=data.get("sdp") or "",
                                 candidate=str(data.get("candidate") or ""),
                                 force_relay=bool(data.get("force_relay")),
                             )
-                except Exception:
-                    logger.exception("federated screen signal enqueue failed")
+                        except Exception:
+                            logger.exception("federated group screen signal failed")
 
             # ── Group voice channel signaling ─────────────────────────
             elif msg_type == "voice_join":

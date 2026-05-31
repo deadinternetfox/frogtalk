@@ -3034,6 +3034,7 @@ const _voiceScreenRx = new Map();
 // Draggable always-on-top video popout (single instance, re-points srcObject).
 let _popoutPeerKey = null;
 let _popoutDragBound = false;
+let _popoutPinching = false;
 
 /** Sync Android tray notification while connected to a room voice channel. */
 function _syncVoiceTrayNotification(statusText) {
@@ -3469,7 +3470,12 @@ function openVideoPopout(peerKey) {
   if (nameEl) nameEl.textContent = name;
   pop.classList.remove('hidden');
   try { vid.play?.().catch(() => {}); } catch {}
-  if (!_popoutDragBound) { _bindPopoutDrag(pop); _popoutDragBound = true; }
+  if (!_popoutDragBound) {
+    _bindPopoutDrag(pop);
+    _bindPopoutResize(pop);
+    _bindPopoutPinch(pop);
+    _popoutDragBound = true;
+  }
 }
 
 function closeVideoPopout() {
@@ -3496,6 +3502,7 @@ function _bindPopoutDrag(pop) {
     pop.style.bottom = 'auto';
   };
   header.addEventListener('pointerdown', (e) => {
+    if (_popoutPinching) return;
     if (e.target.closest && e.target.closest('#call-popout-close')) return;
     if (e.button && e.button !== 0) return;
     const r = pop.getBoundingClientRect();
@@ -3508,7 +3515,7 @@ function _bindPopoutDrag(pop) {
     if (e.cancelable) e.preventDefault();
   });
   header.addEventListener('pointermove', (e) => {
-    if (!dragging) return;
+    if (!dragging || _popoutPinching) return;
     lastX = e.clientX; lastY = e.clientY;
     if (!rafId) rafId = requestAnimationFrame(apply);
     if (e.cancelable) e.preventDefault();
@@ -3521,6 +3528,97 @@ function _bindPopoutDrag(pop) {
   };
   header.addEventListener('pointerup', end);
   header.addEventListener('pointercancel', end);
+}
+
+const _POPOUT_MIN_W = 180, _POPOUT_MIN_H = 130;
+
+/** Anchor the popout to top-left (so it grows toward the bottom-right corner)
+ *  and lift its natural max-height cap so manual sizing is unconstrained. */
+function _popoutPrepareResize(pop) {
+  const r = pop.getBoundingClientRect();
+  pop.style.left = r.left + 'px'; pop.style.top = r.top + 'px';
+  pop.style.right = 'auto'; pop.style.bottom = 'auto';
+  const vid = document.getElementById('call-popout-video');
+  if (vid) vid.style.maxHeight = 'none';
+  return r;
+}
+
+/** Pointer-drag the bottom-right grip to resize (desktop + single-finger). */
+function _bindPopoutResize(pop) {
+  const handle = document.getElementById('call-popout-resize');
+  if (!handle) return;
+  let startX = 0, startY = 0, baseW = 0, baseH = 0, baseLeft = 0, baseTop = 0,
+      lastX = 0, lastY = 0, resizing = false, rafId = 0;
+  const apply = () => {
+    rafId = 0;
+    const maxW = Math.max(_POPOUT_MIN_W, window.innerWidth - baseLeft - 6);
+    const maxH = Math.max(_POPOUT_MIN_H, window.innerHeight - baseTop - 6);
+    const nw = Math.max(_POPOUT_MIN_W, Math.min(maxW, baseW + (lastX - startX)));
+    const nh = Math.max(_POPOUT_MIN_H, Math.min(maxH, baseH + (lastY - startY)));
+    pop.style.width = nw + 'px';
+    pop.style.height = nh + 'px';
+  };
+  handle.addEventListener('pointerdown', (e) => {
+    if (e.button && e.button !== 0) return;
+    const r = _popoutPrepareResize(pop);
+    baseW = r.width; baseH = r.height; baseLeft = r.left; baseTop = r.top;
+    startX = lastX = e.clientX; startY = lastY = e.clientY;
+    resizing = true;
+    try { handle.setPointerCapture(e.pointerId); } catch {}
+    e.stopPropagation();
+    if (e.cancelable) e.preventDefault();
+  });
+  handle.addEventListener('pointermove', (e) => {
+    if (!resizing) return;
+    lastX = e.clientX; lastY = e.clientY;
+    if (!rafId) rafId = requestAnimationFrame(apply);
+    if (e.cancelable) e.preventDefault();
+  });
+  const end = (e) => {
+    if (!resizing) return;
+    resizing = false;
+    if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
+    try { handle.releasePointerCapture(e.pointerId); } catch {}
+  };
+  handle.addEventListener('pointerup', end);
+  handle.addEventListener('pointercancel', end);
+}
+
+/** Two-finger pinch to resize the popout on touch devices. */
+function _bindPopoutPinch(pop) {
+  let baseDist = 0, baseW = 0, baseH = 0, baseLeft = 0, baseTop = 0, curDist = 0, rafId = 0;
+  const dist = (t) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+  const apply = () => {
+    rafId = 0;
+    if (!baseDist) return;
+    const scale = curDist / baseDist;
+    const maxW = Math.max(_POPOUT_MIN_W, window.innerWidth - baseLeft - 6);
+    const maxH = Math.max(_POPOUT_MIN_H, window.innerHeight - baseTop - 6);
+    pop.style.width = Math.max(_POPOUT_MIN_W, Math.min(maxW, baseW * scale)) + 'px';
+    pop.style.height = Math.max(_POPOUT_MIN_H, Math.min(maxH, baseH * scale)) + 'px';
+  };
+  pop.addEventListener('touchstart', (e) => {
+    if (e.touches.length !== 2) return;
+    const r = _popoutPrepareResize(pop);
+    baseW = r.width; baseH = r.height; baseLeft = r.left; baseTop = r.top;
+    baseDist = curDist = dist(e.touches) || 1;
+    _popoutPinching = true;
+    if (e.cancelable) e.preventDefault();
+  }, { passive: false });
+  pop.addEventListener('touchmove', (e) => {
+    if (!_popoutPinching || e.touches.length !== 2) return;
+    curDist = dist(e.touches);
+    if (!rafId) rafId = requestAnimationFrame(apply);
+    if (e.cancelable) e.preventDefault();
+  }, { passive: false });
+  const endPinch = (e) => {
+    if (!_popoutPinching) return;
+    if (e.touches && e.touches.length >= 2) return;
+    _popoutPinching = false; baseDist = 0;
+    if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
+  };
+  pop.addEventListener('touchend', endPinch);
+  pop.addEventListener('touchcancel', endPinch);
 }
 
 function _bindVoicePeerRemoteTrack(peerKey, e) {

@@ -393,9 +393,16 @@ def enqueue_voice_signal(
     kind: str,
     sdp: str = "",
     candidate: str = "",
+    force_relay: bool = False,
 ) -> dict:
     safe_kind = str(kind or "").strip().lower()
-    if safe_kind not in ("offer", "answer", "ice"):
+    # Audio mesh kinds + native/desktop group screen-share kinds. Screen frames
+    # ride the same federated voice-signal path (keyed on the voice room/session,
+    # NOT a call row) so cross-node group screen-share reaches remote peers.
+    if safe_kind not in (
+        "offer", "answer", "ice",
+        "screen_offer", "screen_answer", "screen_ice", "screen_end",
+    ):
         return {"ok": False, "error": "bad_kind"}
     targets = voice_signal_target_servers(to_gid, session_id, room_name=room_name)
     if not targets:
@@ -409,6 +416,8 @@ def enqueue_voice_signal(
         "sdp": (sdp or "")[:32768],
         "candidate": (candidate or "")[:8192],
     }
+    if safe_kind == "screen_offer":
+        payload["force_relay"] = bool(force_relay)
     return _enqueue("voice.signal", payload, targets)
 
 
@@ -693,7 +702,10 @@ async def _apply_voice_signal(payload, origin, session_id, room_name, _fed_globa
     to_gid = _fed_global_id(payload.get("to_global_user_id"))
     from_gid = _fed_global_id(payload.get("from_global_user_id"))
     kind = str(payload.get("kind") or "").strip().lower()
-    if kind not in ("offer", "answer", "ice"):
+    if kind not in (
+        "offer", "answer", "ice",
+        "screen_offer", "screen_answer", "screen_ice", "screen_end",
+    ):
         return
     if not to_gid or not from_gid:
         return
@@ -705,7 +717,7 @@ async def _apply_voice_signal(payload, origin, session_id, room_name, _fed_globa
     # callee node before ``voice.session.join`` is processed; register the
     # sender from the signed origin so mesh setup is not dropped on latency.
     if not _remote_in_room(room_name, from_gid, voice_manager):
-        if kind == "offer" and session_id:
+        if kind in ("offer", "screen_offer") and session_id:
             federated_voice_registry.add_remote(
                 session_id,
                 global_user_id=from_gid,
@@ -744,7 +756,34 @@ async def _apply_voice_signal(payload, origin, session_id, room_name, _fed_globa
         from_uid = int(fr["id"])
         from_nick = str(fr["nickname"] or "")
 
-    if kind == "offer":
+    if kind.startswith("screen_"):
+        # Group voice screen-share frame — deliver exactly like a local
+        # screen_* WS message (call_id 0, room-scoped) so the existing
+        # _handleVoiceScreen* / native handlers process it unchanged.
+        msg = {
+            "type": kind,
+            "from_id": from_uid,
+            "from_nickname": from_nick,
+            "from_global_user_id": from_gid,
+            "call_id": 0,
+            "room": room_name,
+            "session_id": session_id,
+            "peer_home_server_id": origin,
+            "federated": True,
+        }
+        if kind in ("screen_offer", "screen_answer"):
+            sdp = str(payload.get("sdp") or "")[:32768]
+            if not sdp:
+                return
+            msg["sdp"] = sdp
+        if kind == "screen_offer":
+            msg["force_relay"] = bool(payload.get("force_relay"))
+        if kind == "screen_ice":
+            cand = str(payload.get("candidate") or "")[:8192]
+            if not cand:
+                return
+            msg["candidate"] = cand
+    elif kind == "offer":
         msg = {
             "type": "voice_offer",
             "from_id": from_uid,
