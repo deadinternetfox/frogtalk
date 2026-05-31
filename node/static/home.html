@@ -103,7 +103,7 @@
 }
 </script>
 
-  <link rel="stylesheet" href="/static/css/home.css?v=5">
+  <link rel="stylesheet" href="/static/css/home.css?v=6">
 </head>
 <body class="home-node-main">
 
@@ -555,6 +555,38 @@
         <p>The app switches users to the Lilypad's app at <strong>/app</strong>, preserves handoff tickets when possible, and keeps onion links pointed at the real chat surface instead of the marketing home page.</p>
       </div>
     </div>
+  </div>
+</section>
+
+<!-- NO CENTRAL SERVER / DECENTRALIZATION -->
+<section class="section" id="no-central-server">
+  <div class="section-title">No central server. No owner.</div>
+  <div class="section-sub">“Federated” isn’t the same as decentralized. On some networks marketed as decentralized, your identity and metadata still flow to one company’s servers — <a href="https://hackea.org/notas/matrix.html" target="_blank" rel="noopener noreferrer">even when you self-host</a>. FrogTalk has no such server.</div>
+  <div class="compare-grid">
+    <article class="compare-card compare-card--bad">
+      <div class="compare-head"><span class="compare-tag compare-tag--bad">Centralized “federation”</span></div>
+      <ul>
+        <li>A flagship homeserver holds most accounts — a de-facto centre</li>
+        <li>An identity service maps you to email / phone / contacts, stored centrally</li>
+        <li>Metadata — who you talk to, when, from where — reaches central servers, even from self-hosted instances</li>
+        <li>By default, server admins can read your media, avatars and files</li>
+        <li>“Decentralized” in the pitch; phone-home in the code</li>
+      </ul>
+    </article>
+    <article class="compare-card compare-card--good">
+      <div class="compare-head"><span class="compare-tag compare-tag--good">FrogTalk</span></div>
+      <ul>
+        <li><strong>No central server to own you.</strong> Every Lilypad (node) is independent — your data lives only on the node you pick or run</li>
+        <li><strong>No identity broker.</strong> No email, no phone — a nickname is the whole account</li>
+        <li><strong>Metadata stays on your node.</strong> The directory carries only what an operator chooses to list — never your contacts or IP</li>
+        <li><strong>Client-side encryption.</strong> DMs (Signal Protocol) + private channels (AES-GCM); your node stores ciphertext only</li>
+        <li><strong>No phone-home.</strong> Self-host and nothing reports back to us — federation is opt-in, operator-to-operator</li>
+      </ul>
+    </article>
+  </div>
+  <div class="central-note">
+    <span class="central-note-icon" aria-hidden="true">📇</span>
+    <div><strong>Our main site is a listing, not a landlord.</strong> frogtalk.app publishes the public node &amp; channel directory and release metadata — a phone book, nothing more. It can’t read your messages, doesn’t hold your account, and can’t switch you off. Delist from it and your Lilypad keeps running.</div>
   </div>
 </section>
 
