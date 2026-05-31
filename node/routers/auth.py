@@ -1005,7 +1005,7 @@ def _upsert_sync_peer_profile_cache(item: dict, source_server_id: str) -> bool:
     status_msg = str(item.get("status_msg") or "")[:200]
     mood = str(item.get("mood") or "")[:200]
     presence = str(item.get("presence") or "offline")[:32]
-    custom_style = _sanitize_inline_style(str(item.get("custom_style") or "")[:12000])
+    custom_style = _sanitize_inline_style(str(item.get("custom_style") or "")[:20000])
     banner = str(item.get("banner") or "")[:500_000]
     if not (display_name or avatar or bio or status_msg or custom_style or mood or presence or banner):
         return False
@@ -1330,7 +1330,7 @@ def _federation_profile_payload_from_user_row(row, gid: str, origin_server_id: s
         "status_msg": str(d.get("status_msg") or "")[:200],
         "mood": str(d.get("mood") or "")[:200],
         "presence": presence,
-        "custom_style": _sanitize_inline_style(str(d.get("custom_style") or "")[:12000]),
+        "custom_style": _sanitize_inline_style(str(d.get("custom_style") or "")[:20000]),
         "banner": str(d.get("banner") or "")[:500_000],
         "origin_server_id": origin_server_id,
         "profile_public": 1 if int(d.get("profile_public") if d.get("profile_public") is not None else 1) else 0,
@@ -1369,7 +1369,7 @@ def _lookup_federation_profile_gid_payload(gid: str) -> dict | None:
         "status_msg": str(prof.get("status_msg") or "")[:200],
         "mood": str(prof.get("mood") or "")[:200],
         "presence": str(prof.get("presence") or "offline")[:32],
-        "custom_style": _sanitize_inline_style(str(prof.get("custom_style") or "")[:12000]),
+        "custom_style": _sanitize_inline_style(str(prof.get("custom_style") or "")[:20000]),
         "banner": str(prof.get("banner") or "")[:500_000],
         "origin_server_id": str(prof.get("origin_server_id") or "").strip(),
         "profile_public": prof.get("profile_public"),
@@ -1398,7 +1398,7 @@ def _upsert_profile_cache_from_payload(payload: dict) -> None:
             status_msg=str(payload.get("status_msg") or "")[:200],
             mood=str(payload.get("mood") or "")[:200],
             presence=str(payload.get("presence") or "offline")[:32],
-            custom_style=_sanitize_inline_style(str(payload.get("custom_style") or "")[:12000]),
+            custom_style=_sanitize_inline_style(str(payload.get("custom_style") or "")[:20000]),
             banner=str(payload.get("banner") or "")[:500_000],
         )
         allow_dm = str(payload.get("allow_dms_from") or "").strip().lower()
@@ -1722,7 +1722,7 @@ def build_federation_profile_card(
         "status_msg": str(cached.get("status_msg") or "")[:200],
         "mood": str(cached.get("mood") or "")[:200],
         "presence": str(cached.get("presence") or "offline")[:32],
-        "custom_style": _sanitize_inline_style(str(cached.get("custom_style") or "")[:12000]),
+        "custom_style": _sanitize_inline_style(str(cached.get("custom_style") or "")[:20000]),
         "banner": str(cached.get("banner") or "")[:500_000],
         "origin_server_id": str(cached.get("origin_server_id") or home_sid or "")[:128],
         "home_server_id": sub_home_sid,
@@ -3501,7 +3501,7 @@ def _build_sync_export_for_user(
             "status_msg": str(peer.get("status_msg") or "")[:200],
             "mood": str(peer.get("mood") or "")[:200],
             "presence": str(peer.get("presence") or "offline")[:32],
-            "custom_style": _sanitize_inline_style(str(peer.get("custom_style") or "")[:12000]),
+            "custom_style": _sanitize_inline_style(str(peer.get("custom_style") or "")[:20000]),
             **dm_settings,
         })
         if len(dm_peers) >= _SYNC_EXPORT_DM_LIMIT:
@@ -3525,7 +3525,7 @@ def _build_sync_export_for_user(
             "status_msg": str((profile or {}).get("status_msg") or "")[:200],
             "mood": str((profile or {}).get("mood") or "")[:200],
             "presence": str((profile or {}).get("presence") or "offline")[:32],
-            "custom_style": _sanitize_inline_style(str((profile or {}).get("custom_style") or "")[:12000]),
+            "custom_style": _sanitize_inline_style(str((profile or {}).get("custom_style") or "")[:20000]),
             "banner": str((profile or {}).get("banner") or "")[:500_000],
         })
 
@@ -3547,7 +3547,7 @@ def _build_sync_export_for_user(
             "status_msg": str((profile or {}).get("status_msg") or "")[:200],
             "mood": str((profile or {}).get("mood") or "")[:200],
             "presence": str((profile or {}).get("presence") or "offline")[:32],
-            "custom_style": _sanitize_inline_style(str((profile or {}).get("custom_style") or "")[:12000]),
+            "custom_style": _sanitize_inline_style(str((profile or {}).get("custom_style") or "")[:20000]),
         })
         if len(friends) >= _SYNC_EXPORT_DM_LIMIT:
             break
@@ -3615,7 +3615,7 @@ def _build_sync_export_for_user(
         "hide_active_channels": 1 if int(me.get("hide_active_channels") or 0) else 0,
         "hide_dm_history_notice": 1 if int(me.get("hide_dm_history_notice") or 0) else 0,
         "mood": str(me.get("mood") or "")[:200],
-        "custom_style": _sanitize_inline_style(str(me.get("custom_style") or "")[:12000]),
+        "custom_style": _sanitize_inline_style(str(me.get("custom_style") or "")[:20000]),
         "custom_css": str(me.get("custom_css") or "")[:_SYNC_CUSTOM_CSS_MAX],
         "client_prefs": _client_prefs_for_sync_export(uid, me.get("client_prefs_json") or ""),
         "room_order": _sanitize_room_order_json(str(me.get("room_order") or "")[:12000]),
@@ -4557,7 +4557,7 @@ def _apply_sync_export_to_user(
             mood = str(self_profile.get("mood") or "")[:200]
             raw_css = str(self_profile.get("custom_css") or "")[:_SYNC_CUSTOM_CSS_MAX]
             custom_style = _sanitize_inline_style(
-                str(self_profile.get("custom_style") or "")[:12000]
+                str(self_profile.get("custom_style") or "")[:20000]
             ) or _sanitize_inline_style(raw_css)
             prefs_raw = (
                 self_profile.get("client_prefs")

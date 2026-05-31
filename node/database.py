@@ -15029,7 +15029,7 @@ def upsert_federation_user_profile(
             (
                 gid, nick, display_name or "", avatar or "", bio or "", identity_pubkey or "",
                 origin_server_id or "", (status_msg or "")[:200], (mood or "")[:200], pres,
-                (custom_style or "")[:12000], (banner or "")[:500_000], seen,
+                (custom_style or "")[:20000], (banner or "")[:500_000], seen,
             ),
         )
         con.commit()

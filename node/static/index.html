@@ -10860,6 +10860,41 @@ window.ConnErr = (function(){
           </div>
           <textarea id="profile-custom-css" style="width:100%;height:180px;background:#0a0a0a;border:none;color:var(--text-color);font-family:'Fira Code',Consolas,'Courier New',monospace;font-size:12px;line-height:1.5;padding:10px 12px;resize:vertical;outline:none;tab-size:2" placeholder="/* Your custom CSS */" spellcheck="false" oninput="updateCssCharCount()"></textarea>
         </div>
+        <details id="profile-css-help" style="margin:0 0 4px;background:#0d0d0d;border:1px solid #1e1e1e;border-radius:8px;padding:10px 12px;font-size:12px;line-height:1.5;color:#9a9a9a">
+          <summary style="cursor:pointer;list-style:none;outline:none;color:#bbb">
+            ℹ️ <strong>Custom CSS is sandboxed.</strong> Only your profile can be styled —
+            <span class="profile-css-help-toggle" style="text-decoration:underline;text-underline-offset:2px;color:var(--accent-color)">show what's allowed</span>
+          </summary>
+          <div style="margin-top:10px">
+            Everything is re-checked when you save (and again on every other node before it's shown), so unsupported rules just vanish — they never break your profile or anyone else's.
+            <div style="margin-top:9px;color:#7cc47c;font-weight:600">✓ Allowed</div>
+            <ul style="margin:4px 0 0 18px;padding:0;line-height:1.55">
+              <li>Profile selectors only: <code>.social-profile</code>, <code>.sp-banner</code>, <code>.sp-header</code>, <code>.sp-avatar</code>, <code>.sp-nick</code>, <code>.sp-bio</code>, <code>.sp-tag</code>, <code>.wall-post</code>, <code>.sf-post</code> — plus the in-chat card (<code>.profile-header</code>, <code>.userinfo-nick</code>, <code>.profile-avatar-large</code>)</li>
+              <li><code>:hover</code>, <code>:focus</code>, <code>::before</code>, <code>::after</code> on those, and descendant chains like <code>.social-profile .sp-tag</code></li>
+              <li>Colors, gradients, borders, radius, padding/margin, fonts, <code>text-shadow</code>/<code>box-shadow</code>, <code>opacity</code>, <code>transform</code>, <code>transition</code>, <code>content</code> — and <code>!important</code></li>
+              <li><code>background-image: url(…)</code> — external images are auto-routed through this node's image proxy, so viewers' IPs stay private</li>
+            </ul>
+            <div style="margin-top:9px;color:#d08a8a;font-weight:600">✕ Stripped</div>
+            <ul style="margin:4px 0 0 18px;padding:0;line-height:1.55">
+              <li>Any other selector — <code>body</code>, <code>*</code>, IDs, <code>:root</code>, <code>:has()</code>, <code>:is()</code>, <code>[attr]</code>, and <code>&gt;</code> <code>+</code> <code>~</code> combinators</li>
+              <li><code>@import</code>, <code>@media</code>, <code>@font-face</code> and all other <code>@-rules</code></li>
+              <li><code>expression()</code>, <code>javascript:</code>, <code>behavior:</code>, <code>var()</code>, <code>calc()</code>, CSS / Unicode escapes</li>
+              <li><code>data:</code> and protocol-relative <code>//</code> image URLs; values outside safe ranges</li>
+            </ul>
+          </div>
+        </details>
+        <script>
+          // Toggle the inline "show/hide what's allowed" label to mirror the
+          // <details> open state (same affordance as the channel-theme CSS help).
+          (function () {
+            var d = document.getElementById('profile-css-help');
+            if (!d) return;
+            d.addEventListener('toggle', function () {
+              var lbl = d.querySelector('.profile-css-help-toggle');
+              if (lbl) lbl.textContent = d.open ? "hide what's allowed" : "show what's allowed";
+            });
+          })();
+        </script>
       </div>
 
       <div style="background:#0d0d0d;border:1px solid #1e1e1e;border-radius:10px;padding:16px">

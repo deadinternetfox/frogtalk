@@ -5962,132 +5962,103 @@ try { window.PanicHotkey = PanicHotkey; } catch {}
 // attribute to one container element via el.style.setProperty(), which
 // the browser parses in property-value context (never HTML context).
 //
-// `applyUserStyleToContainer(el, raw)` accepts either:
-//   1. A sanitised declaration list ("color: red; padding: 8px") from
-//      the server's `custom_style` column — the normal render path.
-//   2. A legacy rule-shaped string ("body { color: red }") from the
-//      editor's live-preview button. The rule body is extracted and the
-//      selector is dropped — selectors are exactly the surface we close.
+// ── User profile custom CSS (scoped <style> injection) ──────────────────────
 //
-// Property and value validation lives server-side in
-// `routers/_css_inline.py` and runs on every write + every federated
-// inbound. Client-side we only do the structural split, then trust
-// setProperty's own value parser. Anything the browser doesn't recognise
-// is silently dropped by setProperty — no exceptions, no HTML escape.
+// The server (`routers/_css_inline.py`) is the single source of truth: it
+// validates every selector + property + value and emits a canonical
+// stylesheet whose selectors are prefixed with the literal `__FTSCOPE__`
+// token (bytes the server wrote, never raw user input). The client's only
+// job is to swap that token for a per-mount unique id and inject the result
+// into a <style> element via textContent — no client-side CSS parsing.
+//
+// Safe for federated (untrusted) CSS: the rendering node re-runs its own
+// sanitiser on every inbound profile, and url() is rewritten to the local
+// /api/proxy/image endpoint, so a peer's CSS can neither leak the viewer's
+// IP nor break out of the <style>.
+//
+// One legacy path remains: the editor's live preview (preset click,
+// pre-save) passes RAW CSS the server hasn't seen yet. Detected by the
+// absence of the `__FTSCOPE__` token, it is routed through the shared client
+// sanitiser `window.Css.sanitizeScopedCss` (selectors scoped + structurally
+// cleaned) before injection — never injected verbatim.
 
-function _extractDeclarationListFromLegacy(raw) {
-  // If no `{` is present we already have a declaration list.
-  const s = String(raw || '');
-  if (!s.includes('{')) return s;
-  let out = '';
+const _SCOPE_TOKEN = '__FTSCOPE__';
+let _socialProfileCssEl = null;
+let _profileCssEl = null;
+let _ftScopeSeq = 0;
+
+// Defence in depth: the server's _finalize() already guarantees these are
+// absent, but we refuse to inject anything that could close the <style>
+// early (`<`), smuggle an at-rule (`@`), use an escape (`\`), or leave an
+// unbalanced brace. A server bug must not become a client XSS.
+function _scopedStyleIsSafe(s) {
+  if (!s || typeof s !== 'string') return false;
+  if (/[<@\\]/.test(s)) return false;
+  if (/javascript:|expression\(|behavior\(/i.test(s)) return false;
   let depth = 0;
-  let buf = '';
   for (let i = 0; i < s.length; i++) {
     const ch = s[i];
-    if (ch === '{') {
-      if (depth === 0) buf = '';
-      else buf += ch;
-      depth++;
-    } else if (ch === '}') {
-      depth--;
-      if (depth <= 0) { depth = 0; out += buf + ';'; buf = ''; }
-      else buf += ch;
-    } else if (depth > 0) {
-      buf += ch;
-    }
+    if (ch === '{') depth++;
+    else if (ch === '}') { if (--depth < 0) return false; }
   }
-  return out;
+  return depth === 0;
 }
 
-// Tokens that have no legitimate place in a declaration value once the
-// server-side allowlist has run. We defensively reject any value
-// containing one of these substrings, even though the rendering path
-// uses setProperty (not innerHTML). This is one extra layer in case the
-// editor's live preview tries to apply attacker-shaped input before the
-// user has even saved.
-const _STYLE_FORBIDDEN_SUBSTR = [
-  'url(', 'var(', 'env(', 'attr(', 'calc(', 'min(', 'max(', 'clamp(',
-  'image(', 'image-set(', 'cross-fade(', 'element(',
-  'counter(', 'counters(',
-  'expression(', 'behavior(',
-  '@', 'javascript:', 'data:',
-  '\\',
-  '/*', '*/', '//',
-  '<', '>', '{', '}',
-  '"', "'", '`',
-];
-
-const _STYLE_ALLOWED_PROP_RE = /^[a-z][a-z-]{1,40}$/;
-
-function applyUserStyleToContainer(el, raw) {
-  if (!el || !raw) return;
-  const decls = _extractDeclarationListFromLegacy(raw);
-  // Clear any prior inline style we applied, but leave non-user styles
-  // (set via el.classList etc.) alone. We mark our applied properties
-  // on a hidden dataset list so we can remove only those on next call.
-  try {
-    const prev = (el.dataset.userStyleProps || '').split(',').filter(Boolean);
-    for (const p of prev) { try { el.style.removeProperty(p); } catch {} }
-  } catch {}
-  const applied = [];
-  for (const decl of String(decls).split(';')) {
-    const idx = decl.indexOf(':');
-    if (idx <= 0) continue;
-    const prop = decl.slice(0, idx).trim().toLowerCase();
-    const val = decl.slice(idx + 1).trim();
-    if (!prop || !val) continue;
-    if (prop.startsWith('-')) continue;          // no vendor prefixes
-    if (!_STYLE_ALLOWED_PROP_RE.test(prop)) continue;
-    const lowv = val.toLowerCase();
-    let bad = false;
-    for (const tok of _STYLE_FORBIDDEN_SUBSTR) {
-      if (lowv.includes(tok)) { bad = true; break; }
-    }
-    if (bad) continue;
-    try {
-      el.style.setProperty(prop, val);
-      applied.push(prop);
-    } catch {}
+function _ensureScopeId(el) {
+  if (!el.id) {
+    _ftScopeSeq += 1;
+    el.id = 'ftsp-' + _ftScopeSeq + '-' + Math.random().toString(36).slice(2, 8);
   }
-  try { el.dataset.userStyleProps = applied.join(','); } catch {}
+  return el.id;
 }
 
-function clearUserStyleFromContainer(el) {
-  if (!el) return;
-  try {
-    const prev = (el.dataset.userStyleProps || '').split(',').filter(Boolean);
-    for (const p of prev) { try { el.style.removeProperty(p); } catch {} }
-    delete el.dataset.userStyleProps;
-  } catch {}
+// Inject (or clear) the scoped stylesheet for one container. `trackerKey`
+// ('social' | 'profile') selects which module-level <style> element we own,
+// so the two profile surfaces don't clobber each other.
+function _injectScopedStyle(targetEl, css, trackerKey) {
+  const prev = trackerKey === 'profile' ? _profileCssEl : _socialProfileCssEl;
+  if (prev) { try { prev.remove(); } catch {} }
+  if (trackerKey === 'profile') _profileCssEl = null; else _socialProfileCssEl = null;
+  if (!targetEl || !css) return;
+  const id = _ensureScopeId(targetEl);
+  let scoped;
+  if (String(css).indexOf(_SCOPE_TOKEN) !== -1) {
+    // Server-sanitised stylesheet — just bind the per-mount scope id.
+    scoped = String(css).split(_SCOPE_TOKEN).join('#' + id);
+  } else {
+    // Raw editor CSS (live preview before save) — scope + clean client-side.
+    try { scoped = window.Css?.sanitizeScopedCss?.(String(css), '#' + id) || ''; }
+    catch { scoped = ''; }
+  }
+  if (!scoped || !_scopedStyleIsSafe(scoped)) return;
+  const styleEl = document.createElement('style');
+  styleEl.textContent = scoped;
+  document.head.appendChild(styleEl);
+  if (trackerKey === 'profile') _profileCssEl = styleEl; else _socialProfileCssEl = styleEl;
 }
 
 function clearProfileCustomCss() {
-  const el = document.getElementById('modal-user-info');
-  if (el) clearUserStyleFromContainer(el);
+  _injectScopedStyle(null, '', 'profile');
 }
 
 function applyProfileCustomCss(css) {
-  // Apply inline-style to the user-info modal container.
+  // The in-chat user-info modal (and the federated-profile modal, which
+  // shares this machinery). Scoped to the #modal-user-info container.
   const el = document.getElementById('modal-user-info');
-  if (!el) return;
-  clearUserStyleFromContainer(el);
-  if (!css) return;
-  applyUserStyleToContainer(el, css);
+  _injectScopedStyle(el, css, 'profile');
 }
 
 function applySocialProfileCustomCss(css) {
-  // Apply inline-style to the social-profile container. There can be
-  // more than one `.social-profile` element in the DOM if multiple
-  // profile cards are mounted (e.g., during navigation transitions);
-  // apply to each.
+  // The social-profile card. During navigation transitions more than one
+  // `.social-profile` can be mounted; style the active (last) one — the
+  // unique per-mount scope id keeps it isolated from any stragglers.
   const els = document.querySelectorAll('.social-profile');
-  els.forEach(el => clearUserStyleFromContainer(el));
-  if (!css) return;
-  els.forEach(el => applyUserStyleToContainer(el, css));
+  const el = els.length ? els[els.length - 1] : null;
+  _injectScopedStyle(el, css, 'social');
 }
 
 function clearSocialProfileCustomCss() {
-  document.querySelectorAll('.social-profile').forEach(el => clearUserStyleFromContainer(el));
+  _injectScopedStyle(null, '', 'social');
 }
 
 // Backward-compatible alias: keep callers working but use in-settings modal preview.
@@ -6098,7 +6069,7 @@ function previewProfileWithCss() {
 // ── CSS Theme Presets ──────────────────────────────────────────────────────
 const CSS_PRESETS = {
   cyberpunk: `/* 🌆 Cyberpunk — Neon purple & pink glow */
-.profile-header {
+.profile-header, .sp-banner {
   background: linear-gradient(135deg, #0a001a 0%, #1a0033 40%, #33004d 100%) !important;
 }
 .userinfo-nick {
@@ -6106,7 +6077,7 @@ const CSS_PRESETS = {
   text-shadow: 0 0 12px #bf5af2, 0 0 30px rgba(191,90,242,.4) !important;
   font-weight: 800 !important;
 }
-.profile-avatar-large {
+.profile-avatar-large, .sp-avatar {
   border: 3px solid #bf5af2 !important;
   box-shadow: 0 0 20px rgba(191,90,242,.5), 0 0 40px rgba(191,90,242,.2) !important;
 }
@@ -6130,7 +6101,7 @@ const CSS_PRESETS = {
 }`,
 
   ocean: `/* 🌊 Ocean — Deep blue waves & teal */
-.profile-header {
+.profile-header, .sp-banner {
   background: linear-gradient(135deg, #001520 0%, #002a40 40%, #003d5c 100%) !important;
 }
 .userinfo-nick {
@@ -6138,7 +6109,7 @@ const CSS_PRESETS = {
   text-shadow: 0 0 10px rgba(100,210,255,.5) !important;
   font-weight: 700 !important;
 }
-.profile-avatar-large {
+.profile-avatar-large, .sp-avatar {
   border: 3px solid #0097a7 !important;
   box-shadow: 0 0 20px rgba(0,151,167,.4) !important;
 }
@@ -6162,7 +6133,7 @@ const CSS_PRESETS = {
 }`,
 
   retrowave: `/* 🕹️ Retrowave — 80s synthwave sunset */
-.profile-header {
+.profile-header, .sp-banner {
   background: linear-gradient(180deg, #0a001a 0%, #1a0030 30%, #4a0050 50%, #ff006e 80%, #ff8c00 100%) !important;
 }
 .userinfo-nick {
@@ -6172,7 +6143,7 @@ const CSS_PRESETS = {
   letter-spacing: 2px !important;
   text-transform: uppercase !important;
 }
-.profile-avatar-large {
+.profile-avatar-large, .sp-avatar {
   border: 3px solid #ff006e !important;
   box-shadow: 0 0 25px rgba(255,0,110,.5), inset 0 0 10px rgba(255,0,110,.2) !important;
 }
@@ -6193,7 +6164,7 @@ const CSS_PRESETS = {
 }`,
 
   sakura: `/* 🌸 Sakura — Cherry blossom pink */
-.profile-header {
+.profile-header, .sp-banner {
   background: linear-gradient(135deg, #1a0a12 0%, #2a1018 40%, #3a1520 100%) !important;
 }
 .userinfo-nick {
@@ -6201,7 +6172,7 @@ const CSS_PRESETS = {
   text-shadow: 0 0 8px rgba(255,183,197,.4) !important;
   font-weight: 600 !important;
 }
-.profile-avatar-large {
+.profile-avatar-large, .sp-avatar {
   border: 3px solid #ffb7c5 !important;
   box-shadow: 0 0 15px rgba(255,183,197,.3) !important;
 }
@@ -6224,7 +6195,7 @@ const CSS_PRESETS = {
 }`,
 
   hacker: `/* 💀 Hacker — Matrix-style green terminal */
-.profile-header {
+.profile-header, .sp-banner {
   background: #000 !important;
 }
 .userinfo-nick {
@@ -6238,7 +6209,7 @@ const CSS_PRESETS = {
   content: '> ' !important;
   color: #005500 !important;
 }
-.profile-avatar-large {
+.profile-avatar-large, .sp-avatar {
   border: 2px solid #00ff41 !important;
   box-shadow: 0 0 20px rgba(0,255,65,.4), inset 0 0 30px rgba(0,255,65,.1) !important;
 }
@@ -6265,7 +6236,7 @@ const CSS_PRESETS = {
 }`,
 
   golden: `/* 👑 Royal Gold — Luxury gold & dark */
-.profile-header {
+.profile-header, .sp-banner {
   background: linear-gradient(135deg, #0a0800 0%, #1a1400 40%, #2a2000 100%) !important;
 }
 .userinfo-nick {
@@ -6273,7 +6244,7 @@ const CSS_PRESETS = {
   text-shadow: 0 0 12px rgba(255,215,0,.5), 0 2px 4px rgba(0,0,0,.8) !important;
   font-weight: 800 !important;
 }
-.profile-avatar-large {
+.profile-avatar-large, .sp-avatar {
   border: 3px solid #ffd700 !important;
   box-shadow: 0 0 20px rgba(255,215,0,.4) !important;
 }
@@ -6295,7 +6266,7 @@ const CSS_PRESETS = {
 }`,
 
   lava: `/* 🌋 Lava — Molten reds & orange */
-.profile-header {
+.profile-header, .sp-banner {
   background: linear-gradient(180deg, #0a0000 0%, #1a0500 30%, #330a00 50%, #4d1500 100%) !important;
 }
 .userinfo-nick {
@@ -6303,7 +6274,7 @@ const CSS_PRESETS = {
   text-shadow: 0 0 12px rgba(255,87,34,.6), 0 0 25px rgba(255,152,0,.3) !important;
   font-weight: 800 !important;
 }
-.profile-avatar-large {
+.profile-avatar-large, .sp-avatar {
   border: 3px solid #ff5722 !important;
   box-shadow: 0 0 20px rgba(255,87,34,.5), 0 0 40px rgba(255,152,0,.2) !important;
 }

@@ -1,239 +1,339 @@
-"""Fuzz + unit tests for the inline-style sanitiser (Track B)."""
+"""Unit + fuzz tests for the scoped-stylesheet profile-CSS sanitiser.
+
+This sanitiser (`routers._css_inline.sanitize_inline_style`) succeeds the
+flat-declaration Track B model. It now parses full CSS, validates selectors
+against a fixed profile allowlist, validates every property + value, and
+re-emits a canonical stylesheet whose selectors are prefixed with the
+literal ``__FTSCOPE__`` token (the client swaps it for a per-mount id).
+
+Key policy differences from the old model (deliberate — see the module
+docstring and the security note in the implementation plan):
+  * `url()` is ALLOWED but rewritten: external http(s) → `/api/proxy/image`,
+    same-origin paths pass through; data:/javascript:/protocol-relative are
+    dropped.
+  * `font-family` (allowlisted families), `content` (::before/::after), and
+    gradients are ALLOWED.
+  * `!important`, `:hover`, `::before`/`::after`, and multi-element
+    selectors survive.
+
+What must STILL be impossible: any output containing `<` (so a `</style>`
+breakout can't happen), `@`-rules, escapes (`\\`), `expression(`,
+`javascript:`, broadening/root selectors, attribute selectors, `*`/`body`,
+or unbalanced braces.
+"""
 
 from __future__ import annotations
 
-import sys
 import os
+import re
+import sys
 
-# Make `routers` importable when pytest is invoked from repo root.
+# Make `routers` importable when pytest is invoked from repo root or node/.
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from routers._css_inline import sanitize_inline_style  # noqa: E402
 
 
+NODE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+
+
 # ---------------------------------------------------------------------------
-# Hostile inputs that must produce empty / property-stripped output
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _assert_structurally_safe(out: str, src: str = "") -> None:
+    """Invariants the generator must hold for ANY input."""
+    assert isinstance(out, str)
+    low = out.lower()
+    for bad in ("<", "@", "\\", "javascript:", "expression(", "behavior(",
+                "</style", "<script", ":root", ":host", ":scope", ":target",
+                ":has", ":is(", ":where(", "[data-theme", "[data-mode",
+                "/*", "*/"):
+        assert bad not in low, f"forbidden {bad!r} survived in {out!r} from {src!r}"
+    assert out.count("{") == out.count("}"), f"unbalanced braces in {out!r}"
+
+
+# ---------------------------------------------------------------------------
+# Hostile inputs — must be neutralised (empty or scrubbed, never dangerous)
 # ---------------------------------------------------------------------------
 
 HOSTILE = [
-    # Closing-style escapes
-    "color: red</style><script>alert(1)</script>",
-    "color: red\\3c /style\\3e",
-    "color: red\\3c/style\\3e",
-    "color: red /*</style>*/",
-    # Substring grammar abuses
-    "background: url(http://evil.example/x.png)",
-    "background-image: url('javascript:alert(1)')",
-    "color: var(--x)",
-    "width: calc(100% - 10px)",
-    "color: red; behavior:url(xss.htc)",
-    "background: -moz-binding:url(http://evil/x.xml#xss)",
-    "color: expression(alert(1))",
+    # Closing-style / HTML breakouts
+    ".sp-nick { color: red } </style><script>alert(1)</script>",
+    ".sp-nick { color: red\\3c /style\\3e }",
+    ".sp-nick { color: red\\3c/style\\3e }",
+    ".sp-nick { color: red /*</style>*/ }",
+    "</style><script>alert(1)</script> .sp-nick { color: red }",
+    # Value-level function abuses
+    ".sp-nick { color: var(--x) }",
+    ".sp-nick { width: calc(100% - 10px) }",
+    ".sp-nick { color: expression(alert(1)) }",
+    ".sp-nick { color: red; behavior: url(xss.htc) }",
+    ".sp-nick { background: -moz-binding:url(http://evil/x.xml#xss) }",
+    # url() that must be dropped (not rewritten)
+    ".sp-banner { background-image: url('javascript:alert(1)') }",
+    ".sp-banner { background-image: url(data:image/svg+xml;base64,PHN2Zw==) }",
+    ".sp-banner { background-image: url(//evil.example/x.png) }",
+    ".sp-banner { background: data:text/html,<script>alert(1)</script> }",
     # @-rule + selector smuggling
-    "@import url(http://evil/x.css)",
-    "color: red; @media all { color: green }",
+    "@import url(http://evil/x.css); .sp-nick { color: red }",
+    ".sp-nick { color: red; @media all { color: green } }",
     "} body { background: red; ",
     "*:has(input) { color: red }",
-    # Quoted values (we don't allow any quoted token)
-    'font-family: "Arial"',
-    "content: 'pwn'",
-    # Data URIs
-    "background-image: url(data:image/svg+xml;base64,PHN2Zw==)",
-    "background: data:text/html,<script>alert(1)</script>",
-    # Unicode bidi/lookalike
-    "color: red\u202e; background: blue",
-    # Hex escapes
-    "color\\3a red",
-    "color: re\\64",
+    ":root { color: red }",
+    "body { color: red }",
+    "* { color: red }",
+    "[data-theme] { color: red }",
+    "#secret { color: red }",
+    ".sp-nick > .x { color: red }",
+    ".sp-nick + .y { color: red }",
+    ".not-an-allowed-class { color: red }",
+    # Unicode comma-bridge / hex-escape bypasses
+    ".sp-nick ,* { color: red }",
+    ".sp-nick { background: \\75 rl(http://evil/x) }",
+    "\\:root { color: red }",
     # Vendor + custom props
-    "-webkit-filter: blur(5px)",
-    "--evil: red; color: var(--evil)",
+    ".sp-nick { -webkit-filter: blur(5px) }",
+    ".sp-nick { --evil: red; color: var(--evil) }",
     # Numbers out of bounds
-    "padding: 999999px",
-    "opacity: 99",
-    "transform: scale(100)",
+    ".sp-nick { padding: 999999px }",
+    ".sp-nick { opacity: 99 }",
+    ".sp-nick { transform: scale(100) }",
     # Empty / malformed
-    "",
-    ":",
-    ";",
-    "color:",
-    ":red",
-    "color red",
+    "", ":", ";", "color:", ":red", "color red", ".sp-nick {}",
     # Oversize input
-    "color: red;" * 5000,
-    # Mixed legit + hostile — legit pieces should survive, hostile dropped
-    # (asserted separately below).
+    ".sp-nick { color: red }" * 5000,
 ]
 
 
-def test_hostile_inputs_drop_dangerous_tokens():
+def test_hostile_inputs_are_neutralised():
     for src in HOSTILE:
         out = sanitize_inline_style(src)
-        low = out.lower()
-        # No declaration in output may contain any of these strings.
-        for bad in (
-            "<", ">", "url(", "var(", "calc(", "expression(", "@",
-            "javascript:", "data:", "</style", "\\", "{", "}", '"', "'",
-            "behavior", "binding", "/*", "*/",
-        ):
-            assert bad not in low, f"forbidden {bad!r} survived in {out!r} from {src!r}"
+        _assert_structurally_safe(out, src)
 
 
-def test_mixed_legit_and_hostile_keeps_legit_drops_hostile():
-    src = "color: #ff0000; background: url(x); padding: 8px; --evil: red"
-    out = sanitize_inline_style(src)
-    assert "color: #ff0000" in out
-    assert "padding: 8px" in out
-    assert "url" not in out
-    assert "--" not in out
+def test_hostile_does_not_become_nonempty_garbage():
+    # A pure-attack input with no salvageable rule must be empty.
+    for src in [
+        "*:has(input) { color: red }",
+        ":root { color: red }",
+        "[data-theme] { color: red }",
+        "@import url(http://evil/x.css)",
+        ".evil { color: red }",
+    ]:
+        assert sanitize_inline_style(src) == "", src
 
 
 # ---------------------------------------------------------------------------
-# Per-property validators — accept good values, reject bad ones
+# Selector allowlist + scoping
 # ---------------------------------------------------------------------------
 
-def test_color_accepts_named_hex_rgb():
-    assert sanitize_inline_style("color: red") == "color: red"
-    assert sanitize_inline_style("color: #abc") == "color: #abc"
-    assert sanitize_inline_style("color: #aabbcc") == "color: #aabbcc"
-    assert sanitize_inline_style("color: rgb(10, 20, 30)").startswith("color: rgb(")
-    assert sanitize_inline_style("color: rgba(10, 20, 30, 0.5)").startswith("color: rgba(")
+def test_allowed_selectors_are_scoped():
+    out = sanitize_inline_style(".sp-nick { color: red }")
+    assert out == "__FTSCOPE__ .sp-nick { color: red }"
+
+
+def test_pseudo_class_and_element_allowed():
+    assert sanitize_inline_style(".wall-post:hover { color: red }") == \
+        "__FTSCOPE__ .wall-post:hover { color: red }"
+    out = sanitize_inline_style(".sp-nick::before { content: '> ' }")
+    assert out == '__FTSCOPE__ .sp-nick::before { content: "> " }'
+
+
+def test_container_class_folds_into_scope():
+    # `.social-profile` is the scoped element itself, not a descendant.
+    assert sanitize_inline_style(".social-profile { background: #000 }") == \
+        "__FTSCOPE__ { background: #000 }"
+    assert sanitize_inline_style(".social-profile .sp-tag { color: red }") == \
+        "__FTSCOPE__ .sp-tag { color: red }"
+
+
+def test_modal_classes_allowed():
+    # The in-chat user-info modal classes are also in the allowlist so one
+    # custom_style themes both surfaces.
+    for sel in (".profile-header", ".userinfo-nick", ".profile-avatar-large"):
+        out = sanitize_inline_style(f"{sel} {{ color: red }}")
+        assert out == f"__FTSCOPE__ {sel} {{ color: red }}", out
+
+
+def test_disallowed_selectors_dropped():
+    for sel in (".unknown", "#id", "*", "body", "div", "[class]",
+                ".sp-nick > .x", ".sp-nick + .y", ".sp-nick ~ .z",
+                ".sp-nick:has(.x)", ".sp-nick:is(.y)"):
+        assert sanitize_inline_style(f"{sel} {{ color: red }}") == "", sel
+
+
+def test_comma_list_keeps_only_allowed_parts():
+    out = sanitize_inline_style(".sp-nick, body, .sp-tag { color: red }")
+    # body is dropped; the two allowed parts survive, each scoped.
+    assert "__FTSCOPE__ .sp-nick" in out
+    assert "__FTSCOPE__ .sp-tag" in out
+    assert "body" not in out
+
+
+# ---------------------------------------------------------------------------
+# Value validators (new capabilities)
+# ---------------------------------------------------------------------------
+
+def test_important_preserved_once():
+    out = sanitize_inline_style(".sp-nick { color: red !important }")
+    assert out == "__FTSCOPE__ .sp-nick { color: red !important }"
+    assert out.lower().count("!important") == 1
+
+
+def test_gradient_validated_and_canonicalised():
+    out = sanitize_inline_style(
+        ".sp-banner { background: linear-gradient(135deg, #0a001a 0%, #1a0033 100%) }")
+    assert "linear-gradient(135deg, #0a001a 0%, #1a0033 100%)" in out
+    # Out-of-range angle / single stop / non-color stop → dropped.
+    assert sanitize_inline_style(".sp-banner { background: linear-gradient(999deg, #000, #fff) }") == ""
+    assert sanitize_inline_style(".sp-banner { background: linear-gradient(#000) }") == ""
+
+
+def test_url_external_rewritten_to_proxy():
+    out = sanitize_inline_style(".sp-banner { background-image: url(https://evil.test/x.png) }")
+    assert 'url("/api/proxy/image?u=https%3A%2F%2Fevil.test%2Fx.png")' in out
+    assert "evil.test" in out  # via the proxy, encoded
+    # but no direct/raw scheme survives
+    assert "https://evil" not in out
+
+
+def test_url_same_origin_passthrough():
+    out = sanitize_inline_style(".sp-banner { background-image: url(/api/rooms/foo/theme-bg) }")
+    assert 'url("/api/rooms/foo/theme-bg")' in out
+
+
+def test_url_dangerous_dropped():
+    for v in ("url(data:image/png;base64,AAAA)", "url(javascript:alert(1))",
+              "url(//evil.test/x.png)", "url('x\");}</style>')"):
+        assert sanitize_inline_style(f".sp-banner {{ background-image: {v} }}") == "", v
+
+
+def test_multi_shadow_and_inset():
+    out = sanitize_inline_style(
+        ".wall-post { box-shadow: 0 0 20px rgba(0,0,0,.5), inset 0 0 10px #000 }")
+    assert "0 0 20px rgba(0, 0, 0, .5)" in out
+    assert "inset 0 0 10px #000" in out
+    # text-shadow must NOT accept inset
+    assert sanitize_inline_style(".sp-nick { text-shadow: inset 1px 1px 2px #000 }") == ""
+
+
+def test_font_family_allowlist():
+    out = sanitize_inline_style(".sp-nick { font-family: 'Courier New', monospace }")
+    assert out == '__FTSCOPE__ .sp-nick { font-family: "courier new", monospace }'
+    assert sanitize_inline_style(".sp-nick { font-family: 'Evil Font' }") == ""
+
+
+def test_content_canonical_quoting():
+    assert sanitize_inline_style(".sp-nick::before { content: '~/users/' }") == \
+        '__FTSCOPE__ .sp-nick::before { content: "~/users/" }'
+    # dangerous content dropped
+    assert sanitize_inline_style(".sp-nick::before { content: '</style>' }") == ""
+    assert sanitize_inline_style('.sp-nick::before { content: "a@b" }') == ""
 
 
 def test_color_rejects_garbage():
-    assert sanitize_inline_style("color: not-a-color") == ""
-    assert sanitize_inline_style("color: #zzz") == ""
-    assert sanitize_inline_style("color: rgb(9999, 0, 0)") == ""
+    assert sanitize_inline_style(".sp-nick { color: not-a-color }") == ""
+    assert sanitize_inline_style(".sp-nick { color: #zzz }") == ""
+    assert sanitize_inline_style(".sp-nick { color: rgb(9999, 0, 0) }") == ""
 
 
-def test_lengths_accept_px_reject_unknown_units():
-    assert sanitize_inline_style("padding: 8px") == "padding: 8px"
-    assert sanitize_inline_style("padding: 0") == "padding: 0"
-    assert sanitize_inline_style("padding: 8em") == ""
-    assert sanitize_inline_style("padding: 8vw") == ""
-    assert sanitize_inline_style("padding: 8") == ""
-
-
-def test_font_weight_keyword_set():
-    assert sanitize_inline_style("font-weight: 700") == "font-weight: 700"
-    assert sanitize_inline_style("font-weight: bold") == "font-weight: bold"
-    assert sanitize_inline_style("font-weight: bolder") == ""
-
-
-def test_transform_only_known_functions():
-    assert sanitize_inline_style("transform: rotate(45deg)") == "transform: rotate(45deg)"
-    assert sanitize_inline_style("transform: scale(1.2)") == "transform: scale(1.2)"
-    assert sanitize_inline_style("transform: matrix(1,0,0,1,0,0)") == ""
-    assert sanitize_inline_style("transform: rotate(9999deg)") == ""
-
-
-def test_transition_requires_allowed_property():
-    out = sanitize_inline_style("transition: color 200ms ease")
-    assert out == "transition: color 200ms ease"
-    # `all` is forbidden — too broad, can be abused for side-channels.
-    assert sanitize_inline_style("transition: all 200ms ease") == ""
-    # Unallowed property name
-    assert sanitize_inline_style("transition: position 200ms") == ""
-    # Out-of-range duration
-    assert sanitize_inline_style("transition: color 5s") == ""
-
-
-def test_border_shorthand_requires_style():
-    assert sanitize_inline_style("border: 1px solid red") == "border: 1px solid red"
-    assert sanitize_inline_style("border: 1px red") == ""  # missing style
-    assert sanitize_inline_style("border: solid red") == "border: solid red"
-
-
-def test_text_shadow_rejects_inset_and_url():
-    assert sanitize_inline_style("text-shadow: 1px 1px 2px #000").startswith("text-shadow: 1px 1px 2px")
-    assert sanitize_inline_style("text-shadow: inset 1px 1px 2px #000") == ""
-    assert sanitize_inline_style("text-shadow: 1px 1px url(x)") == ""
-
-
-def test_opacity_range():
-    assert sanitize_inline_style("opacity: 0.5") == "opacity: 0.5"
-    assert sanitize_inline_style("opacity: 1") == "opacity: 1"
-    assert sanitize_inline_style("opacity: 2") == ""
-    assert sanitize_inline_style("opacity: -0.1") == ""
+def test_lengths_units():
+    assert "padding: 8px" in sanitize_inline_style(".sp-nick { padding: 8px }")
+    assert sanitize_inline_style(".sp-nick { padding: 8vw }") == ""
+    # font-size accepts em (the hacker preset uses 0.7em)
+    assert "font-size: 0.7em" in sanitize_inline_style(".sp-nick { font-size: 0.7em }")
 
 
 # ---------------------------------------------------------------------------
 # Structural invariants
 # ---------------------------------------------------------------------------
 
-def test_duplicate_props_kept_only_once():
-    out = sanitize_inline_style("color: red; color: green; color: blue")
-    assert out.count("color:") == 1
-    assert "red" in out  # first wins
+def test_duplicate_props_per_rule_first_wins():
+    out = sanitize_inline_style(".sp-nick { color: red; color: green }")
+    assert out.lower().count("color:") == 1
+    assert "red" in out
 
 
-def test_output_length_cap():
-    src = "; ".join(f"padding: {i % 10}px" for i in range(2000))
-    out = sanitize_inline_style(src, max_output_len=200)
-    assert len(out) <= 200
-    # Cap doesn't break grammar
-    assert ";" not in out or all(":" in chunk for chunk in out.split("; "))
+def test_bare_declaration_list_wrapped():
+    out = sanitize_inline_style("color: red; padding: 8px")
+    assert out == "__FTSCOPE__.social-profile { color: red; padding: 8px }"
 
 
-def test_non_string_returns_empty():
-    assert sanitize_inline_style(None) == ""  # type: ignore[arg-type]
+def test_idempotent_resanitisation():
+    # Federation re-runs the sanitiser over already-scoped stylesheets.
+    src = (".sp-nick:hover { color: #bf5af2 !important; "
+           "text-shadow: 0 0 12px #bf5af2, 0 0 30px rgba(191,90,242,.4) !important } "
+           ".sp-banner { background: linear-gradient(135deg, rgba(10,0,26,.9) 0%, #1a0033 100%) }")
+    once = sanitize_inline_style(src)
+    assert once
+    assert sanitize_inline_style(once) == once
+
+
+def test_output_length_cap_breaks_at_rule_boundary():
+    src = " ".join(f".sp-tag {{ padding: {i % 9 + 1}px }}" for i in range(2000))
+    out = sanitize_inline_style(src, max_output_len=300)
+    assert len(out) <= 300
+    _assert_structurally_safe(out, "len-cap")
+
+
+def test_non_string_and_empty():
+    assert sanitize_inline_style(None) == ""        # type: ignore[arg-type]
     assert sanitize_inline_style(b"color: red") == ""  # type: ignore[arg-type]
-    assert sanitize_inline_style(123) == ""  # type: ignore[arg-type]
-
-
-def test_empty_returns_empty():
+    assert sanitize_inline_style(123) == ""         # type: ignore[arg-type]
     assert sanitize_inline_style("") == ""
     assert sanitize_inline_style("   ") == ""
     assert sanitize_inline_style(";;;;") == ""
 
 
-def test_output_never_contains_semicolon_inside_value():
-    # Every "; " in the output separates declarations; no value may
-    # itself contain a semicolon.
-    out = sanitize_inline_style("color: red; padding: 8px; font-size: 14px")
-    pieces = out.split("; ")
-    for p in pieces:
-        # Each piece is "prop: value" with exactly one ':'
-        assert p.count(":") == 1
-        # Value has no inner semicolons (would be caught by _FORBIDDEN_SUBSTR
-        # but assert end-to-end too).
-        prop, val = p.split(":", 1)
-        assert ";" not in val
+# ---------------------------------------------------------------------------
+# Shipped presets must survive sanitisation (read live from ui.js so the
+# test fails if a future allowlist change silently blanks a preset).
+# ---------------------------------------------------------------------------
+
+def _load_presets() -> dict[str, str]:
+    path = os.path.join(NODE_DIR, "static", "js", "ui.js")
+    js = open(path, encoding="utf-8").read()
+    block = js[js.index("const CSS_PRESETS = {"):]
+    block = block[:block.index("\n};") + 3]
+    return dict(re.findall(r"(\w+):\s*`(.*?)`", block, re.DOTALL))
+
+
+def test_all_shipped_presets_round_trip():
+    presets = _load_presets()
+    assert len(presets) >= 7, f"parsed only {list(presets)}"
+    for name, css in presets.items():
+        out = sanitize_inline_style(css)
+        assert out, f"preset {name} sanitised to empty"
+        _assert_structurally_safe(out, name)
+        # signature: the social wall must be themed
+        assert "__FTSCOPE__ .sp-banner" in out, name
+        assert "__FTSCOPE__ .sp-nick" in out, name
+        # idempotent
+        assert sanitize_inline_style(out) == out, f"{name} not idempotent"
+
+
+def test_hacker_preset_keeps_pseudo_content():
+    out = sanitize_inline_style(_load_presets()["hacker"])
+    assert 'content: "> "' in out
+    assert 'content: "~/users/"' in out
 
 
 # ---------------------------------------------------------------------------
-# Legacy migration shim — `selector { decls }` → declarations only
+# Fuzz — never raises, always returns str, never leaks `<`
 # ---------------------------------------------------------------------------
 
-def test_legacy_rule_body_extracted():
-    out = sanitize_inline_style("body { color: red; padding: 8px }")
-    assert "color: red" in out
-    assert "padding: 8px" in out
-
-
-def test_legacy_multi_rule_bodies_concatenated_selectors_dropped():
-    src = ".social-profile { color: blue } .x .y { font-size: 14px }"
-    out = sanitize_inline_style(src)
-    assert "color: blue" in out
-    assert "font-size: 14px" in out
-    # Selector text must not survive
-    assert "social-profile" not in out
-    assert ".x" not in out
-
-
-def test_legacy_text_outside_braces_ignored():
-    # Anything between rules (selectors, junk, hostile bytes) is dropped
-    # by the extractor and never reaches the per-property validators.
-    out = sanitize_inline_style("</style><script>alert(1)</script> body { color: red }")
-    assert out == "color: red"
-
-
-def test_legacy_nested_braces_safe():
-    # We don't accept nested grammar — extractor just walks depth.
-    # The point: no exception, no escape, no surviving hostile token.
-    out = sanitize_inline_style("body { color: red; @media (min-width: 1px) { color: blue } }")
-    # `@` is in forbidden tokens so even if depth tracking salvaged the
-    # inner body, it would be dropped. Net: only the outer color: red.
-    assert "@" not in out
-    # The outer "color: red" must survive (it precedes the nested @rule).
-    assert "color: red" in out
+def test_fuzz_never_raises():
+    import random
+    rnd = random.Random(1337)
+    alphabet = list(
+        "{}();:.#abcXYZ /\\*@<>\"'!important url( linear-gradient color "
+        "background 0123456789%pxem,-  ，\\3c"
+    )
+    for _ in range(5000):
+        n = rnd.randint(0, 90)
+        s = "".join(rnd.choice(alphabet) for _ in range(n))
+        out = sanitize_inline_style(s)
+        assert isinstance(out, str)
+        assert "<" not in out
+        assert out.count("{") == out.count("}")

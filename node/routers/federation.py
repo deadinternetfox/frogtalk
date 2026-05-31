@@ -6469,7 +6469,7 @@ async def _handle_user_event(event: dict) -> None:
         banner_in = _fed_clip(payload.get("banner"), _FED_BANNER_MAX)
     custom_style_in = ""
     if "custom_style" in payload or "custom_css" in payload:
-        raw_style = str(payload.get("custom_style") or payload.get("custom_css") or "")[:10240]
+        raw_style = str(payload.get("custom_style") or payload.get("custom_css") or "")[:20000]
         custom_style_in = _sanitize_inline_style(raw_style)
     status_msg_in = _fed_clip(payload.get("status_msg"), _FED_STATUS_MAX)
     db.upsert_federation_user_profile(
@@ -6579,7 +6579,7 @@ async def _handle_user_event(event: dict) -> None:
         # a fallback and run it through the same sanitiser \u2014 we never
         # trust a peer's sanitisation, even when the peer is us.
         if "custom_style" in payload or "custom_css" in payload:
-            raw = str(payload.get("custom_style") or payload.get("custom_css") or "")[:10240]
+            raw = str(payload.get("custom_style") or payload.get("custom_css") or "")[:20000]
             sanitised = _sanitize_inline_style(raw)
             base_sql += ", custom_style=?"
             params.append(sanitised)

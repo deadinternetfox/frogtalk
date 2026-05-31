@@ -1,46 +1,50 @@
-"""Track B acceptance test — no `<style>` injection from user data.
+"""Acceptance tests for the scoped-stylesheet profile-CSS generator.
 
-We forbid:
-    1. Any Python file from importing the deleted ``routers._css_safety``
-       module (it was the old selector-aware ``<style>`` sanitiser).
-    2. Any JS file in ``static/js/`` from creating a ``<style>`` block
-       and feeding it ``custom_css``/``custom_style``/``user_css`` /
-       similar user-derived data, or from concatenating those into
-       ``innerHTML``.
+History: the original "Track B" hardening forbade emitting user CSS as a
+`<style>` block at all, rendering only a flat declaration list via
+`el.style.setProperty()`. That over-corrected — it gutted real profile
+themes (gradients, `!important`, `:hover`, multi-element selectors, and the
+app's own shipped presets all vanished). The current model restores a
+`<style>` block, but one **generated** by the server's allowlist sanitiser
+(`routers._css_inline.sanitize_inline_style`) from bytes the server wrote —
+never raw user input — and injected client-side via `.textContent` after a
+fixed-token scope substitution.
 
-The rendering path uses ``el.style.setProperty()`` against a container
-element exclusively (see ``applyUserStyleToContainer`` in
-``static/js/ui.js``). Anything that re-introduces a user-data
-``<style>`` block is a regression on the Track B threat model.
+These tests pin the invariants that keep that safe:
+  1. Nobody imports the long-deleted `routers._css_safety` module.
+  2. No JS file stitches user-CSS data into `innerHTML`.
+  3. The generator's output can never break out of a `<style>` element
+     (no `<`, no `@`-rule, balanced braces) for a broad hostile corpus.
+  4. The client injects via `.textContent` (not `.innerHTML`) and guards
+     the payload before injecting.
 """
 from __future__ import annotations
 
 import os
 import re
+import sys
 from pathlib import Path
 
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
+from routers._css_inline import sanitize_inline_style  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 JS_DIR = REPO_ROOT / "static" / "js"
+UI_JS = JS_DIR / "ui.js"
 
 
 def _walk_python_files() -> list[Path]:
     out: list[Path] = []
     self_name = Path(__file__).name
     for root, dirs, files in os.walk(REPO_ROOT):
-        # Skip vendored / generated / cache directories. We only care
-        # about source code we author.
         parts = set(Path(root).relative_to(REPO_ROOT).parts)
         if parts & {"__pycache__", ".venv", "venv", "node_modules",
                     ".git", "build", "dist", "android", "ios",
                     "github-build-mirror", "secrets"}:
             continue
         for f in files:
-            if not f.endswith(".py"):
-                continue
-            if f == self_name:
-                # The test file itself contains the forbidden token
-                # patterns by necessity — skip it from the scan.
+            if not f.endswith(".py") or f == self_name:
                 continue
             out.append(Path(root) / f)
     return out
@@ -53,7 +57,7 @@ def _walk_js_files() -> list[Path]:
 
 
 # ──────────────────────────────────────────────────────────────────────
-# Python: nobody imports the deleted module
+# 1. The removed _css_safety module stays removed.
 # ──────────────────────────────────────────────────────────────────────
 
 _FORBIDDEN_PY_IMPORTS = (
@@ -72,10 +76,7 @@ def test_no_imports_of_removed_css_safety_module():
         except OSError:
             continue
         for i, line in enumerate(text.splitlines(), 1):
-            # Allow comments that *mention* the historical module name —
-            # the deletion note in ``routers/wall.py`` is exactly that.
-            stripped = line.lstrip()
-            if stripped.startswith("#"):
+            if line.lstrip().startswith("#"):
                 continue
             for tok in _FORBIDDEN_PY_IMPORTS:
                 if tok in line:
@@ -88,71 +89,13 @@ def test_no_imports_of_removed_css_safety_module():
 
 
 # ──────────────────────────────────────────────────────────────────────
-# JS: no <style> blocks anywhere near user-derived CSS strings
+# 2. No innerHTML stitched together with user-CSS data.
 # ──────────────────────────────────────────────────────────────────────
 
-# Regex matches a single JS line that either:
-#   * creates a `<style …>` literal containing or adjacent to a user-CSS
-#     identifier, OR
-#   * calls ``document.createElement('style')`` (any quote) anywhere in
-#     the file — we forbid the constructor outright.
-
-_STYLE_LITERAL_RE = re.compile(r"<style[\s>]", re.IGNORECASE)
-_CREATE_STYLE_RE = re.compile(
-    r"createElement\s*\(\s*['\"]style['\"]\s*\)", re.IGNORECASE
-)
-
-# Names that strongly suggest user-derived CSS *data*. We intentionally
-# match only object-field shapes (snake_case `custom_css` /
-# `custom_style`, or their camelCase mirrors) — NOT loose function names
-# like `_reapplyProfileCss` which legitimately call into the renderer.
-_USER_CSS_TOKENS = (
-    "custom_css",
-    "custom_style",
-    "customCss",
-    "customStyle",
-)
-
-# JS files that are explicitly allowed to call createElement('style')
-# because they render *system* CSS (not user data). Each entry must be
-# justified by a comment in the corresponding file.
-_JS_SYSTEM_STYLE_ALLOWLIST = {
-    # Live preview overlay for the profile editor; populated with the
-    # *editor's textarea value* but rendered into an overlay sandbox
-    # that is removed on close. Kept under audit; if this drifts to
-    # injecting saved user data we want this test to flag it via the
-    # proximity check on user-CSS tokens below.
-    "ui.js",
-}
-
-
-def test_no_user_data_in_style_tags():
-    offenders: list[tuple[str, int, str]] = []
-    for path in _walk_js_files():
-        try:
-            text = path.read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            continue
-        lines = text.splitlines()
-        for i, line in enumerate(lines):
-            if _STYLE_LITERAL_RE.search(line) or _CREATE_STYLE_RE.search(line):
-                # Snapshot ±5 lines of context and look for user-CSS
-                # identifiers. If found, this is a Track B regression.
-                lo = max(0, i - 5)
-                hi = min(len(lines), i + 6)
-                ctx = "\n".join(lines[lo:hi]).lower()
-                for tok in _USER_CSS_TOKENS:
-                    if tok.lower() in ctx:
-                        offenders.append((path.name, i + 1, line.rstrip()))
-                        break
-    assert not offenders, (
-        "Track B violation: <style> tag in proximity to user-CSS data:\n"
-        + "\n".join(f"  static/js/{p}:{n}: {l}" for p, n, l in offenders)
-    )
+_USER_CSS_TOKENS = ("custom_css", "custom_style", "customCss", "customStyle")
 
 
 def test_no_innerhtml_with_user_css():
-    """``innerHTML = …`` lines must not stitch in user-derived CSS."""
     offenders: list[tuple[str, int, str]] = []
     for path in _walk_js_files():
         try:
@@ -163,7 +106,6 @@ def test_no_innerhtml_with_user_css():
         for i, line in enumerate(lines):
             if "innerHTML" not in line:
                 continue
-            # Look at this line + the next 2 (template literals span)
             window = "\n".join(lines[i:i + 3]).lower()
             if "innerhtml" not in window:
                 continue
@@ -172,6 +114,59 @@ def test_no_innerhtml_with_user_css():
                     offenders.append((path.name, i + 1, line.rstrip()))
                     break
     assert not offenders, (
-        "Track B violation: innerHTML assignment near user-CSS data:\n"
+        "innerHTML assignment near user-CSS data:\n"
         + "\n".join(f"  static/js/{p}:{n}: {l}" for p, n, l in offenders)
     )
+
+
+# ──────────────────────────────────────────────────────────────────────
+# 3. The generator can never break out of a <style> element.
+# ──────────────────────────────────────────────────────────────────────
+
+_BREAKOUT_CORPUS = [
+    ".sp-nick { color: red } </style><script>alert(1)</script>",
+    ".sp-nick { content: '</style>' }",
+    ".sp-nick::before { content: '</style><script>x' }",
+    ".sp-nick { color: red\\3c /style\\3e }",
+    "</style><svg onload=alert(1)>",
+    ".sp-banner { background: url(\"x\");}</style><script>y</script>{a:b }",
+    "@import 'https://evil/x.css'; .sp-nick { color: red }",
+    ".sp-nick { color: expression(alert(1)) }",
+    "*{}</style >",
+]
+
+
+def test_generator_output_cannot_break_out_of_style():
+    for src in _BREAKOUT_CORPUS:
+        out = sanitize_inline_style(src)
+        assert "<" not in out, f"'<' leaked from {src!r}: {out!r}"
+        assert "@" not in out, f"'@' leaked from {src!r}: {out!r}"
+        assert "\\" not in out, f"backslash leaked from {src!r}: {out!r}"
+        assert "</style" not in out.lower()
+        assert "<script" not in out.lower()
+        assert out.count("{") == out.count("}"), f"unbalanced braces from {src!r}"
+
+
+# ──────────────────────────────────────────────────────────────────────
+# 4. The client injects via textContent and guards the payload.
+# ──────────────────────────────────────────────────────────────────────
+
+def test_client_injects_scoped_style_via_textcontent():
+    assert UI_JS.is_file(), "ui.js missing"
+    src = UI_JS.read_text(encoding="utf-8", errors="replace")
+    # The scoped-style injector exists and uses the fixed scope token + a
+    # safety guard, and binds the stylesheet via textContent.
+    assert "_injectScopedStyle" in src
+    assert "_scopedStyleIsSafe" in src
+    assert "__FTSCOPE__" in src
+    # Find the injector body and assert it uses textContent, not innerHTML.
+    m = re.search(r"function _injectScopedStyle\(.*?\n}", src, re.DOTALL)
+    assert m, "could not locate _injectScopedStyle body"
+    body = m.group(0)
+    assert "createElement('style')" in body or 'createElement("style")' in body
+    assert ".textContent" in body
+    assert ".innerHTML" not in body
+    # The guard rejects the breakout/at-rule/escape characters.
+    g = re.search(r"function _scopedStyleIsSafe\(.*?\n}", src, re.DOTALL)
+    assert g, "could not locate _scopedStyleIsSafe body"
+    assert "[<@\\\\]" in g.group(0)
