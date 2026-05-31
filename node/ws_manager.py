@@ -376,6 +376,28 @@ class VoiceManager:
                 del self._voice_rooms[room]
         return rooms_left
 
+    def reap_offline(self, is_online) -> list:
+        """Drop local voice participants whose user no longer has any live
+        connection (device off / network loss / half-open socket reaped by the
+        WS ping timeout). Returns ``[(room, participant_dict)]`` removed so the
+        caller can broadcast ``voice_user_left``. Prevents zombies lingering in
+        the voice list when someone disconnects and never comes back."""
+        removed = []
+        for room in list(self._voice_rooms.keys()):
+            bucket = self._voice_rooms.get(room) or {}
+            for k, p in list(bucket.items()):
+                uid = int(p.get("user_id") or 0)
+                try:
+                    online = bool(uid) and bool(is_online(uid))
+                except Exception:
+                    online = True  # never reap on a probe error
+                if not online:
+                    del bucket[k]
+                    removed.append((room, dict(p)))
+            if not bucket:
+                self._voice_rooms.pop(room, None)
+        return removed
+
 
 manager = ConnectionManager()
 voice_manager = VoiceManager()

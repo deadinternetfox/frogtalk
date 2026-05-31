@@ -135,7 +135,7 @@ and private channels (AES-GCM) before data reaches your disk.
 | Platform | Latest | Notes |
 |----------|--------|-------|
 | 🌐 **Web** | [Open in browser](https://frogtalk.app) | No install needed |
-| 🤖 **Android** | [Latest APK](https://frogtalk.app/download/android) | v1.6.44-alpha (250) — sideload; group calls, video, screen share. Served from the nodes (too large for GitHub). |
+| 🤖 **Android** | [Latest APK](https://frogtalk.app/download/android) · [Releases](https://github.com/deadinternetfox/frogtalk/releases/latest) | v1.6.44-alpha (250) — sideload; group calls, video, screen share |
 | 📦 **Android (Play)** | [AAB in build mirror](github-build-mirror/FrogTalk-1.6.44-alpha-250.aab) | Google Play upload bundle |
 | 🐳 **Run a node (Docker)** | [`docker compose up -d`](docker-compose.yml) | Self-host the backend — see [Self-Host](#self-host-run-your-own-node) |
 | 🐧 **Linux AppImage** | [Latest AppImage](https://frogtalk.app/download/linux) | `chmod +x` then run |

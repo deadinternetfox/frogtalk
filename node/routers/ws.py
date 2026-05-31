@@ -37,6 +37,44 @@ def _link_reply_sync(msg_id, reply_to):
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["websocket"])
 
+
+async def voice_reaper_task():
+    """Periodically evict voice participants whose user has no live WS connection
+    left — device powered off, network dropped, or a half-open socket reaped by
+    the WS ping timeout. The per-disconnect handler already cleans the common
+    case, but its multi-connection guard can skip cleanup when a stale socket
+    lingers; this sweep guarantees nobody is left hanging as a zombie in the
+    voice list. Broadcasts ``voice_user_left`` so every client's roster updates.
+    """
+    while True:
+        await asyncio.sleep(15)
+        try:
+            removed = voice_manager.reap_offline(manager.is_user_online)
+        except Exception:
+            logger.exception("voice_reaper: reap_offline failed")
+            continue
+        for room, p in removed:
+            try:
+                try:
+                    import federation_voice as _fv
+                    parts = _fv.participants_for_room(room, voice_manager)
+                except Exception:
+                    parts = voice_manager.participants(room)
+                await manager.broadcast_room(room, {
+                    "type": "voice_user_left",
+                    "room": room,
+                    "user_id": int(p.get("user_id") or 0),
+                    "global_user_id": str(p.get("global_user_id") or ""),
+                    "nickname": p.get("nickname") or "",
+                    "participants": parts,
+                    "reason": "disconnected",
+                })
+                logger.info("voice_reaper: dropped zombie %s from voice #%s",
+                            p.get("nickname") or p.get("user_id"), room)
+            except Exception:
+                logger.exception("voice_reaper: broadcast failed")
+
+
 # HIGH-4: cap the number of concurrent worker threads we'll burn on
 # best-effort push notifications. Without a cap a sudden 1000-message
 # burst would spawn 1000 simultaneous FCM/APNs/web-push attempts and

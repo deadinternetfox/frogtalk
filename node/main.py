@@ -387,6 +387,7 @@ async def lifespan(app: FastAPI):
     tasks = [
         asyncio.create_task(cleanup_task()),
         asyncio.create_task(wal_checkpoint_task()),
+        asyncio.create_task(ws.voice_reaper_task()),
         asyncio.create_task(official_directory_sync_task()),
         asyncio.create_task(federation_inbox_processor_task()),
         asyncio.create_task(federation_outbox_processor_task()),

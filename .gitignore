@@ -94,10 +94,11 @@ client/mobile/android/frogtalk.keystore
 *.apk
 *.aab
 
-# ── Build mirror ───────────────────────────────────────────────
-# The Android APK is too large for free GitHub storage — it is served from the
-# nodes instead (https://frogtalk.app/download/android), so keep it OUT of git.
-# The smaller AAB (Play Store upload) is kept here.
+# ── Build mirror (binaries published to GitHub) ────────────────
+# Mirror the Android APK + AAB here as long as they fit GitHub's free per-file
+# limit (<100 MB). Genuinely-too-large desktop binaries are excluded (see below)
+# and served from the nodes instead.
+!github-build-mirror/*.apk
 !github-build-mirror/*.aab
 
 # ── Desktop release artifacts (too large for git) ──────────────
