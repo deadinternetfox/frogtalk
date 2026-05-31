@@ -3453,6 +3453,12 @@ async def serve_home(request: Request):
     return _serve_static_html_page("static/index.html", request=request)
 
 
+@app.get("/healthz")
+async def healthz():
+    """Liveness probe for Docker / orchestrators — no auth, no DB, always cheap."""
+    return {"ok": True}
+
+
 if __name__ == "__main__":
     import uvicorn
     host = os.getenv("HOST", "0.0.0.0")

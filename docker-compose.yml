@@ -1,0 +1,42 @@
+# FrogTalk backend node — quick start.
+#
+#   git clone https://github.com/deadinternetfox/frogtalk
+#   cd frogtalk
+#   docker compose up -d
+#
+# The app/board upstream listens on :8080. Put nginx or a Cloudflare Tunnel in
+# front for TLS + your domain, then set PUBLIC_URL. Full env (federation, TURN,
+# push, etc.) is documented at /docs/run-a-node.
+services:
+  frogtalk:
+    # Build from source by default; `docker compose pull` uses the published
+    # image instead if you have access to it.
+    build:
+      context: .
+      dockerfile: node/Dockerfile
+    image: ghcr.io/deadinternetfox/frogtalk:latest
+    container_name: frogtalk-node
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      - HOST=0.0.0.0
+      - PORT=8080
+      - PUBLIC_URL=${PUBLIC_URL:-}
+    volumes:
+      - ft-data:/app/data                  # SQLite DB, federation identity, keys
+      - ft-secrets:/app/secrets            # CSRF / secret material
+      - ft-uploads:/app/static/uploads     # user uploads
+      - ft-board:/app/board/board_data     # imageboard threads
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/healthz',timeout=4).status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 25s
+
+volumes:
+  ft-data:
+  ft-secrets:
+  ft-uploads:
+  ft-board:

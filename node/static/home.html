@@ -397,6 +397,16 @@
   <div class="section-title" id="downloads-heading">Download FrogTalk</div>
   <div class="section-sub section-sub--tight">Pre-alpha builds for testing — native Android, desktop, or browser. Not recommended for sensitive or production use.</div>
   <div data-ft-downloads-root></div>
+  <div class="ft-docker-cta" style="margin-top:18px;padding:16px 18px;border:1px solid #1f3d2c;border-radius:14px;background:linear-gradient(135deg,#0c1a12,#0a140d)">
+    <div style="font-weight:700;color:#e0e0e0;font-size:15px">🐳 Run your own node with Docker</div>
+    <div class="section-sub section-sub--tight" style="margin:6px 0 12px">One command spins up the backend node container (app + imageboard on <code>:8080</code>). Front it with nginx / Cloudflare for TLS.</div>
+    <pre style="background:#06100a;border:1px solid #16291d;border-radius:10px;padding:12px;overflow:auto;color:#9fd9b8;font-size:13px;margin:0 0 12px"><code>git clone https://github.com/deadinternetfox/frogtalk
+cd frogtalk &amp;&amp; docker compose up -d</code></pre>
+    <div style="display:flex;gap:10px;flex-wrap:wrap">
+      <a href="https://github.com/deadinternetfox/frogtalk/blob/master/docker-compose.yml" style="display:inline-block;padding:9px 16px;border-radius:999px;background:#4caf50;color:#04130a;font-weight:700;text-decoration:none">docker-compose.yml</a>
+      <a href="/docs/node#docker" style="display:inline-block;padding:9px 16px;border-radius:999px;border:1px solid #2c5740;color:#9fd9b8;font-weight:600;text-decoration:none">Docker guide →</a>
+    </div>
+  </div>
 </section>
 <link rel="stylesheet" href="/static/css/downloads-picker.css?v=4">
 <script src="/static/js/downloads-picker.js?v=4" defer></script>

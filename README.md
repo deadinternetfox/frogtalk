@@ -135,8 +135,9 @@ and private channels (AES-GCM) before data reaches your disk.
 | Platform | Latest | Notes |
 |----------|--------|-------|
 | 🌐 **Web** | [Open in browser](https://frogtalk.app) | No install needed |
-| 🤖 **Android** | [Latest APK](https://frogtalk.app/download/android) | v1.6.43-alpha (249) — sideload; calls, group video, screen share |
-| 📦 **Android (Play)** | [AAB in build mirror](github-build-mirror/FrogTalk-1.6.43-alpha-249.aab) | Google Play upload bundle |
+| 🤖 **Android** | [Latest APK](https://frogtalk.app/download/android) | v1.6.44-alpha (250) — sideload; group calls, video, screen share. Served from the nodes (too large for GitHub). |
+| 📦 **Android (Play)** | [AAB in build mirror](github-build-mirror/FrogTalk-1.6.44-alpha-250.aab) | Google Play upload bundle |
+| 🐳 **Run a node (Docker)** | [`docker compose up -d`](docker-compose.yml) | Self-host the backend — see [Self-Host](#self-host-run-your-own-node) |
 | 🐧 **Linux AppImage** | [Latest AppImage](https://frogtalk.app/download/linux) | `chmod +x` then run |
 | 📦 **Linux .deb** | [Latest .deb](https://frogtalk.app/download/deb) | `sudo dpkg -i <downloaded_file>.deb` |
 | 🪟 **Windows (Portable .exe)** | [Latest portable .exe](https://frogtalk.app/download/windows) | Portable single-file — just run |
@@ -351,16 +352,24 @@ sudo systemctl status frogtalk
 
 Logs: `journalctl -u frogtalk -f`
 
-### Docker
+### Docker (fastest)
+
+The backend node ships as a container. Compose builds it and wires up
+persistent volumes; front it with nginx or a Cloudflare Tunnel for TLS.
 
 ```bash
-# Build from the repo root, pointed at node/Dockerfile.
-docker build -f node/Dockerfile -t frogtalk .
-docker run -d -p 8080:8080 \
-  -e ADMIN_PASSWORD=your_password \
-  -v $(pwd)/data:/app/data \
-  --name frogtalk frogtalk
+git clone https://github.com/deadinternetfox/frogtalk
+cd frogtalk
+export PUBLIC_URL="https://chat.<YOUR_DOMAIN>"   # once TLS/DNS is set
+docker compose up -d
+curl -sS http://127.0.0.1:8080/healthz           # {"ok":true}
 ```
+
+Update with `git pull && docker compose up -d --build`. The image is defined in
+[`node/Dockerfile`](node/Dockerfile) + [`docker-compose.yml`](docker-compose.yml);
+a multi-arch image can be published to `ghcr.io/deadinternetfox/frogtalk` via the
+GHCR workflow. Full node setup (federation, TURN, board, Tor) is in the sections
+above and at [/docs/run-a-node](https://frogtalk.app/docs/node).
 
 ### Nginx + HTTPS
 

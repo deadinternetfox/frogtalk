@@ -101,6 +101,27 @@ Open **`$PUBLIC_URL/app`**, log in as user **`admin`** (password in `/opt/frogta
 
 ---
 
+## Docker (fastest)
+
+The backend node ships as a container — the app + imageboard on `:8080`. Put nginx
+or a Cloudflare Tunnel in front for TLS, then set `PUBLIC_URL`. Data persists in
+named volumes (`ft-data`, `ft-secrets`, `ft-uploads`, `ft-board`).
+
+```bash
+git clone https://github.com/deadinternetfox/frogtalk
+cd frogtalk
+export PUBLIC_URL="https://chat.<YOUR_DOMAIN>"   # once TLS/DNS is set
+docker compose up -d
+curl -sS http://127.0.0.1:8080/healthz           # {"ok":true}
+```
+
+Update with `git pull && docker compose up -d --build`. Image: [`node/Dockerfile`](../node/Dockerfile)
++ [`docker-compose.yml`](../docker-compose.yml); a multi-arch image can be published to
+`ghcr.io/deadinternetfox/frogtalk` via the GHCR workflow. Join the mesh exactly as
+below (run the federation step inside the container or against `127.0.0.1:8080`).
+
+---
+
 ## Overview (interactive)
 
 ```bash

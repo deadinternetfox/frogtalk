@@ -64,6 +64,7 @@
       <p class="hint hero-meta"><strong>Pre-alpha:</strong> expect breaking changes between releases. Pin a git tag or verify SHA-256 from the release feed before production use.</p>
       <nav class="toc" aria-label="On this page">
         <a href="#quick">Quick install</a>
+        <a href="#docker">🐳 Docker</a>
         <a href="#prereq">Prerequisites</a>
         <a href="#vps">VPS bootstrap</a>
         <a href="#wizard">Setup wizard</a>
@@ -122,6 +123,22 @@ curl -sS https://frogtalk.app/api/network/servers | python3 -m json.tool
 grep ADMIN_PASSWORD /opt/frogtalk/.env</code></pre>
       <p class="hint"><code>setup -y</code> (root) installs board nginx, <strong>auto HTTPS</strong> for <code>http://</code> IPs (self-signed), then updates <code>PUBLIC_URL</code> to <code>https://</code>. See <a href="#https">HTTPS</a>.</p>
       <p class="hint">Open <code>$PUBLIC_URL/app</code>, log in as <code>admin</code> (password in <code>.env</code>), rotate the password.</p>
+    </section>
+
+    <section class="step" id="docker">
+      <h2>🐳 Run with Docker (fastest)</h2>
+      <p class="hint">The backend node ships as a container. This runs the FrogTalk app + imageboard on <code>:8080</code>; put nginx or a <a href="#https">Cloudflare Tunnel</a> in front for TLS and your domain. Data persists in named volumes.</p>
+      <pre><code>git clone https://github.com/deadinternetfox/frogtalk.git
+cd frogtalk
+
+# optional: your public URL once TLS/DNS is set
+export PUBLIC_URL="https://chat.&lt;YOUR_DOMAIN&gt;"
+
+docker compose up -d            # builds the image + starts the node
+docker compose logs -f          # watch it boot
+curl -sS http://127.0.0.1:8080/healthz   # {"ok":true}</code></pre>
+      <p class="hint">Then point nginx/Cloudflare at <code>127.0.0.1:8080</code>, open <code>$PUBLIC_URL/app</code>, log in as <code>admin</code> and rotate the password. Join the mesh with <a href="#federation">federation</a>. The image is defined in <a href="https://github.com/deadinternetfox/frogtalk/blob/master/node/Dockerfile"><code>node/Dockerfile</code></a> and <a href="https://github.com/deadinternetfox/frogtalk/blob/master/docker-compose.yml"><code>docker-compose.yml</code></a>; a multi-arch image can also be published to <code>ghcr.io/deadinternetfox/frogtalk</code> (run the GHCR workflow).</p>
+      <p class="hint"><strong>Persistence:</strong> volumes <code>ft-data</code> (DB + federation identity), <code>ft-secrets</code>, <code>ft-uploads</code>, <code>ft-board</code>. Update with <code>git pull &amp;&amp; docker compose up -d --build</code>.</p>
     </section>
 
     <section class="step" id="prereq">
