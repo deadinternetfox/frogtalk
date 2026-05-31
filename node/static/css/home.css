@@ -1263,6 +1263,22 @@
     #tor-no-central .compare-grid { grid-template-columns: 1fr; gap: 1rem; }
     .central-note { flex-direction: column; gap: .55rem; }
   }
+  /* Subtle, theme-matched inline reference link (overrides default browser blue). */
+  #no-central-server .section-sub a,
+  #no-central-server .central-note a {
+    color: #8fd7b0;
+    font-weight: 500;
+    text-decoration: underline;
+    text-decoration-color: rgba(74, 222, 128, .35);
+    text-decoration-thickness: 1px;
+    text-underline-offset: 3px;
+    transition: color .15s ease, text-decoration-color .15s ease;
+  }
+  #no-central-server .section-sub a:hover,
+  #no-central-server .central-note a:hover {
+    color: var(--green);
+    text-decoration-color: var(--green);
+  }
 
   .node-identity { padding-top: 0; margin-top: -1rem; }
   .node-identity-inner {
