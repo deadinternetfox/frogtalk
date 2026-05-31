@@ -1,0 +1,40 @@
+version = 1
+
+# Skip generated / binary / vendored paths so they don't generate noise.
+exclude_patterns = [
+  "github-build-mirror/**",
+  "node/static/github-build-mirror/**",
+  "**/*.min.js",
+  "**/*.min.css",
+  "**/vendor/**",
+  "client/desktop/app/node_modules/**",
+]
+
+# Mirror the analyzers already running on the repo (declaring a config here
+# overrides auto-detection, so all eight are listed explicitly to keep the
+# JavaScript / Docker / Kotlin / PHP / Secrets / Shell / Swift checks alive).
+[[analyzers]]
+name = "python"
+  [analyzers.meta]
+  runtime_version = "3.x.x"
+
+[[analyzers]]
+name = "javascript"
+
+[[analyzers]]
+name = "docker"
+
+[[analyzers]]
+name = "kotlin"
+
+[[analyzers]]
+name = "php"
+
+[[analyzers]]
+name = "shell"
+
+[[analyzers]]
+name = "swift"
+
+[[analyzers]]
+name = "secrets"
