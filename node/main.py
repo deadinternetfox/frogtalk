@@ -999,16 +999,21 @@ def _build_csp_header(nonce: str) -> str:
     _ = nonce  # reserved for Phase B — not emitted in directives yet
     return (
         "default-src 'self'; "
-        "script-src 'self' 'unsafe-inline' https://frogtalk.app https://frogtalk.xyz; "
+        # static.cloudflareinsights.com: Cloudflare Web Analytics beacon
+        # (beacon.min.js) auto-injected by the CDN. Cookieless/privacy-first;
+        # whitelisted so it isn't CSP-blocked. Disable it in the Cloudflare
+        # dashboard (Web Analytics) to drop it entirely instead.
+        "script-src 'self' 'unsafe-inline' https://frogtalk.app https://frogtalk.xyz https://static.cloudflareinsights.com; "
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
         "font-src 'self' https://fonts.gstatic.com data:; "
         "img-src 'self' data: blob: https:; "
         "media-src 'self' data: blob: https:; "
         # WebSockets to same origin + KLIPY (primary GIF/sticker CDN) +
-        # Tenor (legacy fallback until 2026-06-30 sunset). frame-src is
-        # narrow on purpose: blocks attacker pages from being iframed
-        # inside FrogTalk via stored-XSS injected <iframe>.
-        "connect-src 'self' wss: https://api.klipy.com https://media.klipy.com https://cdn.klipy.com https://static.klipy.com https://tenor.googleapis.com https://media.tenor.com; "
+        # Tenor (legacy fallback until 2026-06-30 sunset) + the Cloudflare
+        # Web Analytics beacon's report endpoint. frame-src is narrow on
+        # purpose: blocks attacker pages from being iframed inside FrogTalk
+        # via stored-XSS injected <iframe>.
+        "connect-src 'self' wss: https://api.klipy.com https://media.klipy.com https://cdn.klipy.com https://static.klipy.com https://tenor.googleapis.com https://media.tenor.com https://cloudflareinsights.com; "
         "frame-src 'self' https://www.youtube.com https://open.spotify.com https://platform.twitter.com; "
         # Hard locks (no inline-handler dependency, so safe to enforce today).
         "frame-ancestors 'self'; "
@@ -1026,12 +1031,12 @@ def _build_strict_csp_header(nonce: str) -> str:
     <script>/on*= handler lacking the nonce. See docs/csp-migration.md."""
     return (
         "default-src 'self'; "
-        f"script-src 'self' 'nonce-{nonce}' https://frogtalk.app https://frogtalk.xyz; "
+        f"script-src 'self' 'nonce-{nonce}' https://frogtalk.app https://frogtalk.xyz https://static.cloudflareinsights.com; "
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
         "font-src 'self' https://fonts.gstatic.com data:; "
         "img-src 'self' data: blob: https:; "
         "media-src 'self' data: blob: https:; "
-        "connect-src 'self' wss: https://api.klipy.com https://media.klipy.com https://cdn.klipy.com https://static.klipy.com https://tenor.googleapis.com https://media.tenor.com; "
+        "connect-src 'self' wss: https://api.klipy.com https://media.klipy.com https://cdn.klipy.com https://static.klipy.com https://tenor.googleapis.com https://media.tenor.com https://cloudflareinsights.com; "
         "frame-src 'self' https://www.youtube.com https://open.spotify.com https://platform.twitter.com; "
         "frame-ancestors 'self'; "
         "base-uri 'self'; "
@@ -1077,9 +1082,16 @@ async def _security_headers(request: Request, call_next):
     # /app on the same origin. Cross-origin framing is still blocked.
     response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
     response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    # Single source of truth for Permissions-Policy (nginx no longer emits it
+    # — a duplicate header forces the browser to intersect the two, and the
+    # legacy copy still carried the now-removed FLoC `interest-cohort` token
+    # which modern browsers reject as an "Unrecognized feature"). mic/camera
+    # are same-origin (calls); everything else (incl. unused geolocation) is
+    # denied. No `interest-cohort` — FLoC is dead and the token is invalid.
     response.headers.setdefault(
         "Permissions-Policy",
-        "geolocation=(self), microphone=(self), camera=(self), payment=(), usb=()",
+        "microphone=(self), camera=(self), geolocation=(), payment=(), usb=(), "
+        "magnetometer=(), gyroscope=(), accelerometer=()",
     )
     response.headers.setdefault(_CSP_HEADER_NAME, _build_csp_header(nonce))
     if _CSP_ENFORCE and _CSP_STRICT_REPORT:
