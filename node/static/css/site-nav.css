@@ -94,25 +94,42 @@ html { scroll-padding-top: 76px; }
   color: #fff;
 }
 
-/* Keep every nav link on a single line above mobile — stops the wrapping seen
-   on tablets / in-between widths (the bar has a fixed height). */
+/* ── Responsive nav: never wrap; shed lowest-priority links as width shrinks ──
+   Above mobile the bar is a single fixed-height row. The logo and the Sign Up
+   CTA stay pinned (flex-shrink:0); the link list can shrink (min-width:0) and
+   never wraps (white-space:nowrap). Between mobile and desktop we progressively
+   hide the lowest-priority links — they remain reachable in the footer and as
+   on-page sections — so the bar can't wrap or overflow at any in-between width
+   (the gap that broke around ~1000–1080px before). */
 @media (min-width: 769px) {
+  .ft-site-nav .nav-logo { flex-shrink: 0; }
+  .ft-site-nav .nav-links { min-width: 0; flex-wrap: nowrap; }
   .ft-site-nav .nav-links a { white-space: nowrap; }
+  .ft-site-nav .nav-links .btn { flex-shrink: 0; }
 }
-
-/* Tablet & odd in-between widths (769–1024px): the full 8-link bar can't fit
-   comfortably, so tighten spacing/type and move the info/legal links (still in
-   the footer + page sections) out of the bar, keeping the product + CTA links. */
-@media (min-width: 769px) and (max-width: 1024px) {
-  .ft-site-nav { padding: 0 1.1rem; }
+/* Priority dropped first → last as the viewport narrows:
+   API → Security → Privacy → Downloads → How it works. */
+@media (min-width: 769px) and (max-width: 1200px) {
+  .ft-site-nav .nav-links a[href$="/docs/api"] { display: none; }
+}
+@media (min-width: 769px) and (max-width: 1100px) {
+  .ft-site-nav .nav-links a[href$="/security"] { display: none; }
+}
+@media (min-width: 769px) and (max-width: 1000px) {
+  .ft-site-nav { padding: 0 1.3rem; }
+  .ft-site-nav .nav-links { gap: 0.85rem; }
+  .ft-site-nav .nav-links a:not(.btn) { font-size: 0.85rem; }
+  .ft-site-nav .nav-links a[href$="/privacy"] { display: none; }
+}
+@media (min-width: 769px) and (max-width: 900px) {
   .ft-site-nav .nav-logo { font-size: 1.1rem; }
   .ft-site-nav .nav-links { gap: 0.7rem; }
   .ft-site-nav .nav-links a:not(.btn) { font-size: 0.82rem; }
-  .ft-site-nav .nav-links a[href$="/privacy"],
-  .ft-site-nav .nav-links a[href$="/security"],
-  .ft-site-nav .nav-links a[href$="/docs/api"] { display: none; }
-  .ft-site-nav .btn { padding: 0.45rem 0.9rem; font-size: 0.82rem; }
-  .ft-site-nav .nav-links .btn-primary { white-space: nowrap; }
+  .ft-site-nav .nav-links a[href$="#downloads"] { display: none; }
+  .ft-site-nav .nav-links .btn { padding: 0.45rem 0.85rem; font-size: 0.82rem; }
+}
+@media (min-width: 769px) and (max-width: 820px) {
+  .ft-site-nav .nav-links a[href$="#how"] { display: none; }
 }
 
 @media (max-width: 768px) {
