@@ -1220,6 +1220,50 @@
     body.home-node-tor .cta-banner { padding: 2.5rem 1.1rem 3.25rem; }
   }
 
+  /* "No central server" comparison section (home.html + home-tor.html). */
+  #no-central-server .compare-grid,
+  #tor-no-central .compare-grid {
+    max-width: 1000px; margin: 2.5rem auto 0;
+    display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem;
+  }
+  .compare-card {
+    border: 1px solid var(--border); border-radius: 16px;
+    padding: 1.5rem 1.5rem 1.6rem; text-align: left;
+  }
+  .compare-card--bad {
+    border-color: rgba(248, 81, 73, .28);
+    background: linear-gradient(160deg, rgba(40, 16, 16, .45), rgba(20, 12, 12, .35));
+  }
+  .compare-card--good {
+    border-color: rgba(74, 222, 128, .30);
+    background: linear-gradient(160deg, rgba(14, 32, 22, .55), rgba(10, 20, 16, .45));
+  }
+  .compare-head { margin-bottom: 1rem; }
+  .compare-tag {
+    display: inline-block; font-size: .72rem; font-weight: 700; letter-spacing: .5px;
+    text-transform: uppercase; padding: 5px 11px; border-radius: 999px;
+  }
+  .compare-tag--bad { color: #ff9b94; background: rgba(248, 81, 73, .14); }
+  .compare-tag--good { color: #6ee7a0; background: rgba(74, 222, 128, .14); }
+  .compare-card ul { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: .7rem; }
+  .compare-card li { position: relative; padding-left: 1.6rem; font-size: .92rem; line-height: 1.5; color: var(--text-muted); }
+  .compare-card--bad li::before { content: "\2715"; position: absolute; left: 0; top: 0; color: var(--danger); font-weight: 700; }
+  .compare-card--good li::before { content: "\2713"; position: absolute; left: 0; top: 0; color: var(--green); font-weight: 700; }
+  .compare-card--good li strong { color: var(--text); }
+  .central-note {
+    max-width: 1000px; margin: 1.4rem auto 0; display: flex; gap: 1rem; align-items: flex-start; text-align: left;
+    border: 1px solid rgba(74, 222, 128, .28); border-radius: 14px; padding: 1.1rem 1.3rem;
+    background: linear-gradient(135deg, rgba(74, 222, 128, .08), transparent);
+    font-size: .95rem; line-height: 1.55; color: var(--text-muted);
+  }
+  .central-note strong { color: var(--text); }
+  .central-note-icon { font-size: 1.6rem; line-height: 1; flex-shrink: 0; }
+  @media (max-width: 768px) {
+    #no-central-server .compare-grid,
+    #tor-no-central .compare-grid { grid-template-columns: 1fr; gap: 1rem; }
+    .central-note { flex-direction: column; gap: .55rem; }
+  }
+
   .node-identity { padding-top: 0; margin-top: -1rem; }
   .node-identity-inner {
     max-width: 960px; margin: 0 auto;

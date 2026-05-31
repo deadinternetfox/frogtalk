@@ -101,7 +101,7 @@
 }
 </script>
 
-  <link rel="stylesheet" href="/static/css/home.css?v=5">
+  <link rel="stylesheet" href="/static/css/home.css?v=6">
 </head>
 <body class="home-node-tor">
 
@@ -293,6 +293,35 @@ cd frogtalk &amp;&amp; docker compose up -d
     <div class="node-identity-actions">
       <a class="primary" href="/docs/node">Operator guide</a>
     </div>
+  </div>
+</section>
+
+<section class="section node-page-section" id="tor-no-central">
+  <div class="section-title">No central server. No owner.</div>
+  <div class="section-sub">“Federated” isn’t the same as decentralized. On some networks sold as decentralized, your identity and metadata still reach one company’s servers — <a href="https://hackea.org/notas/matrix.html" target="_blank" rel="noopener noreferrer" style="color:#c4b5fd">even when you self-host</a>. A FrogTalk onion node answers to no one but its operator.</div>
+  <div class="compare-grid">
+    <article class="compare-card compare-card--bad">
+      <div class="compare-head"><span class="compare-tag compare-tag--bad">Centralized “federation”</span></div>
+      <ul>
+        <li>A flagship homeserver holds most accounts — a de-facto centre</li>
+        <li>An identity service maps you to email / phone / contacts, stored centrally</li>
+        <li>Metadata — who, when, from where — reaches central servers even from self-hosted instances</li>
+        <li>Server admins can read your media and files by default</li>
+      </ul>
+    </article>
+    <article class="compare-card compare-card--good">
+      <div class="compare-head"><span class="compare-tag compare-tag--good">FrogTalk over Tor</span></div>
+      <ul>
+        <li><strong>No central server.</strong> This onion node is independent — data lives here, not on someone’s hub</li>
+        <li><strong>No identity broker.</strong> A nickname is the whole account — no email, no phone</li>
+        <li><strong>Network <em>and</em> ownership privacy.</strong> Tor hides where you connect from; there’s no clearnet centre to subpoena</li>
+        <li><strong>Client-side encryption.</strong> Signal-Protocol DMs + AES-GCM channels; the node stores ciphertext only</li>
+      </ul>
+    </article>
+  </div>
+  <div class="central-note">
+    <span class="central-note-icon" aria-hidden="true">📇</span>
+    <div><strong>frogtalk.app is a listing, not a landlord.</strong> The clearnet hub only publishes the public directory and release metadata — it can’t read your messages, hold your account, or switch this onion node off.</div>
   </div>
 </section>
 
