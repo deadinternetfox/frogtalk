@@ -288,13 +288,17 @@ async def accept_request(request: Request, nickname: str, current_user: dict = D
         channel_id = db.get_or_create_dm(a_id, b_id)
         # Name who added whom. `profile` sent the request (the adder); the
         # current user just accepted it (the one who was added). Both sides see
-        # the same neutral line, e.g. "alice added bob — say hi! 👋".
+        # the same neutral line. We deliberately avoid "say hi" here: FrogTalk
+        # allows DMs before friendship, so the pair may already have an open
+        # conversation — "X added Y" reads right whether the thread is brand
+        # new or they've been chatting for weeks. (The empty-DM placeholder
+        # still prompts "Say hi…" when a thread genuinely has no messages.)
         adder = str(profile.get("nickname") or "Someone")
         added = str(current_user.get("nickname") or "you")
         content = dm_sys_content(
             kind="friends_added",
             title="You're now friends \U0001F438",
-            subtitle=f"{adder} added {added} — say hi! \U0001F44B",
+            subtitle=f"{adder} added {added}",
             icon="\U0001F91D",
         )
         msg_id = db.send_dm_message(channel_id, a_id, content)
