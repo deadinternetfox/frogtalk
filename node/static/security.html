@@ -147,25 +147,9 @@
     <ul>
       <li><strong>High-impact:</strong> account takeover, E2EE bypass, message tampering, server-side RCE, SQL injection, auth bypass.</li>
       <li><strong>Medium-impact:</strong> stored or reflected XSS, CSRF on state-changing endpoints, privilege escalation, IDOR, sensitive info leaks.</li>
-      <li><strong>Lower-impact:</strong> rate-limit bypass, denial-of-service through unbounded inputs, info disclosure of non-sensitive data, bypass of optional 18+ content-warning gates on labeled public channels.</li>
+      <li><strong>Lower-impact:</strong> rate-limit bypass, denial-of-service through unbounded inputs, info disclosure of non-sensitive data.</li>
       <li><strong>Not in scope:</strong> "you can DM yourself spam from your own account", missing security headers without a working exploit, automated scanner output without a PoC, social engineering of other users.</li>
     </ul>
-  </section>
-
-  <section class="block" id="content-warnings">
-    <h2>18+ content warnings (public channels)</h2>
-    <p>
-      Channel owners can label <strong>public</strong> rooms with moderator-chosen categories
-      (nudity, violence, extremism, mature themes). The server does <em>not</em> scan message
-      bodies — labeling is voluntary. When enabled, visitors must confirm they are 18 or older
-      before history, media, or live sends are released for that session. Acknowledgements are
-      session-scoped and invalidated when flags change. Federation peers receive labels via
-      <code>channel.directory.updated</code> so directory cards show an <strong>18+</strong> badge.
-    </p>
-    <p>
-      Private channels and DMs are unaffected. Report bypasses (API/WS paths that skip the gate)
-      as security issues.
-    </p>
   </section>
 
   <section class="block" id="report">
