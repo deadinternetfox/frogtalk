@@ -3,6 +3,16 @@
   "directory_hub_hosts": ["frogtalk.app", "www.frogtalk.app"],
   "ensure_peers": [
     {
+      "server_id": "srv_de0e973c9d1d46da91a1",
+      "display_name": "FrogTalk Dev",
+      "base_url": "https://frogtalk.xyz",
+      "onion_url": "",
+      "region": "Australia",
+      "capabilities": ["federation-v1"],
+      "official": true,
+      "trust_tier": "official"
+    },
+    {
       "server_id": "srv_c93cf598b239402c8452",
       "display_name": "FrogTalk Tor Mirror",
       "base_url": "",
@@ -34,6 +44,13 @@
       "server_id": "srv_ee3f0ff0c6e74fadb542",
       "display_name": "FrogTalk Main",
       "base_url": "https://frogtalk.app",
+      "onion_url": "",
+      "capabilities": ["federation-v1"]
+    },
+    {
+      "server_id": "srv_de0e973c9d1d46da91a1",
+      "display_name": "FrogTalk Dev",
+      "base_url": "https://frogtalk.xyz",
       "onion_url": "",
       "capabilities": ["federation-v1"]
     },

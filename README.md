@@ -65,7 +65,7 @@ cd frogtalk
 
 ## What is FrogTalk?
 
-FrogTalk is a **self-hostable, federated chat and social node**: FastAPI + SQLite on the server,
+FrogTalk is a **self-hostable, federated chat and social node** — a **Lilypad** (what we call a FrogTalk node): FastAPI + SQLite on the server,
 vanilla JS in the browser, optional Frog Channel imageboard, Discord/Telegram bridges, WebRTC calls,
 and **Ed25519-signed federation** between independent operators. Clients encrypt DMs (Signal Protocol)
 and private channels (AES-GCM) before data reaches your disk.
@@ -88,11 +88,11 @@ and private channels (AES-GCM) before data reaches your disk.
 
 ---
 
-## ✨ Why run your own node?
+## ✨ Why run your own Lilypad (node)?
 
 > **Your chat, your server, your keys.** No company in the middle, no plaintext on disk, no telemetry tax.
 
-- **Censorship resistance** — more independent nodes means no single kill switch
+- **Censorship resistance** — more independent Lilypads (nodes) means no single kill switch
 - **Policy control** — moderation, federation peers, and bridges on your terms
 - **Privacy** — you operate the infrastructure users connect to (still E2E for DMs/private rooms)
 - **Federation** — your users can talk to people on other nodes in the same mesh
@@ -137,7 +137,7 @@ and private channels (AES-GCM) before data reaches your disk.
 | 🌐 **Web** | [Open in browser](https://frogtalk.app) | No install needed |
 | 🤖 **Android** | [Latest APK](https://frogtalk.app/download/android) · [Releases](https://github.com/deadinternetfox/frogtalk/releases/latest) | v1.6.44-alpha (250) — sideload; group calls, video, screen share |
 | 📦 **Android (Play)** | [AAB in build mirror](github-build-mirror/FrogTalk-1.6.44-alpha-250.aab) | Google Play upload bundle |
-| 🐳 **Run a node (Docker)** | [`docker compose up -d`](docker-compose.yml) | Self-host the backend — see [Self-Host](#self-host-run-your-own-node) |
+| 🐳 **Run a Lilypad (Docker)** | [`docker compose up -d`](docker-compose.yml) | Self-host the backend — see [Self-Host](#self-host-run-your-own-lilypad) |
 | 🐧 **Linux AppImage** | [Latest AppImage](https://frogtalk.app/download/linux) | `chmod +x` then run |
 | 📦 **Linux .deb** | [Latest .deb](https://frogtalk.app/download/deb) | `sudo dpkg -i <downloaded_file>.deb` |
 | 🪟 **Windows (Portable .exe)** | [Latest portable .exe](https://frogtalk.app/download/windows) | Portable single-file — just run |
@@ -186,7 +186,7 @@ Open **[frogtalk.app/app](https://frogtalk.app/app)** — no install; works on L
 
 ---
 
-## Self-Host (run your own node)
+## Self-Host (run your own Lilypad)
 
 **Docs:** [docs/NODE_INSTALL.md](docs/NODE_INSTALL.md) (VPS, DNS, firewall, nginx, HTTPS, backups) ·
 [https://frogtalk.app/docs/node](https://frogtalk.app/docs/node) (same flow on the live site)
@@ -509,7 +509,7 @@ FrogTalk is **MIT-licensed** and developed in the open. The encryption primitive
 - 🐛 **Bug or security issue?** Report at **<https://frogtalk.app/security>** — anonymous submissions accepted. For sensitive disclosures: `security@frogtalk.app`.
 - 🛠️ **Code contribution?** See **[CONTRIBUTING.md](CONTRIBUTING.md)** for branch workflow and review expectations.
 - 🛠️ **Feature idea?** File a [feature request](https://github.com/deadinternetfox/frogtalk/issues/new?template=feature_idea.md).
-- 📣 **Run a node.** More nodes = more censorship-resistance. Self-host guide above.
+- 📣 **Run a Lilypad (node).** More Lilypads = more censorship-resistance. Self-host guide above.
 - 💬 **Spread the word.** Community projects need a community.
 
 Researchers who responsibly disclose are credited in the security advisory and on the [Hall of Fame](https://frogtalk.app/security#hall-of-fame).

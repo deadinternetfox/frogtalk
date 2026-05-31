@@ -87,8 +87,10 @@
     const run = () => {
       const el = document.getElementById(id);
       if (!el) return;
-      const block = id === 'open-source' ? 'center' : 'start';
-      el.scrollIntoView({ behavior: 'smooth', block });
+      // Always land the section's top just below the fixed nav (the offset is
+      // handled by `scroll-padding-top` in site-nav.css), so headings like
+      // "100% Open Source" sit at the top of the viewport, never mid-section.
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
     };
     run();
     requestAnimationFrame(run);

@@ -1,3 +1,10 @@
+/* Offset in-page anchor jumps by the fixed nav height so a section heading lands
+   just below the bar, never hidden behind it. `scroll-padding-top` covers native
+   :target / hash navigation; `scroll-margin-top` on the targets covers JS
+   `Element.scrollIntoView()` (used by site-nav.js), which ignores scroll-padding. */
+html { scroll-padding-top: 76px; }
+.ft-has-site-nav [id] { scroll-margin-top: 76px; }
+
 .ft-site-nav {
   position: fixed;
   top: 0;
@@ -85,6 +92,27 @@
   transform: translateY(-2px);
   box-shadow: 0 6px 20px rgba(34, 197, 94, 0.45);
   color: #fff;
+}
+
+/* Keep every nav link on a single line above mobile — stops the wrapping seen
+   on tablets / in-between widths (the bar has a fixed height). */
+@media (min-width: 769px) {
+  .ft-site-nav .nav-links a { white-space: nowrap; }
+}
+
+/* Tablet & odd in-between widths (769–1024px): the full 8-link bar can't fit
+   comfortably, so tighten spacing/type and move the info/legal links (still in
+   the footer + page sections) out of the bar, keeping the product + CTA links. */
+@media (min-width: 769px) and (max-width: 1024px) {
+  .ft-site-nav { padding: 0 1.1rem; }
+  .ft-site-nav .nav-logo { font-size: 1.1rem; }
+  .ft-site-nav .nav-links { gap: 0.7rem; }
+  .ft-site-nav .nav-links a:not(.btn) { font-size: 0.82rem; }
+  .ft-site-nav .nav-links a[href$="/privacy"],
+  .ft-site-nav .nav-links a[href$="/security"],
+  .ft-site-nav .nav-links a[href$="/docs/api"] { display: none; }
+  .ft-site-nav .btn { padding: 0.45rem 0.9rem; font-size: 0.82rem; }
+  .ft-site-nav .nav-links .btn-primary { white-space: nowrap; }
 }
 
 @media (max-width: 768px) {

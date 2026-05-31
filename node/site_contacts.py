@@ -89,16 +89,42 @@ def _db_email(kind: str) -> str:
         return ""
 
 
+def _node_domain_email(kind: str) -> str:
+    """``role@<this node's public domain>`` — the sensible default for any node
+    that isn't the official hub. So a Lilypad on ``example.com`` advertises
+    ``privacy@example.com`` instead of leaking the official ``@frogtalk.app``."""
+    local = CONTACT_LOCAL_PARTS.get(kind) or kind
+    try:
+        from public_url_policy import resolve_public_site_host
+
+        host = (resolve_public_site_host() or "").strip().lower()
+    except Exception:
+        host = ""
+    if host.startswith("www."):
+        host = host[4:]
+    if not host or "." not in host or host.endswith(".onion"):
+        return ""
+    candidate = f"{local}@{host}"
+    return candidate if validate_email(candidate) is None else ""
+
+
 def resolve_contact_email(kind: str) -> str:
-    """Effective email for a contact role on this node."""
+    """Effective email for a contact role on this node.
+
+    Priority: explicit DB config → env var → ``role@<node domain>`` →
+    the official ``@frogtalk.app`` default (only when the node has no
+    resolvable public domain, e.g. onion-only or pre-config)."""
     if kind not in DEFAULT_EMAILS:
-        return DEFAULT_EMAILS["support"]
+        kind = "support"
     db_val = _db_email(kind)
     if db_val:
         return db_val
     env_val = _env_email(kind)
     if env_val:
         return env_val
+    node_val = _node_domain_email(kind)
+    if node_val:
+        return node_val
     return DEFAULT_EMAILS[kind]
 
 

@@ -1,8 +1,8 @@
-# FrogTalk Node
+# FrogTalk Node (Lilypad)
 
-This folder is the **federated server**: FastAPI app, web client static assets,
-deploy templates, Docker build, operator scripts, and tests. Self-hosting
-starts here.
+This folder is the **federated server** — a **Lilypad** (what we call a FrogTalk
+node): FastAPI app, web client static assets, deploy templates, Docker build,
+operator scripts, and tests. Self-hosting starts here.
 
 ## Quick start (Linux)
 

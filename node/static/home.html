@@ -148,7 +148,7 @@
     <span class="hero-badge">🔒 E2E Encrypted · 🌐 Federated · 🎞️ Reels · 🖼️ Frog Channel · 🌉 Bridges</span>
   </div>
   <h1>Chat, Post,<br>Vibe Together</h1>
-  <p>FrogTalk is one app for encrypted DMs, voice &amp; video calls, social posts, Reels, stories, Frog Channel imageboard threads, shared music, and live Discord/Telegram bridges — federated across independent nodes. No ads, no tracking. <strong>Pre-alpha:</strong> expect rough edges; we cannot guarantee uptime or data safety yet.</p>
+  <p>FrogTalk is one app for encrypted DMs, voice &amp; video calls, social posts, Reels, stories, Frog Channel imageboard threads, shared music, and live Discord/Telegram bridges — federated across independent <strong>Lilypads</strong> (nodes). No ads, no tracking. <strong>Pre-alpha:</strong> expect rough edges; we cannot guarantee uptime or data safety yet.</p>
   <div class="hero-cta">
     <a href="/app" class="btn btn-primary btn-lg">🐸 Join the Pond</a>
     <a href="#downloads" class="btn btn-ghost btn-lg">Download app ↓</a>
@@ -368,13 +368,13 @@
 <section class="section node-identity node-identity--main" id="this-node">
   <div class="node-identity-inner">
     <article class="node-identity-card">
-      <span class="node-identity-kicker">This node</span>
+      <span class="node-identity-kicker">This Lilypad</span>
       <h2>FrogTalk Main · <code>frogtalk.app</code></h2>
-      <p>Official pre-alpha public hub — federated chat, calls, social, and Frog Channel. Self-host your own node anytime; this instance is what most people use first.</p>
+      <p>Official pre-alpha public hub — federated chat, calls, social, and Frog Channel. Self-host your own Lilypad (node) anytime; this instance is what most people use first.</p>
       <div class="node-identity-actions">
         <a class="primary" href="/app">Open app</a>
         <a href="#downloads">Downloads</a>
-        <a href="/docs/node">Run your node</a>
+        <a href="/docs/node">Run your Lilypad</a>
         <a href="/security">Security</a>
       </div>
     </article>
@@ -397,16 +397,6 @@
   <div class="section-title" id="downloads-heading">Download FrogTalk</div>
   <div class="section-sub section-sub--tight">Pre-alpha builds for testing — native Android, desktop, or browser. Not recommended for sensitive or production use.</div>
   <div data-ft-downloads-root></div>
-  <div class="ft-docker-cta" style="margin-top:18px;padding:16px 18px;border:1px solid #1f3d2c;border-radius:14px;background:linear-gradient(135deg,#0c1a12,#0a140d)">
-    <div style="font-weight:700;color:#e0e0e0;font-size:15px">🐳 Run your own node with Docker</div>
-    <div class="section-sub section-sub--tight" style="margin:6px 0 12px">One command spins up the backend node container (app + imageboard on <code>:8080</code>). Front it with nginx / Cloudflare for TLS.</div>
-    <pre style="background:#06100a;border:1px solid #16291d;border-radius:10px;padding:12px;overflow:auto;color:#9fd9b8;font-size:13px;margin:0 0 12px"><code>git clone https://github.com/deadinternetfox/frogtalk
-cd frogtalk &amp;&amp; docker compose up -d</code></pre>
-    <div style="display:flex;gap:10px;flex-wrap:wrap">
-      <a href="https://github.com/deadinternetfox/frogtalk/blob/master/docker-compose.yml" style="display:inline-block;padding:9px 16px;border-radius:999px;background:#4caf50;color:#04130a;font-weight:700;text-decoration:none">docker-compose.yml</a>
-      <a href="/docs/node#docker" style="display:inline-block;padding:9px 16px;border-radius:999px;border:1px solid #2c5740;color:#9fd9b8;font-weight:600;text-decoration:none">Docker guide →</a>
-    </div>
-  </div>
 </section>
 <link rel="stylesheet" href="/static/css/downloads-picker.css?v=4">
 <script src="/static/js/downloads-picker.js?v=4" defer></script>
@@ -454,12 +444,12 @@ cd frogtalk &amp;&amp; docker compose up -d</code></pre>
     <div class="feature-card">
       <div class="feature-icon">🧳</div>
       <h3>Cross-Node Account Sync</h3>
-      <p>Visit another node and re-sync from home — channel settings, DM prefs, friends, profile themes, client prefs, and FrogSocial posts import with Ed25519-signed exports.</p>
+      <p>Visit another Lilypad and re-sync from home — channel settings, DM prefs, friends, profile themes, client prefs, and FrogSocial posts import with Ed25519-signed exports.</p>
     </div>
     <div class="feature-card">
       <div class="feature-icon">📞</div>
       <h3>Federated DM Calls</h3>
-      <p>Voice and video calls ring across federation when travelers are connected to your node — home-server signaling with optional TURN for NAT traversal.</p>
+      <p>Voice and video calls ring across federation when travelers are connected to your Lilypad — home-server signaling with optional TURN for NAT traversal.</p>
     </div>
     <div class="feature-card">
       <div class="feature-icon">🔞</div>
@@ -521,11 +511,11 @@ cd frogtalk &amp;&amp; docker compose up -d</code></pre>
 
 <section class="section" id="federation">
   <div class="section-title">Federation Reliability</div>
-  <div class="section-sub">Keep every FrogTalk node in sync with official release metadata, build hashes, Tor routing preferences, and trust checks.</div>
+  <div class="section-sub">Keep every FrogTalk <strong>Lilypad</strong> (node) in sync with official release metadata, build hashes, Tor routing preferences, and trust checks.</div>
   <div class="federation-spotlight">
     <div>
       <div class="fed-title">Ship Once From frogtalk.app, Propagate Everywhere</div>
-      <div class="fed-sub">Main site publishes a release feed with package SHA-256 and build hash. Nodes poll the feed, verify legitimacy, prefer onion routes when available, and apply updates safely without leaking onion-only peers.</div>
+      <div class="fed-sub">Main site publishes a release feed with package SHA-256 and build hash. Lilypads poll the feed, verify legitimacy, prefer onion routes when available, and apply updates safely without leaking onion-only peers.</div>
       <div class="fed-badges">
         <span class="fed-badge ok">SAME HASH</span>
         <span class="fed-badge ok">LEGIT COPY</span>
@@ -534,7 +524,17 @@ cd frogtalk &amp;&amp; docker compose up -d</code></pre>
       </div>
       <div class="fed-actions">
         <a href="/docs/api" class="btn btn-primary">View API Docs</a>
-        <a href="/docs/node" class="btn btn-ghost">Node Setup Guide</a>
+        <a href="/docs/node" class="btn btn-ghost">Lilypad Setup Guide</a>
+      </div>
+      <div class="fed-docker" style="margin-top:16px;padding:11px 13px;border:1px solid #1f3d2c;border-radius:11px;background:rgba(8,18,12,.45)">
+        <div style="font-weight:700;color:#cfe9d8;font-size:13px">🐳 Grow a new Lilypad with Docker</div>
+        <div style="color:#8aa897;font-size:12px;line-height:1.45;margin:3px 0 7px">A <strong style="color:#9fd9b8">Lilypad</strong> is a FrogTalk node — one command brings up the backend and federates into the pond above.</div>
+        <code style="display:block;background:#06100a;border:1px solid #16291d;border-radius:7px;padding:7px 9px;color:#9fd9b8;font-size:12px;overflow:auto;white-space:nowrap">docker compose up -d</code>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:7px;font-size:12px">
+          <a href="https://github.com/deadinternetfox/frogtalk/blob/master/docker-compose.yml" style="color:#9fd9b8;text-decoration:none;border-bottom:1px dotted #2c5740">docker-compose.yml</a>
+          <span style="color:#2c5740">·</span>
+          <a href="/docs/node#docker" style="color:#9fd9b8;text-decoration:none;border-bottom:1px dotted #2c5740">Lilypad guide →</a>
+        </div>
       </div>
     </div>
     <div class="fed-mini-grid">
@@ -548,11 +548,11 @@ cd frogtalk &amp;&amp; docker compose up -d</code></pre>
       </div>
       <div class="fed-mini">
         <h4>Safe Apply Flow</h4>
-        <p>Node downloads update package, verifies checksum, syncs files, and restarts service without drift.</p>
+        <p>Each Lilypad downloads the update package, verifies checksum, syncs files, and restarts service without drift.</p>
       </div>
       <div class="fed-mini">
         <h4>Tor-Enabled Server Handoffs</h4>
-        <p>The app switches users to the node app at <strong>/app</strong>, preserves handoff tickets when possible, and keeps onion links pointed at the real chat surface instead of the marketing home page.</p>
+        <p>The app switches users to the Lilypad's app at <strong>/app</strong>, preserves handoff tickets when possible, and keeps onion links pointed at the real chat surface instead of the marketing home page.</p>
       </div>
     </div>
   </div>
@@ -595,13 +595,13 @@ cd frogtalk &amp;&amp; docker compose up -d</code></pre>
 </section>
 
 <!-- OPEN SOURCE -->
-<section class="section opensource-section" aria-labelledby="open-source-heading">
+<section class="section opensource-section" id="open-source" aria-labelledby="open-source-heading">
   <div class="section-title" id="open-source-heading">100% Open Source</div>
-  <div class="section-sub">Audit the cryptography, run your own node, build a bot, or hack on the client. Every line of FrogTalk is on GitHub.</div>
+  <div class="section-sub">Audit the cryptography, run your own Lilypad (node), build a bot, or hack on the client. Every line of FrogTalk is on GitHub.</div>
   <div class="opensource-grid">
     <div>
-      <h2 id="open-source">Built In The Open<br><span class="accent">Owned By Everyone</span></h2>
-      <p>FrogTalk is licensed for self-hosting and inspection. The full server, federation layer, web client, Android app, desktop app, and the Tor / onion routing logic all live in one repository — no closed components, no dark services. Verify the build hash on your node against the one published from frogtalk.app before federating.</p>
+      <h2 id="open-source-statement">Built In The Open<br><span class="accent">Owned By Everyone</span></h2>
+      <p>FrogTalk is licensed for self-hosting and inspection. The full server, federation layer, web client, Android app, desktop app, and the Tor / onion routing logic all live in one repository — no closed components, no dark services. Verify the build hash on your Lilypad against the one published from frogtalk.app before federating.</p>
       <div class="opensource-meta">
         <span class="pill green">⚠️ Pre-alpha</span>
         <span class="pill green">🟢 Active development</span>
@@ -615,7 +615,7 @@ cd frogtalk &amp;&amp; docker compose up -d</code></pre>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.65.5.5 5.65.5 12c0 5.08 3.29 9.39 7.86 10.91.58.11.79-.25.79-.56v-2c-3.2.7-3.87-1.37-3.87-1.37-.52-1.32-1.27-1.67-1.27-1.67-1.04-.71.08-.7.08-.7 1.15.08 1.76 1.18 1.76 1.18 1.02 1.75 2.69 1.24 3.34.95.1-.74.4-1.24.72-1.53-2.55-.29-5.24-1.27-5.24-5.66 0-1.25.45-2.27 1.18-3.07-.12-.29-.51-1.45.11-3.02 0 0 .96-.31 3.15 1.17a10.9 10.9 0 0 1 5.74 0c2.19-1.48 3.15-1.17 3.15-1.17.62 1.57.23 2.73.11 3.02.74.8 1.18 1.82 1.18 3.07 0 4.4-2.69 5.36-5.25 5.65.41.36.78 1.06.78 2.13v3.16c0 .31.21.68.8.56C20.21 21.39 23.5 17.07 23.5 12 23.5 5.65 18.35.5 12 .5Z"/></svg>
           View on GitHub
         </a>
-        <a href="/docs/node" class="btn btn-primary">Run Your Own Node →</a>
+        <a href="/docs/node" class="btn btn-primary">Run Your Own Lilypad →</a>
       </div>
     </div>
     <div class="opensource-cards">
@@ -635,7 +635,7 @@ cd frogtalk &amp;&amp; docker compose up -d</code></pre>
       </a>
       <a href="/docs/node" class="opensource-card">
         <div class="row">
-          <h4>🛠️ Run Your Own Node</h4>
+          <h4>🛠️ Run Your Own Lilypad</h4>
           <span class="arrow">→</span>
         </div>
         <p>VPS install: CLI setup wizard, nginx + HTTPS, federation mesh sync with frogtalk.app, systemd, backups, and troubleshooting.</p>

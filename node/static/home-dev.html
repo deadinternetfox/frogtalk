@@ -114,7 +114,7 @@
     <span class="vb-icon" aria-hidden="true">🔧</span>
     <div class="vb-text">
       <div class="vb-headline">
-        <strong>Development node</strong> — <code style="color:#9fd9b8">frogtalk.xyz</code> runs the <code>dev</code> branch. Breakage expected.
+        <strong>Development Lilypad</strong> — <code style="color:#9fd9b8">frogtalk.xyz</code> runs the <code>dev</code> branch. Breakage expected.
       </div>
       <div class="vb-sub">
         For everyday use, go to <a class="vb-link" href="https://frogtalk.app">frogtalk.app</a> (production hub).
@@ -142,16 +142,16 @@
     <div class="hero-orb o3"></div>
   </div>
   <div class="hero-badges">
-    <span class="hero-badge hero-badge--prealpha">⚠️ Dev node — unstable</span>
+    <span class="hero-badge hero-badge--prealpha">⚠️ Dev Lilypad — unstable</span>
     <span class="hero-badge hero-badge--role">🔧 frogtalk.xyz · dev branch</span>
     <span class="hero-badge">🌐 Federation testbed · 📦 Self-host · 🔒 Same E2E stack</span>
   </div>
   <h1>Help build<br>FrogTalk</h1>
-  <p>The <strong>development instance</strong> on <code>frogtalk.xyz</code> ships the <code>dev</code> branch first — API changes, mobile builds, and federation fixes land here before <a href="https://frogtalk.app" style="color:#7dcea0">frogtalk.app</a>. Open PRs, run your own node, and test cross-node chat without touching production users. <strong>Pre-alpha:</strong> not audited; do not store sensitive data here.</p>
+  <p>The <strong>development instance</strong> on <code>frogtalk.xyz</code> ships the <code>dev</code> branch first — API changes, mobile builds, and federation fixes land here before <a href="https://frogtalk.app" style="color:#7dcea0">frogtalk.app</a>. Open PRs, run your own <strong>Lilypad</strong> (node), and test cross-Lilypad chat without touching production users. <strong>Pre-alpha:</strong> not audited; do not store sensitive data here.</p>
   <div class="hero-cta">
     <a href="/app" class="btn btn-primary btn-lg">🐸 Open dev app</a>
     <a href="https://github.com/deadinternetfox/frogtalk/tree/dev" class="btn btn-ghost btn-lg" target="_blank" rel="noopener">Contribute on GitHub</a>
-    <a href="/docs/node" class="btn btn-ghost btn-lg">Run a node →</a>
+    <a href="/docs/node" class="btn btn-ghost btn-lg">Run a Lilypad →</a>
   </div>
 </section>
 
@@ -203,7 +203,7 @@
 </div>
 
 <section class="section node-page-section" id="dev-highlights">
-  <div class="section-title">What to test on this node</div>
+  <div class="section-title">What to test on this Lilypad</div>
   <div class="section-sub">Same FrogTalk feature set as production — use frogtalk.xyz to validate changes before they ship to frogtalk.app.</div>
   <div class="node-highlights-grid">
     <div class="node-highlight-card">
@@ -253,7 +253,7 @@
     <div class="node-step">
       <div class="node-step-num">2</div>
       <div>
-        <h3>Run locally or on this node</h3>
+        <h3>Run locally or on this Lilypad</h3>
         <p><code>bash node/scripts/install.sh setup</code> — or test against <a href="https://frogtalk.xyz/app" style="color:#9fd9b8">frogtalk.xyz/app</a> after deploy.</p>
       </div>
     </div>
@@ -285,7 +285,7 @@
       <span class="node-fed-badge">RELEASE HASH</span>
     </div>
     <div class="node-identity-actions">
-      <a class="primary" href="/docs/node">Node setup guide</a>
+      <a class="primary" href="/docs/node">Lilypad setup guide</a>
       <a href="/docs/api">API reference</a>
       <a href="https://frogtalk.app" style="color:#9fd9b8">Production hub →</a>
     </div>
@@ -298,13 +298,13 @@
   <div class="section-sub section-sub--tight">Pre-alpha APK and desktop artifacts are published from <a href="https://frogtalk.app/#downloads" style="color:#9fd9b8">frogtalk.app</a> — install here to test against this dev node.</div>
   <div data-ft-downloads-root></div>
   <div class="ft-docker-cta" style="margin-top:18px;padding:16px 18px;border:1px solid #1f3d2c;border-radius:14px;background:linear-gradient(135deg,#0c1a12,#0a140d)">
-    <div style="font-weight:700;color:#e0e0e0;font-size:15px">🐳 Run your own node with Docker</div>
-    <div class="section-sub section-sub--tight" style="margin:6px 0 12px">One command spins up the backend node container (app + imageboard on <code>:8080</code>). Front it with nginx / Cloudflare for TLS.</div>
-    <pre style="background:#06100a;border:1px solid #16291d;border-radius:10px;padding:12px;overflow:auto;color:#9fd9b8;font-size:13px;margin:0 0 12px"><code>git clone https://github.com/deadinternetfox/frogtalk
+    <div style="font-weight:700;color:#e0e0e0;font-size:15px">🐳 Spin up a throwaway test Lilypad with Docker</div>
+    <div class="section-sub section-sub--tight" style="margin:6px 0 12px">A <strong>Lilypad</strong> is a FrogTalk node. One command brings up the backend container (app + imageboard on <code>:8080</code>) so you can exercise federation, bridges, and the <code>dev</code> branch without touching production users. Front it with nginx / Cloudflare for TLS.</div>
+    <pre style="background:#06100a;border:1px solid #16291d;border-radius:10px;padding:12px;overflow:auto;color:#9fd9b8;font-size:13px;margin:0 0 12px"><code>git clone -b dev https://github.com/deadinternetfox/frogtalk
 cd frogtalk &amp;&amp; docker compose up -d</code></pre>
     <div style="display:flex;gap:10px;flex-wrap:wrap">
       <a href="https://github.com/deadinternetfox/frogtalk/blob/master/docker-compose.yml" style="display:inline-block;padding:9px 16px;border-radius:999px;background:#4caf50;color:#04130a;font-weight:700;text-decoration:none">docker-compose.yml</a>
-      <a href="/docs/node#docker" style="display:inline-block;padding:9px 16px;border-radius:999px;border:1px solid #2c5740;color:#9fd9b8;font-weight:600;text-decoration:none">Docker guide →</a>
+      <a href="/docs/node#docker" style="display:inline-block;padding:9px 16px;border-radius:999px;border:1px solid #2c5740;color:#9fd9b8;font-weight:600;text-decoration:none">Lilypad guide →</a>
     </div>
   </div>
 </section>

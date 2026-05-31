@@ -751,7 +751,7 @@ def _render_error_page(status_code: int, title: str, message: str, request: Requ
     </div>
   </main>
   <footer class="foot">
-    <a href="/">{site_home}</a> &nbsp;\u00b7&nbsp; <a href="/static/privacy.html">Privacy</a>
+    <a href="/">{site_home}</a> &nbsp;\u00b7&nbsp; <a href="/privacy">Privacy</a>
   </footer>
 </div>
 </body></html>"""

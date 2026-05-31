@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta http-equiv="X-UA-Compatible" content="IE=edge">
-<title>Run Your FrogTalk Node — FrogTalk</title>
+<title>Run Your FrogTalk Lilypad (Node) — FrogTalk</title>
 <meta name="description" content="Install a FrogTalk federation node on a Linux VPS: setup wizard, HTTPS, systemd, and mesh sync with frogtalk.app.">
 <meta name="theme-color" content="#4caf50">
 <meta name="keywords" content="FrogTalk node, self-hosted chat, federation, VPS install, FastAPI node">
@@ -59,8 +59,8 @@
 
   <main class="wrap">
     <section class="hero">
-      <h1>Run a FrogTalk Node</h1>
-      <p class="sub">Self-host a federated chat node on a fresh Linux VPS — CLI setup wizard, nginx, systemd, and sync with the public mesh anchored at <a href="https://frogtalk.app">frogtalk.app</a>.</p>
+      <h1>Run a FrogTalk Lilypad <span style="opacity:.6;font-weight:600">(node)</span></h1>
+      <p class="sub">A <strong>Lilypad</strong> is a FrogTalk node. Self-host one — a federated chat server — on a fresh Linux VPS: CLI setup wizard, nginx, systemd, and sync with the public mesh anchored at <a href="https://frogtalk.app">frogtalk.app</a>.</p>
       <p class="hint hero-meta"><strong>Pre-alpha:</strong> expect breaking changes between releases. Pin a git tag or verify SHA-256 from the release feed before production use.</p>
       <nav class="toc" aria-label="On this page">
         <a href="#quick">Quick install</a>
@@ -87,7 +87,7 @@
       <a href="/security">security &amp; disclosure</a> before exposing a node to the public internet.
     </section>
 
-    <section class="warn-box">
+    <section class="warn-box" style="margin-bottom:18px">
       <strong>Secrets:</strong> Never commit <code>.env</code>, SSH passwords, or federation tokens. Use SSH keys for VPS login. Placeholders: <code>&lt;YOUR_VPS_IP&gt;</code>, <code>&lt;YOUR_DOMAIN&gt;</code>.
     </section>
 

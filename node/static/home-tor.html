@@ -144,7 +144,7 @@
     <span class="hero-badge">No clearnet leak · Federation · E2E DMs</span>
   </div>
   <h1>FrogTalk<br>over Tor</h1>
-  <p>Access this node through a <strong>v3 .onion</strong> hidden service in Tor Browser. Same federated chat, board, and encryption stack as clearnet — routed for network privacy. <strong>Pre-alpha:</strong> not audited; JS web app only today. See <a href="https://github.com/deadinternetfox/frogtalk/blob/master/client/tor/TOR_TODO.md" style="color:#c4b5fd">TOR_TODO.md</a> for the planned no-JS client.</p>
+  <p>Access this <strong>Lilypad</strong> (node) through a <strong>v3 .onion</strong> hidden service in Tor Browser. Same federated chat, board, and encryption stack as clearnet — routed for network privacy. <strong>Pre-alpha:</strong> not audited; JS web app only today. See <a href="https://github.com/deadinternetfox/frogtalk/blob/master/client/tor/TOR_TODO.md" style="color:#c4b5fd">TOR_TODO.md</a> for the planned no-JS client.</p>
   <div class="hero-cta">
     <a href="/app" class="btn btn-primary btn-lg">Open web app</a>
     <a href="/security" class="btn btn-ghost btn-lg">Security warnings</a>
@@ -195,10 +195,13 @@
       </article>
       <article class="node-identity-card">
         <span class="node-identity-kicker">Operators</span>
-        <h2>Run a Tor node</h2>
-        <p><code>FROGTALK_TOR_ENABLED=1</code>, <code>FROGTALK_ONION_URL</code>, SOCKS proxy, and <code>FROGTALK_HOME_PAGE=tor</code>. Generate <code>frogtalk*.onion</code> with the vanity script.</p>
+        <h2>🐳 Run your own onion Lilypad</h2>
+        <p>A <strong>Lilypad</strong> is a FrogTalk node. Grow one with Docker, then turn on the hidden service: set <code>FROGTALK_TOR_ENABLED=1</code>, <code>FROGTALK_ONION_URL</code>, a SOCKS proxy, and <code>FROGTALK_HOME_PAGE=tor</code>. Generate a vanity <code>frogtalk*.onion</code> with the script.</p>
+        <pre style="background:#0b0712;border:1px solid #2a2140;border-radius:10px;padding:12px;overflow:auto;color:#c4b5fd;font-size:13px;margin:10px 0"><code>git clone https://github.com/deadinternetfox/frogtalk
+cd frogtalk &amp;&amp; docker compose up -d
+# then set FROGTALK_TOR_ENABLED=1 + your .onion</code></pre>
         <div class="node-identity-actions">
-          <a href="/docs/node">Node docs</a>
+          <a href="/docs/node#docker">Lilypad docs</a>
           <a href="https://frogtalk.app">Clearnet hub</a>
         </div>
       </article>
