@@ -7023,7 +7023,7 @@ body.in-welcome #ch-title .room-title-icon{display:none !important}
 .add-story-close:hover{background:#1f1f1f;color:#fff;border-color:#444}
 
 /* Story upload floating progress bar */
-#story-upload-overlay{display:none;position:fixed;bottom:0;left:0;right:0;z-index:1300;background:transparent;padding:12px 16px}
+#story-upload-overlay{display:none;position:fixed;bottom:0;left:0;right:0;z-index:4000;background:transparent;padding:12px max(16px,var(--safe-right)) max(12px,calc(var(--safe-bottom) + 12px)) max(16px,var(--safe-left))}
 .story-upload-bar{width:100%;animation:slideUp .3s cubic-bezier(.2,.85,.6,.95) forwards}
 .story-upload-bar.minimized{width:fit-content;max-width:none;margin-left:auto;margin-right:10px}
 .story-upload-bar.minimized .story-upload-bar-inner{border-radius:10px;padding:8px 8px}
@@ -12584,7 +12584,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoa
   <script src="/static/js/rooms.js?v=__APP_ASSET_VERSION__"></script>
 <script src="/static/js/sticker-fx.js?v=18"></script>
 <script src="/static/js/text_format.js?v=2"></script>
-<script src="/static/js/media.js?v=433"></script>
+<script src="/static/js/media.js?v=434"></script>
 <script src="/static/js/messages.js?v=__APP_ASSET_VERSION__"></script>
 <script src="/static/js/format_toolbar.js?v=2"></script>
 <script src="/static/js/users.js?v=__APP_ASSET_VERSION__"></script>

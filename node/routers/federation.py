@@ -1467,6 +1467,11 @@ def enqueue_social_story_created(
     caption: str = "",
     privacy: str = "public",
 ) -> dict:
+    # Stories federate their media inline. Skip oversized media rather than
+    # broadcasting a blob every peer would reject at the same cap — such a
+    # story stays local-only (there is no cross-node lazy-fetch for stories).
+    if not media_data or len(str(media_data)) > _FED_STORY_MEDIA_DATA_MAX:
+        return {"ok": False, "error": "story_media_too_large"}
     return enqueue_server_event(
         "social.story.created",
         {
@@ -4092,6 +4097,11 @@ _FED_ROOM_RE = re.compile(r"^[A-Za-z0-9._\-]{1,64}$")
 _FED_MEDIA_TYPE_RE = re.compile(r"^(image|video|audio)/[A-Za-z0-9.+\-]{1,40}$")
 _FED_CONTENT_MAX = 8 * 1024              # 8 KiB room/dm body
 _FED_MEDIA_DATA_MAX = 4 * 1024 * 1024    # 4 MiB raw (≈5.3 MiB base64)
+# Stories ship their media INLINE in the federation event (no cross-node
+# lazy-fetch path like wall posts have), so they need a higher cap or every
+# camera photo / short clip drops on the receiving node. nginx allows a 50M
+# inbox body, so a single ~16 MiB story event is well within budget.
+_FED_STORY_MEDIA_DATA_MAX = 16 * 1024 * 1024
 _FED_BIO_MAX = 1024
 _FED_AVATAR_MAX = 256 * 1024
 _FED_STATUS_MAX = 128
@@ -4298,7 +4308,7 @@ def _fed_sanitize_social_payload(event_type: str, payload: dict) -> dict | None:
         p["global_user_id"] = agid
         priv = str(p.get("privacy") or "public").strip().lower()
         p["privacy"] = priv if priv in ("public", "followers") else "public"
-        md = _fed_media_data(p.get("media_data"))
+        md = _fed_media_data(p.get("media_data"), max_bytes=_FED_STORY_MEDIA_DATA_MAX)
         if not md:
             return None
         mt = _fed_media_type(p.get("media_type"))
@@ -4421,14 +4431,14 @@ def _fed_media_type(s) -> str | None:
     return base if _FED_MEDIA_TYPE_RE.match(base) else None
 
 
-def _fed_media_data(blob):
+def _fed_media_data(blob, max_bytes=_FED_MEDIA_DATA_MAX):
     """Cap media size. Returns blob (or None when oversized / hostile)."""
     if blob is None or blob == "":
         return None
     if isinstance(blob, (bytes, bytearray, memoryview)):
-        return bytes(blob) if len(blob) <= _FED_MEDIA_DATA_MAX else None
+        return bytes(blob) if len(blob) <= max_bytes else None
     s = str(blob)
-    if len(s) > _FED_MEDIA_DATA_MAX:
+    if len(s) > max_bytes:
         return None
     # Refuse data: URLs that smuggle text/html (script-bearing) even if
     # the sibling media_type field is benign. Browsers honour the inline

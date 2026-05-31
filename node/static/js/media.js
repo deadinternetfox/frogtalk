@@ -1391,7 +1391,7 @@ async function _camOpenLiveCamera () {
     live.id = 'cam-live-view';
     live.style.cssText = 'display:none;flex-direction:column;gap:10px;align-items:center;width:100%';
     live.innerHTML = `
-      <div id="cam-live-stage" style="position:relative;width:100%;max-width:420px;aspect-ratio:3/4;background:#000;border-radius:10px;overflow:hidden;touch-action:none;user-select:none">
+      <div id="cam-live-stage" style="position:relative;width:100%;max-width:420px;aspect-ratio:3/4;max-height:56vh;margin:0 auto;background:#000;border-radius:10px;overflow:hidden;touch-action:none;user-select:none">
         <video id="cam-live-video" autoplay playsinline muted style="width:100%;height:100%;object-fit:cover;background:#000;transform-origin:center center"></video>
         <button id="cam-live-flip" title="Flip camera" style="position:absolute;top:8px;right:8px;background:rgba(12,28,22,.7);color:var(--text-color);border:1px solid color-mix(in srgb, var(--accent-color) 30%, var(--border-color));border-radius:50%;width:36px;height:36px;font-size:16px;cursor:pointer;z-index:3;transition:background .15s">🔄</button>
         <button id="cam-live-flash" title="Flash" style="position:absolute;top:8px;right:52px;background:rgba(12,28,22,.7);color:var(--text-color);border:1px solid color-mix(in srgb, var(--accent-color) 30%, var(--border-color));border-radius:18px;min-width:36px;height:36px;padding:0 10px;font-size:13px;font-weight:700;cursor:pointer;z-index:3;display:none;gap:4px;align-items:center;justify-content:center;white-space:nowrap;transition:background .15s">⚡ Off</button>
