@@ -6,7 +6,7 @@
       "server_id": "srv_c93cf598b239402c8452",
       "display_name": "FrogTalk Tor Mirror",
       "base_url": "",
-      "onion_url": "http://icn3a43nb6byhdmon4rqzeqswkskk2bnvf54l6at3iskmqlture3blqd.onion",
+      "onion_url": "http://frogtalkiinkmixfmpwvja3hyyqocplbmwkpq2fjqyylhezuqmqdtpid.onion",
       "region": "Tor Hidden Service",
       "capabilities": ["federation-v1"],
       "transport_preference": "onion",
@@ -41,7 +41,7 @@
       "server_id": "srv_c93cf598b239402c8452",
       "display_name": "FrogTalk Tor Mirror",
       "base_url": "",
-      "onion_url": "http://icn3a43nb6byhdmon4rqzeqswkskk2bnvf54l6at3iskmqlture3blqd.onion",
+      "onion_url": "http://frogtalkiinkmixfmpwvja3hyyqocplbmwkpq2fjqyylhezuqmqdtpid.onion",
       "capabilities": ["federation-v1"]
     }
   ]
