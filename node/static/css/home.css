@@ -1198,12 +1198,26 @@
   body.home-node-dev .cta-banner,
   body.home-node-tor .cta-banner {
     background: linear-gradient(180deg, rgba(15, 23, 20, 0.4), rgba(15, 23, 20, 0.95));
+    /* Trim the dead gap under the privacy band (was 5rem) so the page
+       doesn't end in a big empty void above the closing CTA. */
+    padding-top: 3.25rem;
   }
   body.home-node-dev .cta-banner .btn-primary {
     background: linear-gradient(135deg, #b45309, #d97706);
   }
   body.home-node-tor .cta-banner .btn-primary {
     background: linear-gradient(135deg, #6d28d9, #7c3aed);
+  }
+
+  /* Dev/Tor node pages: tighter, comfortable spacing on phones so the
+     privacy band + Docker CTA aren't edge-to-edge and the section gaps
+     don't dominate the small viewport. */
+  @media (max-width: 768px) {
+    .node-page-section { padding: 2.25rem 1.1rem; }
+    .node-privacy-band { padding: 1.5rem 1.15rem; }
+    .ft-docker-cta { max-width: 100%; padding: 14px 14px !important; }
+    body.home-node-dev .cta-banner,
+    body.home-node-tor .cta-banner { padding: 2.5rem 1.1rem 3.25rem; }
   }
 
   .node-identity { padding-top: 0; margin-top: -1rem; }
