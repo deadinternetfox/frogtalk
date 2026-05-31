@@ -217,6 +217,13 @@ class FederatedVoiceRegistry:
                     home = str(p.get("home_server_id") or "")
                     if home and self._origin_count.get(home, 0) > 0:
                         self._origin_count[home] -= 1
+                    # Drop the persisted row too — otherwise participants_for_room
+                    # rehydrates this just-expired entry from the DB and the
+                    # safety net oscillates instead of clearing the zombie.
+                    try:
+                        db.remove_federation_voice_remote(sid, str(p.get("global_user_id") or ""))
+                    except Exception:
+                        _log.exception("expire_stale: remove_federation_voice_remote failed")
                     expired.append((sid_room.get(sid, ""), p))
                 else:
                     keep.append(p)

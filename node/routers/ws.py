@@ -106,6 +106,10 @@ async def voice_reaper_task():
                     parts = voice_manager.participants(vroom)
                     if not parts:
                         continue
+                    # Skip purely-local voice channels — nothing to federate or
+                    # keep alive cross-node (avoids per-participant DB lookups).
+                    if not _fv.member_home_servers_for_room(vroom):
+                        continue
                     sid = _fv.federated_voice_registry.session_for_room(vroom)
                     anchor = _fv.room_anchor_server_id(vroom)
                     for lp in parts:
