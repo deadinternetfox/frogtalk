@@ -29,8 +29,8 @@ try:
     from cryptography.fernet import Fernet as _Fernet, InvalidToken as _FInvalid
     _FERNET_AVAILABLE = True
 except Exception:                          # pragma: no cover - cryptography missing
-    _Fernet = None
-    _FInvalid = Exception
+    _Fernet = None  # skipcq: TYP-014 — deliberate import-fallback rebind
+    _FInvalid = Exception  # skipcq: TYP-014 — alias when cryptography is absent
     _FERNET_AVAILABLE = False
 
 _BRIDGE_KEK_PREFIX = "fkek1:"              # marker so we know it's encrypted
@@ -45,7 +45,7 @@ def _load_bridge_fernet():
        2. <data dir>/bridge_kek.key file (created on first call, 0600)
     Returns None if cryptography isn't installed, in which case the
     caller silently falls back to plaintext storage (compat path)."""
-    global _bridge_fernet
+    global _bridge_fernet  # skipcq: PYL-W0603 — lazy singleton cache
     if _bridge_fernet is not None:
         return _bridge_fernet
     if not _FERNET_AVAILABLE:
@@ -120,9 +120,10 @@ def _decrypt_bridge_token(stored: Optional[str]) -> Optional[str]:
         return ""
     try:
         return f.decrypt(stored[len(_BRIDGE_KEK_PREFIX):].encode("ascii")).decode("utf-8")
-    except _FInvalid:
-        return ""
     except Exception:
+        # Wrong/rotated key, corrupt ciphertext, or — in the no-cryptography
+        # fallback where InvalidToken IS Exception — any decrypt error: fail
+        # closed to empty rather than leak ciphertext to the caller.
         return ""
 
 
@@ -149,7 +150,7 @@ def get_or_create_csrf_secret() -> bytes:
         # Explicit secret: return fresh every call (no caching) so env
         # changes / per-test secrets take effect immediately.
         return env.encode("utf-8")
-    global _CSRF_SECRET_CACHE
+    global _CSRF_SECRET_CACHE  # skipcq: PYL-W0603 — lazy secret cache
     if _CSRF_SECRET_CACHE is not None:
         return _CSRF_SECRET_CACHE
     val = ""
@@ -571,7 +572,7 @@ def init_db():
                         except OSError:
                             pass
                         raise
-                except (OSError, FileExistsError) as _e:
+                except OSError as _e:
                     print(
                         f"[DB] Could not write bootstrap admin password file securely "
                         f"({_e}). Generated password (set ADMIN_PASSWORD env immediately): "
@@ -866,7 +867,7 @@ def list_user_sessions(user_id: int, current_token: str = "") -> list:
         token = d.pop("token", "") or ""
         d["id"] = token[:16]
         d["is_current"] = bool(
-            current_token and (token == current_hashed or token == current_token)
+            current_token and token in (current_hashed, current_token)
         )
         # Pre-v300 sessions have no UA/IP. Don't drop them entirely (the user
         # might have signed in on their phone before this build deployed) —
@@ -1142,7 +1143,7 @@ def content_warning_to_dict(enabled, flags) -> dict:
     return {"enabled": True, "flags": names}
 
 
-def get_room_content_warning(room_name: str) -> tuple[bool, int]:
+def get_room_content_warning(room_name: str) -> tuple[bool, int]:  # skipcq: PY-R1000
     room = get_room_by_name(room_name)
     if room and str(room.get("type") or "public").lower() != "public":
         return False, 0
