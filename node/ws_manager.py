@@ -348,6 +348,10 @@ class VoiceManager:
         """Get list of participants in voice channel."""
         return list(self._voice_rooms.get(room, {}).values())
 
+    def voice_rooms(self):
+        """All room names that currently have local voice participants."""
+        return list(self._voice_rooms.keys())
+
     def is_in_voice(self, room: str, user_id: int) -> bool:
         """Check if user is in voice channel."""
         return any(int(p.get("user_id") or 0) == int(user_id) for p in self.participants(room))

@@ -29,6 +29,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import time
 import uuid
 from typing import Any
 
@@ -117,6 +118,7 @@ class FederatedVoiceRegistry:
                     "home_server_id": home,
                     "avatar": avatar,
                     "federated": True,
+                    "ts": time.time(),     # refresh liveness on re-announce
                 })
                 return True
         if len(lst) >= _REMOTE_PER_SESSION_CAP:
@@ -134,6 +136,7 @@ class FederatedVoiceRegistry:
             "avatar": avatar,
             "federated": True,
             "user_id": 0,
+            "ts": time.time(),
         })
         self._origin_count[home] = self._origin_count.get(home, 0) + 1
         if room_name:
@@ -196,6 +199,32 @@ class FederatedVoiceRegistry:
             if home and self._origin_count.get(home, 0) > 0:
                 self._origin_count[home] -= 1
         self._remote.pop(sid, None)
+
+    def expire_stale(self, ttl_seconds: float) -> list:
+        """Drop remote participants whose roster entry hasn't been refreshed
+        within ``ttl_seconds``. Each home node re-announces its active voice
+        participants on a heartbeat; if those stop (peer node restarted/crashed
+        without sending leaves), the remote entries go stale and are reaped here
+        so no cross-node zombie lingers. Returns ``[(room_name, participant)]``.
+        """
+        cutoff = time.time() - float(ttl_seconds)
+        sid_room = {sid: room for room, sid in self._room_session.items()}
+        expired: list = []
+        for sid, lst in list(self._remote.items()):
+            keep = []
+            for p in lst:
+                if float(p.get("ts") or 0.0) < cutoff:
+                    home = str(p.get("home_server_id") or "")
+                    if home and self._origin_count.get(home, 0) > 0:
+                        self._origin_count[home] -= 1
+                    expired.append((sid_room.get(sid, ""), p))
+                else:
+                    keep.append(p)
+            if keep:
+                self._remote[sid] = keep
+            else:
+                self._remote.pop(sid, None)
+        return expired
 
 
 federated_voice_registry = FederatedVoiceRegistry()
@@ -465,6 +494,10 @@ async def _apply_voice_join(
         _log.info("federation: skip voice.session.join — user already local in voice")
         return
 
+    # A periodic re-announce (liveness heartbeat) for someone already in the
+    # roster just refreshes their TTL — don't re-broadcast / re-write the DB.
+    already_present = federated_voice_registry.is_remote_in_room(room_name, gid)
+
     if not federated_voice_registry.add_remote(
         session_id,
         global_user_id=gid,
@@ -473,6 +506,8 @@ async def _apply_voice_join(
         avatar=avatar,
         room_name=room_name,
     ):
+        return
+    if already_present:
         return
     try:
         db.upsert_federation_voice_remote(session_id, gid, nick, origin, avatar)

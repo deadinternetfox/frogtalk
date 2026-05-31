@@ -37,6 +37,11 @@ def _link_reply_sync(msg_id, reply_to):
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["websocket"])
 
+# A remote voice participant is expired if its home node hasn't re-announced it
+# within this window. Must comfortably exceed the 15s reaper heartbeat so a few
+# missed beats (transient federation lag) don't wrongly drop an active caller.
+_VOICE_REMOTE_TTL = 75.0
+
 
 async def voice_reaper_task():
     """Periodically evict voice participants whose user has no live WS connection
@@ -55,6 +60,21 @@ async def voice_reaper_task():
             continue
         for room, p in removed:
             try:
+                # Federate the leave so peer nodes drop the reaped user from
+                # their cross-node roster too (no cross-node zombie on a silent
+                # disconnect). The reaper runs on every node, so each node
+                # reaps its own locals and tells the rest.
+                try:
+                    import federation_voice as _fv
+                    if _fv.federation_voice_enabled():
+                        sid = _fv.federated_voice_registry.session_for_room(room)
+                        _fv.enqueue_voice_session_leave(
+                            {"global_user_id": str(p.get("global_user_id") or ""),
+                             "nickname": p.get("nickname") or ""},
+                            room, session_id=sid,
+                        )
+                except Exception:
+                    logger.exception("voice_reaper: federated leave enqueue failed")
                 try:
                     import federation_voice as _fv
                     parts = _fv.participants_for_room(room, voice_manager)
@@ -73,6 +93,55 @@ async def voice_reaper_task():
                             p.get("nickname") or p.get("user_id"), room)
             except Exception:
                 logger.exception("voice_reaper: broadcast failed")
+
+        # ── Cross-node safety net ─────────────────────────────────────────
+        # Re-announce our live local voice participants so peers keep their
+        # remote roster fresh, then expire any remote we've stopped hearing
+        # from. A peer node that restarts/crashes wipes its voice state without
+        # sending leaves — without this its users would zombie here forever.
+        try:
+            import federation_voice as _fv
+            if _fv.federation_voice_enabled() and not _fv.voice_sfu_enabled():
+                for vroom in voice_manager.voice_rooms():
+                    parts = voice_manager.participants(vroom)
+                    if not parts:
+                        continue
+                    sid = _fv.federated_voice_registry.session_for_room(vroom)
+                    anchor = _fv.room_anchor_server_id(vroom)
+                    for lp in parts:
+                        lgid = str(lp.get("global_user_id") or "").strip()
+                        if not lgid:
+                            continue
+                        try:
+                            _fv.enqueue_voice_session_join(
+                                {"global_user_id": lgid,
+                                 "nickname": lp.get("nickname") or "",
+                                 "avatar": lp.get("avatar") or ""},
+                                vroom, session_id=sid, anchor_server_id=anchor,
+                            )
+                        except Exception:
+                            pass
+                expired = _fv.federated_voice_registry.expire_stale(_VOICE_REMOTE_TTL)
+                for xroom, xp in expired:
+                    if not xroom:
+                        continue
+                    try:
+                        xparts = _fv.participants_for_room(xroom, voice_manager)
+                    except Exception:
+                        xparts = voice_manager.participants(xroom)
+                    await manager.broadcast_room(xroom, {
+                        "type": "voice_user_left",
+                        "room": xroom,
+                        "user_id": 0,
+                        "global_user_id": str(xp.get("global_user_id") or ""),
+                        "nickname": xp.get("nickname") or "",
+                        "participants": xparts,
+                        "reason": "peer_stale",
+                    })
+                    logger.info("voice_reaper: expired stale remote %s from voice #%s",
+                                xp.get("nickname") or xp.get("global_user_id"), xroom)
+        except Exception:
+            logger.exception("voice_reaper: federation heartbeat/expiry failed")
 
 
 # HIGH-4: cap the number of concurrent worker threads we'll burn on
@@ -2294,6 +2363,16 @@ async def websocket_endpoint(
                 user["id"], str(user.get("global_user_id") or ""),
             )
         for vc_room in rooms_left:
+            # Federate the leave so peer nodes drop this user from their
+            # cross-node voice roster — otherwise a disconnect (vs. an explicit
+            # "leave") leaves a zombie in the call on every other node.
+            try:
+                import federation_voice as _fv
+                if _fv.federation_voice_enabled():
+                    sid = _fv.federated_voice_registry.session_for_room(vc_room)
+                    _fv.enqueue_voice_session_leave(user, vc_room, session_id=sid)
+            except Exception:
+                logger.exception("federated voice disconnect-leave enqueue failed")
             try:
                 import federation_voice as _fv
                 left_parts = _fv.participants_for_room(vc_room, voice_manager)
@@ -2307,7 +2386,7 @@ async def websocket_endpoint(
                 "nickname": user["nickname"],
                 "participants": left_parts,
             })
-        
+
         result = manager.disconnect(websocket)
         try:
             if not manager.is_user_online(user["id"]):
