@@ -3102,6 +3102,7 @@ if ($singleThread) {
                            data-peer-url="<?= htmlspecialchars($_peerHref) ?>"
                            <?php elseif ($_sameTab): ?>
                            rel="noopener"
+                           onclick="_fedNavTop(this.getAttribute('href')); return false;"
                            <?php else: ?>
                            rel="noopener"
                            onclick="return fedPillGo(this, event);"
@@ -5465,6 +5466,25 @@ if ($singleThread) {
     // probe can false-negative on a node that blocks the API but serves /board).
     var _fedNavInFlight = false;
     function _fedEsc(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+    // The board usually runs inside the app's same-origin #board-frame iframe.
+    // Navigating that frame to a cross-origin peer trips the peer's
+    // X-Frame-Options / frame-ancestors 'self' and the browser shows
+    // "This content is blocked." — cross-origin boards can't be framed. So
+    // break OUT to the top-level context. Standalone (top === self) this is a
+    // normal same-tab nav; in-app it replaces the whole app with the peer
+    // board. assign() works when top is same-origin; the href-setter and
+    // _top open are fallbacks for the rare cross-origin-embed case.
+    function _fedNavTop(url) {
+        try {
+            var top = window.top;
+            if (top && top !== window.self) {
+                try { top.location.assign(url); return; } catch (e) {}
+                try { top.location.href = url; return; } catch (e) {}
+                try { window.open(url, '_top'); return; } catch (e) {}
+            }
+        } catch (e) {}
+        try { window.location.assign(url); } catch (e) { window.location.href = url; }
+    }
     function _fedNavOverlay() {
         var ov = document.getElementById('fedNavOverlay');
         if (ov) return ov;
@@ -5519,7 +5539,7 @@ if ($singleThread) {
             '</div>';
         body.querySelector('[data-act="cancel"]').addEventListener('click', fedNavClose);
         body.querySelector('[data-act="open"]').addEventListener('click', function(){
-            try { window.location.assign(url); } catch (e) { window.location.href = url; }
+            _fedNavTop(url);
         });
         ov.classList.add('active');
     }
@@ -5535,7 +5555,7 @@ if ($singleThread) {
         var title = anchorEl.getAttribute('data-peer-title') || 'that board';
         var node  = anchorEl.getAttribute('data-peer-node')  || '';
         if (!url) return false;
-        var go = function(){ try { window.location.assign(url); } catch (e) { window.location.href = url; } };
+        var go = function(){ _fedNavTop(url); };
         _fedNavInFlight = true;
         fedNavShowLoading(title, node);
         // Old webviews without fetch/AbortController: skip the probe, just go.
@@ -5543,6 +5563,12 @@ if ($singleThread) {
         var base = (url.charAt(url.length - 1) === '/') ? url : (url + '/');
         var infoUrl;
         try { infoUrl = new URL('api/info', base).href; } catch (e) { go(); return false; }
+        // An https board can't fetch an http peer (mixed content) — the probe
+        // would always reject and falsely warn "unreachable". Top-level
+        // navigation to http is allowed, so skip the probe and just go.
+        try {
+            if (location.protocol === 'https:' && new URL(base).protocol === 'http:') { go(); return false; }
+        } catch (e) {}
         var ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
         var timer = setTimeout(function(){ if (ctrl) { try { ctrl.abort(); } catch (e) {} } }, 7000);
         // no-cors: any resolved response (even opaque) means the host answered,
@@ -7522,6 +7548,5 @@ if ($singleThread) {
         if (lbl) lbl.classList.toggle('collapsed', closed);
     }
     </script>
-    <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"></script>
 </body>
 </html>

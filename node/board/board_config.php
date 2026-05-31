@@ -33,14 +33,60 @@ if (!function_exists('board_emit_security_headers')) {
         // priority is blocking object/base/form action hijacks and
         // tightening connect-src so a stored XSS cannot exfil to an
         // attacker domain.
+        // Federation reachability probe (board.php fedPillGo): before
+        // navigating to a peer, the JS pings <peer>/api/info so a dead board
+        // warns instead of dumping the visitor on a blank page. That ping is
+        // a cross-origin connect, so every peer origin must appear in
+        // connect-src — otherwise CSP silently blocks the fetch and EVERY
+        // clearnet peer falsely reports "unreachable". Peers come from
+        // settings.json (operator-curated), so this is a bounded, intentional
+        // exception, not an open door for stored-XSS exfil.
+        // Read peers straight from the settings file rather than via
+        // loadSettings(): this runs before DATA_DIR and loadSettings() are
+        // defined further down, so depending on them would fatal under PHP 8.
+        $peerConnectSrc = '';
+        $seenPeerOrigins = [];
+        $__settingsFile = __DIR__ . '/board_data/settings.json';
+        $__peers = [];
+        if (is_file($__settingsFile)) {
+            $__decoded = json_decode((string)file_get_contents($__settingsFile), true);
+            if (is_array($__decoded) && !empty($__decoded['federated_peers']) && is_array($__decoded['federated_peers'])) {
+                $__peers = $__decoded['federated_peers'];
+            }
+        }
+        foreach ($__peers as $__p) {
+            if (!is_array($__p)) continue;
+            if (count($seenPeerOrigins) >= 50) break;
+            foreach ([($__p['url'] ?? ''), ($__p['tor_onion_url'] ?? '')] as $__u) {
+                $__u = trim((string)$__u);
+                if ($__u === '') continue;
+                // Bare onion host with no scheme → treat as https for parsing.
+                if (!preg_match('#^https?://#i', $__u)) $__u = 'https://' . ltrim($__u, '/');
+                $__parts = parse_url($__u);
+                if (empty($__parts['host'])) continue;
+                $__scheme = strtolower($__parts['scheme'] ?? 'https');
+                if ($__scheme !== 'http' && $__scheme !== 'https') continue;
+                $__origin = $__scheme . '://' . strtolower($__parts['host']);
+                if (!empty($__parts['port'])) $__origin .= ':' . (int)$__parts['port'];
+                if (!isset($seenPeerOrigins[$__origin])) {
+                    $seenPeerOrigins[$__origin] = true;
+                    $peerConnectSrc .= ' ' . $__origin;
+                }
+            }
+        }
+        // static.cloudflareinsights.com: Cloudflare Web Analytics beacon
+        // (beacon.min.js), auto-injected by the CDN; reports RUM data to
+        // cloudflareinsights.com. Whitelisted to match the main app's CSP
+        // (node/main.py) so it isn't blocked. Disable it in the Cloudflare
+        // dashboard (Web Analytics) to drop it entirely instead.
         header(
             "Content-Security-Policy: default-src 'self'; " .
-            "script-src 'self' 'unsafe-inline'; " .
+            "script-src 'self' 'unsafe-inline' https://static.cloudflareinsights.com; " .
             "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " .
             "font-src 'self' data: https://fonts.gstatic.com; " .
             "img-src 'self' data: blob: https:; " .
             "media-src 'self' data: blob: https:; " .
-            "connect-src 'self' https://api.mainnet-beta.solana.com; " .
+            "connect-src 'self' https://api.mainnet-beta.solana.com https://cloudflareinsights.com" . $peerConnectSrc . "; " .
             "frame-src 'self' https://www.youtube.com; " .
             "object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
         );
