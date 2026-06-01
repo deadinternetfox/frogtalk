@@ -2026,10 +2026,19 @@ async function handleScreenOffer (data) {
     return _handleVoiceScreenOffer(data);
   }
   try {
-    if (!_screenForThisCall(data)) return;
+    if (!_screenForThisCall(data)) {
+      try { console.debug('[screen] offer ignored (not this call)', { call_id: data.call_id, gid: data.global_call_id, state: _callState }); } catch {}
+      return;
+    }
+    try { console.debug('[screen] offer accepted → answering', { call_id: data.call_id, gid: data.global_call_id }); } catch {}
     // Replace any prior screen PC (sharer re-pressed / restarted).
     _teardownScreen({ keepTile: true });
     _screenFromUid = Number(data.from_id) || _callPeerUID || null;
+    // Reveal the screen tile in a connecting state IMMEDIATELY, before media
+    // negotiates — so a cross-node viewer (incl. mobile) sees "Connecting
+    // screen…" the instant the sharer starts, instead of nothing until/unless
+    // the first frame lands. Cleared on first frame in _renderRemoteScreen.
+    _showScreenTileConnecting();
     const peerHome = String(data.peer_home_server_id || data.origin_server_id || _peerHomeServerId || '').trim();
     const ice = await buildIceServers(peerHome);
     _screenPc = new RTCPeerConnection({ iceServers: ice });
@@ -2238,6 +2247,22 @@ function onNativeScreenShareError (msg) {
   if (m && m.toLowerCase() !== 'cancelled') {
     try { toast('Screen share failed: ' + m, 'error', 6000); } catch {}
   }
+}
+
+/** Reveal the screen tile in a "connecting" state before any frame exists, so
+ *  the viewer gets immediate feedback when a peer starts sharing (the spinner
+ *  shows even if media is still negotiating / never connects). The <video>
+ *  stays hidden until _renderRemoteScreen attaches the real stream. */
+function _showScreenTileConnecting (peerName) {
+  try {
+    const tile = document.getElementById('call-tile-screen');
+    const sv = document.getElementById('screen-video');
+    const nm = document.getElementById('call-tile-screen-name');
+    if (sv) { sv.style.display = 'none'; }       // no stream yet → keep video hidden
+    if (nm) nm.textContent = '📺 ' + (peerName || _callPeerNick || 'Peer') + "'s screen";
+    if (tile) { tile.style.display = ''; _setConnecting(tile, true); }
+    document.getElementById('call-participants')?.classList.add('has-screen');
+  } catch {}
 }
 
 function _renderRemoteScreen (stream, opts) {
