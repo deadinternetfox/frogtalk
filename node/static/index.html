@@ -3475,10 +3475,39 @@ body.ft-incoming-call-active #incoming-call{z-index:20000}
   display:flex;
   gap:10px;
   justify-content:center;
+  align-items:center;
   flex-shrink:0;
   padding:12px calc(12px + var(--safe-right)) calc(12px + var(--safe-bottom)) calc(12px + var(--safe-left));
   background:linear-gradient(to top, color-mix(in srgb, var(--bg-color) 72%, #000), transparent);
   flex-wrap:wrap;
+}
+/* Slim range slider used for the remote/stream volume in calls. */
+.call-volume-slider{
+  -webkit-appearance:none;appearance:none;width:96px;height:6px;border-radius:999px;cursor:pointer;
+  background:color-mix(in srgb, var(--accent-color) 30%, color-mix(in srgb, var(--surface-color) 60%, #000));
+  outline:none;flex:0 0 auto;align-self:center
+}
+.call-volume-slider::-webkit-slider-thumb{
+  -webkit-appearance:none;appearance:none;width:15px;height:15px;border-radius:50%;
+  background:var(--accent-color);border:2px solid rgba(255,255,255,.85);box-shadow:0 1px 3px rgba(0,0,0,.5);cursor:pointer
+}
+.call-volume-slider::-moz-range-thumb{
+  width:15px;height:15px;border-radius:50%;border:2px solid rgba(255,255,255,.85);
+  background:var(--accent-color);cursor:pointer
+}
+/* Volume control inside the pop-out header. */
+#call-popout-volume-wrap{display:flex;align-items:center;gap:5px;flex:0 0 auto}
+#call-popout-volume-wrap .cpv-icon{font-size:12px;opacity:.85}
+#call-popout-volume{
+  -webkit-appearance:none;appearance:none;width:74px;height:5px;border-radius:999px;cursor:pointer;
+  background:color-mix(in srgb, var(--accent-color) 36%, rgba(255,255,255,.18));outline:none
+}
+#call-popout-volume::-webkit-slider-thumb{
+  -webkit-appearance:none;appearance:none;width:13px;height:13px;border-radius:50%;
+  background:var(--accent-color);border:2px solid rgba(255,255,255,.9);cursor:pointer
+}
+#call-popout-volume::-moz-range-thumb{
+  width:13px;height:13px;border-radius:50%;border:2px solid rgba(255,255,255,.9);background:var(--accent-color);cursor:pointer
 }
 #incoming-call{
   position:fixed;inset:0;z-index:12000;
@@ -3994,11 +4023,13 @@ body.ft-incoming-call-active #incoming-call{z-index:20000}
 .call-mini-avatar img{width:100%;height:100%;object-fit:cover;display:block}
 .call-mini-info{flex:1;min-width:0}
 .call-mini-name{font-size:13px;font-weight:700;color:var(--text-color);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.call-mini-status{font-size:11px;color:var(--text-muted);display:flex;align-items:center;gap:5px;margin-top:1px}
-.call-mini-pulse{font-size:8px;animation:pulse 1.5s ease-in-out infinite}
+.call-mini-status{font-size:11px;color:var(--text-muted);display:flex;align-items:center;gap:5px;margin-top:1px;min-width:0;overflow:hidden;white-space:nowrap}
+.call-mini-pulse{font-size:8px;animation:pulse 1.5s ease-in-out infinite;flex-shrink:0}
 .call-mini-timer{color:var(--accent-color);font-weight:600;font-variant-numeric:tabular-nums}
-.call-mini-controls{display:flex;gap:6px;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end}
-.call-mini-btn{width:30px;height:30px;border-radius:50%;background:rgba(0,0,0,.28);border:none;color:var(--text-color);font-size:14px;cursor:pointer;transition:background .15s,transform .1s;display:flex;align-items:center;justify-content:center;padding:0}
+/* nowrap so the buttons stay on one row and never collide with the timer; the
+   info column (flex:1, min-width:0) absorbs any remaining squeeze instead. */
+.call-mini-controls{display:flex;gap:5px;flex-shrink:0;flex-wrap:nowrap;justify-content:flex-end}
+.call-mini-btn{width:30px;height:30px;border-radius:50%;background:rgba(0,0,0,.28);border:none;color:var(--text-color);font-size:14px;cursor:pointer;transition:background .15s,transform .1s;display:flex;align-items:center;justify-content:center;padding:0;flex-shrink:0}
 .call-mini-btn:hover{background:rgba(0,0,0,.46)}
 .call-mini-btn:active{transform:scale(.92)}
 .call-mini-btn.muted{background:#c0392b;color:#fff}
@@ -9555,7 +9586,7 @@ window.ConnErr = (function(){
     -->
     <div class="server-icon" data-tip="Node Admin" data-tip-pos="right" id="node-admin-icon" onclick="try{openNodeAdmin()}catch(e){window.location.assign('/server')}" style="display:none;background:linear-gradient(135deg,#1a1208,#3a2410);color:#ffb347;font-weight:700">🛡️</div>
     <div class="server-icon" data-tip="Lock app" data-tip-pos="right" id="quick-lock-icon" onclick="try{Pin.lockNow()}catch(e){}" style="display:none">🔒</div>
-    <div class="server-icon" data-tip="Settings · long-press for privacy & more" data-tip-pos="right" id="settings-server-icon" onclick="showProfile()">⚙️</div>
+    <div class="server-icon" data-tip="Settings" data-tip-pos="right" id="settings-server-icon" onclick="showProfile()">⚙️</div>
     <div class="server-spacer"></div>
     <div class="server-icon" data-tip="Logout" data-tip-pos="right" onclick="doLogout()" style="background:#2a1414;color:#f85149">🚪</div>
   </div>
@@ -9638,7 +9669,6 @@ window.ConnErr = (function(){
         <button class="call-mini-btn" id="call-mini-mute" onclick="event.stopPropagation(); toggleCallMute()" title="Mute">🎤</button>
         <button class="call-mini-btn" id="call-mini-cam" onclick="event.stopPropagation(); toggleCallCamera()" title="Turn camera on">🚫</button>
         <button class="call-mini-btn" id="call-mini-screen" onclick="event.stopPropagation(); toggleScreenShare()" title="Share screen">🖥️</button>
-        <button class="call-mini-btn expand" onclick="event.stopPropagation(); maximizeCall()" title="Expand call">⬆️</button>
         <button class="call-mini-btn end" onclick="event.stopPropagation(); endCall()" title="End call">📵</button>
       </div>
     </div>
@@ -11952,7 +11982,7 @@ window.ConnErr = (function(){
   <!-- Participant tiles area -->
   <div id="call-participants">
     <!-- Remote participant tile -->
-    <div id="call-tile-remote" class="call-tile">
+    <div id="call-tile-remote" class="call-tile" onclick="openVideoPopout('dm-remote')" title="Tap to expand" style="cursor:pointer">
       <video id="remote-video" autoplay playsinline webkit-playsinline style="width:100%;height:100%;object-fit:cover;border-radius:12px;display:none"></video>
       <!-- Voice-call audio sink: WebKit won't play remote audio through display:none video. -->
       <audio id="remote-audio" autoplay playsinline webkit-playsinline></audio>
@@ -11975,7 +12005,7 @@ window.ConnErr = (function(){
     <!-- Shared-screen tile: shown only while a peer is sharing their screen
          (native Android MediaProjection over the dedicated _screenPc). Spans the
          wide cell so faces stay visible alongside it. -->
-    <div id="call-tile-screen" class="call-tile call-tile-screen" style="display:none">
+    <div id="call-tile-screen" class="call-tile call-tile-screen" style="display:none;cursor:pointer" onclick="openVideoPopout('dm-screen')" title="Tap to expand">
       <video id="screen-video" autoplay playsinline webkit-playsinline style="width:100%;height:100%;object-fit:contain;border-radius:12px;background:#000;display:none"></video>
       <div class="call-tile-name" id="call-tile-screen-name">📺 Screen</div>
     </div>
@@ -11988,6 +12018,8 @@ window.ConnErr = (function(){
     <button id="btn-call-cam" onclick="toggleCallCamera()" class="call-ctl-btn" title="Camera">📷</button>
     <button id="btn-call-screen" onclick="toggleScreenShare()" class="call-ctl-btn" title="Screen Share">🖥️</button>
     <button id="btn-call-speaker" onclick="toggleCallSpeaker()" class="call-ctl-btn" title="Speaker">🔊</button>
+    <input id="call-remote-volume" class="call-volume-slider" type="range" min="0" max="100" value="100"
+           oninput="setDmRemoteVolume(this.value)" title="Their volume" aria-label="Their volume">
     <button id="btn-call-safety" onclick="showCallSafetyNumber()" class="call-ctl-btn" title="Safety Number">🔒</button>
     <button onclick="endCall()" class="call-ctl-btn call-ctl-end" title="End Call">📵</button>
   </div>
@@ -11997,6 +12029,11 @@ window.ConnErr = (function(){
 <div id="call-popout" class="hidden" role="dialog" aria-label="Video pop-out">
   <div id="call-popout-header">
     <span id="call-popout-name">Video</span>
+    <span id="call-popout-volume-wrap" title="Volume">
+      <span class="cpv-icon" aria-hidden="true">🔊</span>
+      <input id="call-popout-volume" type="range" min="0" max="100" value="100"
+             oninput="setPopoutVolume(this.value)" aria-label="Stream volume">
+    </span>
     <button id="call-popout-close" onclick="closeVideoPopout()" title="Close" aria-label="Close">✕</button>
   </div>
   <video id="call-popout-video" autoplay playsinline webkit-playsinline></video>

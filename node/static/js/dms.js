@@ -5164,6 +5164,51 @@ async function sendDMMessage () {
   }
 }
 
+/* ── Incoming WS DM edit/delete (live sync) ─────────────────────────────────
+ * The REST PUT/DELETE handlers now broadcast these so the peer (and our other
+ * devices) update without a refresh. Only acts when the affected channel is
+ * loaded; otherwise the change is already persisted and shows on next open. */
+async function handleWSDMEdited (data) {
+  try {
+    const cid = Number(data.channel_id || 0);
+    const id = Number(data.id || 0);
+    if (!id) return;
+    const m = _dmMessages.find(x => +x.id === id);
+    if (!m) return;                       // channel not loaded — fine, persisted
+    const myId = Number(STATE?.user?.id || 0);
+    const cipher = String(data.content || '');
+    let plain = null;
+    // My own edit echoes back as MY outgoing envelope (which I can't decrypt) —
+    // resolve it from the plaintext cache stored at encrypt time.
+    if (Number(m.sender_id) === myId) plain = _dmPtCacheGet(cipher);
+    if (plain == null && cipher) {
+      const pid = Number(_activeDM?.user_id
+        || _dmChannels.find(c => c.id === cid)?.with_user_id || 0);
+      try { plain = await _decryptDMPreviewContent(cipher, pid, '', { silent: true }); } catch {}
+    }
+    if (plain != null) m.content = plain;
+    m.edited = 1;
+    m.edited_at = data.edited_at || new Date().toISOString();
+    if (State.currentRoomType === 'dm' && Number(_activeDM?.id || 0) === cid
+        && typeof renderDMChat === 'function') renderDMChat();
+  } catch (e) { console.warn('[DM] handleWSDMEdited failed', e); }
+}
+window.handleWSDMEdited = handleWSDMEdited;
+
+function handleWSDMDeleted (data) {
+  try {
+    const cid = Number(data.channel_id || 0);
+    const id = Number(data.id || 0);
+    if (!id) return;
+    const before = _dmMessages.length;
+    _dmMessages = _dmMessages.filter(x => +x.id !== id);
+    if (_dmMessages.length === before) return;   // not loaded
+    if (State.currentRoomType === 'dm' && Number(_activeDM?.id || 0) === cid
+        && typeof renderDMChat === 'function') renderDMChat();
+  } catch (e) { console.warn('[DM] handleWSDMDeleted failed', e); }
+}
+window.handleWSDMDeleted = handleWSDMDeleted;
+
 /* ── Incoming WS DM message ─────────────────────────────────────────────────── */
 function handleWSDMMessage (data) {
   const _fedInbound = !!(data.federated || data.origin_server_id);

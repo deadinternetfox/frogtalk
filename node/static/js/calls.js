@@ -74,7 +74,12 @@ function _ensureMediaPlayback(el, label) {
   // muted=false here is what silently undid the speaker button the instant a
   // track arrived — the root cause of "speaker mute doesn't work".
   try { if (!(el.dataset && el.dataset.userMuted === '1')) el.muted = false; } catch {}
-  try { el.volume = 1; } catch {}
+  // Respect a user-set per-stream volume (the volume sliders tag the element
+  // with data-user-volume); otherwise default to full volume.
+  try {
+    const uv = el.dataset && el.dataset.userVolume;
+    el.volume = (uv != null && uv !== '') ? Math.max(0, Math.min(1, parseFloat(uv))) : 1;
+  } catch {}
   try {
     el.playsInline = true;
     el.setAttribute('playsinline', '');
@@ -286,6 +291,29 @@ let _reconnectTimer = null;
 let _callPeerAvatar = null;
 let _callGlobalId = null;
 let _peerHomeServerId = '';
+// Calls we've already terminated this session (answered/rejected/ended/missed).
+// A flaky reconnect replays the server's still-"ringing" pending offer, and a
+// federated offer can fan out via several paths — without this guard those
+// re-deliveries pop a fresh incoming-call UI ("ghost calls"). Keyed by both the
+// local call_id and the global_call_id; pruned so a later real call re-rings.
+const _terminalCalls = new Map();   // id/gid (string) -> epoch ms
+const _TERMINAL_CALL_TTL_MS = 5 * 60 * 1000;
+function _markCallTerminal (callId, gid) {
+  const now = Date.now();
+  for (const [k, ts] of _terminalCalls) { if (now - ts > _TERMINAL_CALL_TTL_MS) _terminalCalls.delete(k); }
+  const cid = String(callId || _callId || '').trim();
+  const g = String(gid || _callGlobalId || '').trim();
+  if (cid) _terminalCalls.set('c:' + cid, now);
+  if (g) _terminalCalls.set('g:' + g, now);
+}
+function _isCallTerminated (data) {
+  if (!data) return false;
+  const now = Date.now();
+  const cid = String(data.call_id || '').trim();
+  const g = String(data.global_call_id || '').trim();
+  const hit = (cid && _terminalCalls.get('c:' + cid)) || (g && _terminalCalls.get('g:' + g));
+  return !!(hit && (now - hit) <= _TERMINAL_CALL_TTL_MS);
+}
 // ── Native screen-share receive state ──────────────────────────────────────
 // A peer (currently only the Android native shell) can push their screen over
 // a SEPARATE one-way PeerConnection that joins the active call via screen_*
@@ -297,6 +325,15 @@ let _screenFromUid = null;       // uid of the peer sharing (the call peer)
 let _screenPendingIce = [];      // ICE buffered until screen remote-desc applied
 let _screenRemoteDescApplied = false;
 let _nativeScreenSharing = false; // we (Android) are sharing our screen natively
+// ── Desktop screen-share SEND state ─────────────────────────────────────────
+// On a 1-on-1 call the web client shares its screen over a dedicated SEND-only
+// PeerConnection (mirroring the native/group path) instead of swapping the
+// camera track on the main call PC. This gives the viewer a real screen tile
+// and works cross-node — the screen_* relay is keyed on global_call_id, unlike
+// a mid-call renegotiation of _pc which the federation path handled poorly.
+let _screenSendPc = null;            // outbound screen RTCPeerConnection (we offer)
+let _screenSendPendingIce = [];      // ICE buffered until the answer is applied
+let _screenSendRemoteDescApplied = false;
 // Inbound ICE candidates that arrive before setRemoteDescription resolves
 // would throw on addIceCandidate and be lost forever. Buffer them and drain
 // once the remote description is applied.
@@ -1013,6 +1050,15 @@ async function callNick (nick, type) {
 
 /* ── Receive offer (incoming) ──────────────────────────────────────────────── */
 async function handleCallOffer (data) {
+  // Suppress a re-delivered offer for a call we already finished this session
+  // (reconnect replays the server's pending ring; federation can fan out the
+  // same offer). Renegotiations of the live call are exempt — they're handled
+  // just below. This is the main guard against "ghost" incoming-call popups.
+  if (!data?.renegotiate && _isCallTerminated(data)
+      && !(_callId && String(data?.call_id) === String(_callId))) {
+    try { _clearPersistedIncomingCall(); } catch {}
+    return;
+  }
   // Mid-call renegotiation from the same peer (camera turned on, screen-share, etc.)
   if (data.renegotiate && _callState === 'active' && _pc) {
     const okCall = data.call_id && _callId && String(data.call_id) === String(_callId);
@@ -1521,6 +1567,9 @@ function handleCallEnd (data) {
 
 /* ── End call ──────────────────────────────────────────────────────────────── */
 function endCall (notifyPeer = true, opts) {
+  // Remember this call as finished so any re-delivered offer (reconnect drain /
+  // federation fan-out) doesn't pop a ghost incoming-call UI for it.
+  try { _markCallTerminal(_callId, _callGlobalId); } catch {}
   if (notifyPeer) {
     const forced = opts && typeof opts.wasConnected === 'boolean' ? opts.wasConnected : null;
     const wasConnected = forced === null
@@ -1595,10 +1644,10 @@ function resetCall () {
       _pc = null;
     }
     if (_localStream) { try { _localStream.getTracks().forEach(t => t.stop()); } catch {} _localStream = null; }
-    if (_screenStream) { try { _screenStream.getTracks().forEach(t => t.stop()); } catch {} _screenStream = null; }
-    // Tear down both directions of native screen share: the inbound _screenPc
-    // (remote sharing to us) and our own native capture (if we were sharing).
+    // Tear down both directions of screen share: the inbound _screenPc (remote
+    // sharing to us), our own desktop send PC, and any native capture.
     try { _teardownScreen(); } catch {}
+    try { _teardownScreenSend(); } catch {}
     if (_nativeScreenSharing) {
       try { window.Android && window.Android.stopScreenShare && window.Android.stopScreenShare(); } catch {}
       _nativeScreenSharing = false;
@@ -1621,6 +1670,10 @@ function resetCall () {
     _callId = null; _callGlobalId = '';
     _callPeerAvatar = null;
     _mutedAudio = false; _mutedVideo = false; _speakerMuted = false;
+    // Reset per-stream volume so the next call starts at full volume.
+    _dmRemoteVolume = 1;
+    const _volSl = document.getElementById('call-remote-volume');
+    if (_volSl) _volSl.value = 100;
     try { _stopVAD(); } catch {}
     try { _stopCallQualityMonitor(); } catch {}
     const rv = document.getElementById('remote-video');
@@ -1630,11 +1683,11 @@ function resetCall () {
       rv.srcObject = null;
       rv.style.display = 'none';
       rv.classList.remove('ft-remote-audio-sink');
-      try { rv.muted = false; rv.dataset.userMuted = '0'; } catch {}
+      try { rv.muted = false; rv.dataset.userMuted = '0'; delete rv.dataset.userVolume; } catch {}
     }
     if (remoteAudio) {
       remoteAudio.srcObject = null;
-      try { remoteAudio.muted = false; remoteAudio.dataset.userMuted = '0'; } catch {}
+      try { remoteAudio.muted = false; remoteAudio.dataset.userMuted = '0'; delete remoteAudio.dataset.userVolume; } catch {}
     }
     const _spkBtn = document.getElementById('btn-call-speaker');
     if (_spkBtn) { _spkBtn.textContent = '🔊'; _spkBtn.classList.remove('muted'); _spkBtn.title = 'Speaker'; }
@@ -1888,7 +1941,14 @@ function _screenForThisCall (data) {
   if (!data) return false;
   if (_callState !== 'active') return false;
   if (Number(data.from_id) === _selfUid()) return false;
-  if (!_callId || String(data.call_id) !== String(_callId)) return false;
+  // Local call_id matches for same-node calls. For FEDERATED calls each node
+  // assigns its own local call_id (only global_call_id is shared end-to-end),
+  // so a cross-node screen signal carries the *other* node's call_id and would
+  // never match — fall back to global_call_id so DM screen-share federates.
+  const byLocal = _callId && String(data.call_id) === String(_callId);
+  const byGlobal = _callGlobalId && data.global_call_id
+    && String(data.global_call_id) === String(_callGlobalId);
+  if (!byLocal && !byGlobal) return false;
   return true;
 }
 
@@ -1949,12 +2009,14 @@ async function handleScreenOffer (data) {
 }
 
 async function handleScreenAnswer (data) {
-  // v1: the web client never offers screen share, so this only fires if a
-  // future client does. Apply defensively if we have an unanswered _screenPc.
+  // The desktop sharer offers on _screenSendPc; the viewer's answer lands here.
   try {
-    if (!_screenForThisCall(data) || !_screenPc) return;
-    if (_screenPc.signalingState === 'have-local-offer') {
-      await _screenPc.setRemoteDescription({ type: 'answer', sdp: data.sdp });
+    if (!_screenForThisCall(data) || !_screenSendPc) return;
+    if (_screenSendPc.signalingState === 'have-local-offer') {
+      await _screenSendPc.setRemoteDescription({ type: 'answer', sdp: data.sdp });
+      _screenSendRemoteDescApplied = true;
+      const q = _screenSendPendingIce.slice(); _screenSendPendingIce.length = 0;
+      for (const c of q) { try { await _screenSendPc.addIceCandidate(c); } catch {} }
     }
   } catch (e) { console.warn('handleScreenAnswer failed', e); }
 }
@@ -1963,8 +2025,16 @@ async function handleScreenIce (data) {
   try {
     if (Number(data.from_id) === _selfUid()) return;
     if (_voiceRoom && Number(data.call_id || 0) === 0) return _handleVoiceScreenIce(data);
-    if (!_screenPc || !data.candidate) return;
+    if (!data.candidate) return;
     let parsed; try { parsed = JSON.parse(data.candidate); } catch { return; }
+    // On a 1-on-1 call only one direction is active: if we're the sharer the
+    // peer's candidates belong to our send PC, otherwise to the receive PC.
+    if (_screenSendPc) {
+      if (!_screenSendRemoteDescApplied) { _screenSendPendingIce.push(parsed); return; }
+      try { await _screenSendPc.addIceCandidate(parsed); } catch {}
+      return;
+    }
+    if (!_screenPc) return;
     if (!_screenRemoteDescApplied) { _screenPendingIce.push(parsed); return; }
     try { await _screenPc.addIceCandidate(parsed); } catch {}
   } catch (e) { console.warn('handleScreenIce failed', e); }
@@ -1973,6 +2043,7 @@ async function handleScreenIce (data) {
 function handleScreenEnd (data) {
   if (data && Number(data.from_id) === _selfUid()) return;
   if (_voiceRoom && Number(data.call_id || 0) === 0) return _handleVoiceScreenEnd(data);
+  // The peer stopped sharing → drop the inbound screen PC + tile.
   _teardownScreen();
 }
 
@@ -2104,21 +2175,26 @@ function onNativeScreenShareError (msg) {
   }
 }
 
-function _renderRemoteScreen (stream) {
+function _renderRemoteScreen (stream, opts) {
+  const local = !!(opts && opts.local);
   const tile = document.getElementById('call-tile-screen');
   const sv = document.getElementById('screen-video');
   if (!tile || !sv) return;
   sv.srcObject = stream;
+  sv.muted = local;            // our own screen has no audio track; avoid any echo
   sv.style.display = '';
   tile.style.display = '';
-  _screenActive = true;
+  // _screenActive tracks a REMOTE screen; leave it false for our own preview so
+  // stopping our share correctly hides the tile (see _teardownScreenSend).
+  if (!local) _screenActive = true;
   try {
     const nm = document.getElementById('call-tile-screen-name');
-    if (nm) nm.textContent = '📺 ' + (_callPeerNick || 'Peer') + "'s screen";
+    if (nm) nm.textContent = local ? '📺 Your screen'
+      : '📺 ' + (_callPeerNick || 'Peer') + "'s screen";
   } catch {}
   // Switch the participants area into screen layout (CSS grid handles the rest).
   try { document.getElementById('call-participants')?.classList.add('has-screen'); } catch {}
-  _ensureMediaPlayback(sv, 'screen-share');
+  _ensureMediaPlayback(sv, local ? 'screen-share-self' : 'screen-share');
 }
 
 function _teardownScreen (opts) {
@@ -2235,21 +2311,15 @@ async function toggleScreenShare () {
   }
 
   // ── Desktop / browser getDisplayMedia path ───────────────────────────────
-  // Already sharing — stop and revert.
-  if (_screenStream) {
-    _screenStream.getTracks().forEach(t => t.stop());
-    _screenStream = null;
-    const videoSender = _pc.getSenders().find(s => s.track && s.track.kind === 'video');
-    const camTrack = _localStream?.getVideoTracks().find(t => t.readyState === 'live');
-    if (videoSender) {
-      if (camTrack) {
-        await videoSender.replaceTrack(camTrack);
-      } else {
-        // No camera to revert to — stop sending video entirely.
-        try { await videoSender.replaceTrack(null); } catch {}
-      }
-    }
+  // We share over a dedicated SEND-only PeerConnection (screen_* signalling)
+  // rather than swapping the camera on _pc, so the viewer gets a real screen
+  // tile and the share federates cross-node (keyed on global_call_id).
+  // Already sharing — stop and signal the peer to tear down.
+  if (_screenStream || _screenSendPc) {
+    _teardownScreenSend();
+    _sendCallSignal({ type: 'screen_end', ..._callPeerRoutingFields(), call_id: _callId || undefined });
     if (btn) btn.textContent = '🖥️';
+    _syncMiniScreenButton();
     toast('Screen share stopped', 'info');
     return;
   }
@@ -2257,10 +2327,10 @@ async function toggleScreenShare () {
     toast('Screen share is not supported on this device/browser', 'error');
     return;
   }
-  // Step 1 — capture the screen. Kept separate from the track-attach step so a
-  // capture failure (very common on Linux/Wayland when xdg-desktop-portal isn't
-  // wired) reports the REAL reason instead of a generic "failed". A genuine
-  // cancel (picker dismissed) surfaces as NotAllowedError/AbortError → silent.
+  // Step 1 — capture the screen. Kept separate from the offer step so a capture
+  // failure (very common on Linux/Wayland when xdg-desktop-portal isn't wired)
+  // reports the REAL reason instead of a generic "failed". A genuine cancel
+  // (picker dismissed) surfaces as NotAllowedError/AbortError → silent.
   let stream = null;
   try {
     stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
@@ -2272,27 +2342,85 @@ async function toggleScreenShare () {
     toast('Could not start screen share: ' + detail, 'error', 7000);
     return;
   }
-  // Step 2 — attach the captured track to the call (replace existing video, or
-  // add + renegotiate for a voice-only call).
+  // Step 2 — open the send PC, render our own screen locally, and offer.
   try {
     _screenStream = stream;
     const screenTrack = _screenStream.getVideoTracks()[0];
     if (!screenTrack) { toast('No screen video track was captured', 'error'); _screenStream = null; return; }
-    const videoSender = _pc.getSenders().find(s => s.track && s.track.kind === 'video');
-    if (videoSender) {
-      await videoSender.replaceTrack(screenTrack);
-    } else {
-      _pc.addTrack(screenTrack, _screenStream);
-      await _renegotiate();
-    }
+    screenTrack.onended = () => { if (_screenStream || _screenSendPc) toggleScreenShare().catch(() => {}); };
+    _renderRemoteScreen(_screenStream, { local: true });
+    await _startScreenSend(_screenStream);
     if (btn) btn.textContent = '⏹️';
+    _syncMiniScreenButton();
     toast('Sharing screen', 'info');
-    screenTrack.onended = () => { toggleScreenShare().catch(()=>{}); };
   } catch (e) {
-    console.warn('screen share attach failed:', e);
-    toast('Screen share failed to attach: ' + ((e && e.name) || (e && e.message) || 'error'), 'error', 7000);
+    console.warn('screen share start failed:', e);
+    toast('Screen share failed: ' + ((e && e.name) || (e && e.message) || 'error'), 'error', 7000);
+    _teardownScreenSend();
+  }
+}
+
+/** Open a SEND-only screen PeerConnection and offer it to the call peer over
+ *  the screen_* signalling channel (same relay native/group share use, so it
+ *  federates cross-node). The viewer answers on their _screenPc. */
+async function _startScreenSend (stream) {
+  const ice = await buildIceServers(_peerHomeServerId || '');
+  _screenSendPc = new RTCPeerConnection({ iceServers: ice });
+  _screenSendRemoteDescApplied = false;
+  _screenSendPendingIce.length = 0;
+  for (const t of stream.getVideoTracks()) _screenSendPc.addTrack(t, stream);
+  _screenSendPc.onicecandidate = e => {
+    if (!e.candidate) return;
+    _sendCallSignal({
+      type: 'screen_ice',
+      ..._callPeerRoutingFields(),
+      call_id: _callId || undefined,
+      candidate: JSON.stringify(e.candidate),
+    });
+  };
+  _screenSendPc.onconnectionstatechange = () => {
+    const s = _screenSendPc && _screenSendPc.connectionState;
+    if (s === 'failed' || s === 'closed') {
+      // Don't signal screen_end here — a transient failure shouldn't yank the
+      // viewer's tile; the sharer can re-press. Just drop our half.
+      _teardownScreenSend({ keepStream: true });
+    }
+  };
+  const offer = await _screenSendPc.createOffer();
+  await _screenSendPc.setLocalDescription(offer);
+  _sendCallSignal({
+    type: 'screen_offer',
+    ..._callPeerRoutingFields(),
+    call_id: _callId || undefined,
+    sdp: offer.sdp,
+  });
+}
+
+/** Tear down OUR outgoing screen share (send PC + capture + local tile). */
+function _teardownScreenSend (opts) {
+  try {
+    if (_screenSendPc) {
+      _screenSendPc.onicecandidate = null;
+      _screenSendPc.onconnectionstatechange = null;
+      try { _screenSendPc.close(); } catch {}
+      _screenSendPc = null;
+    }
+  } catch {}
+  _screenSendRemoteDescApplied = false;
+  _screenSendPendingIce.length = 0;
+  if (!opts || !opts.keepStream) {
     try { _screenStream && _screenStream.getTracks().forEach(t => t.stop()); } catch {}
     _screenStream = null;
+  }
+  // Hide our local screen preview only if a peer's screen isn't also showing.
+  if (!_screenActive) {
+    try {
+      const tile = document.getElementById('call-tile-screen');
+      const sv = document.getElementById('screen-video');
+      if (sv) { sv.srcObject = null; sv.style.display = 'none'; }
+      if (tile) tile.style.display = 'none';
+      document.getElementById('call-participants')?.classList.remove('has-screen');
+    } catch {}
   }
 }
 
@@ -2316,6 +2444,69 @@ function toggleCallSpeaker () {
     btn.classList.toggle('muted', _speakerMuted);
     btn.title = _speakerMuted ? 'Unmute speaker' : 'Mute speaker';
   }
+}
+
+/* ── Per-stream volume ──────────────────────────────────────────────────────
+ * The speaker button mutes; these sliders set a 0..100% level on the remote
+ * audio sink(s). data-user-volume survives _ensureMediaPlayback's autoplay
+ * keeper (which would otherwise reset volume to 1 on every track event). */
+let _dmRemoteVolume = 1;            // 0..1, the 1-on-1 remote's level
+
+/** Apply the DM remote level to both audio sinks (#remote-audio + #remote-video). */
+function _applyDmRemoteVolume () {
+  for (const id of ['remote-audio', 'remote-video']) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    try { el.volume = _dmRemoteVolume; el.dataset.userVolume = String(_dmRemoteVolume); } catch {}
+  }
+}
+
+/** Slider handler for the 1-on-1 remote volume (input value 0..100). */
+function setDmRemoteVolume (val) {
+  _dmRemoteVolume = Math.max(0, Math.min(1, Number(val) / 100));
+  _applyDmRemoteVolume();
+  const sl = document.getElementById('call-remote-volume');
+  if (sl && Number(sl.value) !== Math.round(_dmRemoteVolume * 100)) sl.value = Math.round(_dmRemoteVolume * 100);
+}
+
+/** The <audio>/<video> sink that the popout's volume slider controls, based on
+ *  which stream is currently popped out (DM remote vs a group peer). */
+function _popoutAudioEls () {
+  const k = _popoutPeerKey;
+  if (k === 'dm-remote' || k === 'dm-screen') {
+    return ['remote-audio', 'remote-video'].map(id => document.getElementById(id)).filter(Boolean);
+  }
+  if (k && k !== 'self' && k !== 'dm-local') {
+    const el = document.getElementById(`voice-audio-${k}`);
+    return el ? [el] : [];
+  }
+  return [];
+}
+
+/** Slider handler for the popout's per-stream volume (input value 0..100). */
+function setPopoutVolume (val) {
+  const v = Math.max(0, Math.min(1, Number(val) / 100));
+  const els = _popoutAudioEls();
+  els.forEach(el => { try { el.volume = v; el.dataset.userVolume = String(v); } catch {} });
+  // Persist so a track refresh / reconnect re-applies it.
+  const k = _popoutPeerKey;
+  if (k === 'dm-remote' || k === 'dm-screen') { _dmRemoteVolume = v; }
+  else if (k && k !== 'self' && k !== 'dm-local') { _voicePeerVolume.set(k, v); }
+}
+
+/** Sync the popout volume slider to the current target's level when opened. */
+function _syncPopoutVolume () {
+  const wrap = document.getElementById('call-popout-volume-wrap');
+  const sl = document.getElementById('call-popout-volume');
+  if (!wrap || !sl) return;
+  const els = _popoutAudioEls();
+  if (!els.length) { wrap.style.display = 'none'; return; }   // no audio (self / screen-only)
+  wrap.style.display = '';
+  const k = _popoutPeerKey;
+  let v = 1;
+  if (k === 'dm-remote' || k === 'dm-screen') v = _dmRemoteVolume;
+  else if (_voicePeerVolume.has(k)) v = _voicePeerVolume.get(k);
+  sl.value = Math.round(v * 100);
 }
 
 /* ── Track E Phase 2 — Safety Number panel ─────────────────────────────────
@@ -3035,6 +3226,10 @@ const _voiceScreenRx = new Map();
 let _popoutPeerKey = null;
 let _popoutDragBound = false;
 let _popoutPinching = false;
+// Aspect ratio (w/h) of the popped video, so resizing scales the box WITH the
+// video instead of letterboxing it. Updated from the stream's intrinsic size.
+let _popoutAspect = 16 / 9;
+const _POPOUT_HEADER_H = 38; // #call-popout-header height (keep in sync w/ CSS)
 
 /** Sync Android tray notification while connected to a room voice channel. */
 function _syncVoiceTrayNotification(statusText) {
@@ -3132,6 +3327,7 @@ function leaveVoiceChannel() {
   }
   _voicePeers.clear();
   _voicePeerMuted.clear();
+  _voicePeerVolume.clear();
 
   // Stop local stream
   if (_voiceStream) {
@@ -3204,6 +3400,7 @@ function toggleVoiceMute() {
  * Returns the Set of nicknames whose mic is currently muted in voice.
  */
 const _voicePeerMuted = new Map();  // user_id -> bool
+const _voicePeerVolume = new Map(); // peerKey -> 0..1 (per-participant volume)
 function getVoiceMutedNicks() {
   const nicks = new Set();
   if (_voiceRoom && _voiceMuted && State.user?.nickname) nicks.add(State.user.nickname);
@@ -3451,7 +3648,20 @@ function openVideoPopout(peerKey) {
   const nameEl = document.getElementById('call-popout-name');
   if (!pop || !vid) return;
   let stream, name, mirror = false;
-  if (peerKey === 'self') {
+  // DM (1-on-1 call) surfaces read straight off the call's <video> elements /
+  // streams; group surfaces read from the voice-mesh peer map.
+  const _dmStreamOf = id => { try { return document.getElementById(id)?.srcObject || null; } catch { return null; } };
+  if (peerKey === 'dm-screen') {
+    stream = _dmStreamOf('screen-video');
+    name = (_screenStream ? 'Your' : (_callPeerNick || 'Peer') + "'s") + ' screen';
+  } else if (peerKey === 'dm-remote') {
+    stream = _dmStreamOf('remote-video');
+    name = _callPeerNick || 'Peer';
+  } else if (peerKey === 'dm-local') {
+    stream = _localStream;
+    name = State.user?.nickname || 'You';
+    mirror = true;
+  } else if (peerKey === 'self') {
     stream = _voiceStream;
     name = (State.user?.nickname || 'You') + (_voiceScreenOn ? ' · screen' : '');
     mirror = _voiceCamOn && !_voiceScreenOn;
@@ -3469,13 +3679,47 @@ function openVideoPopout(peerKey) {
   vid.classList.toggle('mirror', mirror);
   if (nameEl) nameEl.textContent = name;
   pop.classList.remove('hidden');
+  _syncPopoutVolume();
   try { vid.play?.().catch(() => {}); } catch {}
+  // Lock the box to the video's aspect so resizing scales the video edge-to-
+  // edge (object-fit:contain otherwise just letterboxes). Seed from the track
+  // settings, then refine once metadata gives the real intrinsic size.
+  _popoutAspect = _streamAspect(stream) || _popoutAspect || (16 / 9);
+  _applyPopoutAspect(pop);
+  vid.onloadedmetadata = () => {
+    if (vid.videoWidth && vid.videoHeight) {
+      _popoutAspect = vid.videoWidth / vid.videoHeight;
+      _applyPopoutAspect(pop);
+    }
+  };
   if (!_popoutDragBound) {
     _bindPopoutDrag(pop);
     _bindPopoutResize(pop);
     _bindPopoutPinch(pop);
     _popoutDragBound = true;
   }
+}
+
+/** Best-effort aspect ratio (w/h) from a stream's first video track settings. */
+function _streamAspect (stream) {
+  try {
+    const t = stream && stream.getVideoTracks && stream.getVideoTracks()[0];
+    const s = t && t.getSettings && t.getSettings();
+    if (s && s.width && s.height) return s.width / s.height;
+  } catch {}
+  return 0;
+}
+
+/** Resize the popout's current box so the video area matches _popoutAspect
+ *  (keeping width, deriving height + the fixed header), clamped to viewport. */
+function _applyPopoutAspect (pop) {
+  if (!pop || _popoutPinching) return;
+  const r = pop.getBoundingClientRect();
+  const w = r.width || pop.offsetWidth || _POPOUT_MIN_W;
+  let h = Math.round(w / (_popoutAspect || (16 / 9))) + _POPOUT_HEADER_H;
+  const maxH = Math.max(_POPOUT_MIN_H, window.innerHeight - r.top - 6);
+  h = Math.max(_POPOUT_MIN_H, Math.min(maxH, h));
+  pop.style.height = h + 'px';
 }
 
 function closeVideoPopout() {
@@ -3551,10 +3795,17 @@ function _bindPopoutResize(pop) {
       lastX = 0, lastY = 0, resizing = false, rafId = 0;
   const apply = () => {
     rafId = 0;
+    const aspect = _popoutAspect || (16 / 9);
     const maxW = Math.max(_POPOUT_MIN_W, window.innerWidth - baseLeft - 6);
     const maxH = Math.max(_POPOUT_MIN_H, window.innerHeight - baseTop - 6);
-    const nw = Math.max(_POPOUT_MIN_W, Math.min(maxW, baseW + (lastX - startX)));
-    const nh = Math.max(_POPOUT_MIN_H, Math.min(maxH, baseH + (lastY - startY)));
+    // Aspect-locked: drive off whichever axis the user pulled further so the
+    // box (and the contained video) scales without letterboxing.
+    const wFromX = baseW + (lastX - startX);
+    const wFromY = ((baseH + (lastY - startY)) - _POPOUT_HEADER_H) * aspect;
+    let nw = Math.max(_POPOUT_MIN_W, Math.min(maxW, Math.max(wFromX, wFromY)));
+    let nh = (nw / aspect) + _POPOUT_HEADER_H;
+    if (nh > maxH) { nh = maxH; nw = Math.max(_POPOUT_MIN_W, Math.min(maxW, (nh - _POPOUT_HEADER_H) * aspect)); }
+    nh = Math.max(_POPOUT_MIN_H, nh);
     pop.style.width = nw + 'px';
     pop.style.height = nh + 'px';
   };
@@ -3592,10 +3843,16 @@ function _bindPopoutPinch(pop) {
     rafId = 0;
     if (!baseDist) return;
     const scale = curDist / baseDist;
+    const aspect = _popoutAspect || (16 / 9);
     const maxW = Math.max(_POPOUT_MIN_W, window.innerWidth - baseLeft - 6);
     const maxH = Math.max(_POPOUT_MIN_H, window.innerHeight - baseTop - 6);
-    pop.style.width = Math.max(_POPOUT_MIN_W, Math.min(maxW, baseW * scale)) + 'px';
-    pop.style.height = Math.max(_POPOUT_MIN_H, Math.min(maxH, baseH * scale)) + 'px';
+    // Aspect-locked pinch: scale width, derive height so the video fills.
+    let nw = Math.max(_POPOUT_MIN_W, Math.min(maxW, baseW * scale));
+    let nh = (nw / aspect) + _POPOUT_HEADER_H;
+    if (nh > maxH) { nh = maxH; nw = Math.max(_POPOUT_MIN_W, Math.min(maxW, (nh - _POPOUT_HEADER_H) * aspect)); }
+    nh = Math.max(_POPOUT_MIN_H, nh);
+    pop.style.width = nw + 'px';
+    pop.style.height = nh + 'px';
   };
   pop.addEventListener('touchstart', (e) => {
     if (e.touches.length !== 2) return;
@@ -3641,6 +3898,10 @@ function _bindVoicePeerRemoteTrack(peerKey, e) {
   audio.srcObject = stream;
   audio.muted = !!peer.muted;
   try { audio.dataset.userMuted = peer.muted ? '1' : '0'; } catch {}
+  if (_voicePeerVolume.has(peerKey)) {
+    const v = _voicePeerVolume.get(peerKey);
+    try { audio.volume = v; audio.dataset.userVolume = String(v); } catch {}
+  }
   _ensureMediaPlayback(audio, `voice-${peerKey}`);
   _updateVoiceBarParticipants();
 }

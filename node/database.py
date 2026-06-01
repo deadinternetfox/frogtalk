@@ -15017,8 +15017,19 @@ def upsert_federation_user_profile(
                 status_msg=excluded.status_msg,
                 mood=excluded.mood,
                 presence=excluded.presence,
-                custom_style=excluded.custom_style,
-                banner=excluded.banner,
+                -- Background fields (custom CSS + banner image) ride only the
+                -- profile event's `extra` channel, so presence/other events omit
+                -- them. Preserve the existing value on an empty incoming one,
+                -- like last_seen — otherwise every presence change wiped a
+                -- federated user's background cross-node.
+                custom_style=CASE
+                    WHEN excluded.custom_style IS NULL OR excluded.custom_style = ''
+                        THEN federation_user_profiles.custom_style
+                    ELSE excluded.custom_style END,
+                banner=CASE
+                    WHEN excluded.banner IS NULL OR excluded.banner = ''
+                        THEN federation_user_profiles.banner
+                    ELSE excluded.banner END,
                 last_seen=CASE
                     WHEN excluded.last_seen IS NULL OR excluded.last_seen = '' THEN federation_user_profiles.last_seen
                     WHEN federation_user_profiles.last_seen IS NULL OR federation_user_profiles.last_seen = '' THEN excluded.last_seen

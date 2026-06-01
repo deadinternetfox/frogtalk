@@ -798,6 +798,14 @@ const WS = (() => {
         // Notification is now fired from handleWSDMMessage with decrypted content
         break;
       }
+      case 'dm_message_edited': {
+        if (typeof handleWSDMEdited === 'function') handleWSDMEdited(data);
+        break;
+      }
+      case 'dm_message_deleted': {
+        if (typeof handleWSDMDeleted === 'function') handleWSDMDeleted(data);
+        break;
+      }
       case 'dm_typing': {
         if (typeof handleWSDMTyping === 'function') handleWSDMTyping(data);
         break;
