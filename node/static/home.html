@@ -103,7 +103,7 @@
 }
 </script>
 
-  <link rel="stylesheet" href="/static/css/home.css?v=8">
+  <link rel="stylesheet" href="/static/css/home.css?v=9">
 </head>
 <body class="home-node-main">
 
@@ -403,131 +403,91 @@
 
 <!-- FEATURES -->
 <section class="section" id="features">
-  <div class="section-title">Everything You Need — Owned By No One</div>
-  <div class="section-sub">Chat, calls, social, Reels, a Frog Channel imageboard and shared music in one app — running on servers <strong>no company controls</strong>. Here's what sets FrogTalk apart from the Discord clones.</div>
-  <div class="diff-strip">
-    <div class="diff-card">
-      <div class="diff-icon">🪷</div>
+  <div class="section-title">One app. No landlord.</div>
+  <div class="section-sub">Everything you'd reach for — chat, calls, communities, a board, music — on servers that belong to whoever runs them. Not a company. Not us.</div>
+
+  <!-- Bento: what actually makes FrogTalk different -->
+  <div class="bento">
+    <article class="bento-tile bento-hero">
+      <span class="bento-kicker">🪷 What makes it different</span>
       <h3>You can run the whole thing</h3>
-      <p>FrogTalk federates across independent <strong>Lilypads</strong> — nodes anyone can host. No central server, no owner that can read, sell, or switch you off. Grow your own with one command: <code>docker compose up -d</code>.</p>
+      <p>FrogTalk federates across independent <strong>Lilypads</strong> — nodes anyone can host. No central server, no owner who can read your messages, sell your data, or switch you off. Spin up your own pond in one command.</p>
+      <code class="bento-cmd">docker compose up -d</code>
+    </article>
+    <article class="bento-tile">
+      <span class="bento-ico">🔒</span>
+      <h3>Signal-grade E2E, by default</h3>
+      <p>X3DH + Double Ratchet DMs and per-room AES-256-GCM with key rotation. The server only ever holds ciphertext — never a premium toggle.</p>
+    </article>
+    <article class="bento-tile">
+      <span class="bento-ico">📞</span>
+      <h3>Calls that cross servers</h3>
+      <p>Ring a friend on another Lilypad and it just works. Share screen <em>and</em> camera at once, pop the video out, set each person's volume.</p>
+    </article>
+    <article class="bento-tile bento-tor">
+      <span class="bento-ico">🧅</span>
+      <h3>Clearnet or Tor</h3>
+      <p>Reach any node over a v3 <code>.onion</code> — calls, boards and federation included. No ads, no trackers, no analytics SDKs.</p>
+    </article>
+  </div>
+
+  <!-- Straight comparison -->
+  <div class="vs-card">
+    <div class="vs-col vs-them">
+      <div class="vs-h">A typical Discord clone</div>
+      <ul>
+        <li>One company owns every server</li>
+        <li>Your DMs sit readable in their database</li>
+        <li>Account is locked to their domain</li>
+        <li>Ads, telemetry and content scanning</li>
+      </ul>
     </div>
-    <div class="diff-card">
-      <div class="diff-icon">🔒</div>
-      <h3>Signal-grade E2E, on by default</h3>
-      <p>DMs use the Signal Protocol (X3DH + Double Ratchet); private rooms use per-room AES-256-GCM with automatic key rotation. The server only ever holds ciphertext — not a premium toggle, not an afterthought.</p>
-    </div>
-    <div class="diff-card">
-      <div class="diff-icon">📞</div>
-      <h3>Calls &amp; screen-share that cross servers</h3>
-      <p>Ring a friend on a different Lilypad and it just works. Share your screen <strong>and</strong> camera at once, pop the video out and resize it, and set each person's volume — federated WebRTC, not a single-server gimmick.</p>
-    </div>
-    <div class="diff-card">
-      <div class="diff-icon">🧅</div>
-      <h3>For the open web and Tor alike</h3>
-      <p>Reach any Lilypad over clearnet or a v3 <code>.onion</code> — calls, boards and federation included. Zero ads, zero trackers, zero analytics SDKs. Privacy is the default here, not the upsell.</p>
+    <div class="vs-col vs-us">
+      <div class="vs-h">FrogTalk</div>
+      <ul>
+        <li>Anyone runs a Lilypad — yours is yours</li>
+        <li>E2E by default; the server sees ciphertext</li>
+        <li>Travel between nodes, keep your identity</li>
+        <li>Zero ads, zero trackers, fully open source</li>
+      </ul>
     </div>
   </div>
-  <div class="diff-more">…and all the everyday stuff you'd expect, done right:</div>
-  <div class="features-grid">
-    <div class="feature-card">
-      <div class="feature-icon">🔒</div>
-      <h3>End-to-End Encrypted DMs &amp; Rooms</h3>
-      <p>DMs are encrypted client-side with the Signal Protocol (X3DH + Double Ratchet). Private channels use a per-room AES-256-GCM key derived from a shared secret, with AAD-bound ciphertext and automatic key rotation when a member is removed — the server only ever sees ciphertext.</p>
+
+  <!-- Everything else, dense + grouped (no 20-card wall) -->
+  <div class="cap-head">…and every everyday feature you'd expect, done right:</div>
+  <div class="cap-grid">
+    <div class="cap-group">
+      <h4>💬 Talk</h4>
+      <ul class="cap-list">
+        <li>Encrypted DMs &amp; group rooms</li>
+        <li>1:1 &amp; group voice / video calls</li>
+        <li>Screen share alongside camera</li>
+        <li>Voice messages with waveforms</li>
+        <li>Disappearing messages</li>
+        <li>Reactions &amp; quote-replies</li>
+      </ul>
     </div>
-    <div class="feature-card">
-      <div class="feature-icon">🌐</div>
-      <h3>Frog Social</h3>
-      <p>A full social feed inside the app — post updates with images, tag friends, follow &amp; block, explore trending posts and channels.</p>
+    <div class="cap-group">
+      <h4>🌐 Share &amp; discover</h4>
+      <ul class="cap-list">
+        <li>Frog Social feed</li>
+        <li>Reels — vertical short video</li>
+        <li>24-hour Stories</li>
+        <li>Frog Channel imageboard</li>
+        <li>Watch &amp; listen together</li>
+        <li>Browsable channel directory</li>
+      </ul>
     </div>
-    <div class="feature-card">
-      <div class="feature-icon">🎞️</div>
-      <h3>Reels</h3>
-      <p>Swipe vertical short videos with hot/new/top sorting, fast autoplay, reactions, reposts, and instant comment threads.</p>
-    </div>
-    <div class="feature-card">
-      <div class="feature-icon">📸</div>
-      <h3>Stories</h3>
-      <p>Share 24-hour stories with your friends or a public audience. Filters, privacy controls, and a built-in camera.</p>
-    </div>
-    <div class="feature-card">
-      <div class="feature-icon">🖼️</div>
-      <h3>Frog Channel Imageboard</h3>
-      <p>Anonymous 4chan-style board with threaded replies, post likes, greentext, image/video/audio uploads, live board chat, and moderator approval tools.</p>
-    </div>
-    <div class="feature-card">
-      <div class="feature-icon">🎬</div>
-      <h3>Watch &amp; Listen Together</h3>
-      <p>Dedicated media channel with a persistent "Now Playing" bar. Watch YouTube, queue Spotify &amp; SoundCloud, and listen together in sync.</p>
-    </div>
-    <div class="feature-card">
-      <div class="feature-icon">🔁</div>
-      <h3>Discord &amp; Telegram Bridges</h3>
-      <p>Link a FrogTalk channel to Discord or Telegram. Messages, photos, videos, voice notes and stickers sync both ways in real time.</p>
-    </div>
-    <div class="feature-card">
-      <div class="feature-icon">🧳</div>
-      <h3>Cross-Node Account Sync</h3>
-      <p>Visit another Lilypad and re-sync from home — channel settings, DM prefs, friends, profile themes, client prefs, and FrogSocial posts import with Ed25519-signed exports.</p>
-    </div>
-    <div class="feature-card">
-      <div class="feature-icon">📞</div>
-      <h3>Federated DM Calls</h3>
-      <p>Voice and video calls ring across federation when travelers are connected to your Lilypad — home-server signaling with optional TURN for NAT traversal.</p>
-    </div>
-    <div class="feature-card">
-      <div class="feature-icon">🔞</div>
-      <h3>18+ Channel Labels</h3>
-      <p>Moderators mark public channels with voluntary content categories. Visitors confirm age before history loads — session-scoped, not automated scanning.</p>
-    </div>
-    <div class="feature-card">
-      <div class="feature-icon">📞</div>
-      <h3>Voice &amp; Video Calls</h3>
-      <p>1:1 and group calls over WebRTC P2P. Switch camera, share your screen, or go audio-only mid-call.</p>
-    </div>
-    <div class="feature-card">
-      <div class="feature-icon">🎙️</div>
-      <h3>Voice Messages</h3>
-      <p>Hold to record, release to send. Waveform playback, Telegram-style voice notes that stick around.</p>
-    </div>
-    <div class="feature-card">
-      <div class="feature-icon">🏠</div>
-      <h3>Channels &amp; Directory</h3>
-      <p>Public &amp; private text/voice channels, channel images, pinned messages, roles, and a browsable directory.</p>
-    </div>
-    <div class="feature-card">
-      <div class="feature-icon">👥</div>
-      <h3>Friends &amp; Presence</h3>
-      <p>Add friends, see who's online, set a custom status. Real-time presence and typing indicators across the app.</p>
-    </div>
-    <div class="feature-card">
-      <div class="feature-icon">📎</div>
-      <h3>Rich Media</h3>
-      <p>Images, videos, audio, files, GIFs, link previews, and an image lightbox — all inline, all fast.</p>
-    </div>
-    <div class="feature-card">
-      <div class="feature-icon">😄</div>
-      <h3>Reactions &amp; Replies</h3>
-      <p>React with any emoji and quote-reply to any message to keep threads readable.</p>
-    </div>
-    <div class="feature-card">
-      <div class="feature-icon">💨</div>
-      <h3>Disappearing Messages</h3>
-      <p>Auto-delete DMs after 1 hour, 24 hours, 7 days or 30 days. Messages vanish on their own.</p>
-    </div>
-    <div class="feature-card">
-      <div class="feature-icon">🎨</div>
-      <h3>Custom Themes</h3>
-      <p>Pick from Cyberpunk, Ocean, Sakura, Retrowave and more — live preview before you switch.</p>
-    </div>
-    <div class="feature-card">
-      <div class="feature-icon">🔔</div>
-      <h3>Real-time Notifications</h3>
-      <p>Instant WebSocket delivery. Browser &amp; mobile push for DMs, mentions, friend requests and posts you're tagged in.</p>
-    </div>
-    <div class="feature-card">
-      <div class="feature-icon">🖥️</div>
-      <h3>Web, Android &amp; Desktop</h3>
-      <p>Pre-alpha PWA web app, Android APK, Windows portable, and Linux AppImage / .deb. Your account works everywhere — builds are for testing only.</p>
+    <div class="cap-group">
+      <h4>🌉 Connect &amp; make it yours</h4>
+      <ul class="cap-list">
+        <li>Discord &amp; Telegram bridges</li>
+        <li>Cross-node account sync</li>
+        <li>Friends, presence &amp; typing</li>
+        <li>Custom themes &amp; profiles</li>
+        <li>Real-time push notifications</li>
+        <li>Web · Android · Desktop</li>
+      </ul>
     </div>
   </div>
 </section>

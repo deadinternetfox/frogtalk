@@ -209,57 +209,87 @@
   .feature-card h3 { font-size: 1.1rem; font-weight: 600; margin-bottom: .5rem; }
   .feature-card p { color: var(--text-muted); font-size: .9rem; line-height: 1.6; }
 
-  /* ── "What makes us different" differentiator strip ─────────────────
-     Bold, accented cards that lead the features section so the unique
-     stuff (own-your-node, Signal E2E, cross-server calls, Tor) reads
-     first — distinct from the plainer feature grid below. */
-  .diff-strip {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));
-    gap: 1.25rem;
-    max-width: 1100px; margin: 0 auto 2.25rem;
+  /* ── Features: bento differentiators + vs-card + capability groups ──
+     A fresh, non-listy layout: a few accented "what makes us different"
+     tiles, a straight comparison card, then dense grouped capability
+     columns instead of a wall of identical feature cards. */
+  .bento {
+    display: grid; grid-template-columns: repeat(2, 1fr);
+    gap: 1.1rem; max-width: 1100px; margin: 0 auto 1.6rem;
   }
-  .diff-card {
-    position: relative;
-    background:
-      radial-gradient(120% 140% at 0% 0%, rgba(74,222,128,.12), transparent 60%),
-      var(--bg2);
-    border: 1px solid rgba(74,222,128,.28);
-    border-radius: 14px;
-    padding: 1.6rem 1.5rem;
-    overflow: hidden;
+  .bento-tile {
+    position: relative; background: var(--bg2);
+    border: 1px solid var(--border); border-radius: 16px;
+    padding: 1.5rem 1.5rem 1.6rem; overflow: hidden;
     transition: border-color .2s, transform .2s, box-shadow .2s;
   }
-  .diff-card::before {
-    content: "";
-    position: absolute; inset: 0 0 auto 0; height: 3px;
-    background: linear-gradient(90deg, var(--green), var(--green-dark));
-    opacity: .9;
+  .bento-tile:hover {
+    border-color: rgba(74,222,128,.45); transform: translateY(-3px);
+    box-shadow: 0 16px 40px rgba(0,0,0,.35);
   }
-  .diff-card:hover {
-    border-color: rgba(74,222,128,.6);
-    transform: translateY(-3px);
-    box-shadow: 0 14px 36px rgba(0,0,0,.35), 0 0 0 1px rgba(74,222,128,.18);
+  .bento-hero {
+    grid-column: 1 / -1;
+    background: radial-gradient(130% 170% at 0% 0%, rgba(74,222,128,.16), transparent 55%), var(--bg2);
+    border-color: rgba(74,222,128,.35);
   }
-  .diff-icon { font-size: 2.1rem; margin-bottom: .85rem; line-height: 1; }
-  .diff-card h3 {
-    font-size: 1.18rem; font-weight: 700; margin-bottom: .55rem;
-    background: linear-gradient(135deg, #e6edf3 35%, var(--green) 120%);
-    -webkit-background-clip: text; background-clip: text;
-    -webkit-text-fill-color: transparent;
+  .bento-tor {
+    background: radial-gradient(130% 170% at 100% 0%, rgba(140,120,220,.16), transparent 55%), var(--bg2);
   }
-  .diff-card p { color: var(--text-muted); font-size: .92rem; line-height: 1.6; }
-  .diff-card code {
+  .bento-kicker {
+    display: inline-block; font-size: .72rem; font-weight: 700;
+    letter-spacing: .08em; text-transform: uppercase; color: var(--green);
+    background: rgba(74,222,128,.1); border: 1px solid rgba(74,222,128,.25);
+    padding: .25rem .6rem; border-radius: 999px; margin-bottom: .9rem;
+  }
+  .bento-ico { font-size: 1.9rem; display: block; margin-bottom: .7rem; line-height: 1; }
+  .bento-tile h3 { font-size: 1.15rem; font-weight: 700; margin-bottom: .5rem; }
+  .bento-hero h3 { font-size: clamp(1.4rem, 3vw, 1.7rem); }
+  .bento-tile p { color: var(--text-muted); font-size: .92rem; line-height: 1.6; }
+  .bento-tile code {
     background: #06100a; border: 1px solid #16291d; border-radius: 6px;
     padding: 1px 6px; color: var(--green); font-size: .85em;
   }
-  .diff-more {
-    text-align: center; color: var(--text-muted);
-    font-size: .92rem; margin: 0 auto 1.6rem; max-width: 640px;
+  .bento-cmd {
+    display: inline-block; margin-top: 1rem; background: #06100a;
+    border: 1px solid #16291d; border-radius: 8px; padding: .5rem .8rem;
+    color: var(--green); font-size: .9rem;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   }
-  @media (prefers-reduced-motion: reduce) {
-    .diff-card:hover { transform: none; }
+  .vs-card {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 0;
+    max-width: 1100px; margin: 0 auto 2.5rem; border-radius: 16px;
+    overflow: hidden; border: 1px solid var(--border);
   }
+  .vs-col { padding: 1.4rem 1.5rem; }
+  .vs-them { background: rgba(255,255,255,.02); }
+  .vs-us {
+    background: linear-gradient(180deg, rgba(74,222,128,.1), rgba(74,222,128,.04));
+    border-left: 1px solid rgba(74,222,128,.25);
+  }
+  .vs-h { font-weight: 700; font-size: .95rem; margin-bottom: .8rem; }
+  .vs-them .vs-h { color: var(--text-muted); }
+  .vs-us .vs-h { color: var(--green); }
+  .vs-col ul { list-style: none; margin: 0; padding: 0; display: grid; gap: .55rem; }
+  .vs-col li { font-size: .9rem; line-height: 1.4; padding-left: 1.4rem; position: relative; color: var(--text-muted); }
+  .vs-them li::before { content: "✕"; position: absolute; left: 0; color: #e06b6b; font-weight: 700; }
+  .vs-us li { color: #d6e6da; }
+  .vs-us li::before { content: "✓"; position: absolute; left: 0; color: var(--green); font-weight: 700; }
+  .cap-head { text-align: center; color: var(--text-muted); font-size: .95rem; margin: 0 auto 1.6rem; }
+  .cap-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+    gap: 1.25rem; max-width: 1100px; margin: 0 auto;
+  }
+  .cap-group { background: var(--bg2); border: 1px solid var(--border); border-radius: 14px; padding: 1.4rem 1.5rem; }
+  .cap-group h4 { font-size: 1.02rem; font-weight: 700; margin-bottom: .85rem; color: var(--text); }
+  .cap-list { list-style: none; margin: 0; padding: 0; display: grid; gap: .5rem; }
+  .cap-list li { font-size: .9rem; color: var(--text-muted); line-height: 1.45; padding-left: 1.25rem; position: relative; }
+  .cap-list li::before { content: "\203A"; position: absolute; left: 0; color: var(--green); font-weight: 700; }
+  @media (max-width: 720px) {
+    .bento { grid-template-columns: 1fr; }
+    .vs-card { grid-template-columns: 1fr; }
+    .vs-us { border-left: 0; border-top: 1px solid rgba(74,222,128,.25); }
+  }
+  @media (prefers-reduced-motion: reduce) { .bento-tile:hover { transform: none; } }
 
   .federation-spotlight {
     max-width: 1100px;
