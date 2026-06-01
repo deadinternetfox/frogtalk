@@ -1440,14 +1440,22 @@ const App = {
 
     document.getElementById('auth-overlay').classList.add('hidden');
     document.getElementById('app').classList.remove('hidden');
-    // Tell the native shell which node we're actually on. The native screen-share
-    // service builds its signaling WS from this base; it was previously only set
-    // via the network picker, so a normal user never set it → native screen-share
-    // aborted (bad_request) before sending any offer. Sync it every launch so it
-    // tracks the current node (incl. travel/federation).
+    // Tell the ANDROID native shell which node we're on, so its native
+    // screen-share service can build the signaling WS base (it otherwise only
+    // got set via the network picker → native screen-share aborted before
+    // sending any offer). ONLY when it differs from what's stored, because
+    // setServerBaseUrl reloads the app — calling it unconditionally every
+    // launch created an infinite reload loop (most visibly on the Electron
+    // desktop shell, whose handler always reloads). Desktop is excluded: it
+    // uses getDisplayMedia for screen-share and never needs this.
     try {
-      if ((window.Android || window.desktopApp) && typeof _syncNativeServerUrl === 'function') {
-        _syncNativeServerUrl(window.location.origin);
+      if (window.Android && typeof _syncNativeServerUrl === 'function') {
+        const _cur = window.location.origin;
+        let _stored = '';
+        try { _stored = (typeof window.Android.getServerBaseUrl === 'function') ? (window.Android.getServerBaseUrl() || '') : ''; } catch {}
+        if (typeof _normalizeNetworkUrl !== 'function' || _normalizeNetworkUrl(_stored) !== _normalizeNetworkUrl(_cur)) {
+          _syncNativeServerUrl(_cur);
+        }
       }
     } catch {}
     try { window.__ftApplyMiniBoardGuestMode && window.__ftApplyMiniBoardGuestMode(); } catch {}
