@@ -1440,6 +1440,16 @@ const App = {
 
     document.getElementById('auth-overlay').classList.add('hidden');
     document.getElementById('app').classList.remove('hidden');
+    // Tell the native shell which node we're actually on. The native screen-share
+    // service builds its signaling WS from this base; it was previously only set
+    // via the network picker, so a normal user never set it → native screen-share
+    // aborted (bad_request) before sending any offer. Sync it every launch so it
+    // tracks the current node (incl. travel/federation).
+    try {
+      if ((window.Android || window.desktopApp) && typeof _syncNativeServerUrl === 'function') {
+        _syncNativeServerUrl(window.location.origin);
+      }
+    } catch {}
     try { window.__ftApplyMiniBoardGuestMode && window.__ftApplyMiniBoardGuestMode(); } catch {}
     // Skeleton chrome before profile/Signal awaits — members panel must not wait
     // until the bottom of launch() while channel sidebars already shimmer.
