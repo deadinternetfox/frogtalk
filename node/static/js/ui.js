@@ -1207,6 +1207,10 @@ const UI = (() => {
     const icon         = opts.icon != null ? String(opts.icon) : '';
     const primaryLabel = String(opts.primaryLabel || 'OK');
     const actionLabel  = opts.actionLabel != null ? String(opts.actionLabel) : '';
+    // Optional "don't show again" checkbox. When set, the promise resolves with
+    // an object { action, dontShowAgain } instead of the bare action string, so
+    // existing callers (no checkboxLabel) keep their string contract.
+    const checkboxLabel = opts.checkboxLabel != null ? String(opts.checkboxLabel) : '';
     // Inject one-shot stylesheet for notice animations + the inline
     // "Learn more" link styling. Idempotent.
     if (!document.getElementById('ui-notice-style')) {
@@ -1247,6 +1251,9 @@ const UI = (() => {
       const linkHtml = actionLabel
         ? `<div style="display:flex;justify-content:center;margin-top:10px"><button type="button" class="ui-notice-link" data-act="action">${escHtml(actionLabel)}</button></div>`
         : '';
+      const checkboxHtml = checkboxLabel
+        ? `<label class="ui-notice-check" style="display:flex;align-items:center;gap:9px;margin-top:18px;cursor:pointer;font-size:13px;color:var(--text-color,#cfcfcf);opacity:.92;user-select:none"><input type="checkbox" data-role="dont-show" style="width:17px;height:17px;cursor:pointer;accent-color:var(--accent-color,#4caf50);flex:0 0 auto"><span>${escHtml(checkboxLabel)}</span></label>`
+        : '';
       overlay.innerHTML =
         '<div class="modal-box ui-notice-box" role="dialog" aria-modal="true" ' +
         'style="max-width:min(440px,94vw);padding:22px 22px 18px;' +
@@ -1258,6 +1265,7 @@ const UI = (() => {
         'color:var(--text-color,#e8e8e8)">' +
           titleHtml +
           `<div style="font-size:14px;line-height:1.55;color:var(--text-color,#d6d6d6);white-space:pre-wrap;opacity:.95">${escHtml(message)}</div>` +
+          checkboxHtml +
           '<div style="margin-top:20px">' +
             `<button type="button" class="modal-btn primary ui-notice-primary" data-act="ok" style="display:block;width:100%;padding:12px 16px;font-weight:600;font-size:15px;border-radius:10px">${escHtml(primaryLabel)}</button>` +
           '</div>' +
@@ -1267,11 +1275,16 @@ const UI = (() => {
       const cleanup = (val) => {
         if (done) return; done = true;
         document.removeEventListener('keydown', onKey, true);
+        let result = val;
+        if (checkboxLabel) {
+          const cb = overlay.querySelector('[data-role="dont-show"]');
+          result = { action: val, dontShowAgain: !!(cb && cb.checked) };
+        }
         try {
           overlay.classList.add('ui-notice-closing');
           setTimeout(() => { try { overlay.remove(); } catch {} }, 150);
         } catch { try { overlay.remove(); } catch {} }
-        resolve(val);
+        resolve(result);
       };
       const onKey = (ev) => {
         if (ev.key === 'Escape')     { ev.preventDefault(); cleanup('dismiss'); }

@@ -1613,16 +1613,46 @@ async def server_admin_sync_official_directory(request: Request):
     if auth:
         return auth
 
+    # 1) Official server-directory hub (best-effort). A dead/misconfigured hub
+    #    must NOT block the room-directory refresh below — it only feeds the
+    #    federation *server* list, not the public *room* list.
     result = await federation_router.sync_official_directory_once()
-    if result.get("ok"):
+    official_ok = bool(result.get("ok"))
+    official_error = "" if official_ok else str(result.get("error") or "")
+    if official_ok:
         _pol = db.get_federation_policy_settings()
         if _pol.get("block_tor_peers"):
             result["tor_peers_disabled"] = federation_router.apply_tor_peer_blocks_if_enabled()
         if _pol.get("block_http_only_peers"):
             result["http_peers_disabled"] = federation_router.apply_http_only_peer_blocks_if_enabled()
-    if not result.get("ok"):
-        return JSONResponse(status_code=400, content=result)
-    return result
+
+    # 2) Pull every enabled peer's public channels into our directory index.
+    #    THIS is what actually populates the channel directory with peers'
+    #    rooms, so run it unconditionally — even when the official hub is down.
+    try:
+        ch = await federation_router.sync_peer_channels_once()
+    except Exception as e:  # pragma: no cover - defensive
+        import logging
+        logging.getLogger("frogtalk").exception(
+            "sync_peer_channels_once failed during admin sync"
+        )
+        ch = {"ok": False, "peers": 0, "imported": 0, "errors": 1, "error": str(e)}
+
+    return {
+        # The action ran; partial sub-failures are reported as fields, not a 400,
+        # so the operator still sees how many peer rooms were refreshed.
+        "ok": True,
+        "imported": int(result.get("imported") or 0),
+        "skipped": int(result.get("skipped") or 0),
+        "duplicates_pruned": result.get("duplicates_pruned"),
+        "tor_peers_disabled": result.get("tor_peers_disabled", 0),
+        "http_peers_disabled": result.get("http_peers_disabled", 0),
+        "official_ok": official_ok,
+        "official_error": official_error,
+        "channels_imported": int(ch.get("imported") or 0),
+        "channel_peers": int(ch.get("peers") or 0),
+        "channel_errors": int(ch.get("errors") or 0),
+    }
 
 
 @router.post("/api/server-admin/control/kick")

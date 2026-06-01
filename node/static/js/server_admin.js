@@ -2272,7 +2272,16 @@
       setActionMessage('Enter a target nickname first.', true);
       return;
     }
-    setActionMessage('Running action...');
+    // Give the Sync button real busy feedback (it can take several seconds while
+    // peers are polled), and restore it no matter how the request resolves.
+    const syncBtn = action === 'sync' ? document.getElementById('sync-dir-btn') : null;
+    const syncLabel = syncBtn ? syncBtn.textContent : '';
+    if (syncBtn) {
+      syncBtn.disabled = true;
+      syncBtn.classList.add('is-busy');
+      syncBtn.textContent = 'Syncing…';
+    }
+    setActionMessage(action === 'sync' ? 'Syncing directory… pulling peer channels.' : 'Running action...');
     try {
       const path = action === 'sync'
         ? '/api/server-admin/control/sync-official-directory'
@@ -2282,16 +2291,31 @@
         body: action === 'sync' ? undefined : JSON.stringify(body),
       });
       if (action === 'sync') {
-        const parts = [`imported ${data.imported}`, `skipped ${data.skipped}`];
-        if (data.duplicates_pruned != null) parts.push(`pruned ${data.duplicates_pruned} dupes`);
+        // The room directory is populated by the peer-channel pull; lead with it.
+        const parts = [`${data.channels_imported || 0} rooms from ${data.channel_peers || 0} peer(s)`];
+        if (data.imported) parts.push(`${data.imported} servers`);
+        if (data.duplicates_pruned) parts.push(`pruned ${data.duplicates_pruned} dupes`);
         if (data.tor_peers_disabled > 0) parts.push(`Tor blocked ${data.tor_peers_disabled}`);
-        setActionMessage(`Directory sync OK — ${parts.join(', ')}.`);
+        let msg = `Directory synced — ${parts.join(', ')}.`;
+        // Surface a soft note when the official server-directory hub is down — it
+        // no longer blocks the room refresh, but the operator should know.
+        if (data.official_error && data.official_error !== 'directory_url_not_set') {
+          msg += ` (official directory hub unavailable: ${data.official_error})`;
+        }
+        if (data.channel_errors > 0) msg += ` ${data.channel_errors} peer(s) unreachable.`;
+        setActionMessage(msg, data.channel_peers === 0);
       } else {
         setActionMessage(`${action} completed successfully.`);
       }
       await refreshDashboard();
     } catch (e) {
       setActionMessage(e.message, true);
+    } finally {
+      if (syncBtn) {
+        syncBtn.disabled = false;
+        syncBtn.classList.remove('is-busy');
+        syncBtn.textContent = syncLabel || 'Sync Official Directory';
+      }
     }
   }
 
