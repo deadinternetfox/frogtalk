@@ -41,7 +41,9 @@
          don't have — using it crashes the app when the service tries to start. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
+    <!-- No FOREGROUND_SERVICE_CAMERA: the camera streams only in the foreground
+         (WebView), never as a background camera stream, so declaring it violates
+         Play's foreground-service policy. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
 
@@ -83,7 +85,7 @@
 
         <service
             android:name=".CallService"
-            android:foregroundServiceType="microphone|camera|mediaProjection"
+            android:foregroundServiceType="microphone"
             android:exported="false" />
 
         <service
