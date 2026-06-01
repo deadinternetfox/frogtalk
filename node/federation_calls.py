@@ -616,6 +616,47 @@ def enqueue_call_ice(
     return _enqueue("call.ice", payload, targets)
 
 
+def _screen_signal_targets(recipient_gid: str) -> list[str]:
+    """Federation destinations for a screen_* signal.
+
+    Like ``call_signal_target_servers`` but WITHOUT the "recipient has a local
+    WS session → return []" short-circuit. A screen-share viewer can be watching
+    on another node while still holding a (stale, or second-device) session on
+    this node — so 1:1-call-style local-only delivery silently strands the share.
+    We therefore always also target the recipient's KNOWN remote nodes (push
+    targets + profile origin + account home). No blind all-peer fanout, so a
+    purely-local share (no remote presence) returns [] and never federates.
+    """
+    gid = str(recipient_gid or "").strip()
+    if not gid:
+        return []
+    ident = db.get_or_create_local_server_identity() or {}
+    local_sid = str(ident.get("server_id") or "").strip()
+    targets: set[str] = set()
+    try:
+        for sid in db.resolve_federation_push_targets_for_recipient_gids([gid]):
+            sid = str(sid or "").strip()
+            if sid and sid != local_sid:
+                targets.add(sid)
+    except Exception:
+        pass
+    try:
+        origin = str(db.get_federation_profile_origin(gid) or "").strip()
+        if origin and origin != local_sid:
+            targets.add(origin)
+    except Exception:
+        pass
+    try:
+        u = _lookup_local_user_by_gid(gid)
+        if u:
+            home = str(db.get_user_account_home_server_id(int(u.get("id") or 0)) or "").strip()
+            if home and home != local_sid:
+                targets.add(home)
+    except Exception:
+        pass
+    return sorted(targets)
+
+
 def enqueue_screen_signal(
     msg_type: str,
     from_user: dict,
@@ -642,7 +683,7 @@ def enqueue_screen_signal(
         return {"ok": False, "error": "invalid_screen_payload"}
     if msg_type not in ("screen_offer", "screen_answer", "screen_ice", "screen_end"):
         return {"ok": False, "error": "bad_screen_type"}
-    targets = call_signal_target_servers(None, recipient_gid=to_gid_clean)
+    targets = _screen_signal_targets(to_gid_clean)
     if not targets:
         return {"ok": False, "error": "no_screen_route"}
     payload = {
