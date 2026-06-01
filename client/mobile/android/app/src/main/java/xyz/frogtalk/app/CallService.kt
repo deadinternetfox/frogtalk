@@ -179,9 +179,14 @@ class CallService : Service() {
             // Wrap in try/catch: a denied type must NOT crash the whole app.
             try {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    val type = ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE or
-                            ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA or
-                            ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+                    // Ongoing-call service keeps AUDIO alive while backgrounded →
+                    // microphone only. The camera streams only in the foreground
+                    // (WebView) and screen-share runs in its own ScreenCaptureService,
+                    // so declaring camera/mediaProjection here is both unused and a
+                    // Play policy violation ("background camera stream") — and on
+                    // Android 14 a mediaProjection FGS without a live projection token
+                    // would throw anyway.
+                    val type = ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
                     startForeground(NOTIFICATION_ID, notification, type)
                 } else {
                     startForeground(NOTIFICATION_ID, notification)
