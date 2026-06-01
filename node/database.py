@@ -10378,46 +10378,58 @@ def get_public_channels(category: str = None, search: str = None,
         if search:
             query += " AND (r.name LIKE ? OR r.description LIKE ? OR r.tags LIKE ?)"
             params.extend([f'%{search}%', f'%{search}%', f'%{search}%'])
-        query += " ORDER BY member_count DESC LIMIT ? OFFSET ?"
-        params.extend([limit, offset])
+        # Pull a generous window (not just this page) so federated rooms can be
+        # merged in by member_count RANK below instead of only as leftover
+        # filler. The old `OFFSET ?` + "append fed only when the page isn't
+        # full" logic dropped EVERY federated room on a busy node (e.g. the main
+        # node, whose local rooms already filled the page) — the directory then
+        # looked like it was missing a heap of rooms. We now merge + rank +
+        # paginate the combined set in Python.
+        local_cap = int(limit) + int(offset) + 200
+        query += " ORDER BY member_count DESC LIMIT ?"
+        params.append(local_cap)
         rows = con.execute(query, params).fetchall()
     local_rows = [dict(r) for r in rows]
 
-    # Append federated-only rows (channels mirrored in the index that
-    # don't yet exist as a local `rooms` shell). These ride alongside the
-    # local list in the directory so the user sees a single merged view.
-    needed = max(0, int(limit) - len(local_rows))
+    # Federated-only rows: channels mirrored in the index that don't yet exist
+    # as a local `rooms` shell (those that DO have a shell are already in
+    # local_rows via the JOIN, so dedup by name to avoid showing them twice).
+    local_names = {str(r.get("name") or "").lower() for r in local_rows}
     fed_rows: List[Dict] = []
-    if needed > 0 or offset > 0:
-        fed_offset = max(0, int(offset) - max(0, int(limit) - len(local_rows)))
-        fetch_limit = needed if needed > 0 else int(limit)
-        for row in list_federation_channel_index(
-            category=category or "",
-            search=search or "",
-            limit=fetch_limit,
-            offset=fed_offset,
-            active_days=active_days,
-        ):
-            fed_rows.append({
-                "id": None,
-                "name": row.get("name"),
-                "description": row.get("description") or "",
-                "directory_description": row.get("directory_description") or "",
-                "icon": row.get("icon"),
-                "category": row.get("category") or "",
-                "tags": row.get("tags") or "[]",
-                "member_count": row.get("member_count") or 0,
-                "channel_type": row.get("channel_type") or "text",
-                "owner_name": row.get("owner_nickname") or "",
-                "owner_avatar": None,
-                "home_server_id": row.get("home_server_id") or "",
-                "home_base_url": row.get("home_base_url") or "",
-                "is_federated": 1,
-                "remote_only": True,
-                "content_warning_enabled": int(row.get("content_warning_enabled") or 0),
-                "content_warning_flags": int(row.get("content_warning_flags") or 0),
-            })
-    return local_rows + fed_rows
+    for row in list_federation_channel_index(
+        category=category or "",
+        search=search or "",
+        limit=int(limit) + int(offset) + 200,
+        offset=0,
+        active_days=active_days,
+    ):
+        nm = str(row.get("name") or "")
+        if not nm or nm.lower() in local_names:
+            continue
+        fed_rows.append({
+            "id": None,
+            "name": nm,
+            "description": row.get("description") or "",
+            "directory_description": row.get("directory_description") or "",
+            "icon": row.get("icon"),
+            "category": row.get("category") or "",
+            "tags": row.get("tags") or "[]",
+            "member_count": row.get("member_count") or 0,
+            "channel_type": row.get("channel_type") or "text",
+            "owner_name": row.get("owner_nickname") or "",
+            "owner_avatar": None,
+            "home_server_id": row.get("home_server_id") or "",
+            "home_base_url": row.get("home_base_url") or "",
+            "is_federated": 1,
+            "remote_only": True,
+            "content_warning_enabled": int(row.get("content_warning_enabled") or 0),
+            "content_warning_flags": int(row.get("content_warning_flags") or 0),
+        })
+    # Merge local + federated, rank by member_count, then paginate the combined
+    # list so the requested page reflects ALL public rooms (local + remote).
+    merged = local_rows + fed_rows
+    merged.sort(key=lambda r: int(r.get("member_count") or 0), reverse=True)
+    return merged[int(offset): int(offset) + int(limit)]
 
 
 def get_local_homed_public_channels(local_server_id: str = "") -> List[Dict]:
