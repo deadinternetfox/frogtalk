@@ -3,6 +3,8 @@ package xyz.frogtalk.app.screenshare
 import android.content.Context
 import android.content.Intent
 import android.media.projection.MediaProjection
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import org.json.JSONObject
 import org.webrtc.DefaultVideoDecoderFactory
@@ -65,6 +67,16 @@ class ScreenSharePeer(
     private val peers = LinkedHashMap<String, PerPeer>()   // recipient key -> PerPeer
     @Volatile private var stopped = false
     @Volatile private var startedNotified = false
+    // Surface a silent failure: if no viewer's PC connects within the window, stop
+    // with a reason that toasts the sharer instead of a green button sharing to no one.
+    @Volatile private var anyConnected = false
+    private val watchdog = Handler(Looper.getMainLooper())
+    private val watchdogTask = Runnable {
+        if (!stopped && !anyConnected) {
+            Log.w(TAG, "no viewer connected within timeout — stopping share")
+            stop("no_viewer_connection")
+        }
+    }
 
     fun start() {
         try {
@@ -97,6 +109,7 @@ class ScreenSharePeer(
                 if (stopped) break
                 try { createPeerAndOffer(r) } catch (e: Throwable) { Log.w(TAG, "offer to ${r.key()} failed", e) }
             }
+            if (!stopped) watchdog.postDelayed(watchdogTask, WATCHDOG_MS)
         } catch (e: Throwable) {
             Log.e(TAG, "onOpen capture/offer failed", e)
             stop("peer_failed")
@@ -181,7 +194,10 @@ class ScreenSharePeer(
                 signaling?.sendIce(recipient, obj.toString())
             }
             override fun onConnectionChange(newState: PeerConnection.PeerConnectionState?) {
-                if (newState == PeerConnection.PeerConnectionState.FAILED ||
+                if (newState == PeerConnection.PeerConnectionState.CONNECTED) {
+                    anyConnected = true
+                    watchdog.removeCallbacks(watchdogTask)
+                } else if (newState == PeerConnection.PeerConnectionState.FAILED ||
                     newState == PeerConnection.PeerConnectionState.CLOSED
                 ) {
                     dropPeer(key, "ice_${newState.name.lowercase()}")
@@ -248,6 +264,7 @@ class ScreenSharePeer(
     fun stop(reason: String) {
         if (stopped) return
         stopped = true
+        try { watchdog.removeCallbacks(watchdogTask) } catch (_: Throwable) {}
         val snapshot = synchronized(peers) { ArrayList(peers.values).also { peers.clear() } }
         for (pp in snapshot) {
             try { signaling?.sendEnd(pp.recipient) } catch (_: Throwable) {}
@@ -268,6 +285,9 @@ class ScreenSharePeer(
 
     companion object {
         private const val TAG = "FTScreenPeer"
+        // If no viewer PeerConnection reaches CONNECTED in this window, treat the
+        // share as failed and tell the sharer (covers a dead media path / TURN gap).
+        private const val WATCHDOG_MS = 18000L
         // 720p-ish @ 15fps: a sane ceiling for screen content on mobile uplink.
         private const val CAPTURE_WIDTH = 1280
         private const val CAPTURE_HEIGHT = 720

@@ -2083,9 +2083,48 @@ async function handleScreenOffer (data) {
   }
 }
 
+// ── Native (Android) screen-share signaling bridge ─────────────────────────
+// The native app captures the screen + runs the WebRTC peer, but it has no
+// reliable WebSocket of its own through the production Cloudflare front (the
+// upgrade succeeds but frames never reach the origin). So it routes its
+// screen_offer/ice/end through THIS page's WebSocket — the same one the working
+// call uses — via window.ftScreenSignalOut, and receives answers/ice/end via
+// Android.ftScreenSignalIn (see _forwardScreenSignalToNative below).
+function _b64ToStr (b64) {
+  try {
+    const bin = atob(String(b64 || ''));
+    let pct = '';
+    for (let i = 0; i < bin.length; i++) pct += '%' + ('00' + bin.charCodeAt(i).toString(16)).slice(-2);
+    return decodeURIComponent(pct); // UTF-8 safe (nicknames etc.)
+  } catch (e) {
+    try { return atob(String(b64 || '')); } catch { return ''; }
+  }
+}
+window.ftScreenSignalOut = function (b64) {
+  try {
+    const json = _b64ToStr(b64);
+    if (!json) return;
+    const obj = JSON.parse(json);
+    if (obj && obj.type) _sendCallSignal(obj);
+  } catch (e) { try { console.warn('ftScreenSignalOut failed', e); } catch {} }
+};
+/** Hand an inbound screen_* frame to the active native share peer. Returns true
+ *  when forwarded (caller should then stop processing it in JS). */
+function _forwardScreenSignalToNative (data) {
+  try {
+    if (window.Android && typeof window.Android.ftScreenSignalIn === 'function') {
+      window.Android.ftScreenSignalIn(JSON.stringify(data));
+      return true;
+    }
+  } catch (e) { try { console.warn('ftScreenSignalIn forward failed', e); } catch {} }
+  return false;
+}
+
 async function handleScreenAnswer (data) {
   // The desktop sharer offers on _screenSendPc; the viewer's answer lands here.
   try {
+    // Native sharer: the answer belongs to the native peer, not a JS _screenSendPc.
+    if ((_nativeScreenSharing || _nativeVoiceScreenSharing) && _forwardScreenSignalToNative(data)) return;
     if (!_screenForThisCall(data) || !_screenSendPc) return;
     if (_screenSendPc.signalingState === 'have-local-offer') {
       await _screenSendPc.setRemoteDescription({ type: 'answer', sdp: data.sdp });
@@ -2099,6 +2138,8 @@ async function handleScreenAnswer (data) {
 async function handleScreenIce (data) {
   try {
     if (Number(data.from_id) === _selfUid()) return;
+    // Native sharer: route the viewer's ICE to the native peer over the bridge.
+    if ((_nativeScreenSharing || _nativeVoiceScreenSharing) && _forwardScreenSignalToNative(data)) return;
     if (_voiceRoom && Number(data.call_id || 0) === 0) return _handleVoiceScreenIce(data);
     if (!data.candidate) return;
     let parsed; try { parsed = JSON.parse(data.candidate); } catch { return; }
@@ -2117,6 +2158,8 @@ async function handleScreenIce (data) {
 
 function handleScreenEnd (data) {
   if (data && Number(data.from_id) === _selfUid()) return;
+  // Native sharer: the viewer ended → let the native peer tear that recipient down.
+  if ((_nativeScreenSharing || _nativeVoiceScreenSharing) && _forwardScreenSignalToNative(data)) return;
   if (_voiceRoom && Number(data.call_id || 0) === 0) return _handleVoiceScreenEnd(data);
   // The peer stopped sharing → drop the inbound screen PC + tile.
   _teardownScreen();

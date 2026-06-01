@@ -1482,6 +1482,16 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        // Inbound screen_answer/screen_ice/screen_end frame that calls.js received
+        // on the main WS and forwarded here for the active native screen-share peer.
+        // (Native screen-share signaling rides this proven WS — not a separate
+        //  socket — see ScreenShareSignaling.)
+        @android.webkit.JavascriptInterface
+        fun ftScreenSignalIn(json: String) {
+            try { xyz.frogtalk.app.screenshare.ScreenShareSignaling.deliver(json) }
+            catch (e: Throwable) { Log.e(TAG, "ftScreenSignalIn failed", e) }
+        }
+
         @android.webkit.JavascriptInterface
         fun startCallNotification(peerNick: String) {
             try {
