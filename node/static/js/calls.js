@@ -103,6 +103,52 @@ function _ensureMediaPlayback(el, label) {
   run();
 }
 
+/* ── Connecting overlay ─────────────────────────────────────────────────────
+ * A WebRTC <video> shows a bare black surface between "stream attached" and
+ * "first frame painted" — worst on Android WebView, where it reads as a broken
+ * black box. _watchFirstFrame() flips the tile/container into an `is-connecting`
+ * state (a branded spinner) until a real frame lands, then clears it. Robust
+ * across browsers: prefers requestVideoFrameCallback, falls back to
+ * loadeddata/playing/resize, and a hard timeout so the spinner can never stick. */
+function _setConnecting(container, on) {
+  try { container && container.classList.toggle('is-connecting', !!on); } catch {}
+}
+function _watchFirstFrame(video, container) {
+  if (!video || !container) return;
+  let done = false;
+  const clear = () => {
+    if (done) return; done = true;
+    _setConnecting(container, false);
+    try {
+      video.removeEventListener('loadeddata', onEv);
+      video.removeEventListener('playing', onEv);
+      video.removeEventListener('resize', onEv);
+    } catch {}
+    clearTimeout(timer);
+  };
+  const hasFrame = () => {
+    try { return video.videoWidth > 0 && video.videoHeight > 0 && video.readyState >= 2; }
+    catch { return false; }
+  };
+  if (hasFrame()) { _setConnecting(container, false); return; }
+  _setConnecting(container, true);
+  const onEv = () => { if (hasFrame()) clear(); };
+  try {
+    video.addEventListener('loadeddata', onEv);
+    video.addEventListener('playing', onEv);
+    video.addEventListener('resize', onEv);
+  } catch {}
+  // requestVideoFrameCallback fires when an actual frame is presented — the
+  // most reliable "real pixels are on screen now" signal where supported.
+  try {
+    if (typeof video.requestVideoFrameCallback === 'function') {
+      video.requestVideoFrameCallback(() => clear());
+    }
+  } catch {}
+  // Never let the spinner outlive a genuinely-stuck connection.
+  const timer = setTimeout(clear, 25000);
+}
+
 /* ── Call-quality reception meter ───────────────────────────────────────────
  * Polls RTCPeerConnection.getStats() and maps round-trip-time, jitter and
  * incremental packet loss to a 0–4 bar reception meter beside the settings cog.
@@ -1704,6 +1750,10 @@ function resetCall () {
     const mtm = document.getElementById('call-mini-timer'); if (mtm) mtm.textContent = '00:00';
     document.getElementById('call-tile-remote')?.classList.remove('speaking');
     document.getElementById('call-tile-local')?.classList.remove('speaking');
+    // Clear any lingering connecting spinners so the next call starts clean.
+    document.getElementById('call-tile-remote')?.classList.remove('is-connecting');
+    document.getElementById('call-tile-screen')?.classList.remove('is-connecting');
+    document.getElementById('call-popout')?.classList.remove('is-connecting');
     const bMute = document.getElementById('btn-call-mute');
     if (bMute) { bMute.textContent = '🎤'; bMute.classList.remove('muted'); }
     try { _syncCamButton(); } catch {}
@@ -1758,6 +1808,8 @@ async function createPC () {
         }
         if (ra) ra.style.display = 'none';
         _ensureMediaPlayback(rv, 'call-remote-video');
+        // Spinner over the (still-black) remote tile until the first frame paints.
+        try { _watchFirstFrame(rv, document.getElementById('call-tile-remote')); } catch {}
       } else if (e.track?.kind === 'audio') {
         // Remote audio always plays through the dedicated <audio> sink.
         if (raSink) {
@@ -2208,6 +2260,10 @@ function _renderRemoteScreen (stream, opts) {
   // Switch the participants area into screen layout (CSS grid handles the rest).
   try { document.getElementById('call-participants')?.classList.add('has-screen'); } catch {}
   _ensureMediaPlayback(sv, local ? 'screen-share-self' : 'screen-share');
+  // Connecting spinner over the screen tile until the first frame lands. Our own
+  // local capture paints almost instantly; a remote/cross-node share shows the
+  // spinner instead of a black tile while the screen PC negotiates.
+  try { _watchFirstFrame(sv, tile); } catch {}
 }
 
 function _teardownScreen (opts) {
@@ -2231,7 +2287,7 @@ function _teardownScreen (opts) {
     const tile = document.getElementById('call-tile-screen');
     const sv = document.getElementById('screen-video');
     if (sv) { sv.srcObject = null; sv.style.display = 'none'; }
-    if (tile) tile.style.display = 'none';
+    if (tile) { tile.style.display = 'none'; _setConnecting(tile, false); }
     document.getElementById('call-participants')?.classList.remove('has-screen');
   } catch {}
 }
@@ -3719,6 +3775,8 @@ function openVideoPopout(peerKey) {
   pop.classList.remove('hidden');
   _syncPopoutVolume();
   try { vid.play?.().catch(() => {}); } catch {}
+  // Spinner inside the pop-out until the popped stream paints its first frame.
+  try { _watchFirstFrame(vid, pop); } catch {}
   // Lock the box to the video's aspect so resizing scales the video edge-to-
   // edge (object-fit:contain otherwise just letterboxes). Seed from the track
   // settings, then refine once metadata gives the real intrinsic size.
@@ -3764,7 +3822,7 @@ function closeVideoPopout() {
   const pop = document.getElementById('call-popout');
   const vid = document.getElementById('call-popout-video');
   if (vid) { try { vid.srcObject = null; vid.style.display = 'none'; } catch {} }
-  if (pop) pop.classList.add('hidden');
+  if (pop) { pop.classList.add('hidden'); _setConnecting(pop, false); }
   _popoutPeerKey = null;
 }
 

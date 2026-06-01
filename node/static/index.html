@@ -3485,6 +3485,33 @@ body.ft-incoming-call-active #incoming-call{z-index:20000}
   .call-tile-screen{width:94vw;max-height:46vh}
   #call-participants.has-screen .call-tile{width:108px;height:108px}
 }
+/* ── Connecting overlay: a polished branded spinner shown over a call/screen/
+   pop-out video while its stream is negotiating and no frame has painted yet
+   (replaces the bare black <video> surface, esp. on Android WebView). Cleared
+   on the first real video frame. */
+.call-connecting{
+  position:absolute; inset:0; z-index:2; border-radius:inherit;
+  display:none; flex-direction:column; align-items:center; justify-content:center; gap:12px;
+  background:linear-gradient(180deg, rgba(13,20,15,.86), rgba(7,11,8,.94));
+  color:var(--text-color,#e6e6e6); pointer-events:none;
+}
+.call-tile.is-connecting .call-connecting,
+#call-popout.is-connecting .call-connecting{ display:flex; }
+.cc-ring{ position:relative; width:46px; height:46px; display:grid; place-items:center; }
+.cc-ring .cc-spinner{
+  position:absolute; inset:0; border-radius:50%;
+  border:3px solid color-mix(in srgb, var(--accent-color,#4caf50) 26%, transparent);
+  border-top-color:var(--accent-color,#4caf50);
+  animation:ccSpin .85s linear infinite;
+}
+.cc-ring .cc-emoji{ font-size:18px; line-height:1; animation:ccPulse 1.7s ease-in-out infinite; }
+.call-connecting .cc-label{ font-size:13px; font-weight:600; letter-spacing:.2px; opacity:.92; }
+@keyframes ccSpin{ to{ transform:rotate(360deg); } }
+@keyframes ccPulse{ 0%,100%{ transform:scale(1); opacity:.6 } 50%{ transform:scale(1.14); opacity:1 } }
+@media (prefers-reduced-motion: reduce){
+  .cc-ring .cc-spinner{ animation-duration:2.4s }
+  .cc-ring .cc-emoji{ animation:none }
+}
 #call-controls{
   display:flex;
   gap:10px;
@@ -12004,6 +12031,7 @@ window.ConnErr = (function(){
     <!-- Remote participant tile -->
     <div id="call-tile-remote" class="call-tile" onclick="openVideoPopout('dm-remote')" title="Tap to expand" style="cursor:pointer">
       <video id="remote-video" autoplay playsinline webkit-playsinline style="width:100%;height:100%;object-fit:cover;border-radius:12px;display:none"></video>
+      <div class="call-connecting" aria-hidden="true"><div class="cc-ring"><div class="cc-spinner"></div><span class="cc-emoji">🐸</span></div><div class="cc-label">Connecting…</div></div>
       <!-- Voice-call audio sink: WebKit won't play remote audio through display:none video. -->
       <audio id="remote-audio" autoplay playsinline webkit-playsinline></audio>
       <div id="call-remote-avatar" class="call-tile-avatar">
@@ -12027,6 +12055,7 @@ window.ConnErr = (function(){
          wide cell so faces stay visible alongside it. -->
     <div id="call-tile-screen" class="call-tile call-tile-screen" style="display:none;cursor:pointer" onclick="openVideoPopout('dm-screen')" title="Tap to expand">
       <video id="screen-video" autoplay playsinline webkit-playsinline style="width:100%;height:100%;object-fit:contain;border-radius:12px;background:#000;display:none"></video>
+      <div class="call-connecting" aria-hidden="true"><div class="cc-ring"><div class="cc-spinner"></div><span class="cc-emoji">🖥️</span></div><div class="cc-label">Connecting screen…</div></div>
       <div class="call-tile-name" id="call-tile-screen-name">📺 Screen</div>
     </div>
   </div>
@@ -12057,6 +12086,7 @@ window.ConnErr = (function(){
     <button id="call-popout-close" onclick="closeVideoPopout()" title="Close" aria-label="Close">✕</button>
   </div>
   <video id="call-popout-video" autoplay playsinline webkit-playsinline></video>
+  <div class="call-connecting" aria-hidden="true"><div class="cc-ring"><div class="cc-spinner"></div><span class="cc-emoji">🐸</span></div><div class="cc-label">Connecting…</div></div>
   <div id="call-popout-resize" title="Drag to resize" aria-hidden="true">◢</div>
 </div>
 
