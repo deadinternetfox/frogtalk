@@ -2912,6 +2912,11 @@ const Social = (() => {
     _storyModalOpen = false;
     const m = document.getElementById('add-story-modal');
     if (m) m.style.display = 'none';
+    // Also tear down the fullscreen story-camera modal + its getUserMedia
+    // stream. Without this a leftover #story-cap-video (no stream → a black /
+    // broken frame) can stay in the DOM and, on Android WebView's video
+    // surface, bleed through behind the UI — the "broken video background".
+    try { if (typeof closeStoryCapture === 'function') closeStoryCapture(); } catch {}
   }
 
   function _storyNotify(msg, type = 'info') {
