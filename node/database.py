@@ -801,6 +801,29 @@ def get_user_by_id(user_id: int) -> Optional[Dict]:
     return dict(row) if row else None
 
 
+def get_user_privacy_snapshot(global_user_id: str) -> Optional[Dict]:
+    """Authoritative privacy flags for a LOCAL user, by global id.
+
+    Federation privacy snapshots are built from whatever dict the caller has on
+    hand — and some callers pass ``get_user_by_id()`` results, which carry only
+    identity columns (no ``profile_public`` etc.). That made the emitter fall
+    back to defaults and silently federate ``profile_public=0`` (private),
+    wiping a user's "Public Profile" toggle on re-sync/travel. Reading the real
+    values here keeps the snapshot honest regardless of the caller's dict.
+    """
+    gid = str(global_user_id or "").strip()
+    if not gid:
+        return None
+    with _conn() as con:
+        row = con.execute(
+            "SELECT nickname, profile_public, allow_friend_requests, allow_dms_from, "
+            "show_last_seen, show_read_receipts, hide_dm_history_notice "
+            "FROM users WHERE global_user_id=? LIMIT 1",
+            (gid,),
+        ).fetchone()
+    return dict(row) if row else None
+
+
 def get_user_identity(user_id: int) -> Optional[Dict]:
     with _conn() as con:
         row = con.execute(

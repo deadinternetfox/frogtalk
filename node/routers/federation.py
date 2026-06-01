@@ -519,15 +519,28 @@ def enqueue_user_privacy_updated(user: dict) -> dict:
     gid = str(user.get("global_user_id") or "").strip()
     if not gid:
         return {"ok": False, "error": "no_global_user_id"}
+    # Read the AUTHORITATIVE privacy flags from the DB (the user is local on the
+    # home node, which is the only place this is emitted). Several callers pass a
+    # partial dict — notably get_user_by_id(), which omits the privacy columns —
+    # which made this fall back to defaults and federate profile_public=0,
+    # silently flipping "Public Profile" to private on re-sync/travel. DB values
+    # win so the snapshot always reflects what the user actually set.
+    src = dict(user or {})
+    try:
+        snap = db.get_user_privacy_snapshot(gid)
+        if snap:
+            src.update({k: v for k, v in snap.items() if v is not None})
+    except Exception:
+        pass
     payload = {
         "global_user_id": gid,
-        "nickname": str(user.get("nickname") or "").strip(),
-        "profile_public": 1 if int(user.get("profile_public") or 0) else 0,
-        "allow_friend_requests": 1 if int(user.get("allow_friend_requests") or 0) else 0,
-        "allow_dms_from": str(user.get("allow_dms_from") or "everyone").strip().lower()[:32],
-        "show_last_seen": str(user.get("show_last_seen") or "everyone").strip().lower()[:32],
-        "show_read_receipts": 1 if int(user.get("show_read_receipts") or 0) else 0,
-        "hide_dm_history_notice": 1 if int(user.get("hide_dm_history_notice") or 0) else 0,
+        "nickname": str(src.get("nickname") or "").strip(),
+        "profile_public": 1 if int(src.get("profile_public") or 0) else 0,
+        "allow_friend_requests": 1 if int(src.get("allow_friend_requests") or 0) else 0,
+        "allow_dms_from": str(src.get("allow_dms_from") or "everyone").strip().lower()[:32],
+        "show_last_seen": str(src.get("show_last_seen") or "everyone").strip().lower()[:32],
+        "show_read_receipts": 1 if int(src.get("show_read_receipts") or 0) else 0,
+        "hide_dm_history_notice": 1 if int(src.get("hide_dm_history_notice") or 0) else 0,
     }
     if payload["allow_dms_from"] not in ("everyone", "friends", "nobody"):
         payload["allow_dms_from"] = "everyone"
@@ -6832,15 +6845,21 @@ async def _handle_user_privacy_updated(event: dict) -> None:
         db.upsert_federation_user_profile(gid, nick, origin_server_id=home_sid or origin)
     allow_dm = str(payload.get("allow_dms_from") or "").strip().lower()
     show_ls = str(payload.get("show_last_seen") or "").strip().lower()
+    # Only apply the fields the event actually carries — pass None for the rest
+    # so apply_federation_user_privacy preserves the existing value. Defaulting
+    # an absent field to 0 here is what let a partial event flip profile_public
+    # to private.
+    def _opt_bool(key):
+        return int(bool(payload[key])) if key in payload else None
     db.apply_federation_user_privacy(
         gid,
         origin_server_id=home_sid or origin,
-        profile_public=int(payload.get("profile_public") or 0),
-        allow_friend_requests=int(payload.get("allow_friend_requests") or 0),
+        profile_public=_opt_bool("profile_public"),
+        allow_friend_requests=_opt_bool("allow_friend_requests"),
         allow_dms_from=allow_dm if allow_dm in ("everyone", "friends", "nobody") else None,
         show_last_seen=show_ls if show_ls in ("everyone", "friends", "nobody") else None,
-        show_read_receipts=int(payload.get("show_read_receipts") or 0),
-        hide_dm_history_notice=int(payload.get("hide_dm_history_notice") or 0),
+        show_read_receipts=_opt_bool("show_read_receipts"),
+        hide_dm_history_notice=_opt_bool("hide_dm_history_notice"),
     )
 
 
