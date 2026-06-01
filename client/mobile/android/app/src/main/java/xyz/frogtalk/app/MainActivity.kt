@@ -229,12 +229,31 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun getServerBaseUrl(): String {
-        return try {
+        // 1) Explicit pref (set when the user picked a network, or pushed by the
+        //    web app on every launch via setServerBaseUrl).
+        val pref = try {
             getSharedPreferences(PREFS, Context.MODE_PRIVATE)
                 .getString(PREF_SERVER_BASE_URL, "")?.trim().orEmpty()
-        } catch (_: Throwable) {
-            ""
-        }
+        } catch (_: Throwable) { "" }
+        if (pref.isNotEmpty()) return pref
+        // 2) Fall back to the node the WebView is currently on — the call (and its
+        //    signaling WS) lives there. Without this, a user who never opened the
+        //    network picker had an empty base and native screen-share aborted
+        //    (bad_request) before sending any offer.
+        originOf(webView?.url)?.let { return it }
+        // 3) Last resort: the official/default node origin.
+        return originOf(defaultAppUrl()).orEmpty()
+    }
+
+    /** scheme://host[:port] from a full URL, or null if unparseable. */
+    private fun originOf(url: String?): String? {
+        if (url.isNullOrBlank()) return null
+        return try {
+            val u = android.net.Uri.parse(url)
+            val scheme = u.scheme; val host = u.host
+            if (scheme.isNullOrBlank() || host.isNullOrBlank()) null
+            else if (u.port > 0) "$scheme://$host:${u.port}" else "$scheme://$host"
+        } catch (_: Throwable) { null }
     }
 
     private fun getConfiguredAppEntryUrl(): String {
