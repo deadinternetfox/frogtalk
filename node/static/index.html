@@ -3482,7 +3482,10 @@ body.ft-incoming-call-active #incoming-call{z-index:20000}
   flex-wrap:wrap;
 }
 /* Slim range slider used for the remote/stream volume in calls. */
-.call-volume-slider{
+/* Hidden until the user taps the 🔊 button (toggleCallVolume adds .cv-open). */
+.call-volume-slider{display:none}
+#call-controls.cv-open .call-volume-slider{
+  display:block;
   -webkit-appearance:none;appearance:none;width:96px;height:6px;border-radius:999px;cursor:pointer;
   background:color-mix(in srgb, var(--accent-color) 30%, color-mix(in srgb, var(--surface-color) 60%, #000));
   outline:none;flex:0 0 auto;align-self:center
@@ -3975,7 +3978,10 @@ body.ft-incoming-call-active #incoming-call{z-index:20000}
   cursor:pointer;font-size:13px;flex-shrink:0;display:flex;align-items:center;justify-content:center
 }
 #call-popout-close:hover{background:#c0392b;color:#fff}
-#call-popout-video{width:100%;flex:1 1 auto;min-height:0;display:block;background:#000;max-height:70vh;object-fit:contain}
+/* Hidden until a stream is popped out. An empty <video> keeps a native video
+   surface on Android WebView that bleeds a black/broken frame behind the call
+   screen — keep it display:none when idle (openVideoPopout flips it on). */
+#call-popout-video{width:100%;flex:1 1 auto;min-height:0;display:none;background:#000;max-height:70vh;object-fit:contain}
 #call-popout-video.mirror{transform:scaleX(-1)}
 #call-popout-resize{
   position:absolute;right:0;bottom:0;width:26px;height:26px;z-index:3;
@@ -12017,7 +12023,7 @@ window.ConnErr = (function(){
     <button id="btn-call-mute" onclick="toggleCallMute()" class="call-ctl-btn" title="Mute">🎤</button>
     <button id="btn-call-cam" onclick="toggleCallCamera()" class="call-ctl-btn" title="Camera">📷</button>
     <button id="btn-call-screen" onclick="toggleScreenShare()" class="call-ctl-btn" title="Screen Share">🖥️</button>
-    <button id="btn-call-speaker" onclick="toggleCallSpeaker()" class="call-ctl-btn" title="Speaker">🔊</button>
+    <button id="btn-call-speaker" onclick="toggleCallVolume()" class="call-ctl-btn" title="Volume">🔊</button>
     <input id="call-remote-volume" class="call-volume-slider" type="range" min="0" max="100" value="100"
            oninput="setDmRemoteVolume(this.value)" title="Their volume" aria-label="Their volume">
     <button id="btn-call-safety" onclick="showCallSafetyNumber()" class="call-ctl-btn" title="Safety Number">🔒</button>
