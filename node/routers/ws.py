@@ -2076,22 +2076,26 @@ async def websocket_endpoint(
                                 ).fetchone()
                             if crow:
                                 gid = str(crow["global_call_id"] or "").strip()
-                        _remote = _fc.is_remote_peer(peer)
-                        if gid and _remote:
-                            pgid = str(peer.get("global_user_id") or "")
-                            if pgid:
-                                _res = _fc.enqueue_screen_signal(
-                                    msg_type, user, pgid,
-                                    global_call_id=gid, local_call_id=call_id,
-                                    sdp=data.get("sdp") or "",
-                                    candidate=str(data.get("candidate") or ""),
-                                    force_relay=bool(data.get("force_relay")),
-                                )
-                                logger.info("[SCRNDBG] %s enqueue gid=%s pgid=%s -> %r", msg_type, gid, pgid, _res)
-                            else:
-                                logger.info("[SCRNDBG] %s no pgid for to_id=%s", msg_type, to_id)
+                        pgid = str(peer.get("global_user_id") or "")
+                        # Always attempt federation when we have the call's global
+                        # id + the peer's gid. Unlike a 1:1 call (local delivery is
+                        # enough), a screen-share viewer may be watching on another
+                        # node while still holding a session here, so we must reach
+                        # their remote nodes too. enqueue_screen_signal resolves the
+                        # peer's known remote nodes and no-ops (no_screen_route) for
+                        # a purely-local share — so this never spams same-node calls.
+                        if gid and pgid:
+                            _res = _fc.enqueue_screen_signal(
+                                msg_type, user, pgid,
+                                global_call_id=gid, local_call_id=call_id,
+                                sdp=data.get("sdp") or "",
+                                candidate=str(data.get("candidate") or ""),
+                                force_relay=bool(data.get("force_relay")),
+                            )
+                            logger.info("[SCRNDBG] %s enqueue gid=%s pgid=%s remote=%s -> %r",
+                                        msg_type, gid, pgid, _fc.is_remote_peer(peer), _res)
                         else:
-                            logger.info("[SCRNDBG] %s skip enqueue gid=%r remote=%s to_id=%s", msg_type, gid, _remote, to_id)
+                            logger.info("[SCRNDBG] %s skip enqueue gid=%r pgid=%r", msg_type, gid, pgid)
                     except Exception:
                         logger.exception("federated screen signal enqueue failed")
                 else:

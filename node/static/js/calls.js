@@ -892,28 +892,26 @@ async function _ensureCallPeerAvatar(forceRender = false) {
 }
 
 function _renderPeerAvatar(peerNick, avatar) {
-  const ra = document.getElementById('call-remote-avatar');
-  if (!ra) return;
   const safeNick = String(peerNick || _callPeerNick || 'Peer').trim() || 'Peer';
   const avatarData = avatar !== undefined ? avatar : _callPeerAvatar;
-  if (typeof UI !== 'undefined' && typeof UI.avatarEl === 'function') {
-    ra.innerHTML = UI.avatarEl(avatarData || null, safeNick, 96);
-  } else {
-    // Fallback: render simple avatar with initial. The peer nickname /
-    // avatar arrive across the federation trust boundary — always
-    // ``esc()`` them before innerHTML to neutralize any HTML smuggled by
-    // a hostile remote node.
+  const ra = document.getElementById('call-remote-avatar');   // top-bar / tile
+  const mav = document.getElementById('call-mini-avatar');    // minimized-call pill
+  const useUI = (typeof UI !== 'undefined' && typeof UI.avatarEl === 'function');
+  // Fallback builder. The peer nickname / avatar arrive across the federation
+  // trust boundary — always esc() before innerHTML to neutralize any HTML
+  // smuggled by a hostile remote node.
+  const buildHtml = () => {
     const s = String(avatarData || '');
     const isUrl = s.startsWith('data:image/') || s.startsWith('http://') || s.startsWith('https://') || s.startsWith('/');
-    const escNick = esc(safeNick.charAt(0).toUpperCase());
-    if (s && isUrl) {
-      ra.innerHTML = `<img src="${esc(s)}" alt="">`;
-    } else if (s) {
-      ra.innerHTML = `<span class="call-avatar-emoji">${esc(s.slice(0, 2))}</span>`;
-    } else {
-      ra.innerHTML = `<div class="call-avatar-initial">${escNick}</div>`;
-    }
-  }
+    if (s && isUrl) return `<img src="${esc(s)}" alt="">`;
+    if (s) return `<span class="call-avatar-emoji">${esc(s.slice(0, 2))}</span>`;
+    return `<div class="call-avatar-initial">${esc(safeNick.charAt(0).toUpperCase())}</div>`;
+  };
+  // Render BOTH the tile and the pill so the minimized-call avatar stays in
+  // sync with the top bar — important for cross-node peers whose avatar
+  // resolves asynchronously (profile fetch) after the pill may already show.
+  if (ra) ra.innerHTML = useUI ? UI.avatarEl(avatarData || null, safeNick, 96) : buildHtml();
+  if (mav) mav.innerHTML = useUI ? UI.avatarEl(avatarData || null, safeNick, 38) : buildHtml();
 }
 
 function _persistIncomingCall(offer) {
@@ -2807,6 +2805,13 @@ function minimizeCall () {
       }
     } catch { avEl.textContent = '🐸'; }
   }
+  // A cross-node peer's avatar resolves asynchronously (profile fetch). Kick
+  // that off — _renderPeerAvatar now updates BOTH the tile and this pill — so
+  // the minimized avatar fills in just like the top bar instead of staying 🐸.
+  try { _ensureCallPeerAvatar(true).catch(() => {}); } catch {}
+  // Cross-node peer avatars resolve asynchronously; kick off resolution so the
+  // pill (and tile) fill in with the real avatar instead of the frog fallback.
+  try { _ensureCallPeerAvatar(true).catch(() => {}); } catch {}
   // Seed the pill timer from the live overlay timer so it doesn't flash 00:00.
   const t = document.getElementById('call-timer');
   const mt = document.getElementById('call-mini-timer');
