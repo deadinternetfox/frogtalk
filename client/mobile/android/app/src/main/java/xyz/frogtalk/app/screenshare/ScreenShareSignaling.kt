@@ -1,23 +1,26 @@
 package xyz.frogtalk.app.screenshare
 
+import android.util.Base64
 import android.util.Log
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.Response
-import okhttp3.WebSocket
-import okhttp3.WebSocketListener
 import org.json.JSONObject
-import java.util.concurrent.TimeUnit
+import xyz.frogtalk.app.MainActivity
 
 /**
- * One WebSocket that speaks FrogTalk's screen-share signaling for the native
- * peer, MULTIPLEXED across every recipient. It connects as the same user as the
- * WebView and exchanges `screen_offer` / `screen_answer` / `screen_ice` /
- * `screen_end`, routing each outbound frame to a specific recipient and
- * dispatching each inbound frame back to the right peer by its sender id.
+ * Screen-share signaling that rides the SAME WebSocket the WebView app + call use,
+ * via the JS bridge — NOT a separate native socket.
  *
- * For a 1-on-1 call there is a single recipient, so behaviour matches the
- * original single-peer signaling.
+ * Why: a standalone OkHttp WebSocket to the public domain proved unreliable through
+ * the production Cloudflare front. The upgrade succeeded (so the share button went
+ * green) but the screen_offer frame never reached the origin, while the call's own
+ * audio/video — which ride the WebView's browser WebSocket — kept working. Routing
+ * screen_* over the proven transport fixes "button green, nothing on the other end".
+ *
+ * Outbound: serialize the frame, base64 it (sidesteps JS string-escaping of SDP
+ * newlines/quotes) and runJsOnWebView(window.ftScreenSignalOut('<b64>')) — calls.js
+ * sends it over the live WS via _sendCallSignal. Inbound: calls.js forwards
+ * screen_answer/screen_ice/screen_end to Android.ftScreenSignalIn(json) →
+ * [deliver] → this listener. Routing/recipient handling is unchanged from the old
+ * socket version (multiplexed across recipients for group voice screen-share).
  */
 class ScreenShareSignaling(
     private val cfg: ScreenShareConfig,
@@ -31,54 +34,17 @@ class ScreenShareSignaling(
         fun onClosed(reason: String)
     }
 
-    private val client: OkHttpClient = OkHttpClient.Builder()
-        .pingInterval(20, TimeUnit.SECONDS)
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(0, TimeUnit.MILLISECONDS) // keep the socket open
-        .build()
-
-    @Volatile private var ws: WebSocket? = null
     @Volatile private var closed = false
 
     fun connect() {
-        val req = Request.Builder().url(cfg.webSocketUrl()).build()
-        ws = client.newWebSocket(req, object : WebSocketListener() {
-            override fun onOpen(webSocket: WebSocket, response: Response) {
-                if (!closed) listener.onOpen()
-            }
-
-            override fun onMessage(webSocket: WebSocket, text: String) {
-                if (closed) return
-                try {
-                    val o = JSONObject(text)
-                    val type = o.optString("type")
-                    if (type != "screen_answer" && type != "screen_ice" && type != "screen_end") return
-                    val fromKey = senderKey(o)
-                    when (type) {
-                        "screen_answer" -> listener.onScreenAnswer(fromKey, o.optString("sdp"))
-                        "screen_ice" -> listener.onScreenIce(fromKey, o.optString("candidate"))
-                        "screen_end" -> listener.onScreenEnd(fromKey)
-                    }
-                } catch (e: Throwable) {
-                    Log.w(TAG, "bad WS frame", e)
-                }
-            }
-
-            override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
-                webSocket.close(1000, null)
-            }
-
-            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                if (!closed) listener.onClosed("closed:$code")
-            }
-
-            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                if (!closed) {
-                    Log.w(TAG, "WS failure", t)
-                    listener.onClosed("failure:${t.message ?: "io"}")
-                }
-            }
-        })
+        // The WebView WS is already connected (we're in an active call). Register
+        // for inbound frames and signal "open" so the peer starts capture + offers.
+        active = this
+        if (closed) return
+        Thread {
+            try { if (!closed) listener.onOpen() }
+            catch (e: Throwable) { Log.e(TAG, "onOpen failed", e) }
+        }.start()
     }
 
     fun sendOffer(recipient: Recipient, sdp: String, forceRelay: Boolean) {
@@ -86,20 +52,20 @@ class ScreenShareSignaling(
         o.put("type", "screen_offer")
         o.put("sdp", sdp)
         o.put("force_relay", forceRelay)
-        send(o)
+        emit(o)
     }
 
     fun sendIce(recipient: Recipient, candidateJson: String) {
         val o = routing(recipient)
         o.put("type", "screen_ice")
         o.put("candidate", candidateJson)
-        send(o)
+        emit(o)
     }
 
     fun sendEnd(recipient: Recipient) {
         val o = routing(recipient)
         o.put("type", "screen_end")
-        send(o)
+        emit(o)
     }
 
     /** Key matching the web client's voice peer keys (g:… / u:…). */
@@ -122,18 +88,51 @@ class ScreenShareSignaling(
         return o
     }
 
-    private fun send(o: JSONObject) {
-        try { ws?.send(o.toString()) } catch (e: Throwable) { Log.w(TAG, "send failed", e) }
+    private fun emit(o: JSONObject) {
+        if (closed) return
+        try {
+            val b64 = Base64.encodeToString(
+                o.toString().toByteArray(Charsets.UTF_8), Base64.NO_WRAP
+            )
+            MainActivity.runJsOnWebView("if(window.ftScreenSignalOut)window.ftScreenSignalOut('$b64');")
+        } catch (e: Throwable) {
+            Log.w(TAG, "emit failed", e)
+        }
+    }
+
+    /** An inbound screen_answer / screen_ice / screen_end frame from calls.js. */
+    private fun handleInbound(text: String) {
+        if (closed) return
+        try {
+            val o = JSONObject(text)
+            val type = o.optString("type")
+            if (type != "screen_answer" && type != "screen_ice" && type != "screen_end") return
+            val fromKey = senderKey(o)
+            when (type) {
+                "screen_answer" -> listener.onScreenAnswer(fromKey, o.optString("sdp"))
+                "screen_ice" -> listener.onScreenIce(fromKey, o.optString("candidate"))
+                "screen_end" -> listener.onScreenEnd(fromKey)
+            }
+        } catch (e: Throwable) {
+            Log.w(TAG, "bad inbound frame", e)
+        }
     }
 
     fun close() {
         closed = true
-        try { ws?.close(1000, "done") } catch (_: Throwable) {}
-        ws = null
-        try { client.dispatcher.executorService.shutdown() } catch (_: Throwable) {}
+        if (active === this) active = null
     }
 
     companion object {
         private const val TAG = "FTScreenSignal"
+
+        // The single in-flight signaling instance (one native share at a time).
+        @Volatile private var active: ScreenShareSignaling? = null
+
+        /** Called from MainActivity's JS bridge with an inbound screen_* frame. */
+        @JvmStatic
+        fun deliver(json: String) {
+            try { active?.handleInbound(json) } catch (_: Throwable) {}
+        }
     }
 }
