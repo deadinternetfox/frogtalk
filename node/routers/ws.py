@@ -2460,11 +2460,18 @@ async def websocket_endpoint(
                     })
                 except Exception:
                     pass
-        except Exception:
-            pass
-        try:
-            from routers.federation import emit_room_presence
-            emit_room_presence(user, room_name, "offline", force=True)
+                # Room presence -> offline ONLY when the account has no remaining
+                # sockets. The same account can be open on a second device / tab /
+                # travel node; closing one of them must NOT flap the user offline
+                # in the room (and to federated peers via force=True) while they
+                # are still connected elsewhere. Previously this ran
+                # unconditionally outside the guard, producing presence flicker
+                # and zombie cross-node "offline" on multi-session accounts.
+                try:
+                    from routers.federation import emit_room_presence
+                    emit_room_presence(user, room_name, "offline", force=True)
+                except Exception:
+                    pass
         except Exception:
             pass
         if result:

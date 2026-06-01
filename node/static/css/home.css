@@ -209,6 +209,58 @@
   .feature-card h3 { font-size: 1.1rem; font-weight: 600; margin-bottom: .5rem; }
   .feature-card p { color: var(--text-muted); font-size: .9rem; line-height: 1.6; }
 
+  /* ── "What makes us different" differentiator strip ─────────────────
+     Bold, accented cards that lead the features section so the unique
+     stuff (own-your-node, Signal E2E, cross-server calls, Tor) reads
+     first — distinct from the plainer feature grid below. */
+  .diff-strip {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));
+    gap: 1.25rem;
+    max-width: 1100px; margin: 0 auto 2.25rem;
+  }
+  .diff-card {
+    position: relative;
+    background:
+      radial-gradient(120% 140% at 0% 0%, rgba(74,222,128,.12), transparent 60%),
+      var(--bg2);
+    border: 1px solid rgba(74,222,128,.28);
+    border-radius: 14px;
+    padding: 1.6rem 1.5rem;
+    overflow: hidden;
+    transition: border-color .2s, transform .2s, box-shadow .2s;
+  }
+  .diff-card::before {
+    content: "";
+    position: absolute; inset: 0 0 auto 0; height: 3px;
+    background: linear-gradient(90deg, var(--green), var(--green-dark));
+    opacity: .9;
+  }
+  .diff-card:hover {
+    border-color: rgba(74,222,128,.6);
+    transform: translateY(-3px);
+    box-shadow: 0 14px 36px rgba(0,0,0,.35), 0 0 0 1px rgba(74,222,128,.18);
+  }
+  .diff-icon { font-size: 2.1rem; margin-bottom: .85rem; line-height: 1; }
+  .diff-card h3 {
+    font-size: 1.18rem; font-weight: 700; margin-bottom: .55rem;
+    background: linear-gradient(135deg, #e6edf3 35%, var(--green) 120%);
+    -webkit-background-clip: text; background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .diff-card p { color: var(--text-muted); font-size: .92rem; line-height: 1.6; }
+  .diff-card code {
+    background: #06100a; border: 1px solid #16291d; border-radius: 6px;
+    padding: 1px 6px; color: var(--green); font-size: .85em;
+  }
+  .diff-more {
+    text-align: center; color: var(--text-muted);
+    font-size: .92rem; margin: 0 auto 1.6rem; max-width: 640px;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .diff-card:hover { transform: none; }
+  }
+
   .federation-spotlight {
     max-width: 1100px;
     margin: 0 auto;
