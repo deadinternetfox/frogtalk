@@ -8744,8 +8744,19 @@ async def update_profile(request: Request, body: ProfileUpdateRequest, current_u
         ident = db.get_user_by_id(current_user["id"]) or {}
         prof = db.get_user_profile(ident.get("nickname") or "") or {}
         merged = {**ident, **{k: prof[k] for k in ("status_msg", "presence", "mood", "banner") if k in prof}}
+        # banner + custom_style carry the user's profile background (image /
+        # custom CSS). enqueue_user_profile_updated only forwards these via the
+        # `extra` channel — without it peers never received a live background
+        # update and showed a stale/empty background cross-node.
+        _fed_extra = {}
+        _bnr = str(prof.get("banner") or ident.get("banner") or "").strip()
+        if _bnr:
+            _fed_extra["banner"] = _bnr
+        _cstyle = str(prof.get("custom_style") or "").strip()
+        if _cstyle:
+            _fed_extra["custom_style"] = _cstyle
         if _user_at_account_home(int(current_user["id"])):
-            federation_mod.enqueue_user_profile_updated(merged)
+            federation_mod.enqueue_user_profile_updated(merged, extra=(_fed_extra or None))
             if privacy_changed:
                 # get_user_by_id only returns identity columns — re-fetch the
                 # full row (token path includes every privacy flag) so the

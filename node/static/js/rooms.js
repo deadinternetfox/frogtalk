@@ -417,6 +417,7 @@ const Rooms = (() => {
       if (window.ContentWarning?.ensureChatShell) ContentWarning.ensureChatShell(area);
     } catch {}
     area.classList.add('chat-switching', 'chat-switching-swr');
+    _armChatSwitchScrollWatchdog(area);
     try { setRoomHeader(r, type || 'public', null, null, chType); } catch {}
     try {
       window.FtCompose?.beginChannelSwitch?.(r, { swr: true });
@@ -1773,6 +1774,7 @@ const Rooms = (() => {
     const swr = !!opts.swr;
     area.classList.add('chat-switching');
     area.classList.toggle('chat-switching-swr', swr);
+    _armChatSwitchScrollWatchdog(area);
     if (!swr) area.scrollTop = 0;
     _scrubStaleSwitchChrome(area);
     ensureLoadingShieldStyle();
@@ -1942,6 +1944,26 @@ const Rooms = (() => {
         recoverChannelSwitch(expectRoom);
       }
     }, _SWITCH_WATCHDOG_MS);
+  }
+
+  /** Safety net: `.chat-switching` sets `overflow:hidden` on #messages-area, so
+   *  if finishChannelSwitch is never reached (a race / error mid-switch) the
+   *  chat becomes unscrollable until a manual page refresh — exactly the
+   *  "had to refresh to scroll" glitch. Force-clear the class if it's still
+   *  stuck after a generous timeout. Re-arming clears any prior timer (stored
+   *  on the element) so a later real switch is never cut short. */
+  function _armChatSwitchScrollWatchdog(area) {
+    if (!area) return;
+    try { clearTimeout(area._chatSwitchWatchdog); } catch {}
+    try {
+      area._chatSwitchWatchdog = setTimeout(() => {
+        try {
+          if (area.classList.contains('chat-switching')) {
+            area.classList.remove('chat-switching', 'chat-switching-swr');
+          }
+        } catch {}
+      }, 6000);
+    } catch {}
   }
 
   /** Clear loading overlay + compose lock for the active (or given) channel. */

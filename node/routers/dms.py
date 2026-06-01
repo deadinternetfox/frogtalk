@@ -801,6 +801,21 @@ async def mark_dm_viewed(channel_id: int, msg_id: int,
     return {"ok": True, "viewed_by_me": 1 if not is_sender else 0}
 
 
+def _dm_channel_peer(channel_id: int, me_id: int):
+    """(channel_row, peer_id) for a DM channel, or (None, None)."""
+    try:
+        with db._conn() as con:
+            ch = con.execute(
+                "SELECT user_a, user_b FROM dm_channels WHERE id=?", (channel_id,)
+            ).fetchone()
+    except Exception:
+        ch = None
+    if not ch:
+        return None, None
+    peer_id = ch["user_b"] if ch["user_a"] == me_id else ch["user_a"]
+    return ch, peer_id
+
+
 @router.put("/{channel_id}/messages/{msg_id}")
 async def edit_message(channel_id: int, msg_id: int, body: EditDMBody,
                        current_user: dict = Depends(get_current_user)):
@@ -812,7 +827,33 @@ async def edit_message(channel_id: int, msg_id: int, body: EditDMBody,
     ok = db.edit_dm_message(msg_id, current_user["id"], body.content)
     if not ok:
         return JSONResponse(status_code=403, content={"error": "Cannot edit this message"})
-    return {"ok": True}
+    # Live-sync the edit to the peer (and the sender's other devices). Without
+    # this the peer only saw the edit after a manual refresh. The content is the
+    # same Signal envelope the sender stored, so the peer decrypts it normally.
+    edited_at = datetime.utcnow().isoformat() + "Z"
+    payload = {
+        "type": "dm_message_edited",
+        "channel_id": channel_id, "id": msg_id,
+        "sender_id": current_user["id"],
+        "content": body.content or "", "edited": True, "edited_at": edited_at,
+    }
+    _, peer_id = _dm_channel_peer(channel_id, current_user["id"])
+    try:
+        if peer_id and peer_id != current_user["id"]:
+            await manager.send_to_user(peer_id, payload)
+        await manager.send_to_user(current_user["id"], payload)
+    except Exception:
+        _log.debug("dm edit live broadcast failed", exc_info=True)
+    try:
+        from routers import federation as federation_mod
+        peer = db.get_user_by_id(peer_id) or {} if peer_id else {}
+        federation_mod.enqueue_dm_message_edited(
+            current_user, peer, channel_id=channel_id,
+            source_message_id=str(msg_id), content=body.content or "", edited_at=edited_at,
+        )
+    except Exception:
+        _log.exception("federation: failed to enqueue DM edit")
+    return {"ok": True, **payload}
 
 
 @router.delete("/{channel_id}/messages/{msg_id}")
@@ -821,7 +862,27 @@ async def delete_message(channel_id: int, msg_id: int,
     ok = db.delete_dm_message(msg_id, current_user["id"])
     if not ok:
         return JSONResponse(status_code=403, content={"error": "Cannot delete this message"})
-    return {"ok": True}
+    # Live-sync the deletion to the peer (and the sender's other devices).
+    payload = {
+        "type": "dm_message_deleted",
+        "channel_id": channel_id, "id": msg_id, "sender_id": current_user["id"],
+    }
+    _, peer_id = _dm_channel_peer(channel_id, current_user["id"])
+    try:
+        if peer_id and peer_id != current_user["id"]:
+            await manager.send_to_user(peer_id, payload)
+        await manager.send_to_user(current_user["id"], payload)
+    except Exception:
+        _log.debug("dm delete live broadcast failed", exc_info=True)
+    try:
+        from routers import federation as federation_mod
+        peer = db.get_user_by_id(peer_id) or {} if peer_id else {}
+        federation_mod.enqueue_dm_message_deleted(
+            current_user, peer, channel_id=channel_id, source_message_id=str(msg_id),
+        )
+    except Exception:
+        _log.exception("federation: failed to enqueue DM delete")
+    return {"ok": True, **payload}
 
 
 @router.post("/{channel_id}/messages/{msg_id}/react")

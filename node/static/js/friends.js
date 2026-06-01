@@ -528,7 +528,8 @@ function openFriendsPanel() {
         left: 70px;
         top: 0;
         width: 300px;
-        height: 100vh;
+        height: 100dvh;
+        max-height: 100dvh;
         background: linear-gradient(180deg,#132520 0%,#0f1d19 58%,#0c1714 100%);
         border-right: 1px solid #2a4a3f;
         z-index: 500;
@@ -572,8 +573,12 @@ function openFriendsPanel() {
       .ffp-tab.active { background: linear-gradient(180deg,#234238,#1b332b); color: #79cf9f; }
       .ffp-content {
         flex: 1;
+        min-height: 0;                     /* allow the flex child to scroll */
         overflow-y: auto;
+        overscroll-behavior: contain;
+        -webkit-overflow-scrolling: touch;
         padding: 8px;
+        padding-bottom: calc(8px + var(--safe-bottom, 0px));
       }
       .ffp-friend {
         display: flex;

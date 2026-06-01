@@ -254,6 +254,75 @@ def enqueue_dm_message_created(
     )
 
 
+def _dm_lifecycle_targets(sender: dict, peer: dict) -> list[str]:
+    """Remote server ids for a DM edit/delete (same routing as created)."""
+    import federation_dms as fed_dm
+    import federation_calls as fc
+    targets = fed_dm.dm_message_federation_remote_targets(sender, peer)
+    local_sid = fed_dm._local_server_id()
+    if not targets and fed_dm.should_federate_dm(sender, peer):
+        targets = [sid for sid in fc._clearnet_federation_peer_ids() if sid and sid != local_sid]
+    return targets
+
+
+def enqueue_dm_message_edited(
+    sender: dict,
+    peer: dict,
+    *,
+    channel_id: int = 0,
+    source_message_id: str = "",
+    content: str = "",
+    edited_at: str | None = None,
+) -> dict:
+    """Enqueue a signed ``dm.message.edited`` so the peer node updates its copy.
+
+    Keyed on ``source_message_id`` (the sender's local row id) which the receiver
+    maps to its federated copy via find_dm_message_by_federation_origin.
+    """
+    targets = _dm_lifecycle_targets(sender, peer)
+    if not targets:
+        return {"ok": True, "skipped": "no_remote_targets"}
+    return enqueue_server_event(
+        "dm.message.edited",
+        {
+            "channel_id": int(channel_id or 0),
+            "sender_nickname": str(sender.get("nickname") or "").strip(),
+            "peer_nickname": str(peer.get("nickname") or "").strip(),
+            "sender_global_user_id": str(sender.get("global_user_id") or "").strip(),
+            "peer_global_user_id": str(peer.get("global_user_id") or "").strip(),
+            "source_message_id": str(source_message_id or "").strip(),
+            "content": content or "",
+            "edited_at": edited_at or (datetime.utcnow().isoformat() + "Z"),
+        },
+        target_server_ids=targets,
+    )
+
+
+def enqueue_dm_message_deleted(
+    sender: dict,
+    peer: dict,
+    *,
+    channel_id: int = 0,
+    source_message_id: str = "",
+) -> dict:
+    """Enqueue a signed ``dm.message.deleted`` so the peer node removes its copy."""
+    targets = _dm_lifecycle_targets(sender, peer)
+    if not targets:
+        return {"ok": True, "skipped": "no_remote_targets"}
+    return enqueue_server_event(
+        "dm.message.deleted",
+        {
+            "channel_id": int(channel_id or 0),
+            "sender_nickname": str(sender.get("nickname") or "").strip(),
+            "peer_nickname": str(peer.get("nickname") or "").strip(),
+            "sender_global_user_id": str(sender.get("global_user_id") or "").strip(),
+            "peer_global_user_id": str(peer.get("global_user_id") or "").strip(),
+            "source_message_id": str(source_message_id or "").strip(),
+        },
+        target_server_ids=targets,
+    )
+
+
 def enqueue_dm_lock_prefs_updated(
     actor: dict,
     peer: dict,
@@ -6500,6 +6569,17 @@ async def _handle_user_event(event: dict) -> None:
     seen_in = str(payload.get("last_seen") or "").strip()
     if seen_in:
         db.apply_last_seen_if_newer(global_user_id=gid, last_seen=seen_in)
+    # Keep the federated user's "online" status + activity last_seen fresh
+    # between connect/disconnect. profile.updated rides the throttled (~90s)
+    # heartbeat, so refreshing the connection record here keeps it inside the
+    # 300s TTL — otherwise a federated user who stayed connected (no new
+    # connect/disconnect event) flipped to "offline" and their last_seen froze.
+    try:
+        presence_in = str(payload.get("presence") or "").strip().lower()
+        if origin and presence_in and presence_in not in ("offline", "invisible"):
+            db.upsert_federation_user_connection(gid, origin)
+    except Exception:
+        pass
 
     # Only mirror profile fields into the local `users` table when the
     # event's global_user_id matches an EXISTING local user. We deliberately
@@ -6991,6 +7071,64 @@ async def _handle_dm_read_receipt(event: dict) -> None:
         _log.debug("federation: dm.read.receipt ws delivery failed", exc_info=True)
 
 
+async def _handle_dm_message_lifecycle(event: dict, action: str) -> None:
+    """Apply a federated DM edit/delete to our local copy + push it live.
+
+    The originating node identifies the message by ``source_message_id`` (its own
+    local row id); we map that to our federated copy via the origin mapping set
+    when the dm.message.created arrived. Only the original sender can edit/delete,
+    which holds here because the event is signed by the sender's home node.
+    """
+    payload = event.get("payload") or {}
+    sender_nick = _fed_nickname(payload.get("sender_nickname"))
+    peer_nick = _fed_nickname(payload.get("peer_nickname"))
+    if not sender_nick or not peer_nick:
+        return
+    origin = str(event.get("origin_server_id") or "").strip()
+    sender_gid = str(payload.get("sender_global_user_id") or "").strip()
+    peer_gid = str(payload.get("peer_global_user_id") or "").strip()
+    source_msg_id = str(payload.get("source_message_id") or "").strip()
+    if not source_msg_id:
+        return
+    sender = _fed_resolve_user_for_dm(sender_nick, sender_gid or None, origin_server_id=origin)
+    peer = _fed_resolve_user_for_dm(peer_nick, peer_gid or None, origin_server_id=origin)
+    if not sender or not peer:
+        _log.info("federation: drop dm.message.%s — local user missing", action)
+        return
+    local_id = db.find_dm_message_by_federation_origin(origin, source_msg_id)
+    if not local_id:
+        _log.info("federation: drop dm.message.%s — unknown source msg %s", action, source_msg_id)
+        return
+    local_id = int(local_id)
+    channel_id = db.get_or_create_dm(int(sender["id"]), int(peer["id"]))
+    if action == "edited":
+        content = str(payload.get("content") or "")
+        if not content.strip():
+            return
+        if not db.edit_dm_message(local_id, int(sender["id"]), content):
+            return
+        out = {
+            "type": "dm_message_edited", "channel_id": channel_id, "id": local_id,
+            "sender_id": int(sender["id"]), "content": content, "edited": True,
+            "edited_at": str(payload.get("edited_at") or datetime.utcnow().isoformat() + "Z"),
+            "federated": True,
+        }
+    else:
+        if not db.delete_dm_message(local_id, int(sender["id"])):
+            return
+        out = {
+            "type": "dm_message_deleted", "channel_id": channel_id, "id": local_id,
+            "sender_id": int(sender["id"]), "federated": True,
+        }
+    try:
+        from ws_manager import manager as ws_manager
+        await ws_manager.send_to_user(int(peer["id"]), out)
+        if int(sender["id"]) != int(peer["id"]):
+            await ws_manager.send_to_user(int(sender["id"]), out)
+    except Exception:
+        _log.debug("federation: dm.message.%s ws delivery failed", action, exc_info=True)
+
+
 async def _handle_dm_event(event: dict) -> None:
     """Handle incoming federated DM events."""
     event_type = str(event.get("event_type") or "")
@@ -7005,6 +7143,12 @@ async def _handle_dm_event(event: dict) -> None:
         return
     if event_type == "dm.read.receipt":
         await _handle_dm_read_receipt(event)
+        return
+    if event_type == "dm.message.edited":
+        await _handle_dm_message_lifecycle(event, "edited")
+        return
+    if event_type == "dm.message.deleted":
+        await _handle_dm_message_lifecycle(event, "deleted")
         return
     if event_type != "dm.message.created":
         return
