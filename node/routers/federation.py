@@ -2764,7 +2764,20 @@ def _load_directory_entries(
                 },
                 method="GET",
             ).decode("utf-8", errors="replace")
-            payload = json.loads(raw)
+            stripped = raw.strip()
+            if not stripped:
+                raise RuntimeError(
+                    "official directory returned an empty response "
+                    "(check FROGTALK_OFFICIAL_DIRECTORY_URL — the hub may be down)"
+                )
+            try:
+                payload = json.loads(stripped)
+            except json.JSONDecodeError:
+                snippet = stripped[:80].replace("\n", " ").replace("\r", " ")
+                raise RuntimeError(
+                    "official directory returned a non-JSON response "
+                    f"(HTTP error page or wrong URL); starts with: {snippet!r}"
+                )
             if isinstance(payload, list):
                 return [p for p in payload if isinstance(p, dict)]
             if isinstance(payload, dict):

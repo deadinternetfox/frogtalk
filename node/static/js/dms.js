@@ -3491,7 +3491,10 @@ function renderDMChat () {
   // "Learn more" path into the encryption modal.
   try {
     const cid = _activeDM?.id;
-    if (cid && !_cannotDecryptToastShown.has(cid)) {
+    // Respect the user's Privacy → "Hide the previous-messages notice" choice
+    // (same federated flag the in-chat history cards use), so once dismissed the
+    // popup never returns — including never floating over the channel directory.
+    if (cid && !_cannotDecryptToastShown.has(cid) && !STATE.user?.hide_dm_history_notice) {
       const undec = _dmMessages.filter(m => {
         if (typeof m?.content !== 'string') return false;
         if (!_looksEncryptedBlob(m.content)) return false;
@@ -3520,8 +3523,14 @@ function renderDMChat () {
             })(),
             primaryLabel: 'Got it',
             actionLabel: 'Learn more',
+            checkboxLabel: "Don't show this again",
           }).then(r => {
-            if (r === 'action' && typeof toggleEncryptionInfo === 'function') {
+            // checkboxLabel makes notice() resolve { action, dontShowAgain }.
+            const action = (r && typeof r === 'object') ? r.action : r;
+            if (r && typeof r === 'object' && r.dontShowAgain) {
+              try { dmHideHistoryNotice(true); } catch {}
+            }
+            if (action === 'action' && typeof toggleEncryptionInfo === 'function') {
               try { toggleEncryptionInfo(); } catch {}
             }
           });

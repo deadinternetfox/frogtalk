@@ -1759,16 +1759,31 @@ async function createPC () {
         if (ra) ra.style.display = 'none';
         _ensureMediaPlayback(rv, 'call-remote-video');
       } else if (e.track?.kind === 'audio') {
-        // WebKit won't play audio through display:none <video> (voice calls).
-        if (rv) {
-          rv.classList.add('ft-remote-audio-sink');
-          rv.style.removeProperty('display');
-        }
+        // Remote audio always plays through the dedicated <audio> sink.
         if (raSink) {
           raSink.srcObject = stream;
           _ensureMediaPlayback(raSink, 'call-remote-audio');
         }
-        _ensureMediaPlayback(rv, 'call-remote-video-audio');
+        // Voice-only remote (no video track on #remote-video). iOS WebKit
+        // refuses to play audio through a display:none <video>, so there we
+        // keep a 1px live sink. But Android WebView composites that
+        // video-track-less surface as a BROKEN black frame punched behind the
+        // whole call UI ("broken video behind the green avatar") — and audio
+        // already plays through <audio> above — so on Android keep it hidden.
+        // Guarded on "no video track" so a real video call (where this audio
+        // ontrack can fire after the video one) is never shrunk to 1px.
+        const rvHasVideo = !!(rv && rv.srcObject && rv.srcObject.getVideoTracks
+          && rv.srcObject.getVideoTracks().length);
+        if (rv && !rvHasVideo) {
+          if (_isAndroidWebView()) {
+            rv.classList.remove('ft-remote-audio-sink');
+            rv.style.display = 'none';
+          } else {
+            rv.classList.add('ft-remote-audio-sink');
+            rv.style.removeProperty('display');
+            _ensureMediaPlayback(rv, 'call-remote-video-audio');
+          }
+        }
       }
 
       if (e.track?.kind === 'audio' && stream) _startRemoteVAD(stream);
