@@ -998,10 +998,14 @@ ipcMain.handle('desktop:offline-switch-node', async () => {
 ipcMain.handle('desktop:set-server-base-url', (_event, url) => {
   const base = normalizeServerBaseUrl(url || '');
   if (!base) return { ok: false };
+  const prev = normalizeServerBaseUrl(_desktopSettings.serverBaseUrl || '');
   _desktopSettings.serverBaseUrl = base;
   writeDesktopSettings();
   try {
-    if (mainWindow && !mainWindow.isDestroyed()) {
+    // Only reload when the base actually CHANGES. Reloading unconditionally
+    // turned a (now-fixed) per-launch setServerBaseUrl call into an infinite
+    // reload loop; guard it so a redundant same-base call is a no-op.
+    if (base !== prev && mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.loadURL(`${base}/app`);
     }
   } catch {}
