@@ -325,6 +325,15 @@ let _screenFromUid = null;       // uid of the peer sharing (the call peer)
 let _screenPendingIce = [];      // ICE buffered until screen remote-desc applied
 let _screenRemoteDescApplied = false;
 let _nativeScreenSharing = false; // we (Android) are sharing our screen natively
+// ── Desktop screen-share SEND state ─────────────────────────────────────────
+// The web client shares its screen over a dedicated SEND-only PeerConnection
+// (screen_* signalling, the same path native/group share uses) instead of
+// swapping the camera on the main call PC. A separate PC lets the user share
+// their screen AND keep the camera streaming at the same time, and gives the
+// viewer a real screen tile.
+let _screenSendPc = null;            // outbound screen RTCPeerConnection (we offer)
+let _screenSendPendingIce = [];      // ICE buffered until the answer is applied
+let _screenSendRemoteDescApplied = false;
 // Inbound ICE candidates that arrive before setRemoteDescription resolves
 // would throw on addIceCandidate and be lost forever. Buffer them and drain
 // once the remote description is applied.
@@ -1635,9 +1644,10 @@ function resetCall () {
       _pc = null;
     }
     if (_localStream) { try { _localStream.getTracks().forEach(t => t.stop()); } catch {} _localStream = null; }
-    if (_screenStream) { try { _screenStream.getTracks().forEach(t => t.stop()); } catch {} _screenStream = null; }
-    // Tear down inbound screen share (_screenPc) + any native capture.
+    // Tear down both directions of screen share: inbound _screenPc (peer→us),
+    // our own desktop send PC, and any native capture.
     try { _teardownScreen(); } catch {}
+    try { _teardownScreenSend(); } catch {}
     if (_nativeScreenSharing) {
       try { window.Android && window.Android.stopScreenShare && window.Android.stopScreenShare(); } catch {}
       _nativeScreenSharing = false;
@@ -2000,13 +2010,14 @@ async function handleScreenOffer (data) {
 }
 
 async function handleScreenAnswer (data) {
-  // The web client shares over the main call PC (replaceTrack/renegotiate), so
-  // it never offers a dedicated screen PC — this only fires for a native sharer
-  // and is applied defensively to an unanswered inbound _screenPc.
+  // The desktop sharer offers on _screenSendPc; the viewer's answer lands here.
   try {
-    if (!_screenForThisCall(data) || !_screenPc) return;
-    if (_screenPc.signalingState === 'have-local-offer') {
-      await _screenPc.setRemoteDescription({ type: 'answer', sdp: data.sdp });
+    if (!_screenForThisCall(data) || !_screenSendPc) return;
+    if (_screenSendPc.signalingState === 'have-local-offer') {
+      await _screenSendPc.setRemoteDescription({ type: 'answer', sdp: data.sdp });
+      _screenSendRemoteDescApplied = true;
+      const q = _screenSendPendingIce.slice(); _screenSendPendingIce.length = 0;
+      for (const c of q) { try { await _screenSendPc.addIceCandidate(c); } catch {} }
     }
   } catch (e) { console.warn('handleScreenAnswer failed', e); }
 }
@@ -2015,8 +2026,16 @@ async function handleScreenIce (data) {
   try {
     if (Number(data.from_id) === _selfUid()) return;
     if (_voiceRoom && Number(data.call_id || 0) === 0) return _handleVoiceScreenIce(data);
-    if (!_screenPc || !data.candidate) return;
+    if (!data.candidate) return;
     let parsed; try { parsed = JSON.parse(data.candidate); } catch { return; }
+    // On a 1-on-1 call only one direction is active: if we're the sharer the
+    // peer's candidates belong to our send PC, otherwise to the receive PC.
+    if (_screenSendPc) {
+      if (!_screenSendRemoteDescApplied) { _screenSendPendingIce.push(parsed); return; }
+      try { await _screenSendPc.addIceCandidate(parsed); } catch {}
+      return;
+    }
+    if (!_screenPc) return;
     if (!_screenRemoteDescApplied) { _screenPendingIce.push(parsed); return; }
     try { await _screenPc.addIceCandidate(parsed); } catch {}
   } catch (e) { console.warn('handleScreenIce failed', e); }
@@ -2120,8 +2139,7 @@ function onNativeScreenShareStarted () {
     return;
   }
   _nativeScreenSharing = true;
-  const btn = document.getElementById('btn-call-screen');
-  if (btn) btn.textContent = '⏹️';
+  _syncScreenButton();
   try { toast('Sharing your screen', 'info'); } catch {}
 }
 function onNativeScreenShareStopped () {
@@ -2135,8 +2153,7 @@ function onNativeScreenShareStopped () {
     _syncVoiceTrayNotification();
   }
   _nativeScreenSharing = false;
-  const btn = document.getElementById('btn-call-screen');
-  if (btn) btn.textContent = '🖥️';
+  _syncScreenButton();
 }
 function onNativeScreenShareError (msg) {
   if (_nativeVoiceScreenSharing) {
@@ -2148,8 +2165,7 @@ function onNativeScreenShareError (msg) {
     _syncVoiceTrayNotification();
   }
   _nativeScreenSharing = false;
-  const btn = document.getElementById('btn-call-screen');
-  if (btn) btn.textContent = '🖥️';
+  _syncScreenButton();
   const m = String(msg || '').trim();
   // "cancelled" = user dismissed the system consent dialog → stay silent.
   if (m && m.toLowerCase() !== 'cancelled') {
@@ -2157,21 +2173,26 @@ function onNativeScreenShareError (msg) {
   }
 }
 
-function _renderRemoteScreen (stream) {
+function _renderRemoteScreen (stream, opts) {
+  const local = !!(opts && opts.local);
   const tile = document.getElementById('call-tile-screen');
   const sv = document.getElementById('screen-video');
   if (!tile || !sv) return;
   sv.srcObject = stream;
+  sv.muted = local;            // our own screen capture has no audio; avoid echo
   sv.style.display = '';
   tile.style.display = '';
-  _screenActive = true;
+  // _screenActive tracks a REMOTE screen; leave it false for our own preview so
+  // stopping our share correctly hides the tile (see _teardownScreenSend).
+  if (!local) _screenActive = true;
   try {
     const nm = document.getElementById('call-tile-screen-name');
-    if (nm) nm.textContent = '📺 ' + (_callPeerNick || 'Peer') + "'s screen";
+    if (nm) nm.textContent = local ? '📺 Your screen'
+      : '📺 ' + (_callPeerNick || 'Peer') + "'s screen";
   } catch {}
   // Switch the participants area into screen layout (CSS grid handles the rest).
   try { document.getElementById('call-participants')?.classList.add('has-screen'); } catch {}
-  _ensureMediaPlayback(sv, 'screen-share');
+  _ensureMediaPlayback(sv, local ? 'screen-share-self' : 'screen-share');
 }
 
 function _teardownScreen (opts) {
@@ -2264,7 +2285,7 @@ async function toggleScreenShare () {
     if (_nativeScreenSharing) {
       try { window.Android.stopScreenShare(); } catch {}
       _nativeScreenSharing = false;
-      if (btn) btn.textContent = '🖥️';
+      _syncScreenButton();
       toast('Screen share stopped', 'info');
       return;
     }
@@ -2273,7 +2294,7 @@ async function toggleScreenShare () {
       // capture service + WebRTC peer, and signals over its own WS. We learn
       // success/cancel via window.onNativeScreenShare* callbacks below.
       window.Android.startScreenShare(JSON.stringify(_nativeScreenArgs()));
-      if (btn) btn.textContent = '⏹️';
+      _syncScreenButton();
       toast('Starting screen share…', 'info');
     } catch (e) {
       console.warn('native startScreenShare failed', e);
@@ -2288,26 +2309,13 @@ async function toggleScreenShare () {
   }
 
   // ── Desktop / browser getDisplayMedia path ───────────────────────────────
-  // Screen-share rides the EXISTING call PC: replaceTrack on a video call, or
-  // add-track + renegotiate on a voice call. Reusing the already-connected _pc
-  // is what makes it work cross-node — a dedicated screen PeerConnection would
-  // have to re-establish ICE across nodes and regressed federated DM calls.
-  // Already sharing — stop and revert.
-  if (_screenStream) {
-    _screenStream.getTracks().forEach(t => t.stop());
-    _screenStream = null;
-    const videoSender = _pc.getSenders().find(s => s.track && s.track.kind === 'video');
-    const camTrack = _localStream?.getVideoTracks().find(t => t.readyState === 'live');
-    if (videoSender) {
-      if (camTrack) {
-        await videoSender.replaceTrack(camTrack);
-      } else {
-        // No camera to revert to — stop sending video entirely.
-        try { await videoSender.replaceTrack(null); } catch {}
-      }
-    }
-    if (btn) btn.textContent = '🖥️';
-    _syncMiniScreenButton();
+  // Share over a dedicated SEND-only PeerConnection (screen_* signalling) so it
+  // runs ALONGSIDE the camera (separate m-lines) and gives the viewer a real
+  // screen tile. Already sharing → stop and tell the peer to tear down.
+  if (_screenStream || _screenSendPc) {
+    _teardownScreenSend();
+    _sendCallSignal({ type: 'screen_end', ..._callPeerRoutingFields(), call_id: _callId || undefined });
+    _syncScreenButton();
     toast('Screen share stopped', 'info');
     return;
   }
@@ -2315,10 +2323,10 @@ async function toggleScreenShare () {
     toast('Screen share is not supported on this device/browser', 'error');
     return;
   }
-  // Step 1 — capture the screen. Kept separate from the track-attach step so a
-  // capture failure (very common on Linux/Wayland when xdg-desktop-portal isn't
-  // wired) reports the REAL reason instead of a generic "failed". A genuine
-  // cancel (picker dismissed) surfaces as NotAllowedError/AbortError → silent.
+  // Step 1 — capture the screen. Kept separate from the offer step so a capture
+  // failure (very common on Linux/Wayland when xdg-desktop-portal isn't wired)
+  // reports the REAL reason instead of a generic "failed". A genuine cancel
+  // (picker dismissed) surfaces as NotAllowedError/AbortError → silent.
   let stream = null;
   try {
     stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
@@ -2330,28 +2338,99 @@ async function toggleScreenShare () {
     toast('Could not start screen share: ' + detail, 'error', 7000);
     return;
   }
-  // Step 2 — attach the captured track to the call (replace existing video, or
-  // add + renegotiate for a voice-only call).
+  // Step 2 — open the send PC, render our own screen locally, and offer.
   try {
     _screenStream = stream;
     const screenTrack = _screenStream.getVideoTracks()[0];
     if (!screenTrack) { toast('No screen video track was captured', 'error'); _screenStream = null; return; }
-    const videoSender = _pc.getSenders().find(s => s.track && s.track.kind === 'video');
-    if (videoSender) {
-      await videoSender.replaceTrack(screenTrack);
-    } else {
-      _pc.addTrack(screenTrack, _screenStream);
-      await _renegotiate();
-    }
-    if (btn) btn.textContent = '⏹️';
-    _syncMiniScreenButton();
+    screenTrack.onended = () => { if (_screenStream || _screenSendPc) toggleScreenShare().catch(() => {}); };
+    _renderRemoteScreen(_screenStream, { local: true });
+    await _startScreenSend(_screenStream);
+    _syncScreenButton();
     toast('Sharing screen', 'info');
-    screenTrack.onended = () => { toggleScreenShare().catch(()=>{}); };
   } catch (e) {
-    console.warn('screen share attach failed:', e);
-    toast('Screen share failed to attach: ' + ((e && e.name) || (e && e.message) || 'error'), 'error', 7000);
+    console.warn('screen share start failed:', e);
+    toast('Screen share failed: ' + ((e && e.name) || (e && e.message) || 'error'), 'error', 7000);
+    _teardownScreenSend();
+    _syncScreenButton();
+  }
+}
+
+/** Single source of truth for the screen-share buttons (overlay + mini pill),
+ *  so start/stop never drift out of sync. Driven by actual sharing state. */
+function _syncScreenButton () {
+  const sharing = !!(_screenStream || _screenSendPc || _nativeScreenSharing);
+  const b = document.getElementById('btn-call-screen');
+  if (b) {
+    b.textContent = sharing ? '⏹️' : '🖥️';
+    b.classList.toggle('active', sharing);
+    b.title = sharing ? 'Stop sharing screen' : 'Share screen';
+  }
+  try { _syncMiniScreenButton(); } catch {}
+}
+
+/** Open a SEND-only screen PeerConnection and offer it to the call peer over
+ *  the screen_* signalling channel (same relay native/group share use). The
+ *  viewer answers on their _screenPc and renders the dedicated screen tile. */
+async function _startScreenSend (stream) {
+  const ice = await buildIceServers(_peerHomeServerId || '');
+  _screenSendPc = new RTCPeerConnection({ iceServers: ice });
+  _screenSendRemoteDescApplied = false;
+  _screenSendPendingIce.length = 0;
+  for (const t of stream.getVideoTracks()) _screenSendPc.addTrack(t, stream);
+  _screenSendPc.onicecandidate = e => {
+    if (!e.candidate) return;
+    _sendCallSignal({
+      type: 'screen_ice',
+      ..._callPeerRoutingFields(),
+      call_id: _callId || undefined,
+      candidate: JSON.stringify(e.candidate),
+    });
+  };
+  _screenSendPc.onconnectionstatechange = () => {
+    const s = _screenSendPc && _screenSendPc.connectionState;
+    if (s === 'failed' || s === 'closed') {
+      // Transient failure shouldn't yank the viewer's tile; drop our half but
+      // keep the capture so the user can re-press without re-granting.
+      _teardownScreenSend({ keepStream: true });
+      _syncScreenButton();
+    }
+  };
+  const offer = await _screenSendPc.createOffer();
+  await _screenSendPc.setLocalDescription(offer);
+  _sendCallSignal({
+    type: 'screen_offer',
+    ..._callPeerRoutingFields(),
+    call_id: _callId || undefined,
+    sdp: offer.sdp,
+  });
+}
+
+/** Tear down OUR outgoing screen share (send PC + capture + local tile). */
+function _teardownScreenSend (opts) {
+  try {
+    if (_screenSendPc) {
+      _screenSendPc.onicecandidate = null;
+      _screenSendPc.onconnectionstatechange = null;
+      try { _screenSendPc.close(); } catch {}
+      _screenSendPc = null;
+    }
+  } catch {}
+  _screenSendRemoteDescApplied = false;
+  _screenSendPendingIce.length = 0;
+  if (!opts || !opts.keepStream) {
     try { _screenStream && _screenStream.getTracks().forEach(t => t.stop()); } catch {}
     _screenStream = null;
+  }
+  // Hide our local screen preview unless a peer's screen is also showing.
+  if (!_screenActive) {
+    try {
+      const tile = document.getElementById('call-tile-screen');
+      const sv = document.getElementById('screen-video');
+      if (sv) { sv.srcObject = null; sv.style.display = 'none'; }
+      if (tile) tile.style.display = 'none';
+      document.getElementById('call-participants')?.classList.remove('has-screen');
+    } catch {}
   }
 }
 
