@@ -2578,10 +2578,24 @@ video.msg-gif-video.msg-media{background:#0a0f0d}
    Wraps a <video> with a polished, brand-coloured shell so chat videos
    show a real first-frame thumbnail + central play button instead of a
    black rectangle. ChatVideo (ui.js) wires interaction. */
-.chat-video{position:relative;display:inline-block;max-width:min(360px,100%);margin-top:6px;border-radius:12px;overflow:hidden;background:#000;border:1px solid color-mix(in srgb, var(--surface-color) 80%, var(--accent-color) 20%);box-shadow:0 8px 24px rgba(0,0,0,.45),0 0 0 1px color-mix(in srgb, var(--accent-color) 4%, transparent) inset;line-height:0}
-.chat-video video{display:block;width:100%;max-width:100%;max-height:300px;height:auto;background:#000;border-radius:11px;object-fit:contain}
+.chat-video{position:relative;display:inline-block;max-width:min(360px,100%);margin-top:6px;border-radius:12px;overflow:hidden;background:linear-gradient(135deg,color-mix(in srgb, var(--surface-color) 78%, var(--accent-color) 22%),color-mix(in srgb, var(--bg-color) 90%, var(--accent-color) 10%));border:1px solid color-mix(in srgb, var(--surface-color) 80%, var(--accent-color) 20%);box-shadow:0 8px 24px rgba(0,0,0,.45),0 0 0 1px color-mix(in srgb, var(--accent-color) 4%, transparent) inset;line-height:0;min-height:120px;min-width:160px}
+.chat-video video{display:block;width:100%;max-width:100%;max-height:300px;height:auto;background:transparent;border-radius:11px;object-fit:contain}
 .chat-video .cv-poster{position:absolute;inset:0;background-color:color-mix(in srgb, var(--bg-color) 88%, var(--accent-color) 12%);background-position:center;background-size:cover;background-repeat:no-repeat;border-radius:11px;z-index:1;opacity:0;transition:opacity .25s ease}
 .chat-video .cv-poster.ready{opacity:1}
+/* Polished loading placeholder: while the poster/first frame loads, show a
+   soft branded shimmer instead of a flat black/grey box. */
+.chat-video .cv-poster:not(.ready){
+  opacity:1;
+  background-image:linear-gradient(100deg,
+    transparent 18%,
+    color-mix(in srgb, var(--accent-color) 22%, transparent) 46%,
+    transparent 74%);
+  background-size:220% 100%;background-repeat:no-repeat;
+  animation:cvShimmer 1.25s ease-in-out infinite;
+}
+.chat-video.cv-playing .cv-poster:not(.ready){animation:none}
+@keyframes cvShimmer{0%{background-position:170% 0}100%{background-position:-70% 0}}
+@media (prefers-reduced-motion: reduce){ .chat-video .cv-poster:not(.ready){animation:none} }
 .chat-video.cv-playing .cv-poster{display:none}
 .chat-video .cv-loading{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:2;pointer-events:none}
 .chat-video .cv-loading .cv-spinner{width:30px;height:30px;border:3px solid color-mix(in srgb, var(--accent-color) 18%, transparent);border-top-color:var(--accent-color);border-radius:50%;animation:spin .9s linear infinite}

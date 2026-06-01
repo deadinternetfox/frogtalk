@@ -103,6 +103,26 @@
         setTimeout(ensureVisible, 120);
         setTimeout(ensureVisible, 320);
       }
+      // Keep the LAST message visible above the keyboard. When the chat shrinks
+      // (keyboard opens) the newest message can slip under the input/keyboard,
+      // forcing a manual scroll. If the user was already near the bottom
+      // (reading the latest), re-anchor the chat to the bottom once the
+      // viewport settles. Internal element scroll is safe on iOS too (it's not
+      // window.scrollTo, so it doesn't fight Safari's keyboard animation).
+      if (composer) {
+        const area = document.getElementById('messages-area');
+        let wasNearBottom = true;
+        try {
+          if (area) wasNearBottom =
+            (area.scrollHeight - area.scrollTop - area.clientHeight) < 220;
+        } catch {}
+        const anchor = () => {
+          try { if (area && wasNearBottom) area.scrollTop = area.scrollHeight; } catch {}
+        };
+        setTimeout(anchor, 140);
+        setTimeout(anchor, 360);
+        setTimeout(anchor, 600);
+      }
     }, true);
 
     document.addEventListener('focusout', () => {
