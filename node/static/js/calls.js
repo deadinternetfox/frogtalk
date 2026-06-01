@@ -2494,12 +2494,17 @@ async function _startScreenSend (stream) {
   };
   const offer = await _screenSendPc.createOffer();
   await _screenSendPc.setLocalDescription(offer);
-  _sendCallSignal({
+  const _screenOfferMsg = {
     type: 'screen_offer',
     ..._callPeerRoutingFields(),
+    // Always carry the global id too — the server resolves the peer's local
+    // call_id from it on cross-node DM shares (each node has a different one).
+    global_call_id: _callGlobalId || undefined,
     call_id: _callId || undefined,
     sdp: offer.sdp,
-  });
+  };
+  try { console.debug('[screen] sending offer call_id=', _callId, 'gcid=', _callGlobalId, 'to=', _callPeerNick); } catch {}
+  _sendCallSignal(_screenOfferMsg);
 }
 
 /** Tear down OUR outgoing screen share (send PC + capture + local tile). */
