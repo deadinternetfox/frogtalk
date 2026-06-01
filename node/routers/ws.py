@@ -2012,11 +2012,30 @@ async def websocket_endpoint(
             # gone the share just fails and the sharer re-presses.
             elif msg_type in ("screen_offer", "screen_answer", "screen_ice", "screen_end"):
                 call_id = int(data.get("call_id") or 0)
+                _gcid_in = str(data.get("global_call_id") or "").strip()
+                # DM screen-share fix: a cross-node client may know only the
+                # shared global_call_id (each node assigns its own local call_id).
+                # If we got a global id but no local call_id, resolve our local
+                # call row from it so the share stays on the 1-on-1 federation
+                # path instead of falling through to the group-voice branch (which
+                # would silently drop it for a DM — the user is not "in voice").
+                if not call_id and _gcid_in:
+                    try:
+                        _rid = db.resolve_local_call_id(_gcid_in)
+                        if _rid:
+                            call_id = int(_rid)
+                    except Exception:
+                        pass
                 try:
                     _ident_scr = db.get_or_create_local_server_identity() or {}
                     _local_sid_scr = str(_ident_scr.get("server_id") or "").strip()
                 except Exception:
                     _local_sid_scr = ""
+                logger.info(
+                    "[SCRNDBG] recv %s raw_cid=%r cid=%s gcid=%r to_id=%r to_gid=%r",
+                    msg_type, data.get("call_id"), call_id, _gcid_in,
+                    data.get("to_id"), data.get("to_global_user_id"),
+                )
                 if call_id:
                     # ── 1-on-1 call screen-share ──────────────────────────
                     # Only the two participants of a live call row may exchange
@@ -2024,8 +2043,10 @@ async def websocket_endpoint(
                     # on the call's global_call_id).
                     to_id = _resolve_to_id(data)
                     if not to_id:
+                        logger.info("[SCRNDBG] %s drop: no to_id resolved (to_gid=%r)", msg_type, data.get("to_global_user_id"))
                         continue
                     if not _validate_call_participant(call_id, user["id"], to_id):
+                        logger.info("[SCRNDBG] %s drop: validate fail cid=%s uid=%s to_id=%s", msg_type, call_id, user["id"], to_id)
                         continue
                     screen_payload = {
                         "type": msg_type,
@@ -2046,7 +2067,7 @@ async def websocket_endpoint(
                     try:
                         import federation_calls as _fc
                         peer = db.get_user_by_id(to_id) or {}
-                        gid = str(data.get("global_call_id") or "").strip()
+                        gid = _gcid_in
                         if not gid:
                             with db._conn() as con:
                                 crow = con.execute(
@@ -2055,19 +2076,26 @@ async def websocket_endpoint(
                                 ).fetchone()
                             if crow:
                                 gid = str(crow["global_call_id"] or "").strip()
-                        if gid and _fc.is_remote_peer(peer):
+                        _remote = _fc.is_remote_peer(peer)
+                        if gid and _remote:
                             pgid = str(peer.get("global_user_id") or "")
                             if pgid:
-                                _fc.enqueue_screen_signal(
+                                _res = _fc.enqueue_screen_signal(
                                     msg_type, user, pgid,
                                     global_call_id=gid, local_call_id=call_id,
                                     sdp=data.get("sdp") or "",
                                     candidate=str(data.get("candidate") or ""),
                                     force_relay=bool(data.get("force_relay")),
                                 )
+                                logger.info("[SCRNDBG] %s enqueue gid=%s pgid=%s -> %r", msg_type, gid, pgid, _res)
+                            else:
+                                logger.info("[SCRNDBG] %s no pgid for to_id=%s", msg_type, to_id)
+                        else:
+                            logger.info("[SCRNDBG] %s skip enqueue gid=%r remote=%s to_id=%s", msg_type, gid, _remote, to_id)
                     except Exception:
                         logger.exception("federated screen signal enqueue failed")
                 else:
+                    logger.info("[SCRNDBG] %s -> GROUP branch (cid=0); in_voice=%s", msg_type, voice_manager.is_in_voice(room_name, user["id"]))
                     # ── Group voice channel screen-share ──────────────────
                     # Native Android fans its MediaProjection to each voice
                     # participant; desktop sends per-peer too. Mirror the
