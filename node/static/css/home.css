@@ -209,82 +209,83 @@
   .feature-card h3 { font-size: 1.1rem; font-weight: 600; margin-bottom: .5rem; }
   .feature-card p { color: var(--text-muted); font-size: .9rem; line-height: 1.6; }
 
-  /* ── Features: bento differentiators + vs-card + capability groups ──
-     A fresh, non-listy layout: a few accented "what makes us different"
-     tiles, a straight comparison card, then dense grouped capability
-     columns instead of a wall of identical feature cards. */
+  /* ── Features: compact, even differentiator grid ───────────────────
+     Four equal tiles in a tidy 2×2 (no full-width hero, so no lonely tile
+     / empty gap), a slim comparison card, then everyday features as one
+     wrapping chip cloud. Deliberately narrow + low-padding so the section
+     stays small and reads the same on desktop and mobile. */
   .bento {
     display: grid; grid-template-columns: repeat(2, 1fr);
-    gap: 1.1rem; max-width: 1100px; margin: 0 auto 1.6rem;
+    gap: .85rem; max-width: 860px; margin: 0 auto 1.4rem;
   }
   .bento-tile {
-    position: relative; background: var(--bg2);
-    border: 1px solid var(--border); border-radius: 16px;
-    padding: 1.5rem 1.5rem 1.6rem; overflow: hidden;
+    position: relative; background: var(--bg2); min-width: 0;
+    border: 1px solid var(--border); border-radius: 14px;
+    padding: 1.1rem 1.2rem; overflow: hidden;
     transition: border-color .2s, transform .2s, box-shadow .2s;
   }
   .bento-tile:hover {
-    border-color: rgba(74,222,128,.45); transform: translateY(-3px);
-    box-shadow: 0 16px 40px rgba(0,0,0,.35);
+    border-color: rgba(74,222,128,.45); transform: translateY(-2px);
+    box-shadow: 0 12px 30px rgba(0,0,0,.32);
   }
+  /* Federation tile keeps an accent wash but the SAME size as the rest. */
   .bento-hero {
-    grid-column: 1 / -1;
-    background: radial-gradient(130% 170% at 0% 0%, rgba(74,222,128,.16), transparent 55%), var(--bg2);
-    border-color: rgba(74,222,128,.35);
+    background: radial-gradient(130% 170% at 0% 0%, rgba(74,222,128,.15), transparent 58%), var(--bg2);
+    border-color: rgba(74,222,128,.32);
   }
   .bento-tor {
-    background: radial-gradient(130% 170% at 100% 0%, rgba(140,120,220,.16), transparent 55%), var(--bg2);
+    background: radial-gradient(130% 170% at 100% 0%, rgba(140,120,220,.15), transparent 58%), var(--bg2);
   }
   .bento-kicker {
-    display: inline-block; font-size: .72rem; font-weight: 700;
-    letter-spacing: .08em; text-transform: uppercase; color: var(--green);
+    display: inline-block; font-size: .64rem; font-weight: 700;
+    letter-spacing: .07em; text-transform: uppercase; color: var(--green);
     background: rgba(74,222,128,.1); border: 1px solid rgba(74,222,128,.25);
-    padding: .25rem .6rem; border-radius: 999px; margin-bottom: .9rem;
+    padding: .2rem .5rem; border-radius: 999px; margin-bottom: .55rem;
   }
-  .bento-ico { font-size: 1.9rem; display: block; margin-bottom: .7rem; line-height: 1; }
-  .bento-tile h3 { font-size: 1.15rem; font-weight: 700; margin-bottom: .5rem; }
-  .bento-hero h3 { font-size: clamp(1.4rem, 3vw, 1.7rem); }
-  .bento-tile p { color: var(--text-muted); font-size: .92rem; line-height: 1.6; }
+  .bento-ico { font-size: 1.5rem; display: block; margin-bottom: .45rem; line-height: 1; }
+  .bento-tile h3 { font-size: 1.02rem; font-weight: 700; margin-bottom: .4rem; line-height: 1.25; }
+  .bento-tile p { color: var(--text-muted); font-size: .85rem; line-height: 1.5; }
   .bento-tile code {
     background: #06100a; border: 1px solid #16291d; border-radius: 6px;
-    padding: 1px 6px; color: var(--green); font-size: .85em;
+    padding: 1px 5px; color: var(--green); font-size: .82em;
   }
   .bento-cmd {
-    display: inline-block; margin-top: 1rem; background: #06100a;
-    border: 1px solid #16291d; border-radius: 8px; padding: .5rem .8rem;
-    color: var(--green); font-size: .9rem;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    display: inline-block; margin-top: .7rem; max-width: 100%; overflow-x: auto;
+    background: #06100a; border: 1px solid #16291d; border-radius: 7px;
+    padding: .35rem .6rem; color: var(--green); font-size: .8rem;
+    white-space: nowrap; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   }
   .vs-card {
     display: grid; grid-template-columns: 1fr 1fr; gap: 0;
-    max-width: 1100px; margin: 0 auto 2.5rem; border-radius: 16px;
+    max-width: 860px; margin: 0 auto 1.8rem; border-radius: 14px;
     overflow: hidden; border: 1px solid var(--border);
   }
-  .vs-col { padding: 1.4rem 1.5rem; }
+  .vs-col { padding: 1.1rem 1.2rem; }
   .vs-them { background: rgba(255,255,255,.02); }
   .vs-us {
     background: linear-gradient(180deg, rgba(74,222,128,.1), rgba(74,222,128,.04));
     border-left: 1px solid rgba(74,222,128,.25);
   }
-  .vs-h { font-weight: 700; font-size: .95rem; margin-bottom: .8rem; }
+  .vs-h { font-weight: 700; font-size: .88rem; margin-bottom: .65rem; }
   .vs-them .vs-h { color: var(--text-muted); }
   .vs-us .vs-h { color: var(--green); }
-  .vs-col ul { list-style: none; margin: 0; padding: 0; display: grid; gap: .55rem; }
-  .vs-col li { font-size: .9rem; line-height: 1.4; padding-left: 1.4rem; position: relative; color: var(--text-muted); }
+  .vs-col ul { list-style: none; margin: 0; padding: 0; display: grid; gap: .45rem; }
+  .vs-col li { font-size: .84rem; line-height: 1.4; padding-left: 1.3rem; position: relative; color: var(--text-muted); }
   .vs-them li::before { content: "✕"; position: absolute; left: 0; color: #e06b6b; font-weight: 700; }
   .vs-us li { color: #d6e6da; }
   .vs-us li::before { content: "✓"; position: absolute; left: 0; color: var(--green); font-weight: 700; }
-  .cap-head { text-align: center; color: var(--text-muted); font-size: .95rem; margin: 0 auto 1.6rem; }
-  .cap-grid {
-    display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
-    gap: 1.25rem; max-width: 1100px; margin: 0 auto;
+  .cap-head { text-align: center; color: var(--text-muted); font-size: .9rem; margin: 0 auto 1rem; }
+  .cap-cloud {
+    display: flex; flex-wrap: wrap; gap: .5rem; justify-content: center;
+    max-width: 860px; margin: 0 auto;
   }
-  .cap-group { background: var(--bg2); border: 1px solid var(--border); border-radius: 14px; padding: 1.4rem 1.5rem; }
-  .cap-group h4 { font-size: 1.02rem; font-weight: 700; margin-bottom: .85rem; color: var(--text); }
-  .cap-list { list-style: none; margin: 0; padding: 0; display: grid; gap: .5rem; }
-  .cap-list li { font-size: .9rem; color: var(--text-muted); line-height: 1.45; padding-left: 1.25rem; position: relative; }
-  .cap-list li::before { content: "\203A"; position: absolute; left: 0; color: var(--green); font-weight: 700; }
-  @media (max-width: 720px) {
+  .cap-chip {
+    font-size: .8rem; color: var(--text-muted); background: var(--bg2);
+    border: 1px solid var(--border); border-radius: 999px; padding: .38rem .8rem;
+    transition: border-color .15s, color .15s;
+  }
+  .cap-chip:hover { border-color: rgba(74,222,128,.45); color: var(--text); }
+  @media (max-width: 600px) {
     .bento { grid-template-columns: 1fr; }
     .vs-card { grid-template-columns: 1fr; }
     .vs-us { border-left: 0; border-top: 1px solid rgba(74,222,128,.25); }
