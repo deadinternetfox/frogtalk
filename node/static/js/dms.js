@@ -324,6 +324,34 @@ function _looksEncryptedBlob(content) {
   return true;
 }
 
+// Reject-only detector that also catches a TRUNCATED v2 envelope. The server
+// snapshots reply previews as substr(content,1,120) of the referenced message
+// (see routers/dms.py), which for an E2EE DM is a Signal envelope
+// {"v":2,"t":"msg"|"pre","b":"…"} cut off mid-string. That truncation is
+// invalid JSON, so _looksEncryptedBlob (which JSON.parse-s) returns false and
+// the raw "{\"v\":2,..." would otherwise leak into the reply quote. This
+// helper is used ONLY to reject such text from the UI — never to drive
+// decryption (a truncated blob is unrecoverable: the ratchet is single-use).
+function _looksLikeDmEnvelopeText(s) {
+  if (typeof s !== 'string') return false;
+  const t = s.trim();
+  if (!t) return false;
+  if (t.startsWith('[[CALLLOG]]') || t.startsWith('[[DMSYS]]') || t.startsWith(DMLOCK_PREFIX)) return false;
+  if (_looksEncryptedBlob(t)) return true; // full, valid v2 envelope
+  if (!/^\{\s*"v"\s*:\s*2\b/.test(t)) return false;
+  return /"t"\s*:\s*"(?:msg|pre)"/.test(t) || /"b"\s*:/.test(t);
+}
+
+// True when a string can't be shown as a reply-preview plaintext: empty, an
+// (whole or truncated) encrypted envelope, a lock/system/call-log placeholder.
+function _dmReplyTextUnusable(s) {
+  const t = String(s || '');
+  if (!t.trim()) return true;
+  if (t.startsWith('[[DMSYS]]') || t.startsWith('[[CALLLOG]]')) return true;
+  return _looksLikeDmEnvelopeText(t) || _looksEncryptedBlob(t)
+      || _dmIsLockPlaceholder(t) || _isDmLockPlaceholder(t);
+}
+
 function _dmPreviewText(content, hasMedia, mediaType) {
   const lock = _parseDMLock(content);
   if (lock) return lock.title || 'Encrypted message';
@@ -817,6 +845,63 @@ function _resolveOwnDMPlaintext(cipher, msgId, channelId) {
   const pend = _dmMessages.find(x => x._pending && x.content && !_looksEncryptedBlob(x.content));
   if (pend?.content) return pend.content;
   return '';
+}
+
+// Read-only resolution of a DM message's decrypted plaintext, returning '' when
+// it is still encrypted. Mirrors the main-bubble self-heal (content → cache →
+// recall → own-plaintext) without mutating the message, so it is safe to call
+// for an arbitrary referenced message (e.g. when building a reply quote).
+function _resolveDMPlaintextForMessage(m) {
+  if (!m || typeof m !== 'object') return '';
+  const chId = m.channel_id || _activeDM?.id;
+  const origC = (typeof m.content === 'string') ? m.content : '';
+  // Already decrypted in place — the common case after background decrypt.
+  if (origC && !_dmReplyTextUnusable(origC)) return origC;
+  const cipher = _dmCipherRaw(m) || origC;
+  try {
+    const c = _dmPtCacheGet(cipher);
+    if (typeof c === 'string' && c.length && !_dmReplyTextUnusable(c)) return c;
+  } catch {}
+  const byId = _recallDMPlaintext(chId, m.id);
+  if (byId && !_dmReplyTextUnusable(byId)) return byId;
+  const mine = !!(STATE?.user && (
+    (+m.sender_id === +STATE.user.id) ||
+    (m.sender_nick && STATE.user.nickname && m.sender_nick === STATE.user.nickname)
+  ));
+  if (mine) {
+    const own = _resolveOwnDMPlaintext(cipher, m.id, chId);
+    if (own && !_dmReplyTextUnusable(own)) return own;
+  }
+  return '';
+}
+
+// Resolve the reply-quote preview {nick, text} for a DM message. The server's
+// reply_content snapshot is an unrecoverable (truncated, single-use-ratchet)
+// encrypted envelope, so we recover the preview from the referenced message we
+// have already decrypted in this session instead of trusting reply_content.
+// Self-heals: once the referenced message decrypts and a re-render fires, this
+// returns the real text. Never leaks the raw blob.
+function _resolveDMReplyPreview(m) {
+  const fallbackNick = () => m.reply_nickname || m.reply_nick || '?';
+  let refNick = '';
+  const ref = m.reply_to ? _dmMessages.find(x => x && +x.id === +m.reply_to) : null;
+  if (ref) {
+    refNick = ref.sender_display_name || ref.sender_nick || '';
+    const text = _resolveDMPlaintextForMessage(ref);
+    if (text) return { nick: refNick || fallbackNick(), text };
+    if (ref.has_media) return { nick: refNick || fallbackNick(), text: 'Media' };
+    // Referenced message not decrypted yet — keep refNick, try other sources.
+  }
+  if (m.reply_to) {
+    const rec = _recallDMPlaintext(m.channel_id || _activeDM?.id, m.reply_to);
+    if (rec && !_dmReplyTextUnusable(rec)) return { nick: refNick || fallbackNick(), text: rec };
+  }
+  // Server snapshot — only when it is genuine plaintext (e.g. the optimistic
+  // bubble seeds reply_content with the decrypted text at send time).
+  const snap = String(m.reply_content || '');
+  if (!_dmReplyTextUnusable(snap)) return { nick: refNick || fallbackNick(), text: snap };
+  // Graceful fallback — never the raw encrypted snapshot.
+  return { nick: refNick || fallbackNick(), text: (ref && ref.has_media) ? 'Media' : 'Encrypted message' };
 }
 
 const _dmDecryptWarned = new Set();
@@ -4050,15 +4135,15 @@ function renderDMMessage (m) {
     }
   }
 
-  // Reply quote
-  const replyPreviewRaw = String(m.reply_content || '…');
-  const replyPreviewSafe = _looksEncryptedBlob(replyPreviewRaw) ? 'Encrypted message' : replyPreviewRaw;
-  // SECURITY/UX: never fall back to senderNick — a quote whose author is
-  // the same as the message author is meaningless and used to render the
-  // current user's own (truncated) name (e.g. "Frog…") as the "replied-to"
-  // label on optimistic pending bubbles. Show '?' if we genuinely don't
-  // know who was being replied to.
-  const replyNick = m.reply_nickname || m.reply_nick || '?';
+  // Reply quote — resolve from the referenced (decrypted) message, never the
+  // unrecoverable encrypted snapshot the server sends in reply_content. That
+  // snapshot is substr(content,1,120) of the referenced DM, i.e. a cut-off
+  // Signal envelope: invalid JSON and un-decryptable (single-use ratchet), so
+  // it would otherwise leak as raw "{\"v\":2,...}" or collapse to "?".
+  // _resolveDMReplyPreview also never falls back to this message's own author.
+  const _rp = m.reply_to ? _resolveDMReplyPreview(m) : { nick: '?', text: '…' };
+  const replyNick = _rp.nick || '?';
+  const replyPreviewSafe = _rp.text || '…';
   const replyQuote = m.reply_to
     ? `<div class="msg-reply-quote" onclick="document.querySelector('[data-dmid=&quot;${m.reply_to}&quot;]')?.scrollIntoView({behavior:'smooth',block:'center'})">
         <span class="reply-quote-nick">${esc(replyNick)}</span>
