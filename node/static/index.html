@@ -2904,6 +2904,29 @@ video.msg-gif-video.msg-media{background:#0a0f0d}
 }
 .action-sheet .as-cancel:hover{color:var(--text-color);background:color-mix(in srgb, var(--accent-color) 18%, var(--surface-color))}
 @keyframes asSlideUp{from{transform:translateY(100%)}to{transform:translateY(0)}}
+/* Moderation popup (channel-mod / admin actions off a message) */
+.msg-mod-popup{
+  position:fixed;z-index:10020;width:210px;display:flex;flex-direction:column;gap:2px;
+  padding:6px;border-radius:12px;
+  background:linear-gradient(180deg,
+    color-mix(in srgb, var(--accent-color) 16%, var(--surface-color)) 0%,
+    color-mix(in srgb, var(--bg-color) 60%, var(--surface-color)) 100%);
+  border:1px solid color-mix(in srgb, var(--accent-color) 38%, var(--border-color));
+  box-shadow:0 12px 34px rgba(0,0,0,.55),0 -1px 0 color-mix(in srgb, var(--accent-color) 18%, transparent) inset;
+  transform-origin:top center;animation:modPopIn .16s cubic-bezier(.22,1.02,.36,1)
+}
+.msg-mod-popup.centered{transform-origin:center}
+@keyframes modPopIn{from{opacity:0;transform:translateY(-6px) scale(.97)}to{opacity:1;transform:none}}
+.msg-mod-popup-btn{
+  display:block;width:100%;background:none;border:0;
+  padding:10px 12px;border-radius:8px;text-align:left;cursor:pointer;
+  font-size:14px;font-weight:600;line-height:1.2;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  transition:background .14s ease,transform .12s ease
+}
+.msg-mod-popup-btn:hover{background:color-mix(in srgb, var(--accent-color) 18%, var(--surface-color))}
+.msg-mod-popup-btn:active{transform:scale(.98)}
+.msg-mod-popup-sep{height:1px;margin:4px 6px;background:color-mix(in srgb, var(--accent-color) 30%, var(--border-color))}
 /* Continuation message (no avatar) */
 .msg-cont{padding:2px 0 2px 54px;position:relative}
 .msg-cont:hover{background:rgba(255,255,255,.02);border-radius:6px;margin:0 -8px;padding:2px 8px 2px 62px}
