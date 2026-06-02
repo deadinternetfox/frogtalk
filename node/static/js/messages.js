@@ -4539,20 +4539,33 @@ const Messages = (() => {
         : `<button class="msg-mod-popup-btn" data-i="${i}" style="color:${it.color}">${it.label}</button>`
     ).join('');
     document.body.appendChild(pop);
-    const rect = ev.currentTarget.getBoundingClientRect();
-    const pw = 200;
-    let left = rect.left + rect.width / 2 - pw / 2;
-    left = Math.max(8, Math.min(left, window.innerWidth - pw - 8));
-    let top = rect.bottom + 6;
-    if (top + 120 > window.innerHeight) top = rect.top - 120;
-    pop.style.cssText = `position:fixed;left:${left}px;top:${top}px;width:${pw}px;background:var(--surface-color);border:1px solid color-mix(in srgb, var(--accent-color) 30%, var(--border-color));border-radius:10px;padding:6px;z-index:9999;box-shadow:0 8px 24px rgba(0,0,0,.5);display:flex;flex-direction:column;gap:2px`;
-    pop.querySelectorAll('.msg-mod-popup-sep').forEach(s => {
-      s.style.cssText = 'height:1px;background:color-mix(in srgb, var(--accent-color) 30%, var(--border-color));margin:4px 6px;';
-    });
+    // Anchor under the trigger when we have a real on-screen rect. When this is
+    // opened from the action sheet, the source .msg-mod-more button lives in a
+    // display:none .msg-actions row, so getBoundingClientRect() is all zeros —
+    // detect that and center the popup instead of dumping it in the top-left
+    // corner (the "randomly placed" desktop bug). Styling now lives in the
+    // themed .msg-mod-popup CSS; we only set position here.
+    const trg = ev.currentTarget || ev.target;
+    const rect = (trg && trg.getBoundingClientRect) ? trg.getBoundingClientRect() : null;
+    const degenerate = !rect || (rect.width === 0 && rect.height === 0);
+    const margin = 8;
+    const pw = pop.offsetWidth || 210;
+    const ph = pop.offsetHeight || 120;
+    let left, top;
+    if (degenerate) {
+      pop.classList.add('centered');
+      left = (window.innerWidth - pw) / 2;
+      top = (window.innerHeight - ph) / 2;
+    } else {
+      left = rect.left + rect.width / 2 - pw / 2;
+      top = rect.bottom + 6;
+      if (top + ph + margin > window.innerHeight) top = rect.top - ph - 6;
+    }
+    left = Math.max(margin, Math.min(left, window.innerWidth - pw - margin));
+    top = Math.max(margin, Math.min(top, window.innerHeight - ph - margin));
+    pop.style.left = `${Math.round(left)}px`;
+    pop.style.top = `${Math.round(top)}px`;
     pop.querySelectorAll('.msg-mod-popup-btn').forEach(btn => {
-      btn.style.cssText = 'background:transparent;border:0;padding:10px 12px;text-align:left;border-radius:6px;cursor:pointer;font-size:14px';
-      btn.onmouseover = () => btn.style.background = '#1d2d1d';
-      btn.onmouseout  = () => btn.style.background = 'transparent';
       btn.onclick = (e) => {
         e.stopPropagation();
         const idx = +btn.dataset.i;
