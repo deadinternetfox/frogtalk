@@ -2284,10 +2284,22 @@ function onNativeScreenShareError (msg) {
   _nativeScreenSharing = false;
   _syncScreenButton();
   const m = String(msg || '').trim();
+  const ml = m.toLowerCase();
   // "cancelled" = user dismissed the system consent dialog → stay silent.
-  if (m && m.toLowerCase() !== 'cancelled') {
-    try { toast('Screen share failed: ' + m, 'error', 6000); } catch {}
+  if (!m || ml === 'cancelled') return;
+  // Map the native reason codes to a human sentence (the raw codes leaked into
+  // the toast before). Anything unmapped falls back to a generic message.
+  let friendly;
+  if (ml === 'no_viewer_connection' || ml.startsWith('all_peers_gone')) {
+    friendly = "Couldn't reach anyone to share your screen with — check your connection and try again.";
+  } else if (ml === 'init_failed' || ml === 'peer_failed') {
+    friendly = "Couldn't start screen capture. Please try again.";
+  } else if (ml === 'fgs_failed' || ml === 'bad_request' || ml === 'bad_config') {
+    friendly = "Couldn't start the screen-share service.";
+  } else {
+    friendly = 'Screen share stopped unexpectedly.';
   }
+  try { toast(friendly, 'error', 6000); } catch {}
 }
 
 /** Reveal the screen tile in a "connecting" state before any frame exists, so

@@ -87,12 +87,19 @@ class ScreenCaptureService : Service() {
                     notifyJs("if(typeof onNativeScreenShareStarted==='function')onNativeScreenShareStarted();")
                 }
                 override fun onSharingStopped(reason: String) {
-                    if (reason.startsWith("peer_ended") || reason.startsWith("ice_") ||
-                        reason.startsWith("signaling_") || reason.startsWith("projection_revoked")
-                    ) {
-                        notifyJs("if(typeof onNativeScreenShareStopped==='function')onNativeScreenShareStopped();")
-                    } else {
+                    // Surface a toast ONLY for genuine "never got going" failures.
+                    // Everything else — user stopped, a viewer left, projection
+                    // revoked, service torn down, a peer that DID connect — is a
+                    // normal end and must stay silent (a working share that the
+                    // other side saw was wrongly reporting "failed" before this).
+                    val isFailure = reason == "no_viewer_connection" ||
+                        reason == "init_failed" ||
+                        reason == "peer_failed" ||
+                        reason.startsWith("all_peers_gone:")
+                    if (isFailure) {
                         notifyError(reason)
+                    } else {
+                        notifyJs("if(typeof onNativeScreenShareStopped==='function')onNativeScreenShareStopped();")
                     }
                     stopSelfClean()
                 }
