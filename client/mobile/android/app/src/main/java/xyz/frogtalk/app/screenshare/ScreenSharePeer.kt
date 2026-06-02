@@ -195,12 +195,22 @@ class ScreenSharePeer(
             }
             override fun onConnectionChange(newState: PeerConnection.PeerConnectionState?) {
                 if (newState == PeerConnection.PeerConnectionState.CONNECTED) {
-                    anyConnected = true
-                    watchdog.removeCallbacks(watchdogTask)
+                    markConnected()
                 } else if (newState == PeerConnection.PeerConnectionState.FAILED ||
                     newState == PeerConnection.PeerConnectionState.CLOSED
                 ) {
                     dropPeer(key, "ice_${newState.name.lowercase()}")
+                }
+            }
+            // PeerConnectionState (onConnectionChange) is unreliable on several
+            // Android WebRTC builds — it can stay NEW/CONNECTING even after media
+            // flows. onIceConnectionChange is the dependable "we're live" signal,
+            // so mirror it here too or the watchdog wrongly kills a working share.
+            override fun onIceConnectionChange(newState: PeerConnection.IceConnectionState?) {
+                if (newState == PeerConnection.IceConnectionState.CONNECTED ||
+                    newState == PeerConnection.IceConnectionState.COMPLETED
+                ) {
+                    markConnected()
                 }
             }
         }) ?: run { synchronized(peers) { peers.remove(key) }; return }
@@ -246,6 +256,12 @@ class ScreenSharePeer(
         return null
     }
 
+    /** A viewer's media path is up — clear the no-viewer watchdog for good. */
+    private fun markConnected() {
+        anyConnected = true
+        watchdog.removeCallbacks(watchdogTask)
+    }
+
     private fun drainPendingIce(pp: PerPeer) {
         val p = pp.pc ?: return
         val q = ArrayList(pp.pendingIce)
@@ -258,7 +274,10 @@ class ScreenSharePeer(
         try { signaling?.sendEnd(pp.recipient) } catch (_: Throwable) {}
         try { pp.pc?.close(); pp.pc?.dispose() } catch (_: Throwable) {}
         val remaining = synchronized(peers) { peers.size }
-        if (remaining == 0) stop("all_peers_gone:$reason")
+        // If a viewer ever connected, the last one leaving is a normal end — not a
+        // failure. Only flag "all_peers_gone" (→ error toast) when we never had a
+        // single live viewer, which is a genuine "couldn't start" condition.
+        if (remaining == 0) stop(if (anyConnected) "ended" else "all_peers_gone:$reason")
     }
 
     fun stop(reason: String) {
