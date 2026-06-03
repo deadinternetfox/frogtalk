@@ -10,6 +10,11 @@
   const ORDER_WINDOWS = ['windows', 'windows-zip', 'web', 'android', 'linux', 'deb', 'ios'];
   const ORDER_LINUX = ['linux', 'deb', 'web', 'android', 'windows', 'windows-zip', 'ios'];
 
+  // Android is in Google Play open testing — surfaced as a dedicated badge when
+  // the Android platform is selected (Play install is independent of whether
+  // this node hosts the APK).
+  const PLAY_URL = 'https://play.google.com/store/apps/details?id=xyz.frogtalk.app';
+
   const SOURCE_LABEL = {
     node: 'Hosted on this server',
     mirror: 'Served from build mirror on this node',
@@ -128,6 +133,16 @@
                 '</div>' +
                 '<div class="ft-dl-meta" id="ft-dl-meta"></div>' +
                 '<button type="button" class="btn btn-primary btn-lg ft-dl-go" id="ft-dl-go">Download</button>' +
+                '<a class="ft-dl-play" id="ft-dl-play" href="' + PLAY_URL + '" target="_blank" rel="noopener noreferrer" hidden>' +
+                  '<svg class="ft-dl-play-ic" viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">' +
+                    '<path fill="#00C3FF" d="M3.7 2.3c-.25.18-.4.5-.4.95v17.5c0 .45.15.77.4.95l9.05-9.7L3.7 2.3z"/>' +
+                    '<path fill="#FF3D2E" d="M16.9 8.2 13.4 6.1 3.7 2.3l9.05 9.7L16.9 8.2z"/>' +
+                    '<path fill="#FFC81F" d="M16.9 15.8l3.55-2.05c.8-.46.8-1.74 0-2.2L16.9 8.2l-4.15 3.8L16.9 15.8z"/>' +
+                    '<path fill="#1FCB6B" d="M3.7 21.7l9.05-9.7 4.15 3.8-3.55 2.05L3.7 21.7z"/>' +
+                  '</svg>' +
+                  '<span class="ft-dl-play-txt"><small>GET IT ON</small><b>Google Play</b></span>' +
+                  '<span class="ft-dl-play-beta">Open beta</span>' +
+                '</a>' +
               '</div>' +
               '<div class="ft-dl-foot">' +
                 '<div class="ft-dl-chips" id="ft-dl-chips"></div>' +
@@ -141,6 +156,7 @@
         const sel = document.getElementById('ft-dl-select');
         const meta = document.getElementById('ft-dl-meta');
         const go = document.getElementById('ft-dl-go');
+        const play = document.getElementById('ft-dl-play');
         const chips = document.getElementById('ft-dl-chips');
         const mirrorNote = document.getElementById('ft-dl-mirror-note');
 
@@ -194,6 +210,7 @@
           }
           go.textContent = actionLabel(p);
           go.disabled = !canDownload(p);
+          if (play) play.hidden = (p.id !== 'android');
         }
 
         function trigger() {
