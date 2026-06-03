@@ -260,3 +260,58 @@
     align-items: flex-start;
   }
 }
+
+/* "Get it on Google Play" badge — shown under Download when Android is picked */
+.ft-dl-play {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.7rem;
+  width: 100%;
+  margin-top: 0.15rem;
+  padding: 0.6rem 1.1rem;
+  background: #0b0c0e;
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 13px;
+  text-decoration: none;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.32);
+  transition: transform 0.12s ease, border-color 0.14s ease, box-shadow 0.16s ease;
+}
+.ft-dl-play[hidden] { display: none; }
+.ft-dl-play:hover {
+  transform: translateY(-1px);
+  border-color: rgba(159, 217, 184, 0.55);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.42);
+}
+.ft-dl-play:active { transform: translateY(0); }
+.ft-dl-play-ic { flex: 0 0 auto; display: block; }
+.ft-dl-play-txt {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.05;
+  text-align: left;
+}
+.ft-dl-play-txt small {
+  font-size: 0.6rem;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  opacity: 0.82;
+}
+.ft-dl-play-txt b {
+  font-size: 1.06rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+.ft-dl-play-beta {
+  align-self: center;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: #bff3d4;
+  background: rgba(76, 175, 80, 0.18);
+  border: 1px solid rgba(76, 175, 80, 0.42);
+  padding: 0.18rem 0.5rem;
+  border-radius: 999px;
+}
