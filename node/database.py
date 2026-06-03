@@ -5451,6 +5451,20 @@ def apply_sync_room_allowlist(user_id: int, keep_names: set) -> int:
     # a while" on the next account sync). You should never be auto-removed from
     # a channel you created.
     keep = merge_travel_local_room_allowlist(uid, keep)
+    # GUARD: never let a transient/empty authoritative list wipe a user who
+    # still holds joined channels. An empty keep-set only legitimately occurs
+    # for a user genuinely in zero rooms (reconcile is then a harmless no-op).
+    # A home node that just restarted can answer HTTP-200 with rooms:[]; without
+    # this guard reconcile_user_room_memberships() would leave the user from
+    # every non-owned channel ("channels disappeared, must re-join"). Skip the
+    # reconcile AND avoid overwriting the stored allowlist with empty so the
+    # last-good list survives the bad snapshot.
+    if not keep:
+        try:
+            if get_user_joined_room_ids(uid):
+                return 0
+        except Exception:
+            return 0
     try:
         set_user_sync_room_allowlist(uid, sorted(keep))
     except Exception:
