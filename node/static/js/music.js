@@ -2493,6 +2493,18 @@ const Music = (() => {
     // Keep every play/pause button in the UI in sync (drawer + mini bar).
     _syncPlayPauseButtons(nowPlaying);
     if (_paused) _stopSyncProbe(); else _startSyncProbeIfNeeded();
+    if (nowPlaying) {
+      // A minimized/collapsed iframe (pushed off-screen, or shrunk to a slim
+      // strip) often auto-pauses or is slow to honour the first playVideo, so
+      // a single press "plays a sec then re-pauses" and the user has to press
+      // play twice. Reuse the visibility verify-and-retry ladder so one press
+      // reliably sticks; ignorePaused keeps it retrying against the auto-pause.
+      // A later user pause cancels it via the _resumeRetryToken bump below.
+      try { _resumeOnVisible({ force: true, ignorePaused: true }); } catch {}
+    } else {
+      // Pausing cancels any in-flight play-verify ladder so it can't fight us.
+      _resumeRetryToken++;
+    }
     _emitState();
   }
 
