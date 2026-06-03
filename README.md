@@ -29,6 +29,7 @@ Day-to-day work lands first on the <a href="https://github.com/deadinternetfox/f
 [🌐 frogtalk.app — production hub](https://frogtalk.app) ·
 [🧪 frogtalk.xyz — live dev node](https://frogtalk.xyz) ·
 [📥 Downloads](https://frogtalk.app/#downloads) ·
+[🤖 Google Play — open beta](https://play.google.com/store/apps/details?id=xyz.frogtalk.app) ·
 [📚 Node guide](https://frogtalk.app/docs/node) ·
 [🔌 API reference](https://frogtalk.app/docs/api) ·
 [🛡️ Security](https://frogtalk.app/security)
@@ -98,7 +99,7 @@ and private channels (AES-GCM) before data reaches your disk.
 - 🔐 **Real E2E** — Signal Protocol (X3DH + Double Ratchet) for DMs, per-room AES-256-GCM (AAD-bound, with key rotation on ban/kick) for private channels. The server stores ciphertext and nothing else.
 - 🌐 **Federated** — your node talks to other nodes; users, profiles, posts, rooms and DMs replicate across the swamp.
 - 🧅 **Tor-native** — flip a flag and your node lives behind a `.onion`; clearnet IP never leaks.
-- 📱 **Everywhere** — Web, Android (APK), iOS (TestFlight), Windows portable, Linux AppImage / `.deb`, and Electron desktop.
+- 📱 **Everywhere** — Web, Android (APK + [Google Play open beta](https://play.google.com/store/apps/details?id=xyz.frogtalk.app)), iOS (TestFlight), Windows portable, Linux AppImage / `.deb`, and Electron desktop.
 - 🎵 **More than chat** — DMs, group calls (WebRTC), reels, friend wall, music rooms (YT/Spotify/SoundCloud), Frog Channel imageboard, GIF picker, custom emojis.
 - ⚒️ **Full API** — REST + WebSocket for bots, bridges and custom clients. Discord and Telegram bridges ship in-tree.
 
@@ -134,7 +135,7 @@ and private channels (AES-GCM) before data reaches your disk.
 |----------|--------|-------|
 | 🌐 **Web** | [Open in browser](https://frogtalk.app) | No install needed |
 | 🤖 **Android** | [Latest APK](https://frogtalk.app/download/android) · [Releases](https://github.com/deadinternetfox/frogtalk/releases/latest) | v1.6.44-alpha (250) — sideload; group calls, video, screen share |
-| 📦 **Android (Play)** | [AAB in build mirror](github-build-mirror/FrogTalk-1.6.44-alpha-250.aab) | Google Play upload bundle |
+| 🤖 **Android (Google Play)** | [Open testing (beta)](https://play.google.com/store/apps/details?id=xyz.frogtalk.app) | Join the open beta on Google Play — no sideloading |
 | 🐳 **Run a Lilypad (Docker)** | [`docker compose up -d`](docker-compose.yml) | Self-host the backend — see [Self-Host](#self-host-run-your-own-lilypad) |
 | 🐧 **Linux AppImage** | [Latest AppImage](https://frogtalk.app/download/linux) | `chmod +x` then run |
 | 📦 **Linux .deb** | [Latest .deb](https://frogtalk.app/download/deb) | `sudo dpkg -i <downloaded_file>.deb` |
