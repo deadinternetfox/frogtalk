@@ -769,10 +769,11 @@ async def get_post_media(
             return ("unauth", None)
 
         row = db.get_wall_post_media(post_id)
-        if not row or not row.get("media_data"):
+        if not row:
             return ("notfound", None)
         owner_id = int(row["user_id"])
         viewer_id = int(current_user["id"])
+        viewer_gid = str(current_user.get("global_user_id") or "").strip()
         privacy = (row.get("privacy") or "public").lower()
         if owner_id != viewer_id:
             if db.is_blocked_either_way(viewer_id, owner_id):
@@ -793,7 +794,7 @@ async def get_post_media(
                 if not db.wall_post_viewer_in_audience(post_id, viewer_id):
                     return ("forbidden", None)
 
-        media_data = row["media_data"]
+        media_data = row.get("media_data")
         media_type = row.get("media_type") or "application/octet-stream"
 
         if isinstance(media_data, str) and media_data.startswith("data:"):
@@ -807,8 +808,29 @@ async def get_post_media(
                 _log.debug("post media decode failed pid=%s", post_id, exc_info=True)
                 return ("decode_error", None)
 
-        # Fallback: not a data URI — defer to redirect path on the event loop.
-        return ("redirect", {"target": str(media_data or "").strip()})
+        # Federated mirror posts keep their bytes on the origin node — locally
+        # media_data is empty or a home reference. The lazy-load URL the
+        # feed/explore/wall grids point at (/api/social/posts/{id}/media) used
+        # to 404 (empty media_data) or redirect to an unauthenticated cross-node
+        # URL, so the grid's onerror dropped the tile — media only showed in the
+        # detail view (which renders the stored path through _authMediaSrc with a
+        # token). Resolve federated bytes server-side exactly like the /thumb
+        # endpoint so other-node media shows inline on the wall too.
+        origin, post_gid = _lookup_federation_post_map(post_id)
+        if origin and post_gid:
+            st, raw, ct = _resolve_federated_post_media(
+                origin, post_gid, post_id, viewer_id, viewer_gid, "media",
+            )
+            if st == "ok" and raw:
+                return ("bytes", {"raw": raw, "ct": ct or media_type})
+            if st == "forbidden":
+                return ("forbidden", None)
+
+        # Fallback: a non-data-URI local reference — redirect to it.
+        target = str(media_data or "").strip()
+        if not target:
+            return ("notfound", None)
+        return ("redirect", {"target": target})
 
     kind, payload = await run_in_threadpool(_resolve_media)
     if kind == "unauth":
