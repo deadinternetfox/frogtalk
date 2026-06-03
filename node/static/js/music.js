@@ -171,12 +171,12 @@ const Music = (() => {
     try {
       if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
       if (paused && (Date.now() - _lastResumeAt) < 2500) return;
+      if (_userPaused === !!paused) return;            // no real change — don't churn
       _userPaused = !!paused;
-      // A native play must also call off any in-flight force-pause ladder so
-      // it can't re-pause a video the user just resumed in the iframe itself
-      // ("stops again"). The verify ladder already bails on _userPaused, so a
-      // native pause needs no symmetric token bump here.
-      if (!paused) _forcePauseToken++;
+      // The user changed play state in the iframe itself — supersede any app
+      // reconcile still driving toward the old intent (the single token makes
+      // both a stale force-pause and a stale resume bail).
+      _playCmdToken++;
     } catch {}
   }
   let _syncProbeStartedAt = 0;       // ms when probing began for current track
@@ -1548,11 +1548,12 @@ const Music = (() => {
   //   that race for the common small-drift case.
   // - Multiple foreground events firing in <1.5s — debounced.
   let _lastResumeAt = 0;
-  let _resumeRetryToken = 0;
-  // Cancellation token for the _forcePauseFrameSoon pause ladder. Pressing
-  // play bumps it so the remaining scheduled pause ticks bail instead of
-  // snapping a freshly-resumed video back to paused.
-  let _forcePauseToken = 0;
+  // ONE cancellation token shared by every play/pause command sequence (user
+  // toggle, force-pause, visibility resume, native promotion). Any new intent
+  // bumps it so all earlier in-flight reconciles bail immediately — rapid
+  // clicks coalesce to the final intent instead of dueling ladders that
+  // re-play / re-pause and churn the now-playing / sync system.
+  let _playCmdToken = 0;
   let _lastAutoCorrectAt = 0;
   // Android-restart-at-0 detection. We only seek the iframe forward
   // automatically when we have HIGH confidence it actually restarted at
@@ -1595,7 +1596,7 @@ const Music = (() => {
 
       const targetSec = _expectedPosSec();
       // Cancel any in-flight retry chain from a prior return.
-      const myToken = ++_resumeRetryToken;
+      const myToken = ++_playCmdToken;
 
       if (cur.provider === 'youtube') {
         // Idempotent handshake — required for fresh embeds, no-op otherwise.
@@ -1625,7 +1626,7 @@ const Music = (() => {
         const RETRY_GAP_MS = 900;
         let attempts = 1;
         const verify = () => {
-          if (myToken !== _resumeRetryToken) return;   // superseded by a newer call
+          if (myToken !== _playCmdToken) return;   // superseded by a newer call
           if (document.hidden) return;
           if (_userPaused) return;                      // user paused mid-retry — stop
           // Only honor _paused as a stop signal when we did NOT enter via
@@ -1638,7 +1639,7 @@ const Music = (() => {
           // global message listener and updates _lastPlayerState.
           send({ event: 'command', func: 'getPlayerState', args: [] });
           setTimeout(() => {
-            if (myToken !== _resumeRetryToken) return;
+            if (myToken !== _playCmdToken) return;
             if (document.hidden) return;
             if (_userPaused) return;                     // user paused mid-retry — stop
             if (_paused && !ignorePaused) return;
@@ -2223,59 +2224,75 @@ const Music = (() => {
     try { _probeIframeStateSoon(); } catch {}
   }
 
-  // Re-assert a paused state on the in-channel iframe across a surface
-  // switch (collapse/expand, channel-leave → mini dock, FrogSocial close).
-  // The hard case is Android WebView: reparenting/restyling the panel
-  // (big → mini) reloads the iframe, which resets our embed handshake AND
-  // replays the embed's baked-in autoplay=1 — so a single pause postMessage
-  // gets dropped (handshake not ready yet) and the track resumes. Retry
-  // across a longer window, re-handshaking each tick so a pause lands once
-  // the reloaded iframe is listening, and keep the user-intent guard fresh
-  // so the UI-sync recovery tick / visibility resume ladder don't fight us.
+  // Single, coalesced play/pause reconciler — the one place that issues
+  // play/pause to the embed. Drives it toward the canonical intent
+  // (_userPaused) with a few bounded, idempotent nudges, because provider
+  // iframes are async and a minimized/off-screen one drops or is slow to
+  // honour the first command. ONE token (_playCmdToken) supersedes every
+  // other in-flight reconcile (user toggle, force-pause, visibility resume,
+  // native promotion), so a burst of clicks settles on the LAST intent with
+  // no dueling ladders re-playing/re-pausing. Re-issuing the command for a
+  // state the embed is already in is a harmless no-op. Never seeks, so the
+  // playback position is preserved. Spotify has no postMessage transport.
+  function _reconcilePlayState() {
+    const myToken = ++_playCmdToken;
+    const frame0 = document.querySelector('#mp-player-wrap iframe.mp-frame');
+    const cur0 = _state && _state.queue && _state.queue[0];
+    if (!frame0 || !frame0.contentWindow || !cur0) return;
+    if ((frame0.src || '').includes('spotify.com')) return;
+    try { _bindSyncMessageListener(); } catch {}
+    // Don't trust the optimistic _lastPlayerState the caller just set — force
+    // a fresh read so the convergence check waits for real embed state.
+    if ((frame0.src || '').includes('youtube.com')) _lastPlayerState = null;
+    const run = (attempt) => {
+      if (myToken !== _playCmdToken) return;                  // superseded by newer intent
+      if (typeof document !== 'undefined' && document.hidden) return;
+      const frame = document.querySelector('#mp-player-wrap iframe.mp-frame');
+      if (!frame || !frame.contentWindow) return;
+      const src = frame.src || '';
+      const isYt = src.includes('youtube.com');
+      const isSc = src.includes('soundcloud.com');
+      if (!isYt && !isSc) return;
+      const want = _userPaused;                                // desired: paused?
+      // Converged? Stop nudging.
+      const converged = isYt
+        ? (want ? _lastPlayerState === 2 : _lastPlayerState === 1)
+        : (_paused === want);
+      if (converged) return;
+      // Keep the user-intent guard fresh for the desired direction so the
+      // message listener doesn't reconcile our own getPlayerState probe reply
+      // (embed not-yet-in-target-state) back into the opposite intent.
+      _userIntentPaused = want;
+      _userIntentAt = Date.now();
+      if (isYt) {
+        // Stamp _lastResumeAt while driving PLAY so the native-pause promotion
+        // guard ignores the transient "still paused" probe reply.
+        if (!want) _lastResumeAt = Date.now();
+        _postYtProbe(frame);
+        _postToFrame(frame, { event: 'command', func: want ? 'pauseVideo' : 'playVideo', args: [] });
+        _postToFrame(frame, { event: 'command', func: 'getPlayerState', args: [] });
+      } else {
+        _bindSoundCloudWidget(frame);
+        _postToFrame(frame, { method: want ? 'pause' : 'play' });
+        _postToFrame(frame, { method: 'isPaused' });
+      }
+      if (attempt < 5) setTimeout(() => run(attempt + 1), 500);
+    };
+    run(0);
+  }
+
+  // Hold the player in its pre-re-render paused state. A collapse / minimize /
+  // channel-switch rebuilds (or reloads) the iframe, which can replay the
+  // embed's baked-in autoplay. Set the intent and let the single reconciler
+  // re-assert pause until the embed honours it.
   function _forcePauseFrameSoon() {
-    const myToken = ++_forcePauseToken;
     _userPaused = true;
     _paused = true;
     _lastPlayerState = 2;
-    const tick = () => {
-      // Superseded by a newer ladder, or cancelled by the user pressing
-      // play (togglePause bumps _forcePauseToken). Stop re-pausing so a
-      // freshly-resumed video isn't snapped back to paused mid-ladder.
-      if (myToken !== _forcePauseToken) return;
-      // Kill any in-flight auto-resume chain (_resumeOnVisible runs a
-      // ~5s, 5-attempt playVideo ladder with ignorePaused, so it would
-      // otherwise outlast and override our pause — the "pause/resume
-      // flicker, then play wins" symptom). Bumping the token supersedes
-      // its verify loop; stamping _lastResumeAt debounces new non-force
-      // resume triggers (e.g. the window focus event the iframe reload
-      // fires) for 1.5s.
-      _resumeRetryToken++;
-      _lastResumeAt = Date.now();
-      try {
-        const frame = document.querySelector('#mp-player-wrap iframe.mp-frame');
-        if (frame) {
-          const src = frame.src || '';
-          if (src.includes('youtube.com')) {
-            // Re-register our listening channel (resets after a reload),
-            // then command pause.
-            _postYtProbe(frame);
-            _postToFrame(frame, { event: 'command', func: 'pauseVideo', args: [] });
-          } else if (src.includes('soundcloud.com')) {
-            _bindSoundCloudWidget(frame);
-            _postToFrame(frame, { method: 'pause' });
-          }
-        }
-      } catch {}
-      // Refresh the guard window on every tick so a transient post-reload
-      // state=1 doesn't get reconciled back into _paused=false mid-ladder.
-      _userIntentPaused = true;
-      _userIntentAt = Date.now();
-      _userPaused = true;
-      _paused = true;
-      _lastPlayerState = 2;
-      try { _syncPlayPauseButtons(false); } catch {}
-    };
-    [0, 150, 400, 800, 1500, 2500, 3500, 5000].forEach(ms => setTimeout(tick, ms));
+    _userIntentPaused = true;
+    _userIntentAt = Date.now();
+    try { _syncPlayPauseButtons(false); } catch {}
+    _reconcilePlayState();
   }
 
   // Toggle the collapsed state of the music panel. When collapsed, the
@@ -2475,52 +2492,27 @@ const Music = (() => {
     // flipped by lots of paths (visibility, infoDelivery, surrender);
     // _userPaused is sticky and only the user toggles it.
     _userPaused = !nowPlaying;
-    // Pressing play must win over any in-flight _forcePauseFrameSoon ladder
-    // (it re-issues pauseVideo for up to 5s after a pause+collapse/minimize).
-    // Without cancelling it the video plays then snaps back to paused — the
-    // "playing after pause is buggy" symptom. Bumping the token makes every
-    // remaining ladder tick bail.
-    if (nowPlaying) _forcePauseToken++;
-    // Stamp the user-intent guard so the iframe reconciliation handlers
-    // ignore any stale pre-toggle state events still in flight. Without
-    // this, clicking pause and then receiving a buffered playerState=1
-    // event a moment later would silently flip _paused back to false
-    // and leave the dock/mini buttons showing ⏸ while audio was paused
-    // (and vice versa on a click-to-play). Same root cause for both
-    // YouTube and SoundCloud iframes.
+    // Stamp the user-intent guard so the iframe reconciliation handlers ignore
+    // stale pre-toggle state events still in flight (a buffered playerState
+    // event arriving a moment later would otherwise flip _paused back and
+    // desync the dock/mini buttons). The reconciler keeps this fresh too.
     _userIntentPaused = !nowPlaying;
     _userIntentAt = Date.now();
-    // Don't auto-catch-up on un-pause. The iframe resumes from where
-    // the user paused it — that's the expected behaviour. Resync is
-    // a separate explicit action.
     if (btn) {
       btn.dataset.playing = nowPlaying ? '1' : '0';
       btn.innerHTML = nowPlaying ? _PAUSE_SVG : _PLAY_SVG;
       btn.title = nowPlaying ? 'Pause' : 'Play';
       btn.setAttribute('aria-label', btn.title);
     }
-    // Optimistically prime YT's reported state so the next _emitState()
-    // doesn't fall back to the stale value. Without this, after pressing
-    // Play the dock button would flicker right back to ▶ because
-    // _currentEffectivePaused() consults _lastPlayerState (still 2)
-    // until YT's onStateChange catches up a moment later.
+    // Optimistic state so every surface reflects the click instantly.
     _lastPlayerState = nowPlaying ? 1 : 2;
     _paused = !nowPlaying;
-    // Keep every play/pause button in the UI in sync (drawer + mini bar).
     _syncPlayPauseButtons(nowPlaying);
     if (_paused) _stopSyncProbe(); else _startSyncProbeIfNeeded();
-    if (nowPlaying) {
-      // A minimized/collapsed iframe (pushed off-screen, or shrunk to a slim
-      // strip) often auto-pauses or is slow to honour the first playVideo, so
-      // a single press "plays a sec then re-pauses" and the user has to press
-      // play twice. Reuse the visibility verify-and-retry ladder so one press
-      // reliably sticks; ignorePaused keeps it retrying against the auto-pause.
-      // A later user pause cancels it via the _resumeRetryToken bump below.
-      try { _resumeOnVisible({ force: true, ignorePaused: true }); } catch {}
-    } else {
-      // Pausing cancels any in-flight play-verify ladder so it can't fight us.
-      _resumeRetryToken++;
-    }
+    // One coalesced reconcile drives the embed to the new intent and, via the
+    // shared _playCmdToken, supersedes any in-flight reconcile (force-pause,
+    // visibility resume, or a previous rapid click) so they can't fight it.
+    _reconcilePlayState();
     _emitState();
   }
 
