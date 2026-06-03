@@ -1541,6 +1541,10 @@ const Music = (() => {
   // - Multiple foreground events firing in <1.5s — debounced.
   let _lastResumeAt = 0;
   let _resumeRetryToken = 0;
+  // Cancellation token for the _forcePauseFrameSoon pause ladder. Pressing
+  // play bumps it so the remaining scheduled pause ticks bail instead of
+  // snapping a freshly-resumed video back to paused.
+  let _forcePauseToken = 0;
   let _lastAutoCorrectAt = 0;
   // Android-restart-at-0 detection. We only seek the iframe forward
   // automatically when we have HIGH confidence it actually restarted at
@@ -2213,10 +2217,15 @@ const Music = (() => {
   // the reloaded iframe is listening, and keep the user-intent guard fresh
   // so the UI-sync recovery tick / visibility resume ladder don't fight us.
   function _forcePauseFrameSoon() {
+    const myToken = ++_forcePauseToken;
     _userPaused = true;
     _paused = true;
     _lastPlayerState = 2;
     const tick = () => {
+      // Superseded by a newer ladder, or cancelled by the user pressing
+      // play (togglePause bumps _forcePauseToken). Stop re-pausing so a
+      // freshly-resumed video isn't snapped back to paused mid-ladder.
+      if (myToken !== _forcePauseToken) return;
       // Kill any in-flight auto-resume chain (_resumeOnVisible runs a
       // ~5s, 5-attempt playVideo ladder with ignorePaused, so it would
       // otherwise outlast and override our pause — the "pause/resume
@@ -2450,6 +2459,12 @@ const Music = (() => {
     // flipped by lots of paths (visibility, infoDelivery, surrender);
     // _userPaused is sticky and only the user toggles it.
     _userPaused = !nowPlaying;
+    // Pressing play must win over any in-flight _forcePauseFrameSoon ladder
+    // (it re-issues pauseVideo for up to 5s after a pause+collapse/minimize).
+    // Without cancelling it the video plays then snaps back to paused — the
+    // "playing after pause is buggy" symptom. Bumping the token makes every
+    // remaining ladder tick bail.
+    if (nowPlaying) _forcePauseToken++;
     // Stamp the user-intent guard so the iframe reconciliation handlers
     // ignore any stale pre-toggle state events still in flight. Without
     // this, clicking pause and then receiving a buffered playerState=1
