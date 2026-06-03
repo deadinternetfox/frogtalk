@@ -1466,6 +1466,18 @@ html.ft-vv-ios.ft-kb-open #app{
      and the user can't see the input. */
   flex-shrink:1;min-height:0
 }
+/* Media-channel player scrollbars: purple to match #music-panel's purple
+   theme instead of the global green accent. Scoped to #music-panel (and its
+   descendants) so the chat message scrollbars — sibling #messages-area, not a
+   descendant — stay green. !important is required to beat the global
+   *::-webkit-scrollbar-thumb:hover and html,body,*{scrollbar-color} accent
+   rules defined earlier. */
+#music-panel::-webkit-scrollbar-thumb,
+#music-panel *::-webkit-scrollbar-thumb{background:rgba(160,80,216,.55) !important;border-radius:6px}
+#music-panel::-webkit-scrollbar-thumb:hover,
+#music-panel *::-webkit-scrollbar-thumb:hover{background:rgba(200,130,255,.9) !important}
+#music-panel,
+#music-panel *{scrollbar-color:rgba(160,80,216,.55) transparent !important}
 #music-panel.active{display:flex}
 /* Minimized state: keep the iframe rendered at real size so audio keeps
    playing (display:none / 1×1 pauses playback in some browsers), but push
