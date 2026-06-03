@@ -1256,7 +1256,7 @@
   }
 
   .node-privacy-band {
-    max-width: 900px; margin: 0 auto;
+    max-width: 900px; margin: 0 auto 3rem;
     padding: 2rem 1.5rem; border-radius: 16px;
     background: linear-gradient(135deg, rgba(15, 35, 25, 0.95), rgba(10, 20, 16, 0.98));
     border: 1px solid rgba(74, 222, 128, 0.2);
