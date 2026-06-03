@@ -432,6 +432,62 @@ class FederationSyncTests(unittest.TestCase):
         self.assertIn(int(travel_id), joined)
         self.assertIn("travel-prune-room", db.get_user_sync_room_allowlist(uid))
 
+    def test_empty_allowlist_does_not_wipe_held_rooms(self):
+        # Regression: a home node that just restarted can answer with an empty
+        # authoritative channel list. Without the empty-keep guard, the reconcile
+        # left the user from every non-owned channel ("channels disappeared,
+        # must re-join"). The rooms here are owned by a DIFFERENT user so the
+        # owned-room union can't mask the empty keep-set.
+        db = self.db
+        owner = int(db.create_user("ewipe_owner", "secret12"))
+        uid = int(db.create_user("ewipe_member", "secret12"))
+        a_id = db.create_room("ewipe-a", "a", "public", owner, None)
+        b_id = db.create_room("ewipe-b", "b", "public", owner, None)
+        db.join_room(uid, a_id)
+        db.join_room(uid, b_id)
+        db.set_user_sync_room_allowlist(uid, ["ewipe-a", "ewipe-b"])
+        pruned = db.apply_sync_room_allowlist(uid, set())
+        self.assertEqual(pruned, 0)
+        joined = set(db.get_user_joined_room_ids(uid))
+        self.assertIn(a_id, joined)
+        self.assertIn(b_id, joined)
+        # The last-good allowlist must survive — not be overwritten with empty.
+        self.assertEqual(
+            db.get_user_sync_room_allowlist(uid), {"ewipe-a", "ewipe-b"}
+        )
+
+    def test_empty_allowlist_noop_when_zero_joined(self):
+        # A user genuinely in zero rooms: empty keep is fine, returns 0, no error.
+        db = self.db
+        uid = int(db.create_user("ewipe_zero", "secret12"))
+        self.assertEqual(set(db.get_user_joined_room_ids(uid)), set())
+        self.assertEqual(db.apply_sync_room_allowlist(uid, set()), 0)
+
+    def test_apply_home_channel_memberships_empty_payload_no_prune(self):
+        # An empty home membership payload must never reach the prune layer.
+        import routers.auth as auth_mod
+
+        db = self.db
+        owner = int(db.create_user("hpay_owner", "secret12"))
+        uid = int(db.create_user("hpay_member", "secret12"))
+        r_id = db.create_room("hpay-room", "h", "public", owner, None)
+        db.join_room(uid, r_id)
+        result = auth_mod._apply_home_channel_memberships(
+            uid, {"channels": [], "rooms": []}
+        )
+        self.assertEqual(int(result or 0), 0)
+        self.assertIn(r_id, set(db.get_user_joined_room_ids(uid)))
+
+    def test_is_room_member_reflects_join(self):
+        # Backs the join-collision "already a member -> no-op" branch in the
+        # rooms router.
+        db = self.db
+        uid = int(db.create_user("ismember_user", "secret12"))
+        r_id = db.create_room("ismember-room", "x", "public", uid, None)
+        self.assertFalse(db.is_room_member(uid, r_id))
+        db.join_room(uid, r_id)
+        self.assertTrue(db.is_room_member(uid, r_id))
+
     @mock.patch("routers.auth._verify_travel_merge_export")
     def test_merge_travel_private_room_owned_on_home(self, _verify):
         import routers.auth as auth_mod

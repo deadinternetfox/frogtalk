@@ -1461,7 +1461,16 @@ const Rooms = (() => {
             return;
           }
           console.warn('[rooms] loadRooms failed', res.status, data?.error || data);
-          if (res.status === 401 || res.status === 403) State.rooms = [];
+          // Do NOT wipe the sidebar on a transient 401/403 — that commonly fires
+          // during a token/cookie race when switching federation nodes or when
+          // logged in on two devices, and blanking the channel list with no
+          // explanation was exactly the reported "rooms disappeared" symptom.
+          // Real session expiry is handled at boot (/api/auth/me -> showAuth())
+          // and via WS close 4001, neither of which depends on this line. Keep
+          // the last-good list; the next successful fetch replaces it.
+          if (res.status === 401 || res.status === 403) {
+            console.warn('[rooms] auth-failed on /api/rooms; keeping cached channels');
+          }
         } else {
           State.rooms = data.rooms || [];
         }
@@ -1480,6 +1489,22 @@ const Rooms = (() => {
       _roomsLoadInflight = null;
     }
   }
+
+  // Self-heal the sidebar after a server reset / reconnect. ws.js dispatches
+  // 'ws:open' every time the socket (re)opens; dms.js and calls.js already
+  // re-sync on it, but rooms.js had no listener, so after a node restart the
+  // channel list stayed blank/stale until a manual reload. Debounce so rapid
+  // reconnect flaps coalesce into a single refetch. loadRooms() self-dedupes
+  // via _roomsLoadInflight and renderRooms() early-returns on an unchanged
+  // render key, so this is cheap even when it fires often.
+  let _wsReloadTimer = null;
+  window.addEventListener('ws:open', () => {
+    if (_wsReloadTimer) clearTimeout(_wsReloadTimer);
+    _wsReloadTimer = setTimeout(() => {
+      _wsReloadTimer = null;
+      try { loadRooms(); } catch {}
+    }, 750);
+  });
 
   // ── Discord-style drag-to-reorder for joined channels ────────────────────
   // Desktop: small mousemove after pointerdown enters drag mode.

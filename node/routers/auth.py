@@ -5961,6 +5961,11 @@ def _apply_home_channel_memberships(user_id: int, payload: dict) -> int:
                     db.join_room(uid, int(room["id"]))
                 except Exception:
                     pass
+    if not names:
+        # Empty home membership payload (often a momentary post-restart snapshot
+        # returning rooms:[]). Do not reconcile — leave existing joins intact so
+        # a transient/empty home response never wipes the user's channels.
+        return 0
     return int(db.apply_sync_room_allowlist(uid, names) or 0)
 
 
@@ -6047,7 +6052,13 @@ def _fetch_home_memberships_payload(base_url: str, global_user_id: str) -> dict 
         )
     except Exception:
         data = None
-    if isinstance(data, dict) and isinstance(data.get("rooms"), list):
+    # Require a NON-EMPTY rooms list here. An empty list (a home node that just
+    # restarted answering HTTP-200 with rooms:[]) falls through to the federation
+    # export path, which has a better chance of returning the real list on the
+    # same call. For a user genuinely in zero rooms the export is also empty, so
+    # the net result is identical — but a transient empty primary response no
+    # longer short-circuits to an authoritative "you are in no channels".
+    if isinstance(data, dict) and data.get("rooms"):
         return data
     export = _fetch_sync_export_via_federation_gid(source, gid)
     if not isinstance(export, dict):

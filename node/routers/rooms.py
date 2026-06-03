@@ -2006,6 +2006,18 @@ async def join_room(
     room = db.get_room_by_name(name)
     fed_index = db.get_federation_channel_index_entry(name)
     if room and fed_index and db.room_blocks_home_sync_mirror(room):
+        # If the caller already belongs to the existing local channel of this
+        # name, joining is a no-op — return success so the client just opens it
+        # instead of erroring "a room by the same name already exists". rooms.name
+        # is UNIQUE (one channel per name per node, by federation design), so an
+        # existing member is already on the only channel this node can host for
+        # that name; the collision guard only needs to block joining a DIFFERENT
+        # (federated) channel that happens to share the name.
+        try:
+            if db.is_room_member(int(current_user["id"]), int(room["id"])):
+                return {"ok": True, "room": name, "already_member": True}
+        except Exception:
+            pass
         return JSONResponse(
             status_code=409,
             content={
