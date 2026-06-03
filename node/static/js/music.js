@@ -157,6 +157,23 @@ const Music = (() => {
     return _userIntentPaused !== null
       && (Date.now() - _userIntentAt) < USER_INTENT_GUARD_MS;
   }
+  // Promote a GENUINE foreground native play/pause (the user tapping the
+  // iframe's OWN ▶/⏸ control, not the app's dock button) to the sticky
+  // _userPaused intent. Previously a native pause only updated _paused —
+  // which _onAppHidden deliberately clobbers and the resume ladder ignores —
+  // so _onAppVisible (which gates auto-resume solely on _userPaused) would
+  // force-resume a video the user had paused the moment they returned to the
+  // tab/app or toggled minimize/maximize ("pause, then it restarts on its
+  // own"). Gated so it never sticks a BACKGROUND auto-pause (must be
+  // foreground) or a transient state=2 emitted mid resume-ladder (within the
+  // _lastResumeAt window) — both of those must still resume on return.
+  function _maybePromoteNativeIntent(paused) {
+    try {
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+      if (paused && (Date.now() - _lastResumeAt) < 2500) return;
+      _userPaused = !!paused;
+    } catch {}
+  }
   let _syncProbeStartedAt = 0;       // ms when probing began for current track
   let _syncFastProbeTimers = [];     // setTimeouts queued by fast re-probe
   // Lightweight UI-only re-sync. Fires every ~1.5s while a track is
@@ -1160,6 +1177,7 @@ const Music = (() => {
           if (nowPlaying && _paused) {
             if (!(guardActive && _userIntentPaused === true)) {
               _paused = false;
+              _maybePromoteNativeIntent(false);
               try { _syncPlayPauseButtons(); } catch {}
             }
           } else if (parsed.info === 2 && !_paused) {
@@ -1167,6 +1185,7 @@ const Music = (() => {
             // Mirror to _paused so the dock + tray + badge are honest.
             if (!(guardActive && _userIntentPaused === false)) {
               _paused = true;
+              _maybePromoteNativeIntent(true);
               try { _syncPlayPauseButtons(); } catch {}
             }
           }
@@ -1205,6 +1224,7 @@ const Music = (() => {
           if (ps === 1 && _paused) {
             if (!(guardActiveInfo && _userIntentPaused === true)) {
               _paused = false;
+              _maybePromoteNativeIntent(false);
               _lastEmitHash = '';
               try { _syncPlayPauseButtons(); } catch {}
               try { _emitState(); } catch {}
@@ -1213,6 +1233,7 @@ const Music = (() => {
           } else if (ps === 2 && !_paused) {
             if (!(guardActiveInfo && _userIntentPaused === false)) {
               _paused = true;
+              _maybePromoteNativeIntent(true);
               _lastEmitHash = '';
               try { _syncPlayPauseButtons(); } catch {}
               try { _emitState(); } catch {}
@@ -1247,6 +1268,7 @@ const Music = (() => {
             // the user just asked for; matching reports always pass.
             if (!(_userIntentActive() && _userIntentPaused !== scPaused)) {
               _paused = scPaused;
+              _maybePromoteNativeIntent(scPaused);
               _lastEmitHash = '';
               try { _syncPlayPauseButtons(); } catch {}
               try { _emitState(); } catch {}
