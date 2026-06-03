@@ -345,7 +345,11 @@ class DMMessageBody(BaseModel):
     # ~30MB media after base64 expansion. Hard cap at the boundary so
     # bcrypt/sanitizers/SQLite never see oversize payloads.
     media_data: Optional[str] = Field(default=None, max_length=40_000_000)
-    media_type: Optional[str] = Field(default=None, max_length=128)
+    # 1600, not 128: sticker effects ride inside media_type as a
+    # ";fx=<base64url>" suffix (StickerFX caps the encoded part at 1500). The
+    # old 128 cap silently 422'd every effect sticker in DMs ("send failed");
+    # channels never capped this. Plain mime types are still tiny.
+    media_type: Optional[str] = Field(default=None, max_length=1600)
     media_name: Optional[str] = Field(default=None, max_length=256)
     reply_to: Optional[int] = None
     media_blur: int = 0
