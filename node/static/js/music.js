@@ -172,6 +172,11 @@ const Music = (() => {
       if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
       if (paused && (Date.now() - _lastResumeAt) < 2500) return;
       _userPaused = !!paused;
+      // A native play must also call off any in-flight force-pause ladder so
+      // it can't re-pause a video the user just resumed in the iframe itself
+      // ("stops again"). The verify ladder already bails on _userPaused, so a
+      // native pause needs no symmetric token bump here.
+      if (!paused) _forcePauseToken++;
     } catch {}
   }
   let _syncProbeStartedAt = 0;       // ms when probing began for current track
@@ -970,6 +975,9 @@ const Music = (() => {
     // stale playerState=2 events from before the resume ladder lands.
     _userIntentPaused = false;
     _userIntentAt = Date.now();
+    // Explicit user play intent — clear sticky pause so the resume ladder
+    // (which now bails on _userPaused) actually runs.
+    _userPaused = false;
     // Bring the user back to the music source (channel or FrogSocial
     // music tab) so they actually see the player they tapped on.
     try { expand(); } catch {}
@@ -1567,6 +1575,12 @@ const Music = (() => {
       // by _onAppHidden — the verify loop will reconcile _paused to YT
       // truth on confirmation or surrender.
       if (_paused && !ignorePaused) return;
+      // Sticky user-pause wins over every auto-resume. Native (in-iframe)
+      // pauses now set _userPaused too, so a user who paused — via the dock
+      // OR the iframe's own ⏸ — can't be re-played by an in-flight verify
+      // ladder ("plays again after I pause"). Explicit play entry points
+      // (togglePause play, notification Play) clear _userPaused first.
+      if (_userPaused) return;
       const cur = _state && _state.queue && _state.queue[0];
       if (!cur) return;
       if (cur.provider === 'spotify') return;       // no postMessage play API
@@ -1613,6 +1627,7 @@ const Music = (() => {
         const verify = () => {
           if (myToken !== _resumeRetryToken) return;   // superseded by a newer call
           if (document.hidden) return;
+          if (_userPaused) return;                      // user paused mid-retry — stop
           // Only honor _paused as a stop signal when we did NOT enter via
           // ignorePaused. Without this exception, the notification-tray
           // resume + app-return resume bail immediately because
@@ -1625,6 +1640,7 @@ const Music = (() => {
           setTimeout(() => {
             if (myToken !== _resumeRetryToken) return;
             if (document.hidden) return;
+            if (_userPaused) return;                     // user paused mid-retry — stop
             if (_paused && !ignorePaused) return;
             if (_lastPlayerState === 1) {
               // Playing — do NOT seek. The iframe's currentTime is
