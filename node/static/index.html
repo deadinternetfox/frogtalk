@@ -7451,7 +7451,12 @@ body.in-welcome #ch-title .room-title-icon{display:none !important}
 /* Unified reaction panel (list + picker) */
 /* Post detail opens at z-index 9999, so reaction surfaces launched from
   inside that overlay must sit above it instead of underneath the modal. */
-.sf-rx-panel-overlay{position:fixed;inset:0;background:rgba(0,0,0,.68);z-index:10020;display:flex;align-items:flex-end;justify-content:center}
+/* height pinned to the VISIBLE viewport (--vvh = visualViewport.height, set in
+   app.js) so the bottom-aligned sheet sits at the true visible bottom. With
+   inset:0 alone the overlay spanned the layout viewport, so on mobile its
+   flex-end picker landed behind the browser/app bottom controls. Mirrors the
+   call overlay (#call CSS) convention. */
+.sf-rx-panel-overlay{position:fixed;inset:0;height:var(--vvh, 100dvh);max-height:var(--vvh, 100dvh);background:rgba(0,0,0,.68);z-index:10020;display:flex;align-items:flex-end;justify-content:center}
 .sf-rx-panel{width:min(620px,100%);max-height:78vh;background:linear-gradient(180deg,color-mix(in srgb, var(--bg-color) 88%, var(--accent-color) 12%),#0b0f0c);border-radius:20px 20px 0 0;border:1px solid color-mix(in srgb, var(--surface-color) 80%, var(--accent-color) 20%);border-bottom:none;display:flex;flex-direction:column;overflow:hidden}
 .sf-rx-panel-header{display:flex;align-items:center;justify-content:space-between;padding:14px 16px 10px;border-bottom:1px solid color-mix(in srgb, var(--surface-color) 80%, var(--accent-color) 20%)}
 .sf-rx-panel-title{font-size:15px;font-weight:700;color:var(--text-color);letter-spacing:.2px}
@@ -7460,7 +7465,7 @@ body.in-welcome #ch-title .room-title-icon{display:none !important}
 .sf-rx-panel-tabs{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none}
 .sf-rx-panel-tabs::-webkit-scrollbar{display:none}
 .sf-rx-panel-list{max-height:290px;overflow:auto;padding-right:2px}
-.sf-rx-picker-wrap{border-top:1px solid color-mix(in srgb, var(--surface-color) 80%, var(--accent-color) 20%);padding:12px 14px 14px;background:rgba(0,0,0,.14)}
+.sf-rx-picker-wrap{border-top:1px solid color-mix(in srgb, var(--surface-color) 80%, var(--accent-color) 20%);padding:12px 14px max(14px, calc(var(--safe-bottom) + 14px));background:rgba(0,0,0,.14)}
 .sf-rx-picker-title{font-size:12px;color:var(--text-muted);margin-bottom:8px}
 .sf-rx-picker-grid{display:flex;flex-wrap:wrap;gap:8px}
 .sf-rx-picker-btn{background:#111813;border:1px solid color-mix(in srgb, var(--surface-color) 80%, var(--accent-color) 20%);color:var(--text-color);border-radius:10px;padding:7px 10px;cursor:pointer;transition:background .15s,border-color .15s,transform .15s;font-size:18px;line-height:1}
