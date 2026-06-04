@@ -3252,6 +3252,7 @@ def _migrate():
             ("presence", "ALTER TABLE federation_user_profiles ADD COLUMN presence TEXT DEFAULT 'offline'"),
             ("custom_style", "ALTER TABLE federation_user_profiles ADD COLUMN custom_style TEXT DEFAULT ''"),
             ("banner", "ALTER TABLE federation_user_profiles ADD COLUMN banner TEXT DEFAULT ''"),
+            ("banner_pending", "ALTER TABLE federation_user_profiles ADD COLUMN banner_pending INTEGER DEFAULT 0"),
             ("last_seen", "ALTER TABLE federation_user_profiles ADD COLUMN last_seen TEXT DEFAULT ''"),
             ("profile_public", "ALTER TABLE federation_user_profiles ADD COLUMN profile_public INTEGER"),
             ("allow_friend_requests", "ALTER TABLE federation_user_profiles ADD COLUMN allow_friend_requests INTEGER"),
@@ -14846,7 +14847,8 @@ def get_federation_user_profile_row(global_user_id: str) -> dict:
             row = con.execute(
                 """
                 SELECT global_user_id, nickname, display_name, avatar, bio, origin_server_id,
-                       status_msg, mood, presence, custom_style, banner, updated_at, last_seen,
+                       status_msg, mood, presence, custom_style, banner, banner_pending,
+                       updated_at, last_seen,
                        profile_public, allow_friend_requests, allow_dms_from,
                        show_last_seen, show_read_receipts
                 FROM federation_user_profiles WHERE global_user_id=? LIMIT 1
@@ -14926,6 +14928,7 @@ def upsert_federation_user_profile(
     custom_style: str = "",
     banner: str = "",
     last_seen: str = "",
+    banner_pending: int | None = None,
 ) -> bool:
     gid = (global_user_id or "").strip()
     nick = (nickname or "").strip()
@@ -14953,12 +14956,20 @@ def upsert_federation_user_profile(
         if pres not in ("online", "away", "dnd", "invisible", "offline"):
             pres = "offline"
         seen = str(last_seen or "").strip()
+        # banner_pending tracks "home has a banner that was omitted from the
+        # event (too big for the outbox cap) and still needs hydrating". None =
+        # don't touch the flag; 1 = pending; 0 = explicit clear. A non-empty
+        # incoming banner always clears it (we now have the banner).
+        has_banner = bool((banner or "").strip())
+        bp_insert = 0 if has_banner else int(banner_pending or 0)
+        bp_touch = 0 if banner_pending is None else 1
+        bp_value = int(banner_pending or 0)
         con.execute(
             """
             INSERT INTO federation_user_profiles
             (global_user_id, nickname, display_name, avatar, bio, identity_pubkey, origin_server_id,
-             status_msg, mood, presence, custom_style, banner, last_seen, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+             status_msg, mood, presence, custom_style, banner, banner_pending, last_seen, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
             ON CONFLICT(global_user_id) DO UPDATE SET
                 nickname=excluded.nickname,
                 display_name=excluded.display_name,
@@ -14982,6 +14993,11 @@ def upsert_federation_user_profile(
                     WHEN excluded.banner IS NULL OR excluded.banner = ''
                         THEN federation_user_profiles.banner
                     ELSE excluded.banner END,
+                banner_pending=CASE
+                    WHEN excluded.banner IS NOT NULL AND excluded.banner != '' THEN 0
+                    WHEN ? = 1 THEN ?
+                    ELSE federation_user_profiles.banner_pending
+                END,
                 last_seen=CASE
                     WHEN excluded.last_seen IS NULL OR excluded.last_seen = '' THEN federation_user_profiles.last_seen
                     WHEN federation_user_profiles.last_seen IS NULL OR federation_user_profiles.last_seen = '' THEN excluded.last_seen
@@ -14993,11 +15009,29 @@ def upsert_federation_user_profile(
             (
                 gid, nick, display_name or "", avatar or "", bio or "", identity_pubkey or "",
                 origin_server_id or "", (status_msg or "")[:200], (mood or "")[:200], pres,
-                (custom_style or "")[:20000], (banner or "")[:500_000], seen,
+                (custom_style or "")[:20000], (banner or "")[:500_000], bp_insert, seen,
+                bp_touch, bp_value,
             ),
         )
         con.commit()
     return True
+
+
+def clear_federation_banner_pending(global_user_id: str) -> None:
+    """Drop the banner_pending flag for a gid — called when a home fetch confirms
+    there is no banner (removed on home), so we stop retrying hydration."""
+    gid = str(global_user_id or "").strip()
+    if not gid:
+        return
+    try:
+        with _conn() as con:
+            con.execute(
+                "UPDATE federation_user_profiles SET banner_pending=0 WHERE global_user_id=?",
+                (gid,),
+            )
+            con.commit()
+    except Exception:
+        pass
 
 
 def upsert_federation_room_presence(

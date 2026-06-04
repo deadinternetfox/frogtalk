@@ -264,6 +264,11 @@ def _maybe_hydrate_federation_banner(gid: str) -> None:
     prof = db.get_federation_user_profile_row(gid) or {}
     if str(prof.get("banner") or "").strip():
         return
+    # Only reach out to home when we know a banner exists there but was omitted
+    # from the event (too big). Without this, every profile view of a genuinely
+    # bannerless user would hammer the home node.
+    if not bool(int(prof.get("banner_pending") or 0)):
+        return
     try:
         hydrate_federation_profile_from_home(gid, str(prof.get("origin_server_id") or ""))
     except Exception:

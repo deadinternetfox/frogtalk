@@ -4064,6 +4064,16 @@ const Social = (() => {
       } else if (typeof window.clearSocialProfileCustomCss === 'function') {
         try { window.clearSocialProfileCustomCss(); } catch {}
       }
+      // Custom-CSS presets style `.sp-banner` with `!important`, which would
+      // override the uploaded banner painted via the (non-important) inline
+      // style above. Re-apply the banner image with inline `!important` AFTER
+      // the custom CSS so a user's uploaded banner always wins. No-ops when
+      // there's no valid image, leaving the preset's gradient intact.
+      if (u.banner && typeof UI !== 'undefined' && UI.applyProfileBannerToElement) {
+        try {
+          UI.applyProfileBannerToElement(content.querySelector('.social-profile .sp-banner'), u.banner);
+        } catch {}
+      }
 
       const wallToken = _beginProfileTabLoad('wall');
       loadProfilePosts(nickname, 'wall', wallToken);
@@ -10420,8 +10430,15 @@ const Social = (() => {
         }
         _invalidateProfileCache(nick);
         const el = document.querySelector('.social-profile .sp-banner');
-        if (!el || typeof UI === 'undefined' || !UI.profileBannerBackground) return;
-        el.style.background = UI.profileBannerBackground(banner);
+        if (!el || typeof UI === 'undefined') return;
+        // Use applyProfileBannerToElement (inline !important) so a live banner
+        // update still beats any custom-CSS `.sp-banner` rule. When there's no
+        // valid image it clears to the gradient fallback.
+        if (UI.applyProfileBannerToElement) {
+          UI.applyProfileBannerToElement(el, banner);
+        } else if (UI.profileBannerBackground) {
+          el.style.background = UI.profileBannerBackground(banner);
+        }
       } catch {}
     },
     refreshUserProfile(userId, nickname, avatar) {

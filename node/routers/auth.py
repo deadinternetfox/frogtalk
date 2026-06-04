@@ -1605,6 +1605,10 @@ def _fetch_home_federated_post_media(
 def _profile_cache_is_thin(prof: dict) -> bool:
     if not str(prof.get("nickname") or "").strip():
         return True
+    # A banner omitted from the event (pending) but not yet hydrated means the
+    # card is incomplete even if the small fields are all present — force refetch.
+    if bool(int(prof.get("banner_pending") or 0)) and not str(prof.get("banner") or "").strip():
+        return True
     if str(prof.get("avatar") or "").strip() and str(prof.get("banner") or "").strip():
         return False
     if str(prof.get("status_msg") or "").strip() or str(prof.get("custom_style") or "").strip():
@@ -1746,7 +1750,16 @@ def hydrate_federation_profile_from_home(global_user_id: str, home_server_id: st
         return False
     try:
         existing = db.get_federation_user_profile_row(gid) or {}
-        if str(existing.get("avatar") or "").strip() and str(existing.get("status_msg") or "").strip():
+        has_banner = bool(str(existing.get("banner") or "").strip())
+        banner_pending = bool(int(existing.get("banner_pending") or 0))
+        complete_small = (
+            str(existing.get("avatar") or "").strip()
+            and str(existing.get("status_msg") or "").strip()
+        )
+        # Skip only when the small fields are present AND the banner is either
+        # already cached or known-absent. A pending banner (omitted from the
+        # event because it was too big) must still trigger a fetch.
+        if complete_small and (has_banner or not banner_pending):
             return False
     except Exception:
         existing = {}
@@ -1758,6 +1771,13 @@ def hydrate_federation_profile_from_home(global_user_id: str, home_server_id: st
     if not live:
         return False
     _upsert_profile_cache_from_payload(live)
+    # If home confirms there's no banner (removed since the omit event), drop the
+    # pending flag so we stop retrying. A non-empty banner clears it via upsert.
+    if not str(live.get("banner") or "").strip():
+        try:
+            db.clear_federation_banner_pending(gid)
+        except Exception:
+            pass
     return True
 
 
