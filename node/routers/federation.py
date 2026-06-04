@@ -6569,8 +6569,9 @@ async def _handle_user_event(event: dict) -> None:
     nick_in = _fed_nickname(payload.get("nickname"))
     if not nick_in:
         return
+    banner_omitted_in = bool(payload.get("banner_omitted"))
     banner_in = ""
-    if not payload.get("banner_omitted"):
+    if not banner_omitted_in:
         banner_in = _fed_clip(payload.get("banner"), _FED_BANNER_MAX)
     custom_style_in = ""
     if "custom_style" in payload or "custom_css" in payload:
@@ -6591,7 +6592,20 @@ async def _handle_user_event(event: dict) -> None:
         custom_style=custom_style_in,
         banner=banner_in,
         last_seen=_fed_clip(payload.get("last_seen"), 64),
+        # Banners over the outbox cap ride as banner_omitted=True with no bytes.
+        # Flag the row so on-demand/proactive hydration knows a banner exists on
+        # home and must be pulled (vs. a user who simply has no banner).
+        banner_pending=(1 if banner_omitted_in else None),
     )
+    # Proactively pull the omitted banner from the user's home node now, so it's
+    # present before anyone views the profile. Rate-limited inside the helper
+    # (per-gid 300s) so event bursts can't hammer home; best-effort.
+    if banner_omitted_in:
+        try:
+            from routers.auth import hydrate_federation_profile_from_home
+            hydrate_federation_profile_from_home(gid, origin)
+        except Exception:
+            pass
     seen_in = str(payload.get("last_seen") or "").strip()
     if seen_in:
         db.apply_last_seen_if_newer(global_user_id=gid, last_seen=seen_in)
