@@ -75,6 +75,9 @@ node/board/board_uploads/
 node/board/board_data/
 node/board/board_previews/
 node/board/.env
+# Operator-local board customizations (extra nav pills, embedded external
+# boards). Loaded by board.php's optional include hook; node-local only.
+node/board/board_local.php
 
 # ── FrogTalk runtime ───────────────────────────────────────────
 uvicorn.log
