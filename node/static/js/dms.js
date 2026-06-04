@@ -3473,6 +3473,7 @@ async function loadDMMessages (pageOffset = 0, options = {}) {
     const cid = m.channel_id || _reqRoomId || 0;
     if (_isViewOnceSeenLocal(m.id, cid)) m.viewed_by_me = 1;
   }
+  let _deltaAddedCount = 0;
   if (pageOffset === 0) {
     if (isDelta) {
       if (msgs.length) {
@@ -3483,6 +3484,7 @@ async function loadDMMessages (pageOffset = 0, options = {}) {
           if (!mid || seen.has(mid)) continue;
           seen.add(mid);
           merged.push(m);
+          _deltaAddedCount++;
         }
         _dmMessages = merged;
       }
@@ -3494,7 +3496,14 @@ async function loadDMMessages (pageOffset = 0, options = {}) {
       fetchedAt: Date.now(),
       lastMsgId: Number((_dmMessages[_dmMessages.length - 1]?.id) || 0),
     });
-    if (!isDelta || msgs.length) {
+    // The stale-chat catch-up runs a delta fetch on every inbound message and
+    // usually re-returns only the message(s) the real-time path already
+    // appended — merging to ZERO new rows. Re-rendering then still rebuilds
+    // every bubble, which wipes the per-message embed-settled flags and
+    // re-hydrates the invite / FrogSocial / link cards ("🐸 Loading…" flash)
+    // on every new message. Only rebuild when the delta genuinely added rows
+    // (a real gap was filled); the live append already painted the new bubble.
+    if (!isDelta || _deltaAddedCount > 0) {
       renderDMChat();
       scrollChatBottom();
       void _dmBackgroundDecryptLoadedMessages(_reqRoomId, _peerUserId, _peerNick)
