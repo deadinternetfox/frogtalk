@@ -9820,12 +9820,78 @@ function _mentionColorWithAlpha(color, alpha, fallback) {
     }
     refresh();
     syncSendButton({ channelMode: !_isDmView() });
+    _maybeAutoFocusComposer();
   }
 
   function isChannelLoading() {
     if (_composeHardLockRequired()) return true;
     if (_chLoad.active && !_chLoad.soft && !_channelShellReady()) return true;
     return false;
+  }
+
+  // ── Discord-style composer focus ─────────────────────────────────────
+  // Two wins over "you must click the box first":
+  //   1. type-to-focus — pressing a printable key anywhere (when nothing
+  //      editable is focused and no dialog/overlay is up) drops the keystroke
+  //      into the composer. We never preventDefault, so the character that
+  //      fired the keydown lands in the now-focused textarea.
+  //   2. desktop auto-focus when a channel/DM finishes loading.
+  let _autoFocusRoomKey = null;
+
+  function _composeOverlayBlocking() {
+    try {
+      return !!(
+        document.querySelector('.modal-overlay:not(.hidden)') ||
+        document.querySelector('.media-player-overlay:not(.hidden)') ||
+        document.querySelector('.action-sheet')
+      );
+    } catch { return false; }
+  }
+
+  function _composerTypeable() {
+    const input = msgInput();
+    if (!input) return null;
+    if (input.disabled || input.readOnly) return null;
+    // offsetParent === null ⇒ hidden: not on a chat/DM view, or the composer
+    // has been replaced by a ban / content-warning banner.
+    if (input.offsetParent === null) return null;
+    return input;
+  }
+
+  function _editableFocused() {
+    const ae = document.activeElement;
+    if (!ae || ae === document.body) return false;
+    const tag = (ae.tagName || '').toLowerCase();
+    if (tag === 'input' || tag === 'textarea' || tag === 'select') return true;
+    return !!ae.isContentEditable;
+  }
+
+  function _onGlobalTypeToFocus(e) {
+    if (e.defaultPrevented || e.isComposing) return;
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    // Single printable character only — skips Enter/Tab/Esc/arrows/F-keys.
+    if (typeof e.key !== 'string' || e.key.length !== 1) return;
+    if (_editableFocused() || _composeOverlayBlocking()) return;
+    const input = _composerTypeable();
+    if (!input || isFocused(input)) return;
+    try { input.focus({ preventScroll: true }); } catch {}
+  }
+  document.addEventListener('keydown', _onGlobalTypeToFocus);
+
+  function _maybeAutoFocusComposer() {
+    try {
+      // Desktop only — auto-focusing on touch would pop the on-screen keyboard.
+      if (!window.matchMedia || !window.matchMedia('(pointer: fine)').matches) return;
+      if (_editableFocused() || _composeOverlayBlocking()) return;
+      const input = _composerTypeable();
+      if (!input || isFocused(input)) return;
+      // Key on the conversation being loaded so we auto-focus once per switch,
+      // not on every background SWR refresh of the same channel/DM.
+      const key = String(_chLoad.room || State?.currentRoom || '');
+      if (!key || key === _autoFocusRoomKey) return;
+      _autoFocusRoomKey = key;
+      input.focus({ preventScroll: true });
+    } catch {}
   }
 
   window.FtCompose = {
