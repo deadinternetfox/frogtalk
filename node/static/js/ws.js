@@ -584,6 +584,14 @@ const WS = (() => {
         // outgoing owner just became a moderator) and surface a small
         // toast for everyone watching the room. The new owner gets a
         // direct `room_ownership_received` ping below.
+        // Move the Owner badge in the sidebar live for whoever this affects
+        // (outgoing owner loses it, incoming owner gains it), independent of
+        // which channel they're currently viewing.
+        try {
+          if (typeof Rooms !== 'undefined' && Rooms.applyOwnerChange) {
+            Rooms.applyOwnerChange(data.room, data.new_owner_nickname, data.new_owner_id);
+          }
+        } catch {}
         if (data.room === room) {
           try {
             // Refresh full room metadata so the moderator list and
@@ -608,6 +616,14 @@ const WS = (() => {
       case 'room_ownership_received': {
         // Direct ping to the new owner. Toast even if they're not
         // currently looking at that room — they'll likely want to know.
+        // Reflect the new Owner badge in our sidebar immediately (loadRooms
+        // fallback inside applyOwnerChange covers the case where we weren't
+        // a member of the channel before).
+        try {
+          if (typeof Rooms !== 'undefined' && Rooms.applyOwnerChange) {
+            Rooms.applyOwnerChange(data.room, State.user && State.user.nickname, State.user && State.user.id);
+          }
+        } catch {}
         try {
           const from = data.from_nickname || 'someone';
           UI.showToast(`You're now the owner of #${data.room} (transferred by ${from})`);
