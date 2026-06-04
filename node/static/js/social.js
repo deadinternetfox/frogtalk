@@ -8088,6 +8088,39 @@ const Social = (() => {
     try { _storyData = []; } catch {}
   }
 
+  // A freshly-followed account is no longer a suggestion. Drop it from the
+  // "Suggested for you" strip AND from _suggestedCache so the list visibly
+  // updates and the feed fast-path doesn't repaint the followed user back in.
+  function _consumeSuggestion(nickname, btn) {
+    const key = String(nickname || '').toLowerCase();
+    try {
+      if (_suggestedCache && Array.isArray(_suggestedCache.users)) {
+        _suggestedCache.users = _suggestedCache.users.filter(
+          u => String(u.nickname || '').toLowerCase() !== key
+        );
+      }
+    } catch {}
+    const card = btn?.closest?.('.social-suggest-card');
+    if (!card) return;
+    const bar = card.closest('.social-suggest-bar');
+    try {
+      card.style.transition = 'opacity .18s ease, transform .18s ease';
+      card.style.opacity = '0';
+      card.style.transform = 'scale(.9)';
+    } catch {}
+    setTimeout(() => {
+      try { card.remove(); } catch {}
+      // Whole strip empty → drop the "Suggested for you" bar entirely.
+      if (bar && !bar.querySelector('.social-suggest-card')) {
+        try {
+          const host = document.getElementById('social-feed-suggest');
+          bar.remove();
+          if (host) host.innerHTML = '';
+        } catch {}
+      }
+    }, 190);
+  }
+
   async function toggleFollow(nickname, btn) {
     const isFollowing = btn?.textContent?.trim() === 'Following' || btn?.textContent?.trim() === 'Unfollow';
     const method = isFollowing ? 'DELETE' : 'POST';
@@ -8106,6 +8139,9 @@ const Social = (() => {
           btn.textContent = 'Following';
           btn.classList.remove('primary');
           btn.classList.add('secondary');
+          // Consume the suggestion so the strip updates (server already excludes
+          // followed users from /suggested, but the cached list wouldn't).
+          try { _consumeSuggestion(nickname, btn); } catch {}
         } else {
           btn.textContent = 'Follow';
           btn.classList.remove('secondary');
