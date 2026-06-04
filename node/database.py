@@ -1880,10 +1880,6 @@ def _migrate():
             con.execute("ALTER TABLE users ADD COLUMN custom_theme_json TEXT DEFAULT ''")
         if "client_prefs_json" not in cols:
             con.execute("ALTER TABLE users ADD COLUMN client_prefs_json TEXT DEFAULT ''")
-        # Backfill the default palette for rows with no theme set. 'dark' is a
-        # real, distinct, user-selectable theme, so it must NOT be collapsed to
-        # 'frog' here — only NULL/empty rows get the default.
-        con.execute("UPDATE users SET theme='frog' WHERE theme IS NULL OR theme=''")
         if "notify_sounds" not in cols:
             con.execute("ALTER TABLE users ADD COLUMN notify_sounds INTEGER DEFAULT 1")
         if "notify_desktop" not in cols:
@@ -2618,15 +2614,6 @@ def _migrate():
             value TEXT NOT NULL
         )""")
 
-        # Backfill global IDs for existing users after adding the new column.
-        missing_gid_rows = con.execute(
-            "SELECT id FROM users WHERE global_user_id IS NULL OR global_user_id=''"
-        ).fetchall()
-        for row in missing_gid_rows:
-            con.execute(
-                "UPDATE users SET global_user_id=? WHERE id=?",
-                (str(uuid.uuid4()), row["id"]),
-            )
         # Push subscriptions
         con.execute("""CREATE TABLE IF NOT EXISTS push_subscriptions (
             id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2945,10 +2932,6 @@ def _migrate():
         con.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_rooms_vanity_lower "
             "ON rooms(LOWER(vanity)) WHERE vanity IS NOT NULL"
-        )
-        # Private channels must not retain vanity slugs (join is invite-only).
-        con.execute(
-            "UPDATE rooms SET vanity = NULL WHERE type = 'private' AND vanity IS NOT NULL"
         )
         # Forwarded-from metadata for room messages: JSON blob
         # {nick, source_label, kind:'room'|'dm', original_id?}.
@@ -3290,50 +3273,6 @@ def _migrate():
         if fci_cols and "content_warning_flags" not in fci_cols:
             con.execute("ALTER TABLE federation_channel_index ADD COLUMN content_warning_flags INTEGER DEFAULT 0")
 
-        # ── One-time repair: rooms owned by the federation_sync system user ──
-        # Historic/legacy rooms got owner_id pointing at the federation_sync
-        # system account, so the directory rendered "federation_sync" as the
-        # owner. Repair existing rows once (display logic also covers any future
-        # such rows). Idempotent via the config sentinel + the COALESCE guards.
-        _owner_mig = con.execute(
-            "SELECT 1 FROM config WHERE key='migrate.room_owner_fed_sync.v2'"
-        ).fetchone()
-        if not _owner_mig:
-            _fed_row = con.execute(
-                "SELECT id FROM users WHERE nickname='federation_sync' COLLATE NOCASE"
-            ).fetchone()
-            if _fed_row:
-                _fed_uid = int(_fed_row["id"])
-                # (a) federated mirror rooms: backfill the real owner gid from
-                #     the directory index so display resolves the real nickname.
-                con.execute(
-                    """
-                    UPDATE rooms SET owner_global_user_id = (
-                        SELECT f.owner_global_user_id FROM federation_channel_index f
-                         WHERE f.room_name=rooms.name AND f.tombstoned=0
-                           AND COALESCE(f.owner_global_user_id,'')<>''
-                         ORDER BY f.last_seen_at DESC LIMIT 1)
-                     WHERE owner_id=? AND COALESCE(owner_global_user_id,'')=''
-                       AND EXISTS (SELECT 1 FROM federation_channel_index f2
-                                    WHERE f2.room_name=rooms.name AND f2.tombstoned=0
-                                      AND COALESCE(f2.owner_global_user_id,'')<>'')
-                    """,
-                    (_fed_uid,),
-                )
-                # (b) locally-homed orphan rooms: hand ownership back to 'frog'
-                #     (skip silently if no such user exists on this node).
-                _frog_row = con.execute(
-                    "SELECT id FROM users WHERE nickname='frog' COLLATE NOCASE"
-                ).fetchone()
-                if _frog_row:
-                    con.execute(
-                        "UPDATE rooms SET owner_id=? WHERE owner_id=? AND COALESCE(home_server_id,'')=''",
-                        (int(_frog_row["id"]), _fed_uid),
-                    )
-            con.execute(
-                "INSERT OR REPLACE INTO config(key,value) VALUES('migrate.room_owner_fed_sync.v2','1')"
-            )
-
         # ── Denormalized engagement counters on wall_posts ──
         # The /feed, /explore and /reels endpoints used to evaluate three
         # correlated subqueries per row (reactions/comments/reposts COUNT(*))
@@ -3354,30 +3293,10 @@ def _migrate():
             if _col not in wall_cols:
                 con.execute(_ddl)
                 wall_cols.add(_col)
-        _newly_added_counters: list[str] = []
         for _col in ("reaction_count", "comment_count", "repost_count"):
             if _col not in wall_cols:
                 con.execute(f"ALTER TABLE wall_posts ADD COLUMN {_col} INTEGER DEFAULT 0")
-                _newly_added_counters.append(_col)
                 wall_cols.add(_col)
-
-        # Backfill once for any newly-added column (idempotent — runs only on
-        # the first server start that introduced the column).
-        if "reaction_count" in _newly_added_counters:
-            con.execute(
-                "UPDATE wall_posts SET reaction_count = COALESCE(("
-                "SELECT COUNT(*) FROM wall_post_reactions WHERE post_id = wall_posts.id), 0)"
-            )
-        if "comment_count" in _newly_added_counters:
-            con.execute(
-                "UPDATE wall_posts SET comment_count = COALESCE(("
-                "SELECT COUNT(*) FROM wall_comments WHERE post_id = wall_posts.id), 0)"
-            )
-        if "repost_count" in _newly_added_counters:
-            con.execute(
-                "UPDATE wall_posts SET repost_count = COALESCE(("
-                "SELECT COUNT(*) FROM wall_reposts WHERE post_id = wall_posts.id), 0)"
-            )
 
         # Triggers keep the counters in sync within the same transaction as
         # the INSERT/DELETE — race-free, no application-level coupling.
@@ -3591,17 +3510,6 @@ def _migrate():
 
         con.commit()
 
-    # Track B one-shot backfill: ensure every existing user has their
-    # `custom_style` derived from the raw `custom_css`. Idempotent —
-    # only touches rows where `custom_style` is still empty. Failure
-    # here must not block startup (logging out of band; renderer just
-    # falls back to default styling for that user).
-    try:
-        n = backfill_custom_style()
-        if n:
-            print(f"[migrate] backfilled custom_style for {n} users")
-    except Exception as _e:
-        print(f"[migrate] custom_style backfill skipped: {_e!r}")
 
 def signal_publish_bundle(user_id: int, registration_id: int,
                           identity_pub: bytes,
@@ -9102,11 +9010,6 @@ def _migrate_custom_emoji_sticker_scope(con: sqlite3.Connection) -> None:
             con.execute("ALTER TABLE custom_emojis ADD COLUMN image_hash TEXT NOT NULL DEFAULT ''")
         except Exception:
             pass
-        for row in con.execute("SELECT id, image_data FROM custom_emojis WHERE COALESCE(image_hash,'')=''").fetchall():
-            con.execute(
-                "UPDATE custom_emojis SET image_hash=? WHERE id=?",
-                (_hash_data_url(row["image_data"] or ""), row["id"]),
-            )
     if "room_id" not in ce_cols:
         try:
             con.execute("ALTER TABLE custom_emojis ADD COLUMN room_id INTEGER DEFAULT NULL REFERENCES rooms(id)")
