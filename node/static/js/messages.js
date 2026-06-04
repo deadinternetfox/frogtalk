@@ -5000,6 +5000,9 @@ async function sendMessage() {
     Messages.clearReply();
     // User just sent — always snap them to latest so they see their message land.
     try { scrollToBottom(true); } catch {}
+    // Keep focus in the composer so they can keep typing without re-clicking
+    // (notably after a mouse click on the send button, which moves focus to it).
+    try { input.focus({ preventScroll: true }); } catch {}
   } catch (e) {
     console.error('Send error:', e);
     if (_nonce && !_wsDispatched) {
