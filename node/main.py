@@ -1014,7 +1014,7 @@ def _build_csp_header(nonce: str) -> str:
         # purpose: blocks attacker pages from being iframed inside FrogTalk
         # via stored-XSS injected <iframe>.
         "connect-src 'self' wss: https://api.klipy.com https://media.klipy.com https://cdn.klipy.com https://static.klipy.com https://tenor.googleapis.com https://media.tenor.com https://cloudflareinsights.com; "
-        "frame-src 'self' https://www.youtube.com https://open.spotify.com https://platform.twitter.com; "
+        "frame-src 'self' https://www.youtube.com https://open.spotify.com https://platform.twitter.com https://frogtalk.app https://frogtalk.xyz; "
         # Hard locks (no inline-handler dependency, so safe to enforce today).
         "frame-ancestors 'self'; "
         "base-uri 'self'; "
@@ -1037,7 +1037,7 @@ def _build_strict_csp_header(nonce: str) -> str:
         "img-src 'self' data: blob: https:; "
         "media-src 'self' data: blob: https:; "
         "connect-src 'self' wss: https://api.klipy.com https://media.klipy.com https://cdn.klipy.com https://static.klipy.com https://tenor.googleapis.com https://media.tenor.com https://cloudflareinsights.com; "
-        "frame-src 'self' https://www.youtube.com https://open.spotify.com https://platform.twitter.com; "
+        "frame-src 'self' https://www.youtube.com https://open.spotify.com https://platform.twitter.com https://frogtalk.app https://frogtalk.xyz; "
         "frame-ancestors 'self'; "
         "base-uri 'self'; "
         "form-action 'self'; "
