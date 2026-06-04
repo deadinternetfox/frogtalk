@@ -138,7 +138,11 @@ const Rooms = (() => {
     const muted = (typeof Mute !== 'undefined' && Mute.isRoomMuted)
       ? joined.map((r) => (Mute.isRoomMuted(r.name) ? '1' : '0')).join('')
       : '';
-    return joined.map((r) => `${r.name}\x1f${r.channel_type || 'text'}`).join('\x1e')
+    // Include an "owned by me" bit per room so a live ownership transfer
+    // (which moves the Owner badge) flips the key and forces a re-render
+    // instead of being skipped by the unchanged-key fast path below.
+    const myNick = State.user && State.user.nickname;
+    return joined.map((r) => `${r.name}\x1f${r.channel_type || 'text'}\x1f${r.owner_nickname === myNick ? '1' : '0'}`).join('\x1e')
       + `\x1d${showUnjoined ? '1' : '0'}\x1d${q}\x1d${muted}`;
   }
 
@@ -1756,6 +1760,29 @@ const Rooms = (() => {
       browseBtn.onclick = () => { State._showAllChannels = !State._showAllChannels; renderRooms(); };
       container.appendChild(browseBtn);
     }
+  }
+
+  // Reflect a channel ownership transfer in the sidebar immediately so the
+  // "Owner" badge moves to the new owner (and disappears for the outgoing
+  // owner) without a reload. Called from the acting client and from the
+  // room_owner_changed / room_ownership_received websocket handlers; it's
+  // idempotent, so the overlapping coverage is harmless.
+  function applyOwnerChange(roomName, newOwnerNick, newOwnerId) {
+    if (!roomName) return;
+    const r = (State.rooms || []).find((x) => x.name === roomName);
+    if (!r) {
+      // We don't have this room cached yet (e.g. the new owner was just
+      // auto-added as a member server-side) — pull the authoritative list so
+      // it shows up with the correct badge.
+      try { loadRooms(); } catch {}
+      return;
+    }
+    if (newOwnerNick != null) r.owner_nickname = newOwnerNick;
+    if (newOwnerId != null) r.owner_id = newOwnerId;
+    if (State.currentRoom === roomName && newOwnerNick != null) {
+      State.currentRoomOwner = newOwnerNick;
+    }
+    try { renderRooms(); } catch {}
   }
 
   const _ROOM_NAME_SAFE_RE = /^[a-z0-9_-]{1,32}$/;
@@ -3800,6 +3827,10 @@ const Rooms = (() => {
       UI.showToast(`Ownership of #${room} transferred to ${target.nickname}`);
       try { closeModal('modal-transfer-ownership'); } catch {}
       try { closeModal('modal-channel-settings'); } catch {}
+      // Drop the Owner badge from our sidebar entry right away — we just
+      // demoted ourselves to moderator. (The WS broadcast also covers anyone
+      // else watching the channel; the new owner gets room_ownership_received.)
+      try { applyOwnerChange(room, target.nickname, target.id); } catch {}
       // Refresh local view of mod state — the WS room_owner_changed
       // event also fires for everyone in the room (see ws.js handler).
       try {
@@ -4600,7 +4631,7 @@ const Rooms = (() => {
     handleChannelThemeBgUpload, clearChannelThemeBgImage,
     createInvite, revokeInvite, fetchInvites, showChannelAbout,
     saveVanity, clearVanity, copyVanityLink,
-    renderMuteState, renderRooms, openChannelLink,
+    renderMuteState, renderRooms, applyOwnerChange, openChannelLink,
     cancelPrivateSecretPrompt, submitPrivateSecretPrompt,
     ensurePrivateRoomSecret,
     toggleSecretVisibility,
