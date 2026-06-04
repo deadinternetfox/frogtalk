@@ -5474,7 +5474,7 @@ function renderDirectoryCard(ch, compact) {
       </div>
       <div class="dir-card-desc">${esc(plainDesc.substring(0, 200))}${plainDesc.length > 200 ? '…' : ''}</div>
       ${tags.length ? `<div class="dir-card-tags">${tags.slice(0, 5).map(t => `<span class="dir-tag">${esc(t)}</span>`).join('')}</div>` : ''}
-      ${ch.owner_name ? `<div class="dir-card-owner">by ${isSafeCssImageUrl(ch.owner_avatar) ? `<img src="${esc(ch.owner_avatar)}" style="width:14px;height:14px;border-radius:50%;vertical-align:middle;margin-right:2px">` : ''}${esc(ch.owner_name)}</div>` : ''}
+      ${ch.owner_name ? `<div class="dir-card-owner">by ${isSafeCssImageUrl(ch.owner_avatar) ? `<img src="${esc(ch.owner_avatar)}" style="width:14px;height:14px;border-radius:50%;vertical-align:middle;margin:0 5px 0 3px">` : ''}${esc(ch.owner_name)}</div>` : ''}
       ${remoteHint}
     </div>
     <div class="dir-card-join">
