@@ -43,6 +43,11 @@ if (shouldShowTorGateway()) {
     exit;
 }
 
+// Optional operator-local board customizations (extra federated nav pills,
+// embedded external boards, etc). Node-local and gitignored — absent in a
+// clean checkout, so this is a no-op for anyone but the operator who adds it.
+if (is_file(__DIR__ . '/board_local.php')) require __DIR__ . '/board_local.php';
+
 // Check if user is banned
 $ban = isIPBanned($ipHash);
 $isBanned = $ban !== false;
@@ -3117,6 +3122,7 @@ if ($singleThread) {
                             <?php if (!empty($_pp['topic'])): ?><span class="fed-pill-topic">#<?= htmlspecialchars($_pp['topic']) ?></span><?php endif; ?>
                         </a>
                     <?php endforeach; ?>
+                    <?php if (function_exists('board_local_pills')) board_local_pills(); ?>
                 </div>
             </nav>
             <?php endif; ?>
