@@ -6051,7 +6051,10 @@ async def _handle_room_event(event: dict) -> None:
             )
             return
         owner = db.get_or_create_federation_system_user()
-        room_id = db.create_room(room_name, "Federated room", "public", owner, None)
+        # Legacy federated shell: keep home empty (stamped from the event origin
+        # below) instead of branding it with our own id.
+        room_id = db.create_room(room_name, "Federated room", "public", owner, None,
+                                 home_server_id="")
         if room_id is None:
             room = db.get_room_by_name(room_name)
         else:

@@ -212,6 +212,42 @@ async def official_directory_sync_task():
             _log.exception("Federation channel pull task error")
 
 
+async def channel_home_reconcile_task():
+    """Self-heal channels whose ``home_server_id`` drifted from reality.
+
+    A locally-created channel can have its home column branded with a peer's
+    server_id (a replicated message for the same name arriving before we ever
+    asserted our own home), after which the genuine owner's settings edits
+    (banner, 18+, name, theme) are treated as cross-node mirror edits and
+    relayed to a node that disclaims the channel — so they silently never save.
+    This network-free pass re-homes such orphans to us (and adopts the mesh
+    consensus for genuine mirrors), then re-broadcasts the directory for any
+    reclaimed channel so peers converge. Idempotent: a no-op once consistent.
+    """
+    interval = int(os.getenv("FROGTALK_CHANNEL_HOME_RECONCILE_INTERVAL_SEC", "600"))
+    interval = max(60, interval)
+    await asyncio.sleep(20)  # let init + boot-sync settle before the first pass
+    while True:
+        try:
+            from database import reconcile_channel_home_server_ids
+            result = await asyncio.to_thread(reconcile_channel_home_server_ids)
+            reclaimed = (result or {}).get("reclaimed") or []
+            adopted = (result or {}).get("adopted") or []
+            if reclaimed or adopted:
+                _log.info("Channel home reconcile: reclaimed=%s adopted=%s",
+                          reclaimed, adopted)
+            for name in reclaimed:
+                try:
+                    await asyncio.to_thread(
+                        federation_mod.enqueue_channel_directory_updated, name
+                    )
+                except Exception:
+                    _log.exception("directory re-broadcast failed for %s", name)
+        except Exception:
+            _log.exception("channel home reconcile error")
+        await asyncio.sleep(interval)
+
+
 async def federation_inbox_processor_task():
     """Background task to process incoming federation events with idempotency."""
     idle_sleep = max(2, int(os.getenv("FROGTALK_FEDERATION_INBOX_IDLE_SEC", "8")))
@@ -389,6 +425,7 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(wal_checkpoint_task()),
         asyncio.create_task(ws.voice_reaper_task()),
         asyncio.create_task(official_directory_sync_task()),
+        asyncio.create_task(channel_home_reconcile_task()),
         asyncio.create_task(federation_inbox_processor_task()),
         asyncio.create_task(federation_outbox_processor_task()),
         asyncio.create_task(federation_update_check_task()),

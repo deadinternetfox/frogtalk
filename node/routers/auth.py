@@ -4236,6 +4236,7 @@ def _apply_sync_export_to_user(
                 db.create_room(
                     name, desc, "public", owner, None,
                     icon=icon, channel_type=channel_type,
+                    home_server_id="",  # federated shell: remote home stamped after
                 )
                 existing = db.get_room_by_name(name)
             except Exception:
@@ -5831,6 +5832,7 @@ def _materialize_federated_channel(raw, *, owner_user_id: int | None = None) -> 
                 parsed.get("room_key_hint"),
                 icon=parsed.get("icon"),
                 channel_type=parsed["channel_type"],
+                home_server_id="",  # mirror shell: home stamped by the caller
             )
             room = db.get_room_by_name(name)
             if room and parsed["type"] == "private":
