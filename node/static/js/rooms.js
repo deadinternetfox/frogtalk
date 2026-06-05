@@ -142,7 +142,16 @@ const Rooms = (() => {
     // (which moves the Owner badge) flips the key and forces a re-render
     // instead of being skipped by the unchanged-key fast path below.
     const myNick = State.user && State.user.nickname;
-    return joined.map((r) => `${r.name}\x1f${r.channel_type || 'text'}\x1f${r.owner_nickname === myNick ? '1' : '0'}`).join('\x1e')
+    // Include a content-warning bit too, so toggling 18+ (locally OR via a
+    // cross-node channel_directory_updated event) flips the key and repaints
+    // the sidebar 18+ badge live — without it patchContentWarning's
+    // renderRooms() hit the unchanged-key fast path and the badge only
+    // appeared after a full reload / re-login.
+    const cwOn = (r) => {
+      const cw = r.content_warning;
+      return (cw && cw.enabled && cw.flags && cw.flags.length) ? '1' : '0';
+    };
+    return joined.map((r) => `${r.name}\x1f${r.channel_type || 'text'}\x1f${r.owner_nickname === myNick ? '1' : '0'}\x1f${cwOn(r)}`).join('\x1e')
       + `\x1d${showUnjoined ? '1' : '0'}\x1d${q}\x1d${muted}`;
   }
 
