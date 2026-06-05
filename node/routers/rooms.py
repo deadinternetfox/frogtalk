@@ -911,6 +911,20 @@ async def update_room(request: Request, room_name: str, body: UpdateRoomRequest,
     re-broadcasts. Local/home channels keep the normal moderator authz.
     """
     from routers import federation as federation_mod
+    # Self-heal a corrupted home pointer before deciding local-vs-relay. Without
+    # this, a channel whose home_server_id was wrongly stamped with a peer id
+    # (see reconcile_channel_home_server_ids) makes the genuine owner's edit get
+    # relayed to a node that disclaims the channel — so banners / 18+ silently
+    # never save. Scoped to this one room; a no-op for correctly-homed channels.
+    try:
+        healed = db.reconcile_channel_home_server_ids(room_name)
+        if healed.get("reclaimed"):
+            try:
+                federation_mod.enqueue_channel_directory_updated(room_name)
+            except Exception:
+                pass
+    except Exception:
+        pass
     _room = db.get_room_by_name(room_name)
     _local_sid = federation_mod._local_server_id()
     _home = str((_room or {}).get("home_server_id") or "").strip()

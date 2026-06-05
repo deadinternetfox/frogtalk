@@ -1320,16 +1320,37 @@ def list_rooms() -> List[Dict]:
 
 def create_room(name: str, description: str, room_type: str, owner_id: int,
                 room_key_hint: Optional[str], icon: Optional[str] = None,
-                channel_type: str = "text", about: Optional[str] = None) -> Optional[int]:
+                channel_type: str = "text", about: Optional[str] = None,
+                home_server_id: Optional[str] = None) -> Optional[int]:
     # Seed the long-form "about" with the description on creation so the
     # Settings → About tab shows the same text the creator typed instead of
     # being blank until they re-save.
     about_val = about if (about is not None and about != "") else (description or "")
+    # Stamp the channel's home as *this* node at creation time. Leaving
+    # home_server_id='' (the column default) opened a corruption window: a
+    # replicated message for the same channel name arriving from a peer before
+    # we ever asserted our own home would brand our local channel with the
+    # peer's server_id (the "first-write-wins" import path), after which the
+    # owner's own edits were treated as cross-node mirror edits and silently
+    # relayed into the void. Being born home=local_sid closes that window.
+    # A channel created while visiting a remote node is genuinely homed there,
+    # so local_sid is always the correct home for a locally-created room.
+    #
+    # Federation shell creators (directory materialise, legacy autocreate) pass
+    # an explicit home_server_id — usually "" so they keep the empty-then-stamp
+    # pattern and `set_room_home_server_id_if_empty` can apply the *remote* home.
+    if home_server_id is None:
+        try:
+            home_sid = str((get_or_create_local_server_identity() or {}).get("server_id") or "").strip()
+        except Exception:
+            home_sid = ""
+    else:
+        home_sid = str(home_server_id or "").strip()
     try:
         with _conn() as con:
             cur = con.execute(
-                "INSERT INTO rooms (name, description, about, type, owner_id, room_key_hint, icon, channel_type) VALUES (?,?,?,?,?,?,?,?)",
-                (name, description, about_val, room_type, owner_id, room_key_hint, icon, channel_type)
+                "INSERT INTO rooms (name, description, about, type, owner_id, room_key_hint, icon, channel_type, home_server_id) VALUES (?,?,?,?,?,?,?,?,?)",
+                (name, description, about_val, room_type, owner_id, room_key_hint, icon, channel_type, home_sid)
             )
             con.commit()
             return cur.lastrowid
@@ -14770,6 +14791,135 @@ def set_room_home_server_id_if_empty(room_name: str, home_server_id: str) -> boo
         return False
 
 
+def _index_consensus_home(con, room_name: str) -> Optional[str]:
+    """Mesh-agreed home for a room from the directory index, or None.
+
+    The directory index is the federation's shared view of who homes each
+    public channel; entries are signed assertions from the home node. Prefer a
+    live (non-tombstoned), most-recently-synced row. Returns None when no peer
+    has ever told us a home for this channel.
+    """
+    try:
+        rows = con.execute(
+            "SELECT COALESCE(home_server_id,'') AS h FROM federation_channel_index "
+            "WHERE room_name=? ORDER BY tombstoned ASC, last_synced_at DESC",
+            ((room_name or "").strip().lower(),),
+        ).fetchall()
+    except Exception:
+        return None
+    for r in rows:
+        h = str(r["h"] or "").strip()
+        if h:
+            return h
+    return None
+
+
+def _room_has_remote_sourced_content(con, room_name: str, local_sid: str) -> bool:
+    """True when the room holds messages replicated *from another node*.
+
+    A genuine local channel only ever stores locally-authored messages
+    (``origin_server_id`` empty or our own id). A directory mirror of a remote
+    channel carries messages stamped with the remote home's id. This is the
+    decisive "am I the origin?" signal that distinguishes our own mis-stamped
+    channel from a mirror whose directory-index entry happens to be missing.
+    """
+    try:
+        row = con.execute(
+            "SELECT 1 FROM messages "
+            "WHERE room_name=? AND origin_server_id IS NOT NULL "
+            "AND origin_server_id!='' AND origin_server_id!=? LIMIT 1",
+            (room_name, local_sid or ""),
+        ).fetchone()
+        return row is not None
+    except Exception:
+        # Be conservative: if we can't tell, assume remote-sourced so we never
+        # wrongly reclaim a mirror.
+        return True
+
+
+def reconcile_channel_home_server_ids(room_name: Optional[str] = None) -> Dict:
+    """Repair ``rooms.home_server_id`` rows that disagree with reality.
+
+    Network-free, idempotent self-heal for two corruption classes, so a node
+    can never get permanently stuck treating a channel's home incorrectly
+    (which silently breaks the owner's banner / 18+ / settings edits):
+
+    * **Adopt consensus** — when the directory index says some node is the home
+      and our local row disagrees, follow the mesh. If the index says *we* are
+      home, that's a reclaim toward self.
+    * **Reclaim orphan** — a channel whose ``home_server_id`` points at a peer
+      that nothing corroborates (no directory-index entry), that is owned by a
+      local-origin account (account homed here, not the federation shell user),
+      and that holds no remote-sourced messages, is our own mis-stamped channel.
+      Re-home it to us.
+
+    Returns ``{"reclaimed": [...], "adopted": [...]}`` (room names changed).
+    The caller should re-broadcast the directory for ``reclaimed`` names so
+    peers converge on the corrected owner/home.
+    """
+    out: Dict[str, List[str]] = {"reclaimed": [], "adopted": []}
+    try:
+        sid = str((get_or_create_local_server_identity() or {}).get("server_id") or "").strip()
+    except Exception:
+        sid = ""
+    if not sid:
+        return out
+    try:
+        fed_uid = int(get_or_create_federation_system_user())
+    except Exception:
+        fed_uid = 0
+    only = (room_name or "").strip().lower() or None
+    with _conn() as con:
+        if only:
+            rooms = con.execute(
+                "SELECT id, name, owner_id, COALESCE(home_server_id,'') AS home "
+                "FROM rooms WHERE name=?",
+                (only,),
+            ).fetchall()
+        else:
+            rooms = con.execute(
+                "SELECT id, name, owner_id, COALESCE(home_server_id,'') AS home FROM rooms"
+            ).fetchall()
+        changed = False
+        for r in rooms:
+            name = r["name"]
+            home = str(r["home"] or "").strip()
+            consensus = _index_consensus_home(con, name)
+            # 1) Directory consensus names a home that differs from our row.
+            if consensus and consensus != home:
+                con.execute(
+                    "UPDATE rooms SET home_server_id=? WHERE id=?",
+                    (consensus, r["id"]),
+                )
+                changed = True
+                (out["reclaimed"] if consensus == sid else out["adopted"]).append(name)
+                continue
+            # 2) Orphaned origin: home points at a peer nobody corroborates and
+            #    every signal says the channel is genuinely ours.
+            if home and home != sid and consensus is None:
+                owner_id = int(r["owner_id"] or 0)
+                if not owner_id or owner_id == fed_uid:
+                    continue
+                ah = con.execute(
+                    "SELECT COALESCE(account_home_server_id,'') AS h FROM users WHERE id=?",
+                    (owner_id,),
+                ).fetchone()
+                ah_v = str((ah["h"] if ah else "") or "").strip()
+                if ah_v not in ("", sid):
+                    continue  # visiting owner → genuinely a remote channel
+                if _room_has_remote_sourced_content(con, name, sid):
+                    continue  # holds replicated remote content → it's a mirror
+                con.execute(
+                    "UPDATE rooms SET home_server_id=? WHERE id=?",
+                    (sid, r["id"]),
+                )
+                changed = True
+                out["reclaimed"].append(name)
+        if changed:
+            con.commit()
+    return out
+
+
 def room_blocks_home_sync_mirror(room: Optional[Dict]) -> bool:
     """True when a local channel name is owned by someone other than the sync shell.
 
@@ -15294,11 +15444,45 @@ def save_federated_room_message(event_id: str, payload: Dict, origin_server_id: 
         elif origin_sid:
             # First-write wins for home_server_id — never let a later peer
             # overwrite an established home (defence against malicious
-            # peers relabelling a local channel).
-            con.execute(
-                "UPDATE rooms SET home_server_id=? WHERE name=? AND (home_server_id IS NULL OR home_server_id='')",
-                (origin_sid, room_name),
-            )
+            # peers relabelling a local channel). We only fill an *empty*
+            # home, and even then never stamp a *peer's* id onto a channel
+            # that is genuinely ours: a room owned by a local-origin account
+            # (their account is homed here, and it isn't the federation
+            # system shell user) is homed on this node even if the column
+            # hasn't been stamped yet. Stamping the peer id there was the
+            # root cause of owner edits silently relaying into the void.
+            home_row = con.execute(
+                "SELECT COALESCE(home_server_id,'') AS home, owner_id FROM rooms WHERE name=?",
+                (room_name,),
+            ).fetchone()
+            if home_row is not None and not str(home_row["home"] or "").strip():
+                local_sid_now = ""
+                try:
+                    local_sid_now = str(
+                        (get_or_create_local_server_identity() or {}).get("server_id") or ""
+                    ).strip()
+                except Exception:
+                    local_sid_now = ""
+                stamp = origin_sid
+                owner_id_existing = int(home_row["owner_id"] or 0)
+                if owner_id_existing and local_sid_now and origin_sid != local_sid_now:
+                    try:
+                        fed_uid = int(get_or_create_federation_system_user())
+                    except Exception:
+                        fed_uid = 0
+                    if owner_id_existing != fed_uid:
+                        ah = con.execute(
+                            "SELECT COALESCE(account_home_server_id,'') AS h FROM users WHERE id=?",
+                            (owner_id_existing,),
+                        ).fetchone()
+                        ah_v = str((ah["h"] if ah else "") or "").strip()
+                        if ah_v in ("", local_sid_now):
+                            # Genuinely our channel → stamp ourselves, not the peer.
+                            stamp = local_sid_now
+                con.execute(
+                    "UPDATE rooms SET home_server_id=? WHERE name=? AND (home_server_id IS NULL OR home_server_id='')",
+                    (stamp, room_name),
+                )
 
         edited_flag = 1 if bool(payload.get("edited")) else 0
         key_ver = max(0, int(payload.get("key_version") or 0))
