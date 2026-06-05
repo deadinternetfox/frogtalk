@@ -8203,6 +8203,10 @@ async def change_nickname(
         db.set_username(current_user["id"], body.nickname, old_nick)
     except Exception:
         return JSONResponse(status_code=409, content={"error": "Could not change username"})
+    # Make sure the account has a federation identity before we federate the
+    # rename — a legacy/edge account without a global_user_id would otherwise
+    # no-op the enqueue below and never propagate cross-node.
+    gid = db.ensure_global_user_id(current_user["id"]) or current_user.get("global_user_id")
     # Flush the cached session so /me + get_current_user resolve the new handle.
     invalidate_token_cache(x_session_token)
     manager.update_user_meta(current_user["id"], nickname=body.nickname)
@@ -8214,7 +8218,7 @@ async def change_nickname(
         await manager.broadcast_all({
             "type": "profile_update",
             "user_id": current_user["id"],
-            "global_user_id": current_user.get("global_user_id"),
+            "global_user_id": gid,
             "nickname": body.nickname,
             "old_nickname": old_nick,
         })

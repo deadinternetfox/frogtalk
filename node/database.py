@@ -14298,6 +14298,44 @@ def _lookup_local_user_by_gid(gid: str) -> Optional[Dict]:
         return None
 
 
+def ensure_global_user_id(user_id: int) -> Optional[str]:
+    """Return the account's ``global_user_id``, assigning a fresh one if missing.
+
+    Accounts created via ``create_user`` always get a gid at signup, but legacy
+    rows (predating the column) or odd creation paths may have NULL/''. Anything
+    that federates an identity (rename, display-name, etc.) no-ops without a gid,
+    so this self-heals the row on demand. Returns the gid, or None on failure.
+    """
+    if not user_id:
+        return None
+    try:
+        with _conn() as con:
+            row = con.execute(
+                "SELECT global_user_id FROM users WHERE id=? LIMIT 1",
+                (int(user_id),),
+            ).fetchone()
+            if not row:
+                return None
+            existing = str((row["global_user_id"] if hasattr(row, "keys") else row[0]) or "").strip()
+            if existing:
+                return existing
+            gid = str(uuid.uuid4())
+            con.execute(
+                "UPDATE users SET global_user_id=? "
+                "WHERE id=? AND (global_user_id IS NULL OR global_user_id='')",
+                (gid, int(user_id)),
+            )
+            con.commit()
+            # Re-read in case a concurrent writer won the race.
+            row2 = con.execute(
+                "SELECT global_user_id FROM users WHERE id=? LIMIT 1",
+                (int(user_id),),
+            ).fetchone()
+            return str((row2["global_user_id"] if (row2 and hasattr(row2, "keys")) else (row2[0] if row2 else "")) or "").strip() or gid
+    except Exception:
+        return None
+
+
 def apply_federated_wall_post_encrypted(payload: Dict, origin_server_id: str) -> Optional[int]:
     """Idempotently apply an encrypted federated wall post + recipient wraps."""
     import base64 as _b64
