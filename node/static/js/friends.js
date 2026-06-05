@@ -375,13 +375,19 @@ function patchFriendPresence(data) {
   const userId = data.user_id != null ? String(data.user_id) : '';
   const nick = String(data.nickname || '').trim();
   const nickKey = nick.toLowerCase();
+  // On a rename the friend row still holds the OLD handle, so match on it too.
+  const oldNickKey = String(data.old_nickname || '').trim().toLowerCase();
+  const renamed = !!(data.old_nickname && nick && oldNickKey !== nickKey);
   const gid = String(data.global_user_id || '').trim();
   let changed = false;
   for (const f of _allFriends) {
     const sameById = userId && String(f.user_id || f.id || '') === userId;
-    const sameByNick = nickKey && String(f.nickname || '').toLowerCase() === nickKey;
+    const fNickKey = String(f.nickname || '').toLowerCase();
+    const sameByNick = nickKey && fNickKey === nickKey;
+    const sameByOldNick = oldNickKey && fNickKey === oldNickKey;
     const sameByGid = gid && String(f.global_user_id || '').trim() === gid;
-    if (!sameById && !sameByNick && !sameByGid) continue;
+    if (!sameById && !sameByNick && !sameByOldNick && !sameByGid) continue;
+    if (renamed) { f.nickname = nick; changed = true; }
     if (data.presence !== undefined) {
       const p = String(data.presence || 'offline').toLowerCase();
       f.presence = p;

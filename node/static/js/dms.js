@@ -1576,30 +1576,47 @@ try {
 
 function updateDmPeerPresence(patch = {}) {
   const nick = String(patch.nickname || '').trim().toLowerCase();
+  const oldNick = String(patch.old_nickname || '').trim().toLowerCase();
   const gid = String(patch.global_user_id || '').trim();
   const uid = Number(patch.user_id || 0);
+  // On a rename the cache still holds the OLD handle, so match on it too.
   const matchPeer = (peerNick, peerGid, peerUid) => {
     if (gid && peerGid && gid === peerGid) return true;
     if (uid && peerUid && uid === peerUid) return true;
-    if (nick && peerNick && nick === String(peerNick).trim().toLowerCase()) return true;
+    const pn = String(peerNick || '').trim().toLowerCase();
+    if (pn && ((nick && pn === nick) || (oldNick && pn === oldNick))) return true;
     return false;
   };
   const ls = patch.last_seen;
   const pr = patch.presence;
+  const renamed = !!(patch.old_nickname && patch.nickname && oldNick !== nick);
   let touched = false;
   for (const ch of _dmChannels) {
     if (!matchPeer(ch.nickname, ch.global_user_id, ch.with_user_id)) continue;
     if (ls !== undefined) ch.other_last_seen = ls;
     if (pr !== undefined) ch.other_presence = pr;
+    if (renamed) ch.nickname = patch.nickname;
     touched = true;
   }
   if (_activeDM && matchPeer(_activeDM.nickname, _activeDM.global_user_id, _activeDM.user_id)) {
     if (ls !== undefined) _activeDM.other_last_seen = ls;
     if (pr !== undefined) _activeDM.other_presence = pr;
+    if (renamed) _activeDM.nickname = patch.nickname;
     if (State.currentRoomType === 'dm') {
       const desc = document.getElementById('ch-desc');
-      if (desc) {
+      if (desc && (ls !== undefined || pr !== undefined)) {
         desc.textContent = _formatDmPeerPresence(_activeDM.other_last_seen, _activeDM.other_presence);
+      }
+      if (renamed) {
+        // Rewrite the open conversation's @handle in the header.
+        const titleText = document.querySelector('#ch-title .room-title-text');
+        if (titleText) titleText.textContent = '@' + (_activeDM.nickname || '');
+        const titleEl = document.getElementById('ch-title');
+        if (titleEl) {
+          titleEl.onclick = () => {
+            if (typeof showUserInfo === 'function') showUserInfo(_activeDM.nickname, _activeDM?.user_id || null);
+          };
+        }
       }
     }
     touched = true;
