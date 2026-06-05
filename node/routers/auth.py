@@ -8164,7 +8164,12 @@ class NicknameChangeRequest(BaseModel):
 
 @router.patch("/nickname")
 @limiter.limit("5/hour")
-async def change_nickname(request: Request, body: NicknameChangeRequest, current_user: dict = Depends(get_current_user)):
+async def change_nickname(
+    request: Request,
+    body: NicknameChangeRequest,
+    x_session_token: str = Header(None, alias="X-Session-Token"),
+    current_user: dict = Depends(get_current_user),
+):
     """Change user's username (the unique @handle).
 
     Note: this endpoint is historically named `/nickname` because the
@@ -8193,10 +8198,39 @@ async def change_nickname(request: Request, body: NicknameChangeRequest, current
     existing = db.get_user_by_nick(body.nickname)
     if existing and existing["id"] != current_user["id"]:
         return JSONResponse(status_code=409, content={"error": "That username is taken"})
+    old_nick = current_user["nickname"]
     try:
-        db.set_username(current_user["id"], body.nickname, current_user["nickname"])
+        db.set_username(current_user["id"], body.nickname, old_nick)
     except Exception:
         return JSONResponse(status_code=409, content={"error": "Could not change username"})
+    # Flush the cached session so /me + get_current_user resolve the new handle.
+    invalidate_token_cache(x_session_token)
+    manager.update_user_meta(current_user["id"], nickname=body.nickname)
+    # Broadcast so every connected client rewrites the @handle in already-rendered
+    # member/friend/DM rows. Carry both handles + gid: federated rows have a null
+    # user_id and can only be matched by global_user_id, and the old handle lets
+    # clients/peers find the stale row.
+    try:
+        await manager.broadcast_all({
+            "type": "profile_update",
+            "user_id": current_user["id"],
+            "global_user_id": current_user.get("global_user_id"),
+            "nickname": body.nickname,
+            "old_nickname": old_nick,
+        })
+    except Exception:
+        pass
+    # Federate the rename so peers refresh their profile directory, room rosters,
+    # and shadow user rows (mirrors what the display-name endpoint already does).
+    try:
+        from routers import federation as federation_mod
+        ident = db.get_user_by_id(current_user["id"]) or current_user
+        federation_mod.enqueue_user_profile_updated(
+            ident,
+            extra={"old_nickname": old_nick},
+        )
+    except Exception:
+        _log.exception("federation: failed to enqueue username sync")
     return {"ok": True, "nickname": body.nickname, "username": body.nickname}
 
 

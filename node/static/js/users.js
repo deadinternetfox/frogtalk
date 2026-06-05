@@ -733,6 +733,37 @@ const Users = (() => {
     if (changed) _renderFiltered();
   }
 
+  // Live-rewrite the @handle of a renamed user across every cached member row
+  // so the sidebar reflects a username change without a reload. Matches on the
+  // OLD nickname (the rows still hold it) or on the stable global_user_id —
+  // the gid arm is essential for federated rows, whose user_id is null.
+  function updateNickname(userId, oldNick, newNick, globalUserId) {
+    const next = String(newNick || '').trim();
+    if (!next) return;
+    const gid = globalUserId ? String(globalUserId).trim() : '';
+    const matches = (u) => {
+      if (_sameUser(u.user_id, u.nickname, userId, oldNick)) return true;
+      return !!(gid && String(u.global_user_id || '').trim() === gid);
+    };
+    let changed = false;
+    for (const u of _allUsers) {
+      if (matches(u)) { u.nickname = next; changed = true; }
+    }
+    for (const m of _channelMembers) {
+      if (matches(m)) { m.nickname = next; changed = true; }
+    }
+    if (State.onlineUsers) {
+      for (const u of State.onlineUsers) {
+        if (matches(u)) u.nickname = next;
+      }
+    }
+    if (changed) {
+      // Persist into the per-room cache so a cached re-render doesn't revert it.
+      if (_channelRoom) _putCachedMembers(_channelRoom, _channelMembers, _channelBots);
+      _renderFiltered();
+    }
+  }
+
   function updatePresence(userId, nickname, presence, statusMsg, globalUserId, opts) {
     let changed = false;
     const roomScoped = !!(opts && opts.roomScoped);
@@ -895,6 +926,7 @@ const Users = (() => {
     updateList,
     updateAvatar,
     updateDisplayName,
+    updateNickname,
     updatePresence,
     prepareMembersPanelBoot,
     prepareMembersListLoad,

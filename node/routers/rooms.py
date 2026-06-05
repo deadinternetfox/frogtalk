@@ -2242,11 +2242,19 @@ async def get_channel_members(room_name: str,
                 continue
             avatar = str(row.get("avatar") or "").strip()
             display_name = str(row.get("display_name") or "").strip()
+            nickname = str(row.get("nickname") or "").strip()
             status_msg = ""
             mood = ""
-            if gid and (not avatar or not display_name):
+            # The federation_user_profiles directory is the live source of truth
+            # for a federated user's identity — its handle is refreshed on every
+            # rename, so prefer it over the (possibly stale) room-index snapshot
+            # for the displayed @handle, avatar, and display name.
+            if gid:
                 try:
                     prof = db.get_federation_user_profile_row(gid) or {}
+                    prof_nick = str(prof.get("nickname") or "").strip()
+                    if prof_nick:
+                        nickname = prof_nick
                     if not avatar:
                         avatar = str(prof.get("avatar") or "").strip()
                     if not display_name:
@@ -2270,18 +2278,11 @@ async def get_channel_members(room_name: str,
                             mood = str(prof.get("mood") or "").strip()
                 except Exception:
                     pass
-            if gid and not status_msg:
-                try:
-                    prof = db.get_federation_user_profile_row(gid) or {}
-                    status_msg = str(prof.get("status_msg") or "").strip()
-                    mood = str(prof.get("mood") or "").strip()
-                except Exception:
-                    pass
             fed_row = room_presence_map.get(gid) if gid else None
             fed_p, live = _room_presence_is_live(fed_row)
             federated.append({
                 "user_id": None,
-                "nickname": row.get("nickname") or "",
+                "nickname": nickname or row.get("nickname") or "",
                 "display_name": display_name,
                 "avatar": avatar,
                 "status_msg": status_msg,

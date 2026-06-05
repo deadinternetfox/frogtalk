@@ -14648,6 +14648,71 @@ def disambiguate_federated_nickname(
     return fallback if is_username_available(fallback) else ""
 
 
+def refresh_shadow_user_nickname(
+    user_id: int,
+    gid: str,
+    new_nick: str,
+    origin_server_id: str = "",
+) -> Optional[str]:
+    """Rename a federated shadow ``users`` row to track a remote handle change.
+
+    Friends / DM parties homed on other nodes are materialized as local shadow
+    ``users`` rows (see ``ensure_federated_dm_local_user``) and read back via a
+    JOIN on ``users.nickname`` — so a remote rename leaves them stale until this
+    runs. ``users.nickname`` is UNIQUE, so this is collision-aware: if the new
+    handle is taken by an unrelated local account it falls back to a
+    disambiguated variant (same scheme shadow creation uses). The WHERE guards
+    on BOTH id and gid so it can only ever touch the intended federated row.
+    Returns the handle actually applied, or ``None`` if nothing changed.
+    """
+    nick = (new_nick or "").strip()
+    gid = (gid or "").strip()
+    if not user_id or not nick or not gid:
+        return None
+    try:
+        with _conn() as con:
+            row = con.execute(
+                "SELECT nickname FROM users WHERE id=? AND global_user_id=? LIMIT 1",
+                (int(user_id), gid),
+            ).fetchone()
+            if not row:
+                return None
+            current = str((row["nickname"] if hasattr(row, "keys") else row[0]) or "")
+            if current.lower() == nick.lower():
+                return None  # already correct
+            # Pre-check a collision against a DIFFERENT local account.
+            clash = con.execute(
+                "SELECT 1 FROM users WHERE LOWER(nickname)=LOWER(?) AND id<>? LIMIT 1",
+                (nick, int(user_id)),
+            ).fetchone()
+            target = nick
+            if clash:
+                alt = disambiguate_federated_nickname(nick, gid, origin_server_id)
+                if not alt:
+                    return None
+                target = alt
+            try:
+                con.execute(
+                    "UPDATE users SET nickname=? WHERE id=?",
+                    (target, int(user_id)),
+                )
+                con.commit()
+                return target
+            except sqlite3.IntegrityError:
+                con.rollback()
+                alt = disambiguate_federated_nickname(nick, gid, origin_server_id)
+                if not alt:
+                    return None
+                con.execute(
+                    "UPDATE users SET nickname=? WHERE id=?",
+                    (alt, int(user_id)),
+                )
+                con.commit()
+                return alt
+    except Exception:
+        return None
+
+
 def set_room_home_server_id_if_empty(room_name: str, home_server_id: str) -> bool:
     """Set ``rooms.home_server_id`` only when unset (first-write wins)."""
     name = (room_name or "").strip().lower()
@@ -15508,6 +15573,32 @@ def upsert_federation_room_member(
         return True
     except Exception:
         return False
+
+
+def refresh_federation_room_member_identity(
+    global_user_id: str,
+    nickname: str,
+    display_name: str = "",
+) -> int:
+    """Rewrite the denormalized handle/display_name on every cached room-roster
+    row for a federated user after a remote rename. The room index is otherwise
+    only refreshed by snapshot/join events, so without this a renamed peer keeps
+    their old @handle in cross-node member lists. Returns rows touched."""
+    gid = (global_user_id or "").strip()
+    nick = (nickname or "").strip()
+    if not gid or not nick:
+        return 0
+    try:
+        with _conn() as con:
+            cur = con.execute(
+                "UPDATE federation_room_member_index "
+                "SET nickname=?, display_name=? WHERE global_user_id=?",
+                (nick[:64], (display_name or "")[:64], gid),
+            )
+            con.commit()
+            return cur.rowcount or 0
+    except Exception:
+        return 0
 
 
 def tombstone_federation_room_member(room_name: str, global_user_id: str) -> bool:

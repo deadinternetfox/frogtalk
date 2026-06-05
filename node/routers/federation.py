@@ -6597,6 +6597,17 @@ async def _handle_user_event(event: dict) -> None:
         # home and must be pulled (vs. a user who simply has no banner).
         banner_pending=(1 if banner_omitted_in else None),
     )
+    # Refresh the denormalized handle on every cached room-roster row for this
+    # gid so a remote rename shows the new @handle in cross-node member lists
+    # (the room index is otherwise only touched by snapshot/join events). Keyed
+    # purely by gid, so it runs whether or not a local shadow user exists.
+    try:
+        db.refresh_federation_room_member_identity(
+            gid, nick_in,
+            display_name=_fed_clip(payload.get("display_name"), _FED_DISPLAY_MAX),
+        )
+    except Exception:
+        pass
     # Proactively pull the omitted banner from the user's home node now, so it's
     # present before anyone views the profile. Rate-limited inside the helper
     # (per-gid 300s) so event bursts can't hammer home; best-effort.
@@ -6649,6 +6660,7 @@ async def _handle_user_event(event: dict) -> None:
             broadcast = {
                 "type": "profile_update",
                 "nickname": nick_in,
+                "old_nickname": str(payload.get("old_nickname") or "").strip() or None,
                 "global_user_id": gid,
                 "presence": fp,
             }
@@ -6728,6 +6740,20 @@ async def _handle_user_event(event: dict) -> None:
         con.execute(base_sql, params)
         con.commit()
 
+    # The COALESCE UPDATE above deliberately omits nickname (it would clobber a
+    # real local account). For a federated *shadow* user the handle IS owned by
+    # the home node, so refresh it here — collision-safe. On the user's home
+    # node this is a no-op (the handle already matches); on any peer the gid
+    # match is always a shadow (gid is a globally-unique UUID).
+    old_nick_in = str(payload.get("old_nickname") or "").strip() or None
+    applied_nick = None
+    try:
+        applied_nick = db.refresh_shadow_user_nickname(
+            local_user["id"], gid, nick_in, origin_server_id=origin,
+        )
+    except Exception:
+        applied_nick = None
+
     # Push live profile changes (including presence/status) to connected clients
     # so channel member sidebars update without a manual refresh. Only fire
     # this when the event actually corresponds to a local user (matched by
@@ -6739,7 +6765,8 @@ async def _handle_user_event(event: dict) -> None:
         broadcast = {
             "type": "profile_update",
             "user_id": local_user["id"],
-            "nickname": str(payload.get("nickname") or "").strip(),
+            "nickname": applied_nick or nick_in,
+            "old_nickname": old_nick_in,
             "display_name": display_name_raw or None,
             "avatar": avatar_in or None,
             "presence": db.effective_presence_for_user(local_user["id"], gid),

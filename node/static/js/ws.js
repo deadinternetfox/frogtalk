@@ -635,9 +635,32 @@ const WS = (() => {
           if (!user) return false;
           if (data.user_id != null && user.id != null && String(data.user_id) === String(user.id)) return true;
           const a = String(data.nickname || '').toLowerCase();
+          const aOld = String(data.old_nickname || '').toLowerCase();
           const b = String(user.nickname || '').toLowerCase();
-          return !!(a && b && a === b);
+          // Match on the old handle too: on a rename the cached nickname is still
+          // the previous value on devices that haven't applied the change yet.
+          return !!(b && ((a && a === b) || (aOld && aOld === b)));
         };
+        // A username (@handle) change: rewrite it in every rendered surface so
+        // member sidebars, friends, and DM lists update without a reload. Rows
+        // are matched by stable user_id/global_user_id or the old handle.
+        if (data.old_nickname && data.nickname && data.old_nickname !== data.nickname) {
+          if (sameUser(State.user)) {
+            State.user.nickname = data.nickname;
+            try { State.save(); } catch {}
+            try { UI.setSelfNameAndHandle && UI.setSelfNameAndHandle(); } catch {}
+          }
+          try {
+            if (typeof Users !== 'undefined' && Users.updateNickname) {
+              Users.updateNickname(data.user_id, data.old_nickname, data.nickname, data.global_user_id);
+            }
+          } catch {}
+          try {
+            if (typeof DMs !== 'undefined' && DMs.updatePeerPresence) {
+              DMs.updatePeerPresence(data);
+            }
+          } catch {}
+        }
         // If our own avatar changed on another device, sync local state + self panel
         if (sameUser(State.user)) {
           if (data.avatar !== undefined) State.user.avatar = data.avatar;
