@@ -205,12 +205,45 @@ async def set_presence(body: PresenceBody, current_user: dict = Depends(get_curr
 
 # ── Friend requests ───────────────────────────────────────────────────────────
 
+# Per-(requester, target) cooldown layered on top of the 60/hour global cap.
+# The global cap stops a firehose; this stops the *targeted* pattern — re-poking
+# one specific person again and again (e.g. right after they decline). In-memory
+# + soft: it never blocks a first request, only rapid repeats at the same user.
+_FRIEND_REQ_TARGET_COOLDOWN_S = 6 * 3600
+_friend_req_last: dict[tuple[int, int], float] = {}
+
+
+def _friend_request_target_allowed(from_id: int, to_id: int) -> bool:
+    # Live, per-node, admin-tunable cooldown (TTL-cached); default 6h.
+    cooldown = int(
+        db.get_rate_limit_settings().get("friend_req_cooldown_s") or _FRIEND_REQ_TARGET_COOLDOWN_S
+    )
+    now = time.monotonic()
+    if len(_friend_req_last) > 20000:
+        old = now - cooldown
+        for k in [k for k, ts in _friend_req_last.items() if ts < old]:
+            _friend_req_last.pop(k, None)
+    key = (int(from_id), int(to_id))
+    last = _friend_req_last.get(key)
+    if last is not None and (now - last) < cooldown:
+        return False
+    _friend_req_last[key] = now
+    return True
+
+
 @router.post("/request/{nickname}")
 @limiter.limit("60/hour")
 async def send_request(request: Request, nickname: str, current_user: dict = Depends(get_current_user)):
     profile = db.get_user_profile(nickname)
     if not profile:
         return JSONResponse(status_code=404, content={"error": "User not found"})
+    if int(profile["id"]) != int(current_user["id"]) and not _friend_request_target_allowed(
+        current_user["id"], profile["id"]
+    ):
+        return JSONResponse(
+            status_code=429,
+            content={"error": "You recently requested this user — please wait before trying again"},
+        )
     result = db.send_friend_request(current_user["id"], profile["id"])
     if result == "self":
         return JSONResponse(status_code=400, content={"error": "Cannot add yourself"})

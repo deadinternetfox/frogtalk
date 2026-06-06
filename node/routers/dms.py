@@ -35,6 +35,34 @@ _log = logging.getLogger(__name__)
 limiter = Limiter(key_func=client_ip)
 router = APIRouter(prefix="/dms", tags=["dms"])
 
+# Per-(sender, recipient) burst cap for messages to a NON-FRIEND, layered under
+# the global 120/min. A stranger who can DM you (recipient allows everyone)
+# still can't fire a wall of messages at one victim; friends are unaffected.
+_DM_STRANGER_WINDOW_S = 60
+_DM_STRANGER_MAX = 10
+_dm_stranger_tracker: dict[tuple[int, int], list[float]] = {}
+
+
+def _dm_stranger_allowed(sender_id: int, peer_id: int) -> bool:
+    # Live, per-node, admin-tunable (TTL-cached); defaults match the constants.
+    _rl = db.get_rate_limit_settings()
+    window = int(_rl.get("dm_stranger_window_s") or _DM_STRANGER_WINDOW_S)
+    max_msgs = int(_rl.get("dm_stranger_max") or _DM_STRANGER_MAX)
+    now = time.monotonic()
+    cut = now - window
+    if len(_dm_stranger_tracker) > 20000:
+        for k, b in list(_dm_stranger_tracker.items()):
+            if not b or b[-1] < cut:
+                _dm_stranger_tracker.pop(k, None)
+    bucket = _dm_stranger_tracker.setdefault((int(sender_id), int(peer_id)), [])
+    while bucket and bucket[0] < cut:
+        bucket.pop(0)
+    if len(bucket) >= max_msgs:
+        return False
+    bucket.append(now)
+    return True
+
+
 MAX_MEDIA_BYTES = 20 * 1024 * 1024
 # Whitelist of acceptable data: URL prefixes for inbound DM media. See
 # routers/messages.py for the rationale — same allow-list, narrowed
@@ -622,6 +650,16 @@ async def send_message(request: Request, channel_id: int, body: DMMessageBody,
                 "i_blocked": bool(i_blocked),
                 "blocked_by_them": bool(peer_blocked_me),
                 "peer_nickname": peer_row.get("nickname") or "",
+            })
+    # Anti-spam: throttle a non-friend blasting one victim (friends exempt).
+    if peer_id and peer_id != current_user["id"]:
+        try:
+            _dm_friends = db.are_friends(current_user["id"], peer_id)
+        except Exception:
+            _dm_friends = True  # fail-open: never block a legit DM on a lookup error
+        if not _dm_friends and not _dm_stranger_allowed(current_user["id"], peer_id):
+            return JSONResponse(status_code=429, content={
+                "error": "You're messaging this user too quickly — slow down.",
             })
     # Source-side forwarding-disabled enforcement.
     fwd_meta = None

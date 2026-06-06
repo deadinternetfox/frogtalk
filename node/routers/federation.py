@@ -538,12 +538,15 @@ def enqueue_user_privacy_updated(user: dict) -> dict:
         "profile_public": 1 if int(src.get("profile_public") or 0) else 0,
         "allow_friend_requests": 1 if int(src.get("allow_friend_requests") or 0) else 0,
         "allow_dms_from": str(src.get("allow_dms_from") or "everyone").strip().lower()[:32],
+        "allow_calls_from": str(src.get("allow_calls_from") or "friends").strip().lower()[:32],
         "show_last_seen": str(src.get("show_last_seen") or "everyone").strip().lower()[:32],
         "show_read_receipts": 1 if int(src.get("show_read_receipts") or 0) else 0,
         "hide_dm_history_notice": 1 if int(src.get("hide_dm_history_notice") or 0) else 0,
     }
     if payload["allow_dms_from"] not in ("everyone", "friends", "nobody"):
         payload["allow_dms_from"] = "everyone"
+    if payload["allow_calls_from"] not in ("everyone", "friends", "nobody"):
+        payload["allow_calls_from"] = "friends"
     if payload["show_last_seen"] not in ("everyone", "friends", "nobody"):
         payload["show_last_seen"] = "everyone"
     return enqueue_server_event("user.privacy.updated", payload)
@@ -6888,6 +6891,7 @@ async def _handle_user_privacy_updated(event: dict) -> None:
     if nick:
         db.upsert_federation_user_profile(gid, nick, origin_server_id=home_sid or origin)
     allow_dm = str(payload.get("allow_dms_from") or "").strip().lower()
+    allow_call = str(payload.get("allow_calls_from") or "").strip().lower()
     show_ls = str(payload.get("show_last_seen") or "").strip().lower()
     # Only apply the fields the event actually carries — pass None for the rest
     # so apply_federation_user_privacy preserves the existing value. Defaulting
@@ -6901,6 +6905,7 @@ async def _handle_user_privacy_updated(event: dict) -> None:
         profile_public=_opt_bool("profile_public"),
         allow_friend_requests=_opt_bool("allow_friend_requests"),
         allow_dms_from=allow_dm if allow_dm in ("everyone", "friends", "nobody") else None,
+        allow_calls_from=allow_call if allow_call in ("everyone", "friends", "nobody") else None,
         show_last_seen=show_ls if show_ls in ("everyone", "friends", "nobody") else None,
         show_read_receipts=_opt_bool("show_read_receipts"),
         hide_dm_history_notice=_opt_bool("hide_dm_history_notice"),
@@ -7279,6 +7284,28 @@ async def _handle_dm_event(event: dict) -> None:
             peer_nick,
         )
         return
+    # Mirror the local allow_dms_from gate (routers/dms.py open_dm) on the
+    # federation inbound path — previously a cross-node first-contact DM could
+    # bypass a "friends"/"nobody" recipient. Enforce only on FIRST contact (no
+    # prior MESSAGE between them — not merely an empty channel row, which
+    # sibling events like read-receipts / disappear-timers can auto-create as a
+    # bypass) so ongoing threads are never interrupted; the recipient on this
+    # node is `peer`. Fail-open so a transient error never drops mail.
+    try:
+        if not db.dm_pair_has_messages(int(sender["id"]), int(peer["id"])):
+            _dm_policy = db.get_user_dm_policy(int(peer["id"]))
+            if _dm_policy == "nobody" or (
+                _dm_policy == "friends"
+                and not db.are_friends(int(sender["id"]), int(peer["id"]))
+            ):
+                _log.info(
+                    "federation: drop dm.message.created — allow_dms_from=%s blocks "
+                    "first-contact sender=%s peer=%s",
+                    _dm_policy, sender_nick, peer_nick,
+                )
+                return
+    except Exception:
+        _log.exception("federation DM policy gate failed (fail-open)")
     # Do not pin signal_keys_server_id from DM ciphertext origin — each node
     # keeps its own published keys; cross-node decrypt uses per-node lanes
     # (see user.signal.keys_updated when a peer uploads a bundle).

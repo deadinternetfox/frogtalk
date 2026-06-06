@@ -5183,6 +5183,7 @@ function _mergeUserSettingsFromMe(data) {
   if (data.profile_public !== undefined) State.user.profile_public = data.profile_public ? 1 : 0;
   if (data.allow_friend_requests !== undefined) State.user.allow_friend_requests = data.allow_friend_requests ? 1 : 0;
   if (data.allow_dms_from !== undefined) State.user.allow_dms_from = data.allow_dms_from;
+  if (data.allow_calls_from !== undefined) State.user.allow_calls_from = data.allow_calls_from;
   if (data.show_last_seen !== undefined) State.user.show_last_seen = data.show_last_seen;
   if (data.show_read_receipts !== undefined) State.user.show_read_receipts = data.show_read_receipts ? 1 : 0;
   if (data.hide_active_channels !== undefined) State.user.hide_active_channels = data.hide_active_channels ? 1 : 0;
@@ -6789,6 +6790,8 @@ async function showProfile() {
   if (frEl) frEl.checked = u.allow_friend_requests !== 0;
   const dmEl = document.getElementById('profile-allow-dms');
   if (dmEl) dmEl.value = u.allow_dms_from || 'everyone';
+  const callEl = document.getElementById('profile-allow-calls');
+  if (callEl) callEl.value = u.allow_calls_from || 'friends';
   const lsEl = document.getElementById('profile-show-last-seen');
   if (lsEl) lsEl.value = u.show_last_seen || 'everyone';
   const rrEl = document.getElementById('profile-show-read-receipts');
@@ -7202,6 +7205,7 @@ async function saveProfile() {
   const profilePublic = document.getElementById('profile-public')?.checked ?? true;
   const allowFr       = document.getElementById('profile-allow-fr')?.checked ?? true;
   const allowDms      = document.getElementById('profile-allow-dms')?.value || 'everyone';
+  const allowCalls    = document.getElementById('profile-allow-calls')?.value || 'friends';
   const showLastSeen  = document.getElementById('profile-show-last-seen')?.value || 'everyone';
   const showReadRx    = document.getElementById('profile-show-read-receipts')?.checked ?? true;
   const hideActiveCh  = document.getElementById('profile-hide-active-channels')?.checked ?? false;
@@ -7294,6 +7298,7 @@ async function saveProfile() {
     profile_public: profilePublic,
     allow_friend_requests: allowFr,
     allow_dms_from: allowDms,
+    allow_calls_from: allowCalls,
     show_last_seen: showLastSeen,
     show_read_receipts: showReadRx,
     hide_active_channels: hideActiveCh,
@@ -7375,6 +7380,7 @@ async function saveProfile() {
     State.user.profile_public = profilePublic ? 1 : 0;
     State.user.allow_friend_requests = allowFr ? 1 : 0;
     State.user.allow_dms_from = allowDms;
+    State.user.allow_calls_from = allowCalls;
     State.user.show_last_seen = showLastSeen;
     State.user.show_read_receipts = showReadRx ? 1 : 0;
     State.user.hide_active_channels = hideActiveCh ? 1 : 0;

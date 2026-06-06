@@ -2128,6 +2128,7 @@
     syncSiteSettings(config);
     applyFederationPolicyControls(config.federation_policy_ui || {});
     syncFederationPolicy(config.federation_policy || {});
+    await refreshRateLimits();
     if (config.public_url_meta) applyPublicUrlMeta(config.public_url_meta);
     else if (stats?.server?.public_url_meta) applyPublicUrlMeta(stats.server.public_url_meta);
     renderServerMeta(stats);
@@ -2332,6 +2333,121 @@
   document.getElementById('sync-dir-btn').addEventListener('click', () => runAction('sync'));
   nodeStalePreviewBtn?.addEventListener('click', () => runPurgeStale(true));
   nodeStalePurgeBtn?.addEventListener('click', () => runPurgeStale(false));
+  // ── Anti-abuse / rate limits ──────────────────────────────────────────────
+  const RL_INT_FIELDS = {
+    call_offer_max: 'rl-call-offer-max',
+    call_offer_window_s: 'rl-call-offer-window',
+    call_cooldown_friend_s: 'rl-call-cd-friend',
+    call_cooldown_stranger_s: 'rl-call-cd-stranger',
+    call_stranger_distinct_max: 'rl-call-stranger-distinct',
+    call_stranger_window_s: 'rl-call-stranger-window',
+    dm_stranger_max: 'rl-dm-max',
+    dm_stranger_window_s: 'rl-dm-window',
+    friend_req_cooldown_s: 'rl-friend-cooldown',
+    fed_offer_flood_max: 'rl-fed-flood-max',
+    fed_offer_flood_window_s: 'rl-fed-flood-window',
+  };
+  const RL_POLICY_FIELDS = {
+    node_default_allow_calls_from: 'rl-default-calls',
+    node_default_allow_dms_from: 'rl-default-dms',
+  };
+  const RL_PRESETS = {
+    relaxed:  { call_offer_max:15, call_offer_window_s:30, call_cooldown_friend_s:2,  call_cooldown_stranger_s:20,  call_stranger_distinct_max:15, call_stranger_window_s:3600, dm_stranger_max:30, dm_stranger_window_s:60,  friend_req_cooldown_s:3600,  fed_offer_flood_max:8, fed_offer_flood_window_s:60 },
+    balanced: { call_offer_max:8,  call_offer_window_s:30, call_cooldown_friend_s:5,  call_cooldown_stranger_s:60,  call_stranger_distinct_max:5,  call_stranger_window_s:3600, dm_stranger_max:10, dm_stranger_window_s:60,  friend_req_cooldown_s:21600, fed_offer_flood_max:4, fed_offer_flood_window_s:60 },
+    strict:   { call_offer_max:5,  call_offer_window_s:30, call_cooldown_friend_s:8,  call_cooldown_stranger_s:120, call_stranger_distinct_max:3,  call_stranger_window_s:3600, dm_stranger_max:5,  dm_stranger_window_s:60,  friend_req_cooldown_s:43200, fed_offer_flood_max:2, fed_offer_flood_window_s:60 },
+    lockdown: { call_offer_max:3,  call_offer_window_s:60, call_cooldown_friend_s:10, call_cooldown_stranger_s:300, call_stranger_distinct_max:1,  call_stranger_window_s:3600, dm_stranger_max:2,  dm_stranger_window_s:120, friend_req_cooldown_s:86400, fed_offer_flood_max:1, fed_offer_flood_window_s:60 },
+  };
+  const rlPresetEl = document.getElementById('rl-preset');
+  const rateLimitsStatus = document.getElementById('rate-limits-status');
+  const saveRateLimitsBtn = document.getElementById('save-rate-limits-btn');
+  let rateLimitsBaseline = '';
+
+  function setRateLimitsStatus(state, text) {
+    if (!rateLimitsStatus) return;
+    rateLimitsStatus.className = `status-pill state-${state}`;
+    rateLimitsStatus.textContent = text || '';
+  }
+  function rlReadInputs() {
+    const out = {};
+    for (const [key, id] of Object.entries(RL_INT_FIELDS)) {
+      const el = document.getElementById(id);
+      if (el && el.value !== '') out[key] = parseInt(el.value, 10);
+    }
+    for (const [key, id] of Object.entries(RL_POLICY_FIELDS)) {
+      const el = document.getElementById(id);
+      if (el) out[key] = el.value;
+    }
+    return out;
+  }
+  function rateLimitsSig() { return JSON.stringify(rlReadInputs()); }
+  function refreshRateLimitsDirtyUi() {
+    const dirty = rateLimitsSig() !== rateLimitsBaseline;
+    if (dirty) setRateLimitsStatus('dirty', 'Unsaved local changes');
+    else if (!rateLimitsStatus?.classList.contains('state-saved')) setRateLimitsStatus('saved', 'No local changes');
+  }
+  function rlDetectPreset() {
+    const cur = rlReadInputs();
+    for (const [name, vals] of Object.entries(RL_PRESETS)) {
+      if (Object.entries(vals).every(([k, v]) => Number(cur[k]) === Number(v))) return name;
+    }
+    return 'custom';
+  }
+  function syncRateLimits(rl) {
+    if (!rl || typeof rl !== 'object') return;
+    for (const [key, id] of Object.entries(RL_INT_FIELDS)) {
+      const el = document.getElementById(id);
+      if (el && rl[key] !== undefined && rl[key] !== null) el.value = rl[key];
+    }
+    for (const [key, id] of Object.entries(RL_POLICY_FIELDS)) {
+      const el = document.getElementById(id);
+      if (el && rl[key]) el.value = rl[key];
+    }
+    if (rlPresetEl) rlPresetEl.value = rlDetectPreset();
+    rateLimitsBaseline = rateLimitsSig();
+    setRateLimitsStatus('saved', 'No local changes');
+  }
+  function applyRlPreset(name) {
+    const vals = RL_PRESETS[name];
+    if (!vals) return; // 'custom' → leave values as-is
+    for (const [key, id] of Object.entries(RL_INT_FIELDS)) {
+      const el = document.getElementById(id);
+      if (el && vals[key] !== undefined) el.value = vals[key];
+    }
+    refreshRateLimitsDirtyUi();
+  }
+  async function refreshRateLimits() {
+    try {
+      const payload = await api('/api/server-admin/rate-limits');
+      syncRateLimits(payload.rate_limits || {});
+    } catch (e) { /* non-fatal: section just stays at defaults */ }
+  }
+  async function saveRateLimits() {
+    if (!saveRateLimitsBtn) return;
+    saveRateLimitsBtn.disabled = true;
+    saveRateLimitsBtn.classList.add('is-loading');
+    setRateLimitsStatus('saving', 'Saving to this node…');
+    try {
+      const payload = await api('/api/server-admin/rate-limits', {
+        method: 'PUT',
+        body: JSON.stringify(rlReadInputs()),
+      });
+      syncRateLimits(payload.rate_limits || {});
+      setRateLimitsStatus('saved', 'Saved');
+    } catch (e) {
+      setRateLimitsStatus('error', e.message || 'Save failed');
+    } finally {
+      saveRateLimitsBtn.disabled = false;
+      saveRateLimitsBtn.classList.remove('is-loading');
+    }
+  }
+  saveRateLimitsBtn?.addEventListener('click', () => { saveRateLimits().catch(() => {}); });
+  rlPresetEl?.addEventListener('change', () => applyRlPreset(rlPresetEl.value));
+  Object.values(RL_INT_FIELDS).forEach((id) => document.getElementById(id)?.addEventListener('input', () => {
+    if (rlPresetEl) rlPresetEl.value = rlDetectPreset();
+    refreshRateLimitsDirtyUi();
+  }));
+  Object.values(RL_POLICY_FIELDS).forEach((id) => document.getElementById(id)?.addEventListener('change', refreshRateLimitsDirtyUi));
+
   saveChannelRetentionBtn?.addEventListener('click', () => {
     saveChannelRetention().catch(() => {});
   });

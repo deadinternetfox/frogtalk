@@ -1539,7 +1539,11 @@ function handleCallError(data) {
   } else if (reason === 'federation_route_failed' || reason === 'no_callee_route') {
     toast('Cannot reach that user across nodes — check you are friends and both nodes are online, then try again.', 'error', 8000);
   } else if (reason === 'not_friends') {
-    toast('Cross-node calls require being friends — add them on this node or wait for sync to finish.', 'error', 8000);
+    toast((_callPeerNick || 'This user') + ' only accepts calls from friends — send a friend request first.', 'error', 8000);
+  } else if (reason === 'calls_disabled') {
+    toast((_callPeerNick || 'This user') + " isn't accepting calls right now.", 'info', 7000);
+  } else if (reason === 'rate_limited') {
+    toast("You're calling too often — please wait a moment and try again.", 'error', 7000);
   } else if (reason === 'blocked') {
     toast('Call blocked', 'error');
   } else if (reason === 'tampering') {

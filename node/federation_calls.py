@@ -109,13 +109,20 @@ def _offer_throttled(origin: str, callee_gid: str) -> bool:
     key = (str(origin or "").strip(), str(callee_gid or "").strip())
     if not key[0] or not key[1]:
         return False
+    # Live, per-node, admin-tunable (TTL-cached); defaults match the constants.
+    try:
+        _rl = db.get_rate_limit_settings()
+        flood_window = int(_rl.get("fed_offer_flood_window_s") or _OFFER_FLOOD_WINDOW_S)
+        flood_max = int(_rl.get("fed_offer_flood_max") or _OFFER_FLOOD_MAX)
+    except Exception:
+        flood_window, flood_max = _OFFER_FLOOD_WINDOW_S, _OFFER_FLOOD_MAX
     now = time.monotonic()
     if len(_offer_flood) > _OFFER_FLOOD_KEYS_MAX:
         # Opportunistic compact: drop stale/empty buckets first, then trim
         # oldest survivors to keep memory bounded under hostile cardinality.
         stale: list[tuple[str, str]] = []
         for k, b in _offer_flood.items():
-            while b and (now - b[0]) > _OFFER_FLOOD_WINDOW_S:
+            while b and (now - b[0]) > flood_window:
                 b.popleft()
             if not b:
                 stale.append(k)
@@ -125,9 +132,9 @@ def _offer_throttled(origin: str, callee_gid: str) -> bool:
             for k in list(_offer_flood.keys())[: len(_offer_flood) - _OFFER_FLOOD_KEYS_MAX]:
                 _offer_flood.pop(k, None)
     bucket = _offer_flood[key]
-    while bucket and (now - bucket[0]) > _OFFER_FLOOD_WINDOW_S:
+    while bucket and (now - bucket[0]) > flood_window:
         bucket.popleft()
-    if len(bucket) >= _OFFER_FLOOD_MAX:
+    if len(bucket) >= flood_max:
         return True
     bucket.append(now)
     return False
@@ -432,35 +439,58 @@ def call_offer_target_servers(callee_user: dict) -> list[str]:
     return call_signal_target_servers(callee_user)
 
 
-def can_call_user(caller_id: int, callee_id: int) -> str | None:
-    """Return error code or ``None`` when the call is permitted.
+def _has_dm_history(caller_id: int, callee_id: int) -> bool:
+    """True when these two already share a DM channel (prior contact)."""
+    try:
+        with db._conn() as con:
+            row = con.execute(
+                """
+                SELECT id FROM dm_channels
+                WHERE (user_a=? AND user_b=?) OR (user_a=? AND user_b=?)
+                LIMIT 1
+                """,
+                (int(caller_id), int(callee_id), int(callee_id), int(caller_id)),
+            ).fetchone()
+        return bool(row)
+    except Exception:
+        return False
 
-    Enforces ``is_blocked_either_way`` and (optionally) friendship. The
-    friendship gate prevents random cross-node strangers from ringing your
-    users; turn off with ``FROGTALK_FEDERATION_CALLS_REQUIRE_FRIEND=0`` if
-    you explicitly want open ringing.
+
+def can_call_user(caller_id: int, callee_id: int) -> str | None:
+    """Return an error code, or ``None`` when the call is permitted.
+
+    Enforcement runs on the callee's home node, so the callee's own
+    ``allow_calls_from`` privacy setting governs both same-node and
+    cross-node calls:
+
+    * always blocked when ``is_blocked_either_way``;
+    * ``nobody``   → no one may call (``calls_disabled``);
+    * ``friends``  → only friends, or someone they already DM with
+                     (default — stops brand-new / stranger ghost-calls);
+    * ``everyone`` → open ringing.
+
+    The legacy ``FROGTALK_FEDERATION_CALLS_REQUIRE_FRIEND`` env still acts as
+    a node-wide floor: with it on (default), a missing/blank policy is
+    treated as ``friends`` rather than ``everyone``.
     """
     if not caller_id or not callee_id:
         return "user_not_found"
     if db.is_blocked_either_way(int(caller_id), int(callee_id)):
         return "blocked"
-    if require_friend_for_calls() and not db.are_friends(int(caller_id), int(callee_id)):
-        try:
-            with db._conn() as con:
-                row = con.execute(
-                    """
-                    SELECT id FROM dm_channels
-                    WHERE (user_a=? AND user_b=?) OR (user_a=? AND user_b=?)
-                    LIMIT 1
-                    """,
-                    (int(caller_id), int(callee_id), int(callee_id), int(caller_id)),
-                ).fetchone()
-            if row:
-                return None
-        except Exception:
-            pass
-        return "not_friends"
-    return None
+    try:
+        policy = db.get_user_call_policy(int(callee_id))
+    except Exception:
+        policy = "friends" if require_friend_for_calls() else "everyone"
+    if policy == "nobody":
+        return "calls_disabled"
+    if policy == "everyone":
+        return None
+    # 'friends' (the default): allow friends or an existing DM relationship.
+    if db.are_friends(int(caller_id), int(callee_id)):
+        return None
+    if _has_dm_history(int(caller_id), int(callee_id)):
+        return None
+    return "not_friends"
 
 
 def _lookup_local_user_by_gid(gid: str) -> dict | None:
@@ -974,6 +1004,27 @@ async def _apply_call_offer(payload, origin, gid_call, _fed_nickname, _fed_globa
         "origin_server_id": origin,
     }
     callee_id = int(callee["id"])
+    # B3 (federated): honor the local callee's Do-Not-Disturb. Silence the ring
+    # + push on this node, leave a one-time missed-call notice, and bounce a
+    # 'missed' call.end back to the caller's node so their UI stops ringing.
+    try:
+        _callee_pres = db.effective_presence_for_user(callee_id, callee_gid)
+    except Exception:
+        _callee_pres = "online"
+    if _callee_pres == "dnd":
+        try:
+            db.mark_call_missed(int(local_id))
+        except Exception:
+            _log.exception("federated DND: mark_call_missed failed")
+        try:
+            callee_row = db.get_user_by_id(callee_id) or {}
+            enqueue_call_end(
+                callee_row, caller_gid,
+                global_call_id=gid_call, status="missed",
+            )
+        except Exception:
+            _log.exception("federated DND: call.end bounce failed")
+        return
     await manager.send_to_user(callee_id, offer_payload)
     try:
         from routers.ws import _push_always
@@ -1211,7 +1262,8 @@ async def _apply_call_end(payload, origin, gid_call, _fed_global_id):
         safe_status = "ended"
     ended_at = datetime.utcnow().isoformat()
     if safe_status == "missed":
-        db.update_call_status(local_id, "missed", ended_at=ended_at)
+        # had_pending must be read BEFORE the transition — mark_call_missed
+        # deletes the pending offer as part of flipping ringing→missed.
         had_pending = False
         try:
             with db._conn() as con:
@@ -1221,12 +1273,12 @@ async def _apply_call_end(payload, origin, gid_call, _fed_global_id):
                 ).fetchone())
         except Exception:
             had_pending = False
-        if had_pending:
-            _log.info(
-                "federation: suppress missed-call push — offer never delivered call=%s",
-                local_id,
-            )
-        else:
+        # Guarded transition + one-time callee-side missed notice (DB-only, per
+        # node — no cross-node fanout). Only push if WE won the transition, so a
+        # late call.end after the local sweep already flipped the row can't
+        # double-push.
+        newly = db.mark_call_missed(int(local_id))
+        if newly and not had_pending:
             try:
                 from routers.ws import _push_always
 
@@ -1250,7 +1302,12 @@ async def _apply_call_end(payload, origin, gid_call, _fed_global_id):
                     require_interaction=False,
                 )
             except Exception:
-                _log.exception("federation: failed to emit missed-call log/push")
+                _log.exception("federation: failed to emit missed-call push")
+        elif had_pending:
+            _log.info(
+                "federation: suppress missed-call push — offer never delivered call=%s",
+                local_id,
+            )
     else:
         db.update_call_status(local_id, "ended", ended_at=ended_at)
     db.delete_pending_call_offer(local_id)

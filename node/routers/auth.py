@@ -321,7 +321,7 @@ def _load_user_sync_row(user_id: int) -> dict:
                        theme, custom_theme_json, custom_css, client_prefs_json,
                        notify_sounds, notify_desktop,
                        notify_dms, notify_mentions,
-                       allow_dms_from, show_last_seen,
+                       allow_dms_from, allow_calls_from, show_last_seen,
                        show_read_receipts, hide_active_channels,
                        mood, custom_style, room_order,
                        location_sharing_enabled,
@@ -1336,6 +1336,7 @@ def _federation_profile_payload_from_user_row(row, gid: str, origin_server_id: s
         "profile_public": 1 if int(d.get("profile_public") if d.get("profile_public") is not None else 1) else 0,
         "allow_friend_requests": 1 if int(d.get("allow_friend_requests") if d.get("allow_friend_requests") is not None else 1) else 0,
         "allow_dms_from": str(d.get("allow_dms_from") or "everyone")[:32],
+        "allow_calls_from": str(d.get("allow_calls_from") or "friends")[:32],
         "show_last_seen": str(d.get("show_last_seen") or "everyone")[:32],
         "show_read_receipts": 1 if int(d.get("show_read_receipts") if d.get("show_read_receipts") is not None else 1) else 0,
     }
@@ -1348,7 +1349,7 @@ def _lookup_federation_profile_gid_payload(gid: str) -> dict | None:
             """
             SELECT id, nickname, display_name, avatar, bio, status_msg, mood, presence,
                    custom_style, banner, profile_public, allow_friend_requests,
-                   allow_dms_from, show_last_seen, show_read_receipts
+                   allow_dms_from, allow_calls_from, show_last_seen, show_read_receipts
             FROM users WHERE global_user_id=? LIMIT 1
             """,
             (gid,),
@@ -1375,6 +1376,7 @@ def _lookup_federation_profile_gid_payload(gid: str) -> dict | None:
         "profile_public": prof.get("profile_public"),
         "allow_friend_requests": prof.get("allow_friend_requests"),
         "allow_dms_from": str(prof.get("allow_dms_from") or "")[:32],
+        "allow_calls_from": str(prof.get("allow_calls_from") or "")[:32],
         "show_last_seen": str(prof.get("show_last_seen") or "")[:32],
         "show_read_receipts": prof.get("show_read_receipts"),
     }
@@ -1402,6 +1404,7 @@ def _upsert_profile_cache_from_payload(payload: dict) -> None:
             banner=str(payload.get("banner") or "")[:500_000],
         )
         allow_dm = str(payload.get("allow_dms_from") or "").strip().lower()
+        allow_call = str(payload.get("allow_calls_from") or "").strip().lower()
         show_ls = str(payload.get("show_last_seen") or "").strip().lower()
         db.apply_federation_user_privacy(
             gid,
@@ -1409,6 +1412,7 @@ def _upsert_profile_cache_from_payload(payload: dict) -> None:
             profile_public=int(payload["profile_public"]) if payload.get("profile_public") is not None else None,
             allow_friend_requests=int(payload["allow_friend_requests"]) if payload.get("allow_friend_requests") is not None else None,
             allow_dms_from=allow_dm if allow_dm in ("everyone", "friends", "nobody") else None,
+            allow_calls_from=allow_call if allow_call in ("everyone", "friends", "nobody") else None,
             show_last_seen=show_ls if show_ls in ("everyone", "friends", "nobody") else None,
             show_read_receipts=int(payload["show_read_receipts"]) if payload.get("show_read_receipts") is not None else None,
             hide_dm_history_notice=int(payload["hide_dm_history_notice"]) if payload.get("hide_dm_history_notice") is not None else None,
@@ -2546,6 +2550,7 @@ def _build_travel_profile_export(ctx: dict) -> dict:
         "profile_public": 1 if int(me.get("profile_public") or 0) else 0,
         "allow_friend_requests": 1 if int(me.get("allow_friend_requests") or 0) else 0,
         "allow_dms_from": str(me.get("allow_dms_from") or "everyone").strip().lower(),
+        "allow_calls_from": str(me.get("allow_calls_from") or "friends").strip().lower(),
         "show_last_seen": str(me.get("show_last_seen") or "everyone").strip().lower(),
         "show_read_receipts": 1 if int(me.get("show_read_receipts") or 0) else 0,
     }
@@ -3630,6 +3635,7 @@ def _build_sync_export_for_user(
         "notify_dms": 1 if int(me.get("notify_dms") or 0) else 0,
         "notify_mentions": 1 if int(me.get("notify_mentions") or 0) else 0,
         "allow_dms_from": str(me.get("allow_dms_from") or "everyone")[:32],
+        "allow_calls_from": str(me.get("allow_calls_from") or "friends")[:32],
         "show_last_seen": str(me.get("show_last_seen") or "everyone")[:32],
         "show_read_receipts": 1 if int(me.get("show_read_receipts") or 0) else 0,
         "hide_active_channels": 1 if int(me.get("hide_active_channels") or 0) else 0,
@@ -4569,6 +4575,9 @@ def _apply_sync_export_to_user(
             allow_dms_from = str(self_profile.get("allow_dms_from") or "everyone").strip().lower()
             if allow_dms_from not in ("everyone", "friends", "nobody"):
                 allow_dms_from = "everyone"
+            allow_calls_from = str(self_profile.get("allow_calls_from") or "friends").strip().lower()
+            if allow_calls_from not in ("everyone", "friends", "nobody"):
+                allow_calls_from = "friends"
             show_last_seen = str(self_profile.get("show_last_seen") or "everyone").strip().lower()
             if show_last_seen not in ("everyone", "friends", "nobody"):
                 show_last_seen = "everyone"
@@ -4616,6 +4625,7 @@ def _apply_sync_export_to_user(
                         notify_dms=?,
                         notify_mentions=?,
                         allow_dms_from=?,
+                        allow_calls_from=?,
                         show_last_seen=?,
                         show_read_receipts=?,
                         hide_active_channels=?,
@@ -4646,6 +4656,7 @@ def _apply_sync_export_to_user(
                         notify_dms,
                         notify_mentions,
                         allow_dms_from,
+                        allow_calls_from,
                         show_last_seen,
                         show_read_receipts,
                         hide_active_channels,
@@ -4667,6 +4678,7 @@ def _apply_sync_export_to_user(
                         profile_public=profile_public,
                         allow_friend_requests=allow_friend_requests,
                         allow_dms_from=allow_dms_from,
+                        allow_calls_from=allow_calls_from,
                         show_last_seen=show_last_seen,
                         show_read_receipts=show_read_receipts,
                         hide_dm_history_notice=hide_dm_history_notice,
@@ -4716,6 +4728,11 @@ def _apply_sync_export_to_user(
                 if v not in ("everyone", "friends", "nobody"):
                     v = "everyone"
                 sets.append("allow_dms_from=?"); vals.append(v); priv["allow_dms_from"] = v
+            if "allow_calls_from" in pf:
+                v = str(pf.get("allow_calls_from") or "friends").strip().lower()
+                if v not in ("everyone", "friends", "nobody"):
+                    v = "friends"
+                sets.append("allow_calls_from=?"); vals.append(v); priv["allow_calls_from"] = v
             if "show_last_seen" in pf:
                 v = str(pf.get("show_last_seen") or "everyone").strip().lower()
                 if v not in ("everyone", "friends", "nobody"):
@@ -6455,6 +6472,7 @@ class ProfileUpdateRequest(BaseModel):
     notify_dms: bool | None = None
     notify_mentions: bool | None = None
     allow_dms_from: str | None = Field(default=None, max_length=32)
+    allow_calls_from: str | None = Field(default=None, max_length=32)
     show_last_seen: str | None = Field(default=None, max_length=32)
     show_read_receipts: bool | None = None
     hide_active_channels: bool | None = None
@@ -8733,6 +8751,7 @@ async def update_profile(request: Request, body: ProfileUpdateRequest, current_u
             "profile_public",
             "allow_friend_requests",
             "allow_dms_from",
+            "allow_calls_from",
             "show_last_seen",
             "show_read_receipts",
             "hide_dm_history_notice",
@@ -8761,6 +8780,10 @@ async def update_profile(request: Request, body: ProfileUpdateRequest, current_u
             allowed_dm_opts = {"everyone", "friends", "nobody"}
             if body.allow_dms_from in allowed_dm_opts:
                 con.execute("UPDATE users SET allow_dms_from=? WHERE id=?", (body.allow_dms_from, current_user["id"]))
+        if body.allow_calls_from is not None:
+            allowed_call_opts = {"everyone", "friends", "nobody"}
+            if body.allow_calls_from in allowed_call_opts:
+                con.execute("UPDATE users SET allow_calls_from=? WHERE id=?", (body.allow_calls_from, current_user["id"]))
         if body.show_last_seen is not None:
             allowed_ls = {"everyone", "friends", "nobody"}
             if body.show_last_seen in allowed_ls:

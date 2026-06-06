@@ -612,6 +612,11 @@ def create_user(nickname: str, password: str, registration_ip: Optional[str] = N
     geolookup) so admins can spot bot-farm bursts of accounts created from
     the same IP.
     """
+    # Node-configured privacy defaults for brand-new accounts (computed before
+    # the insert transaction so the cached config read can't interleave with it).
+    _rl = get_rate_limit_settings()
+    _call_def = str(_rl.get("node_default_allow_calls_from") or "friends")
+    _dm_def = str(_rl.get("node_default_allow_dms_from") or "everyone")
     try:
         with _conn() as con:
             try:
@@ -634,8 +639,17 @@ def create_user(nickname: str, password: str, registration_ip: Optional[str] = N
                         str(uuid.uuid4()),
                     )
                 )
+            uid = int(cur.lastrowid or 0) or None
+            if uid:
+                try:
+                    con.execute(
+                        "UPDATE users SET allow_calls_from=?, allow_dms_from=? WHERE id=?",
+                        (_call_def, _dm_def, uid),
+                    )
+                except sqlite3.OperationalError:
+                    pass
             con.commit()
-            return int(cur.lastrowid or 0) or None
+            return uid
     except sqlite3.IntegrityError:
         return None
 
@@ -750,6 +764,7 @@ def get_user_by_token(token: str) -> Optional[Dict]:
                    u.global_user_id, u.identity_pubkey,
                    u.theme, u.custom_theme_json, u.notify_sounds, u.notify_desktop,
                    u.notify_dms, u.notify_mentions, u.allow_dms_from,
+                   u.allow_calls_from,
                    u.show_last_seen, u.show_read_receipts,
                    u.hide_active_channels, u.hide_dm_history_notice,
                    u.mood, u.custom_style, u.room_order,
@@ -772,6 +787,7 @@ def get_user_by_token(token: str) -> Optional[Dict]:
                        u.global_user_id, u.identity_pubkey,
                        u.theme, u.custom_theme_json, u.notify_sounds, u.notify_desktop,
                        u.notify_dms, u.notify_mentions, u.allow_dms_from,
+                       u.allow_calls_from,
                        u.show_last_seen, u.show_read_receipts,
                        u.hide_active_channels, u.hide_dm_history_notice,
                        u.mood, u.custom_style, u.room_order,
@@ -1911,6 +1927,12 @@ def _migrate():
             con.execute("ALTER TABLE users ADD COLUMN notify_mentions INTEGER DEFAULT 1")
         if "allow_dms_from" not in cols:
             con.execute("ALTER TABLE users ADD COLUMN allow_dms_from TEXT DEFAULT 'everyone'")
+        # Privacy: who may place a call to this user (everyone|friends|nobody).
+        # Defaults to 'friends' so a brand-new / non-friend account can't ring
+        # you out of the blue (the "skrill" ghost-call pattern). Federated like
+        # allow_dms_from so the callee's home node enforces it cross-node.
+        if "allow_calls_from" not in cols:
+            con.execute("ALTER TABLE users ADD COLUMN allow_calls_from TEXT DEFAULT 'friends'")
         # Privacy: last-seen + read-receipts (everyone|friends|nobody)
         if "show_last_seen" not in cols:
             con.execute("ALTER TABLE users ADD COLUMN show_last_seen TEXT DEFAULT 'everyone'")
@@ -3278,6 +3300,7 @@ def _migrate():
             ("profile_public", "ALTER TABLE federation_user_profiles ADD COLUMN profile_public INTEGER"),
             ("allow_friend_requests", "ALTER TABLE federation_user_profiles ADD COLUMN allow_friend_requests INTEGER"),
             ("allow_dms_from", "ALTER TABLE federation_user_profiles ADD COLUMN allow_dms_from TEXT DEFAULT ''"),
+            ("allow_calls_from", "ALTER TABLE federation_user_profiles ADD COLUMN allow_calls_from TEXT DEFAULT ''"),
             ("show_last_seen", "ALTER TABLE federation_user_profiles ADD COLUMN show_last_seen TEXT DEFAULT ''"),
             ("show_read_receipts", "ALTER TABLE federation_user_profiles ADD COLUMN show_read_receipts INTEGER"),
             ("hide_dm_history_notice", "ALTER TABLE federation_user_profiles ADD COLUMN hide_dm_history_notice INTEGER"),
@@ -4142,6 +4165,102 @@ def set_config(key: str, value: str):
     with _conn() as con:
         con.execute("INSERT OR REPLACE INTO config(key,value) VALUES(?,?)", (key, value))
         con.commit()
+
+
+# ── Per-node rate-limit / anti-abuse config (admin-tunable, live, PER NODE) ──
+# Stored in the `config` table under "ratelimit.<key>". Per-node and NOT
+# federated — each node keeps its own limits. Every value is clamped to a safe
+# [min,max] on read AND write so an admin can never set 0 (disable anti-abuse)
+# or an absurd value that wedges a window. The defaults below match the
+# module-level constants in routers/ws.py, routers/dms.py, routers/friends.py
+# and federation_calls.py (which remain the fallback when no override is set).
+_RATE_LIMIT_PREFIX = "ratelimit."
+_RATE_LIMIT_SPEC = {
+    # key:                          (default, min, max)
+    "call_offer_max":              (8, 1, 100),
+    "call_offer_window_s":         (30, 5, 3600),
+    "call_cooldown_friend_s":      (5, 0, 3600),
+    "call_cooldown_stranger_s":    (60, 0, 86400),
+    "call_stranger_distinct_max":  (5, 1, 1000),
+    "call_stranger_window_s":      (3600, 60, 86400),
+    "dm_stranger_max":             (10, 1, 1000),
+    "dm_stranger_window_s":        (60, 5, 3600),
+    "friend_req_cooldown_s":       (6 * 3600, 0, 7 * 86400),
+    "fed_offer_flood_max":         (4, 1, 100),
+    "fed_offer_flood_window_s":    (60, 5, 3600),
+}
+_RATE_LIMIT_POLICY_SPEC = {
+    # key:                              (default,    allowed values)
+    "node_default_allow_calls_from":    ("friends",  ("everyone", "friends", "nobody")),
+    "node_default_allow_dms_from":      ("everyone", ("everyone", "friends", "nobody")),
+}
+_RL_CACHE_TTL_S = 15.0
+_rl_cache: Dict[str, object] = {"ts": 0.0, "data": None}
+
+
+def _rl_clamp_int(value, lo: int, hi: int, default: int) -> int:
+    try:
+        iv = int(value)
+    except (TypeError, ValueError):
+        return int(default)
+    return max(int(lo), min(int(hi), iv))
+
+
+def get_rate_limit_settings(force: bool = False) -> Dict[str, object]:
+    """Effective per-node rate-limit settings (clamped overrides + defaults).
+
+    TTL-cached (~15s) so the per-message / per-offer enforcement sites can call
+    it on the hot path without a DB round-trip every time.
+    """
+    import time as _t
+    now = _t.monotonic()
+    cached = _rl_cache.get("data")
+    if not force and isinstance(cached, dict) and (now - float(_rl_cache.get("ts") or 0)) < _RL_CACHE_TTL_S:
+        return cached
+    out: Dict[str, object] = {}
+    for key, (default, lo, hi) in _RATE_LIMIT_SPEC.items():
+        raw = get_config(_RATE_LIMIT_PREFIX + key)
+        out[key] = _rl_clamp_int(raw, lo, hi, default) if raw is not None else int(default)
+    for key, (default, allowed) in _RATE_LIMIT_POLICY_SPEC.items():
+        raw = (get_config(_RATE_LIMIT_PREFIX + key) or "").strip().lower()
+        out[key] = raw if raw in allowed else default
+    _rl_cache["ts"] = now
+    _rl_cache["data"] = out
+    return out
+
+
+def set_rate_limit_settings(values: dict) -> Dict[str, object]:
+    """Validate+clamp and persist rate-limit settings; returns the effective set.
+
+    Only keys present in the spec are accepted (fixed allow-list — no arbitrary
+    config keys can be written through this path).
+    """
+    if not isinstance(values, dict):
+        values = {}
+    for key, (default, lo, hi) in _RATE_LIMIT_SPEC.items():
+        if values.get(key) is not None:
+            set_config(_RATE_LIMIT_PREFIX + key, str(_rl_clamp_int(values[key], lo, hi, default)))
+    for key, (default, allowed) in _RATE_LIMIT_POLICY_SPEC.items():
+        if values.get(key) is not None:
+            v = str(values[key]).strip().lower()
+            if v in allowed:
+                set_config(_RATE_LIMIT_PREFIX + key, v)
+    _rl_cache["data"] = None  # invalidate so the next read reflects the change
+    return get_rate_limit_settings(force=True)
+
+
+def rate_limit_spec_public() -> Dict[str, object]:
+    """Bounds + defaults for the admin UI (so it can label + clamp client-side)."""
+    return {
+        "ints": {
+            k: {"default": d, "min": lo, "max": hi}
+            for k, (d, lo, hi) in _RATE_LIMIT_SPEC.items()
+        },
+        "policies": {
+            k: {"default": d, "allowed": list(a)}
+            for k, (d, a) in _RATE_LIMIT_POLICY_SPEC.items()
+        },
+    }
 
 
 def _get_positive_int_config(key: str, default: int, minimum: int = 0, maximum: int = 3650) -> int:
@@ -6214,6 +6333,39 @@ def get_user_dm_policy(user_id: int) -> str:
         return "everyone"
 
 
+def get_user_call_policy(user_id: int) -> str:
+    """Who may call this user: 'everyone' | 'friends' | 'nobody' (default 'friends').
+
+    Mirrors get_user_dm_policy: when the user is homed on another node, the
+    cross-node cached policy wins so the callee's chosen setting is enforced
+    on whichever node actually rings them.
+    """
+    with _conn() as con:
+        row = con.execute(
+            "SELECT allow_calls_from, global_user_id FROM users WHERE id=?",
+            (user_id,),
+        ).fetchone()
+        if not row:
+            return "friends"
+        policy = str(row["allow_calls_from"] or "friends").strip().lower()
+        gid = str(row["global_user_id"] or "").strip()
+        if gid:
+            cached = get_federation_privacy_snapshot(gid)
+            cached_policy = str(cached.get("allow_calls_from") or "").strip().lower()
+            if cached_policy in ("everyone", "friends", "nobody"):
+                try:
+                    ident = get_or_create_local_server_identity() or {}
+                    local_sid = str(ident.get("server_id") or "").strip()
+                    home_sid = str(resolve_global_user_home_server_id(gid) or "").strip()
+                    if home_sid and local_sid and home_sid != local_sid:
+                        return cached_policy
+                except Exception:
+                    pass
+        if policy in ("everyone", "friends", "nobody"):
+            return policy
+        return "friends"
+
+
 def get_federation_privacy_snapshot(global_user_id: str) -> dict:
     """Privacy fields cached from user.privacy.updated federation events."""
     gid = str(global_user_id or "").strip()
@@ -6224,7 +6376,7 @@ def get_federation_privacy_snapshot(global_user_id: str) -> dict:
             row = con.execute(
                 """
                 SELECT profile_public, allow_friend_requests, allow_dms_from,
-                       show_last_seen, show_read_receipts
+                       allow_calls_from, show_last_seen, show_read_receipts
                 FROM federation_user_profiles WHERE global_user_id=? LIMIT 1
                 """,
                 (gid,),
@@ -6239,6 +6391,9 @@ def get_federation_privacy_snapshot(global_user_id: str) -> dict:
         dm = str(row["allow_dms_from"] or "").strip().lower()
         if dm in ("everyone", "friends", "nobody"):
             out["allow_dms_from"] = dm
+        cp = str(row["allow_calls_from"] or "").strip().lower()
+        if cp in ("everyone", "friends", "nobody"):
+            out["allow_calls_from"] = cp
         ls = str(row["show_last_seen"] or "").strip().lower()
         if ls in ("everyone", "friends", "nobody"):
             out["show_last_seen"] = ls
@@ -6278,6 +6433,7 @@ def apply_federation_user_privacy(
     profile_public: int | None = None,
     allow_friend_requests: int | None = None,
     allow_dms_from: str | None = None,
+    allow_calls_from: str | None = None,
     show_last_seen: str | None = None,
     show_read_receipts: int | None = None,
     hide_dm_history_notice: int | None = None,
@@ -6289,6 +6445,9 @@ def apply_federation_user_privacy(
     dm = str(allow_dms_from or "").strip().lower()
     if dm and dm not in ("everyone", "friends", "nobody"):
         dm = ""
+    cp = str(allow_calls_from or "").strip().lower()
+    if cp and cp not in ("everyone", "friends", "nobody"):
+        cp = ""
     ls = str(show_last_seen or "").strip().lower()
     if ls and ls not in ("everyone", "friends", "nobody"):
         ls = ""
@@ -6303,6 +6462,9 @@ def apply_federation_user_privacy(
     if dm:
         sets.append("allow_dms_from=?")
         vals.append(dm)
+    if cp:
+        sets.append("allow_calls_from=?")
+        vals.append(cp)
     if ls:
         sets.append("show_last_seen=?")
         vals.append(ls)
@@ -6356,6 +6518,8 @@ def apply_federation_user_privacy(
                         )
                 if dm:
                     con.execute("UPDATE users SET allow_dms_from=? WHERE id=?", (dm, uid))
+                if cp:
+                    con.execute("UPDATE users SET allow_calls_from=? WHERE id=?", (cp, uid))
                 if ls:
                     con.execute("UPDATE users SET show_last_seen=? WHERE id=?", (ls, uid))
                 if show_read_receipts is not None:
@@ -6946,6 +7110,38 @@ def save_synced_dm_message(
             )
             con.commit()
         return True
+    except Exception:
+        return False
+
+
+def dm_pair_has_messages(user_a: int, user_b: int) -> bool:
+    """True when these two users have at least one DM message between them.
+
+    Distinguishes an *established conversation* from an empty channel row.
+    Sibling federation events (read-receipts, disappear-timer updates) can
+    auto-create an empty dm_channels row; keying the allow_dms_from
+    first-contact gate off real message history (not mere channel existence)
+    means those side-doors can't pre-create a channel to slip a first DM past
+    a 'friends'/'nobody' recipient. Matches local behaviour: a prior call also
+    writes a CALLLOG message, so post-interaction DMs are allowed either way.
+    """
+    a, b = int(user_a or 0), int(user_b or 0)
+    if a <= 0 or b <= 0:
+        return False
+    try:
+        with _conn() as con:
+            ch = con.execute(
+                """SELECT id FROM dm_channels
+                   WHERE (user_a=? AND user_b=?) OR (user_a=? AND user_b=?) LIMIT 1""",
+                (a, b, b, a),
+            ).fetchone()
+            if not ch:
+                return False
+            row = con.execute(
+                "SELECT 1 FROM dm_messages WHERE channel_id=? LIMIT 1",
+                (int(ch["id"]),),
+            ).fetchone()
+        return bool(row)
     except Exception:
         return False
 
@@ -7702,13 +7898,70 @@ def get_pending_call_offer(call_id: int, callee_id: int) -> Optional[Dict]:
 PENDING_CALL_MAX_AGE_SEC = 180
 
 
+def _purge_call_side_tables(con, ids) -> None:
+    """Drop federation_call_map + pending_call_signals rows for finished calls.
+
+    Neither table has an ON DELETE CASCADE from ``calls``, so without this
+    sweep a federated call leaves an orphaned mapping row forever and stale
+    call-signal rows pile up — a slow "ghost call" leak. Best-effort: the
+    tables may be absent on very old DBs.
+    """
+    ids = [int(i) for i in (ids or []) if i]
+    if not ids:
+        return
+    qmarks = ",".join("?" for _ in ids)
+    for sql in (
+        f"DELETE FROM federation_call_map WHERE local_call_id IN ({qmarks})",
+        f"DELETE FROM pending_call_signals WHERE call_id IN ({qmarks})",
+    ):
+        try:
+            con.execute(sql, tuple(ids))
+        except sqlite3.OperationalError:
+            pass
+
+
+def _missed_call_log_content(caller_nick: str, call_type: str) -> str:
+    """`[[CALLLOG]]` payload mirroring routers/ws.py ``_call_log_content``."""
+    label = "video" if str(call_type or "") == "video" else "voice"
+    payload = {
+        "title": "Missed call",
+        "subtitle": f"Missed a {label} call from {caller_nick or 'someone'}",
+        "icon": "📵",
+        "kind": "missed",
+        "call_type": str(call_type or "voice"),
+    }
+    return "[[CALLLOG]]" + json.dumps(payload, separators=(",", ":"))
+
+
+def _write_missed_call_logs(missed) -> None:
+    """Persist a missed-call CALLLOG into each caller↔callee DM thread.
+
+    Used by the timeout sweep so a call that never got an explicit hangup or
+    a clean disconnect still leaves the callee a notice (unread badge) on
+    their next DM load. DB-only (no WS fanout): both parties are typically
+    off-WS when a ring times out. Best-effort and run *outside* the calls
+    transaction to avoid nested-connection write contention.
+    """
+    for caller_id, callee_id, call_type in (missed or []):
+        try:
+            caller = get_user_by_id(int(caller_id)) or {}
+            content = _missed_call_log_content(
+                str(caller.get("nickname") or ""), call_type
+            )
+            ch = get_or_create_dm(int(caller_id), int(callee_id))
+            send_dm_message(ch, int(caller_id), content)
+        except Exception:
+            pass
+
+
 def expire_stale_ringing_calls(max_age_sec: int = PENDING_CALL_MAX_AGE_SEC) -> int:
     """End ringing calls older than max_age_sec and drop their pending offers."""
     age = max(30, int(max_age_sec or PENDING_CALL_MAX_AGE_SEC))
+    missed = []
     with _conn() as con:
         stale = con.execute(
             """
-            SELECT id FROM calls
+            SELECT id, caller_id, callee_id, call_type FROM calls
             WHERE status='ringing'
               AND datetime(created_at) <= datetime('now', ?)
             """,
@@ -7718,14 +7971,24 @@ def expire_stale_ringing_calls(max_age_sec: int = PENDING_CALL_MAX_AGE_SEC) -> i
         if not ids:
             return 0
         ended = datetime.utcnow().isoformat()
-        for cid in ids:
-            con.execute(
+        for r in stale:
+            cid = int(r["id"])
+            cur = con.execute(
                 "UPDATE calls SET status='missed', ended_at=? WHERE id=? AND status='ringing'",
                 (ended, cid),
             )
             con.execute("DELETE FROM pending_call_offers WHERE call_id=?", (cid,))
+            # Only this caller wins the ringing→missed transition; if an
+            # explicit hangup / disconnect already flipped it, rowcount is 0 and
+            # we must NOT write a second missed notice for the same call.
+            if cur.rowcount and cur.rowcount > 0:
+                missed.append((int(r["caller_id"]), int(r["callee_id"]),
+                               str(r["call_type"] or "voice")))
+        _purge_call_side_tables(con, ids)
         con.commit()
-        return len(ids)
+    # Surface a missed-call notice for each newly-missed call (outside txn).
+    _write_missed_call_logs(missed)
+    return len(missed)
 
 
 ACTIVE_CALL_MAX_AGE_SEC = 4 * 3600
@@ -7752,8 +8015,91 @@ def expire_stale_active_calls(max_age_sec: int = ACTIVE_CALL_MAX_AGE_SEC) -> int
                 "UPDATE calls SET status='ended', ended_at=? WHERE id=? AND status='active'",
                 (ended, cid),
             )
+        _purge_call_side_tables(con, ids)
         con.commit()
         return len(ids)
+
+
+def end_outgoing_ringing_calls(caller_id: int):
+    """Mark this caller's still-ringing calls as missed (the caller vanished).
+
+    Returns the affected calls so the WS layer can immediately stop the
+    callee's ring + log a missed call, instead of leaving the callee ringing
+    into the void until the 180s sweep. This is the core fix for "ghost
+    calls" when a caller closes the tab / crashes mid-ring.
+    """
+    cid = int(caller_id or 0)
+    if not cid:
+        return []
+    with _conn() as con:
+        rows = con.execute(
+            """SELECT id, callee_id, call_type, COALESCE(global_call_id,'') AS global_call_id
+               FROM calls WHERE caller_id=? AND status='ringing'""",
+            (cid,),
+        ).fetchall()
+        ids = [int(r["id"]) for r in rows if r and r["id"]]
+        if not ids:
+            return []
+        ended = datetime.utcnow().isoformat()
+        kept = []
+        for r in rows:
+            rid = int(r["id"])
+            cur = con.execute(
+                "UPDATE calls SET status='missed', ended_at=? WHERE id=? AND status='ringing'",
+                (ended, rid),
+            )
+            # Only report calls THIS path transitioned, so the caller layer
+            # writes exactly one missed notice (no race-dup with the sweep or
+            # an explicit hangup that already flipped the same row).
+            if cur.rowcount and cur.rowcount > 0:
+                con.execute("DELETE FROM pending_call_offers WHERE call_id=?", (rid,))
+                kept.append(r)
+        con.commit()
+    # Write the caller-side missed notice here (DB-only, per node) so the WS
+    # disconnect handler does NOT fan a CALLLOG cross-node — the callee's node
+    # writes its own via the federated call.end → mark_call_missed. One notice
+    # per participant, no cross-node duplicate.
+    _write_missed_call_logs(
+        [(int(caller_id), int(r["callee_id"]), str(r["call_type"] or "voice")) for r in kept]
+    )
+    return [
+        {
+            "call_id": int(r["id"]),
+            "callee_id": int(r["callee_id"]),
+            "call_type": str(r["call_type"] or "voice"),
+            "global_call_id": str(r["global_call_id"] or ""),
+        }
+        for r in kept
+    ]
+
+
+def mark_call_missed(call_id: int) -> bool:
+    """Atomically flip a ringing call to 'missed' and write a one-time missed
+    notice into the DM thread. Returns True only on the first transition, so
+    racing paths (sweep / explicit hangup / disconnect / federated call.end)
+    never double-notify the same call.
+    """
+    cid = int(call_id or 0)
+    if not cid:
+        return False
+    row = None
+    with _conn() as con:
+        cur = con.execute(
+            "UPDATE calls SET status='missed', ended_at=? WHERE id=? AND status='ringing'",
+            (datetime.utcnow().isoformat(), cid),
+        )
+        changed = bool(cur.rowcount and cur.rowcount > 0)
+        if changed:
+            row = con.execute(
+                "SELECT caller_id, callee_id, call_type FROM calls WHERE id=?",
+                (cid,),
+            ).fetchone()
+            con.execute("DELETE FROM pending_call_offers WHERE call_id=?", (cid,))
+        con.commit()
+    if changed and row:
+        _write_missed_call_logs([(int(row["caller_id"]), int(row["callee_id"]),
+                                  str(row["call_type"] or "voice"))])
+    return changed
 
 
 def find_open_call_for_user(user_id: int, call_id: int = 0) -> Optional[Dict]:
@@ -7788,9 +8134,10 @@ def find_open_call_for_user(user_id: int, call_id: int = 0) -> Optional[Dict]:
     return dict(row) if row else None
 
 
-def get_latest_pending_call_offer(callee_id: int) -> Optional[Dict]:
+def get_latest_pending_call_offer(callee_id: int,
+                                  max_age_sec: int = PENDING_CALL_MAX_AGE_SEC) -> Optional[Dict]:
     expire_stale_ringing_calls()
-    max_age = PENDING_CALL_MAX_AGE_SEC
+    max_age = max(15, int(max_age_sec or PENDING_CALL_MAX_AGE_SEC))
     with _conn() as con:
         try:
             row = con.execute(
@@ -15103,7 +15450,7 @@ def get_federation_user_profile_row(global_user_id: str) -> dict:
                        status_msg, mood, presence, custom_style, banner, banner_pending,
                        updated_at, last_seen,
                        profile_public, allow_friend_requests, allow_dms_from,
-                       show_last_seen, show_read_receipts
+                       allow_calls_from, show_last_seen, show_read_receipts
                 FROM federation_user_profiles WHERE global_user_id=? LIMIT 1
                 """,
                 (gid,),
