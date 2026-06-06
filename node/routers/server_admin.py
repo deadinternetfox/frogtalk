@@ -571,6 +571,25 @@ class FederationPolicyBody(BaseModel):
     redact_clearnet_ips: bool = False
 
 
+class RateLimitsBody(BaseModel):
+    # All optional → partial update. Server clamps every value to a safe range
+    # (db.set_rate_limit_settings) so out-of-range / disabling values are
+    # impossible regardless of what the client posts.
+    call_offer_max: int | None = None
+    call_offer_window_s: int | None = None
+    call_cooldown_friend_s: int | None = None
+    call_cooldown_stranger_s: int | None = None
+    call_stranger_distinct_max: int | None = None
+    call_stranger_window_s: int | None = None
+    dm_stranger_max: int | None = None
+    dm_stranger_window_s: int | None = None
+    friend_req_cooldown_s: int | None = None
+    fed_offer_flood_max: int | None = None
+    fed_offer_flood_window_s: int | None = None
+    node_default_allow_calls_from: str | None = Field(default=None, max_length=16)
+    node_default_allow_dms_from: str | None = Field(default=None, max_length=16)
+
+
 class PublicSiteUrlBody(BaseModel):
     public_url: str = Field(default="", max_length=512)
 
@@ -762,6 +781,39 @@ async def server_admin_put_federation_policy(body: FederationPolicyBody, request
         "http_peers_disabled": http_disabled,
         "policy_notes": policy_notes,
         "public_url_meta": url_meta,
+    }
+
+
+@router.get("/api/server-admin/rate-limits")
+async def server_admin_get_rate_limits(request: Request):
+    """Current per-node anti-abuse / rate-limit settings + their bounds."""
+    disabled = _require_enabled()
+    if disabled:
+        return disabled
+    _user, auth = await _require_frogtalk_admin(request)
+    if auth:
+        return auth
+    return {
+        "ok": True,
+        "rate_limits": db.get_rate_limit_settings(force=True),
+        "spec": db.rate_limit_spec_public(),
+    }
+
+
+@router.put("/api/server-admin/rate-limits")
+async def server_admin_put_rate_limits(body: RateLimitsBody, request: Request):
+    """Persist per-node anti-abuse / rate-limit settings (clamped server-side)."""
+    disabled = _require_enabled()
+    if disabled:
+        return disabled
+    _user, auth = await _require_frogtalk_admin(request)
+    if auth:
+        return auth
+    effective = db.set_rate_limit_settings(body.model_dump(exclude_none=True))
+    return {
+        "ok": True,
+        "rate_limits": effective,
+        "spec": db.rate_limit_spec_public(),
     }
 
 

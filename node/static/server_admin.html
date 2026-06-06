@@ -1492,6 +1492,101 @@ input, select {
             </div>
 
             <div class="control-group">
+              <div class="control-title">Anti-Abuse &amp; Rate Limits</div>
+              <div class="field-grid">
+                <div class="field">
+                  <label for="rl-preset">Strictness preset</label>
+                  <select id="rl-preset" autocomplete="off">
+                    <option value="relaxed">Relaxed</option>
+                    <option value="balanced">Balanced (default)</option>
+                    <option value="strict">Strict</option>
+                    <option value="lockdown">Lockdown</option>
+                    <option value="custom">Custom…</option>
+                  </select>
+                  <div class="field-hint">Pick a preset to fill the values below, or choose Custom and tune individually.</div>
+                </div>
+              </div>
+              <div class="field-grid" style="margin-top:8px;">
+                <div class="field">
+                  <label for="rl-default-calls">New users — who can call</label>
+                  <select id="rl-default-calls" autocomplete="off">
+                    <option value="everyone">Everyone</option>
+                    <option value="friends">Friends only</option>
+                    <option value="nobody">Nobody</option>
+                  </select>
+                  <div class="field-hint">Default call privacy for newly registered accounts on this node.</div>
+                </div>
+                <div class="field">
+                  <label for="rl-default-dms">New users — who can DM</label>
+                  <select id="rl-default-dms" autocomplete="off">
+                    <option value="everyone">Everyone</option>
+                    <option value="friends">Friends only</option>
+                    <option value="nobody">Nobody</option>
+                  </select>
+                  <div class="field-hint">Default DM privacy for newly registered accounts on this node.</div>
+                </div>
+              </div>
+
+              <details style="margin-top:10px;">
+                <summary style="cursor:pointer;color:#9ad;">Advanced — individual limits</summary>
+                <div class="field-grid" style="margin-top:8px;">
+                  <div class="field">
+                    <label for="rl-call-offer-max">Calls: max offers / window</label>
+                    <input id="rl-call-offer-max" type="number" min="1" max="100" value="8">
+                    <div class="field-hint">Per caller, across everyone.</div>
+                  </div>
+                  <div class="field">
+                    <label for="rl-call-offer-window">Calls: window (seconds)</label>
+                    <input id="rl-call-offer-window" type="number" min="5" max="3600" value="30">
+                  </div>
+                  <div class="field">
+                    <label for="rl-call-cd-friend">Calls: cooldown to a friend (s)</label>
+                    <input id="rl-call-cd-friend" type="number" min="0" max="3600" value="5">
+                  </div>
+                  <div class="field">
+                    <label for="rl-call-cd-stranger">Calls: cooldown to a non-friend (s)</label>
+                    <input id="rl-call-cd-stranger" type="number" min="0" max="86400" value="60">
+                  </div>
+                  <div class="field">
+                    <label for="rl-call-stranger-distinct">Calls: distinct non-friends / window</label>
+                    <input id="rl-call-stranger-distinct" type="number" min="1" max="1000" value="5">
+                  </div>
+                  <div class="field">
+                    <label for="rl-call-stranger-window">Calls: non-friend window (s)</label>
+                    <input id="rl-call-stranger-window" type="number" min="60" max="86400" value="3600">
+                  </div>
+                  <div class="field">
+                    <label for="rl-dm-max">DMs: max to a non-friend / window</label>
+                    <input id="rl-dm-max" type="number" min="1" max="1000" value="10">
+                  </div>
+                  <div class="field">
+                    <label for="rl-dm-window">DMs: non-friend window (s)</label>
+                    <input id="rl-dm-window" type="number" min="5" max="3600" value="60">
+                  </div>
+                  <div class="field">
+                    <label for="rl-friend-cooldown">Friend requests: re-request cooldown (s)</label>
+                    <input id="rl-friend-cooldown" type="number" min="0" max="604800" value="21600">
+                  </div>
+                  <div class="field">
+                    <label for="rl-fed-flood-max">Federation: max inbound call offers / window</label>
+                    <input id="rl-fed-flood-max" type="number" min="1" max="100" value="4">
+                    <div class="field-hint">Per origin node + callee.</div>
+                  </div>
+                  <div class="field">
+                    <label for="rl-fed-flood-window">Federation: offer window (s)</label>
+                    <input id="rl-fed-flood-window" type="number" min="5" max="3600" value="60">
+                  </div>
+                </div>
+              </details>
+
+              <div class="retention-actions" style="margin-top:10px;">
+                <button class="btn" id="save-rate-limits-btn" type="button">Save Rate Limits</button>
+                <span id="rate-limits-status" class="status-pill">No local changes</span>
+              </div>
+              <div class="inline-note">Per-node only — each node enforces its own limits. Values are clamped to safe ranges on save so anti-abuse can't be fully disabled.</div>
+            </div>
+
+            <div class="control-group">
               <div class="control-title">Moderation Actions</div>
               <div class="field-grid" style="margin-bottom:8px;">
                 <div class="field">

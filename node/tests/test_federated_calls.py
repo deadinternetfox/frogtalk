@@ -132,15 +132,36 @@ class FederatedCallsTests(unittest.TestCase):
         self.assertFalse(fc._offer_throttled(origin, "00000000-0000-4000-8000-0000000000aa"))
 
     def test_can_call_user_block_and_friend(self):
+        # can_call_user is now driven by the callee's per-user allow_calls_from
+        # policy (default 'friends'), enforced on the callee's home node. A
+        # block always wins.
         with mock.patch("database.is_blocked_either_way", return_value=True):
             self.assertEqual(fc.can_call_user(1, 2), "blocked")
+        # policy 'friends', not friends, no prior DM -> not_friends
         with mock.patch("database.is_blocked_either_way", return_value=False), \
-             mock.patch("federation_calls.require_friend_for_calls", return_value=True), \
-             mock.patch("database.are_friends", return_value=False):
+             mock.patch("database.get_user_call_policy", return_value="friends"), \
+             mock.patch("database.are_friends", return_value=False), \
+             mock.patch("federation_calls._has_dm_history", return_value=False):
             self.assertEqual(fc.can_call_user(1, 2), "not_friends")
+        # policy 'friends' + already friends -> allowed
         with mock.patch("database.is_blocked_either_way", return_value=False), \
-             mock.patch("federation_calls.require_friend_for_calls", return_value=False):
+             mock.patch("database.get_user_call_policy", return_value="friends"), \
+             mock.patch("database.are_friends", return_value=True):
             self.assertIsNone(fc.can_call_user(1, 2))
+        # policy 'friends' + prior DM history -> allowed (established contact)
+        with mock.patch("database.is_blocked_either_way", return_value=False), \
+             mock.patch("database.get_user_call_policy", return_value="friends"), \
+             mock.patch("database.are_friends", return_value=False), \
+             mock.patch("federation_calls._has_dm_history", return_value=True):
+            self.assertIsNone(fc.can_call_user(1, 2))
+        # policy 'everyone' -> always allowed (even non-friend)
+        with mock.patch("database.is_blocked_either_way", return_value=False), \
+             mock.patch("database.get_user_call_policy", return_value="everyone"):
+            self.assertIsNone(fc.can_call_user(1, 2))
+        # policy 'nobody' -> calls disabled
+        with mock.patch("database.is_blocked_either_way", return_value=False), \
+             mock.patch("database.get_user_call_policy", return_value="nobody"):
+            self.assertEqual(fc.can_call_user(1, 2), "calls_disabled")
 
     def test_peer_signal_bundle_source_prefers_keys_server(self):
         from routers import signal as sig_mod

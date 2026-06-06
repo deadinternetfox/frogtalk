@@ -174,6 +174,28 @@ _CALL_OFFER_WINDOW_S = 30
 _CALL_OFFER_MAX = 8
 _call_offer_tracker: dict[int, list[float]] = {}
 
+# On (re)connect the server replays the latest still-ringing pending offer so a
+# cold-booted callee can still answer. A call may legitimately stay "ringing"
+# for up to PENDING_CALL_MAX_AGE_SEC (180s) before the sweep marks it missed,
+# but re-popping a *live ring* for an offer that old is exactly the "ghost call
+# on login" the user hit. Only replay as a live ring when the offer is fresh;
+# anything older becomes a silent missed-call notice instead of a popup.
+_LOGIN_RING_REPLAY_MAX_AGE_SEC = 60
+
+# Tiered anti-spam for outbound call offers. The per-caller window above is the
+# coarse cap; these add finer limits that bite hardest on NON-FRIENDS:
+#   * a per-(caller, callee) cooldown so the same person can't be re-rung in a
+#     tight loop (the harass / ghost-call pattern);
+#   * a cap on how many DISTINCT non-friends a caller may ring per hour, so a
+#     fresh or hostile account can't spray-call the directory.
+# Friends keep effectively the original generous behaviour.
+_CALL_TARGET_COOLDOWN_FRIEND_S = 5
+_CALL_TARGET_COOLDOWN_STRANGER_S = 60
+_CALL_STRANGER_WINDOW_S = 3600
+_CALL_STRANGER_DISTINCT_MAX = 5
+_call_target_last: dict[tuple[int, int], float] = {}        # (caller,callee) -> ts
+_call_stranger_targets: dict[int, dict[int, float]] = {}    # caller -> {callee: ts}
+
 # General per-connection inbound frame-rate cap. The 256 KB frame-size cap
 # below bounds per-frame cost; this bounds frame *frequency* so a single
 # socket can't flood the node (DB writes on last_seen, broadcasts, federation
@@ -195,25 +217,67 @@ _WS_RATE_EXEMPT_TYPES = frozenset({
 })
 
 
-def _call_offer_allowed(user_id: int) -> bool:
-    """Sliding-window throttle for outbound call_offer per caller."""
+def _call_offer_allowed(user_id: int, callee_id: int = 0, is_friend: bool = True) -> bool:
+    """Tiered sliding-window throttle for outbound call_offer.
+
+    Friends keep the original generous per-caller window; non-friends also face
+    a longer per-target cooldown and a distinct-stranger-per-hour cap so a
+    hostile or brand-new account can't ring-bomb one user or spray the directory.
+    """
     try:
         uid = int(user_id)
+        tid = int(callee_id or 0)
     except Exception:
         return False
     if uid <= 0:
         return False
+    # Live, per-node, admin-tunable limits (TTL-cached). Defaults match the
+    # module constants above.
+    _rl = db.get_rate_limit_settings()
+    offer_window = int(_rl.get("call_offer_window_s") or _CALL_OFFER_WINDOW_S)
+    offer_max = int(_rl.get("call_offer_max") or _CALL_OFFER_MAX)
+    cd_friend = int(_rl.get("call_cooldown_friend_s", _CALL_TARGET_COOLDOWN_FRIEND_S))
+    cd_stranger = int(_rl.get("call_cooldown_stranger_s", _CALL_TARGET_COOLDOWN_STRANGER_S))
+    stranger_window = int(_rl.get("call_stranger_window_s") or _CALL_STRANGER_WINDOW_S)
+    stranger_distinct_max = int(_rl.get("call_stranger_distinct_max") or _CALL_STRANGER_DISTINCT_MAX)
     now = time.monotonic()
+    # 1) Coarse per-caller window (unchanged behaviour).
     bucket = _call_offer_tracker.get(uid)
     if bucket is None:
         bucket = []
         _call_offer_tracker[uid] = bucket
-    cutoff = now - _CALL_OFFER_WINDOW_S
+    cutoff = now - offer_window
     while bucket and bucket[0] < cutoff:
         bucket.pop(0)
-    if len(bucket) >= _CALL_OFFER_MAX:
+    if len(bucket) >= offer_max:
         return False
+    # 2) Per-(caller, callee) cooldown — much longer for strangers.
+    if tid > 0:
+        gap = cd_friend if is_friend else cd_stranger
+        last = _call_target_last.get((uid, tid))
+        if last is not None and (now - last) < gap:
+            return False
+    # 3) Distinct-stranger cap per hour (does not apply to friends).
+    if tid > 0 and not is_friend:
+        seen = _call_stranger_targets.get(uid)
+        if seen is None:
+            seen = {}
+            _call_stranger_targets[uid] = seen
+        scut = now - stranger_window
+        for k in [k for k, ts in seen.items() if ts < scut]:
+            del seen[k]
+        if tid not in seen and len(seen) >= stranger_distinct_max:
+            return False
+        seen[tid] = now
+    # Commit this offer to the windows above.
     bucket.append(now)
+    if tid > 0:
+        _call_target_last[(uid, tid)] = now
+        # Opportunistic memory bound on the per-pair map under hostile fan-out.
+        if len(_call_target_last) > 20000:
+            old = now - _CALL_STRANGER_WINDOW_S
+            for k in [k for k, ts in _call_target_last.items() if ts < old]:
+                _call_target_last.pop(k, None)
     return True
 
 
@@ -583,7 +647,9 @@ async def websocket_endpoint(
     # missed call with no answer/decline UI.
     pending_ring_call_id = None
     try:
-        pending_offer = db.get_latest_pending_call_offer(user["id"])
+        pending_offer = db.get_latest_pending_call_offer(
+            user["id"], max_age_sec=_LOGIN_RING_REPLAY_MAX_AGE_SEC,
+        )
         if pending_offer:
             pending_ring_call_id = int(pending_offer.get("call_id") or 0) or None
             global_call_id = ""
@@ -1481,27 +1547,51 @@ async def websocket_endpoint(
                     except Exception:
                         logger.exception("federated call_offer renegotiate enqueue failed")
                     continue
-                # Rate-limit new (non-renegotiate) call_offer per caller so
-                # one user can't ring-bomb their friend list or pump
-                # outbound federation queue.
-                if not _call_offer_allowed(user["id"]):
+                callee_user = db.get_user_by_id(to_id) or {}
+                callee_home_sid = ""
+                try:
+                    _is_friend = db.are_friends(int(user["id"]), int(to_id))
+                except Exception:
+                    _is_friend = False
+                # Rate-limit new (non-renegotiate) call_offer per caller so one
+                # user can't ring-bomb their list or pump the federation queue.
+                # Tiered: non-friends get a longer per-target cooldown + a
+                # distinct-stranger-per-hour cap (see _call_offer_allowed).
+                if not _call_offer_allowed(user["id"], to_id, _is_friend):
                     await manager.send_personal(websocket, {
                         "type": "call_error",
                         "reason": "rate_limited",
                     })
                     continue
-                callee_user = db.get_user_by_id(to_id) or {}
-                callee_home_sid = ""
+                # Who-can-call + block gate for BOTH local and federated callees.
+                # Previously only the federated branch ran can_call_user, so on
+                # the same node a blocked or non-friend caller could still ring a
+                # target, and the new allow_calls_from='friends' default went
+                # unenforced locally. can_call_user reads the callee's policy, so
+                # a federated target's home-node setting is honored here too.
+                try:
+                    import federation_calls as _fc
+                    _call_gate = _fc.can_call_user(user["id"], to_id)
+                except Exception:
+                    # Fail CLOSED for the high-impact block case: if the policy
+                    # check errors, still refuse a blocked caller rather than let
+                    # the ring through. Other (non-block) errors fail open.
+                    logger.exception("can_call_user failed; falling back to block check")
+                    try:
+                        _call_gate = "blocked" if db.is_blocked_either_way(
+                            int(user["id"]), int(to_id)
+                        ) else None
+                    except Exception:
+                        _call_gate = None
+                if _call_gate:
+                    await manager.send_personal(websocket, {
+                        "type": "call_error",
+                        "reason": _call_gate,
+                    })
+                    continue
                 try:
                     import federation_calls as _fc
                     if _fc.is_remote_peer(callee_user):
-                        block_err = _fc.can_call_user(user["id"], to_id)
-                        if block_err:
-                            await manager.send_personal(websocket, {
-                                "type": "call_error",
-                                "reason": block_err,
-                            })
-                            continue
                         gid = _fc.new_global_call_id()
                         call_id_db = db.create_call(
                             user["id"], to_id, call_type, global_call_id=gid,
@@ -1549,6 +1639,34 @@ async def websocket_endpoint(
                         continue
                 except Exception:
                     logger.exception("federated call_offer routing failed")
+                # B3: honor Do-Not-Disturb for a LOCAL callee — silence the ring
+                # AND the push, but leave them a missed-call notice and tell the
+                # caller they're unavailable. (Remote-callee DND is enforced on
+                # the callee's home node in federation_calls._apply_call_offer.)
+                # NOTE: only 'dnd' silences. An offline/idle callee is handled
+                # by the normal path below — push still fires so a backgrounded
+                # phone rings, and an unanswered call becomes a missed notice via
+                # the stale-ringing sweep, never a re-popped ghost ring on login.
+                try:
+                    _callee_pres = db.effective_presence_for_user(
+                        to_id, str(callee_user.get("global_user_id") or ""),
+                    )
+                except Exception:
+                    _callee_pres = "online"
+                if _callee_pres == "dnd":
+                    _dnd_label = "video" if call_type == "video" else "voice"
+                    await _emit_dm_call_log(
+                        user["id"], to_id, call_type,
+                        "Missed call",
+                        f"Missed a {_dnd_label} call from {user['nickname']}",
+                        "📵", "missed",
+                    )
+                    await manager.send_personal(websocket, {
+                        "type": "call_unreachable",
+                        "call_id": 0,
+                        "reason": "dnd",
+                    })
+                    continue
                 call_gid_local = None
                 try:
                     import federation_calls as _fc
@@ -1866,30 +1984,25 @@ async def websocket_endpoint(
                     print(f"[CALLDBG] call_end lookup: call_id={call_id} status={status!r} was_connected={was_connected}", flush=True)
                     if status == "ringing" and not was_connected:
                         federated_end_status = "missed"
-                        db.update_call_status(call_id, "missed",
-                                              ended_at=datetime.utcnow().isoformat())
-                        caller_id = int(call_row["caller_id"])
-                        callee_id = int(call_row["callee_id"])
-                        caller = db.get_user_by_id(caller_id) or {}
-                        call_label = "video" if call_row["call_type"] == "video" else "voice"
-                        await _emit_dm_call_log(
-                            caller_id,
-                            callee_id,
-                            call_row["call_type"],
-                            "Missed call",
-                            f"Missed a {call_label} call from {caller.get('nickname') or 'someone'}",
-                            "📵",
-                            "missed",
-                        )
-                        _push_always(
-                            callee_id,
-                            "📵 Missed call",
-                            f"Missed a {call_label} call from {caller.get('nickname') or 'someone'}",
-                            "/app",
-                            kind="missed_call",
-                            tag=f"ft-missed-{call_id}",
-                            require_interaction=False,
-                        )
+                        # Guarded ringing→missed transition that also writes the
+                        # one-time missed-call notice (DB-only, per node — no
+                        # cross-node fanout, so it can't duplicate against the
+                        # callee node's own sweep / call.end handling). Only the
+                        # path that actually wins the transition pushes.
+                        if db.mark_call_missed(call_id):
+                            caller_id = int(call_row["caller_id"])
+                            callee_id = int(call_row["callee_id"])
+                            caller = db.get_user_by_id(caller_id) or {}
+                            call_label = "video" if call_row["call_type"] == "video" else "voice"
+                            _push_always(
+                                callee_id,
+                                "📵 Missed call",
+                                f"Missed a {call_label} call from {caller.get('nickname') or 'someone'}",
+                                "/app",
+                                kind="missed_call",
+                                tag=f"ft-missed-{call_id}",
+                                require_interaction=False,
+                            )
                     elif status in ("active", "ringing"):
                         ended_at = datetime.utcnow().isoformat()
                         db.update_call_status(call_id, "ended", ended_at=ended_at)
@@ -2504,6 +2617,74 @@ async def websocket_endpoint(
                     emit_room_presence(user, room_name, "offline", force=True)
                 except Exception:
                     pass
+                # Ghost-call fix: a caller who vanishes (tab close / crash /
+                # network drop) while still ringing must not leave the callee
+                # ringing into the void until the 180s sweep — that stale ring
+                # re-pops on the callee's next login. End our outgoing ringing
+                # calls now and tell the callee the ring is over + log a miss.
+                try:
+                    abandoned = db.end_outgoing_ringing_calls(int(user["id"]))
+                except Exception:
+                    abandoned = []
+                for _ac in abandoned:
+                    try:
+                        _callee_id = int(_ac.get("callee_id") or 0)
+                        _a_call_id = int(_ac.get("call_id") or 0)
+                        if not _callee_id or not _a_call_id:
+                            continue
+                        _ctype = _ac.get("call_type") or "voice"
+                        _label = "video" if _ctype == "video" else "voice"
+                        _end_payload = {
+                            "type": "call_end",
+                            "from_id": int(user["id"]),
+                            "from_nickname": user.get("nickname") or "",
+                            "call_id": _a_call_id,
+                            "reason": "caller_disconnected",
+                        }
+                        _delivered = await manager.send_to_user(_callee_id, _end_payload)
+                        if not _delivered:
+                            try:
+                                db.queue_call_signal(
+                                    call_id=_a_call_id,
+                                    target_id=_callee_id,
+                                    from_id=int(user["id"]),
+                                    from_nick=user.get("nickname") or "",
+                                    kind="call_end",
+                                    payload=json.dumps(_end_payload),
+                                )
+                            except Exception:
+                                pass
+                        # The caller-side missed notice is written by
+                        # end_outgoing_ringing_calls (DB-only, per node). The
+                        # callee's node writes its own via the federated
+                        # call.end → mark_call_missed below, so we do NOT fan a
+                        # CALLLOG cross-node here (that would double the notice).
+                        # Still send the callee a background missed push.
+                        _push_always(
+                            _callee_id,
+                            "📵 Missed call",
+                            f"Missed a {_label} call from {user.get('nickname') or 'someone'}",
+                            "/app",
+                            kind="missed_call",
+                            tag=f"ft-missed-{_a_call_id}",
+                            require_interaction=False,
+                        )
+                        # Federated callee: tell their home node the ring ended.
+                        try:
+                            import federation_calls as _fc
+                            _gid = str(_ac.get("global_call_id") or "").strip()
+                            _peer = db.get_user_by_id(_callee_id) or {}
+                            if _gid and _fc.is_remote_peer(_peer):
+                                _peer_gid = str(_peer.get("global_user_id") or "")
+                                if _peer_gid:
+                                    _fc.enqueue_call_end(
+                                        user, _peer_gid,
+                                        global_call_id=_gid, status="missed",
+                                    )
+                        except Exception:
+                            pass
+                    except Exception:
+                        logger.exception("disconnect ringing-call teardown failed")
         except Exception:
             pass
         if result:

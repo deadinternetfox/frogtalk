@@ -73,10 +73,13 @@ async def abandon_open_call(
     call_id = int(row["id"])
     status = str(row.get("status") or "")
     ended_at = datetime.utcnow().isoformat()
-    db.delete_pending_call_offer(call_id)
     if status == "ringing":
-        db.update_call_status(call_id, "missed", ended_at=ended_at)
+        # Guarded transition + one-time missed-call notice. Without this the
+        # caller abandoning via pagehide/keepalive flipped the call to 'missed'
+        # silently and no later sweep would ever surface it (lost notice).
+        db.mark_call_missed(call_id)
     else:
+        db.delete_pending_call_offer(call_id)
         db.update_call_status(call_id, "ended", ended_at=ended_at)
     await _notify_call_abandoned(row, uid)
     return {"ok": True, "cleared": True, "call_id": call_id}
