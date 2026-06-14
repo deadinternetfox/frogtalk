@@ -3935,6 +3935,47 @@ body.ft-incoming-call-active #incoming-call{z-index:20000}
 .call-ctl-btn.muted{background:#f85149}
 .call-ctl-btn.call-ctl-end{width:56px;height:56px;background:#f85149;font-size:1.4rem}
 .call-ctl-btn.call-ctl-end:hover{background:#ff6b63}
+
+/* ── Live camera-filter picker (shared by DM overlay + group voice bar) ───── */
+#camfx-tray{
+  position:fixed;left:50%;bottom:108px;transform:translateX(-50%);
+  z-index:960;width:min(94vw,520px);
+  background:color-mix(in srgb, var(--surface-color) 94%, #000);
+  border:1px solid color-mix(in srgb, #fff 12%, transparent);
+  border-radius:18px;padding:12px 12px 14px;
+  box-shadow:0 18px 50px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.06);
+  animation:camfxIn .18s ease;
+}
+#camfx-tray.hidden{display:none}
+@keyframes camfxIn{from{opacity:0;transform:translate(-50%,10px)}to{opacity:1;transform:translate(-50%,0)}}
+.camfx-tray-head{display:flex;align-items:center;justify-content:space-between;margin:0 4px 10px}
+.camfx-tray-title{font-size:13px;font-weight:700;color:var(--text-color);letter-spacing:.02em}
+.camfx-tray-close{background:none;border:none;color:var(--text-muted);font-size:15px;cursor:pointer;padding:2px 6px;border-radius:8px}
+.camfx-tray-close:hover{background:color-mix(in srgb,#fff 10%,transparent);color:var(--text-color)}
+.camfx-chips{display:flex;gap:10px;overflow-x:auto;padding:2px 2px 6px;scrollbar-width:thin;-webkit-overflow-scrolling:touch}
+.camfx-chips::-webkit-scrollbar{height:6px}
+.camfx-chips::-webkit-scrollbar-thumb{background:color-mix(in srgb,#fff 16%,transparent);border-radius:6px}
+.camfx-chip{
+  flex:0 0 auto;display:flex;flex-direction:column;align-items:center;gap:6px;
+  width:68px;padding:10px 4px 8px;cursor:pointer;
+  background:color-mix(in srgb, var(--surface-color) 60%, #000);
+  border:2px solid transparent;border-radius:14px;color:var(--text-color);
+  transition:transform .12s, border-color .15s, background .15s;
+}
+.camfx-chip:hover{transform:translateY(-2px);background:color-mix(in srgb, var(--accent-color) 18%, var(--surface-color))}
+.camfx-chip:active{transform:translateY(0) scale(.96)}
+.camfx-chip.active{border-color:var(--accent-color);background:color-mix(in srgb, var(--accent-color) 24%, var(--surface-color))}
+.camfx-chip-emoji{
+  width:40px;height:40px;display:flex;align-items:center;justify-content:center;
+  font-size:22px;border-radius:50%;
+  background:color-mix(in srgb,#000 28%,transparent);
+}
+.camfx-chip.active .camfx-chip-emoji{background:color-mix(in srgb, var(--accent-color) 30%, #000)}
+.camfx-chip-label{font-size:11px;font-weight:600;white-space:nowrap;color:var(--text-color)}
+@media(max-width:640px){
+  #camfx-tray{bottom:96px;width:94vw}
+  .camfx-chip{width:62px}
+}
 @media(max-width:640px){
   #call-participants{gap:10px;padding:10px}
   #call-controls{gap:8px;padding-top:10px}
@@ -3992,11 +4033,12 @@ body.ft-incoming-call-active #incoming-call{z-index:20000}
   box-shadow:0 0 0 2px color-mix(in srgb, var(--accent-color) 85%, transparent);
   border-color:var(--accent-color)
 }
-.voice-bar-controls{display:flex;gap:6px;flex-shrink:0}
+.voice-bar-controls{display:flex;gap:4px;flex-shrink:1;flex-wrap:wrap;justify-content:flex-end;min-width:0}
 .voice-ctl-btn{
-  width:28px;height:28px;border-radius:50%;
+  width:24px;height:24px;border-radius:50%;
   background:#333;border:none;color:#e0e0e0;
-  font-size:14px;cursor:pointer;transition:all .15s
+  font-size:12px;line-height:1;cursor:pointer;transition:all .15s;
+  display:flex;align-items:center;justify-content:center;padding:0;flex:0 0 auto
 }
 .voice-ctl-btn:hover{background:#444}
 .voice-ctl-btn.active{background:var(--accent-color);color:#000}
@@ -9778,6 +9820,8 @@ window.ConnErr = (function(){
         <div class="voice-bar-controls">
           <button class="voice-ctl-btn" id="voice-mute-btn" onclick="toggleVoiceMute()" data-tip="Mute">🎤</button>
           <button class="voice-ctl-btn" id="voice-cam-btn" onclick="toggleVoiceCamera()" data-tip="Camera">📷</button>
+          <button class="voice-ctl-btn" id="voice-flip-btn" onclick="flipCallCamera()" data-tip="Switch camera" style="display:none">🔄</button>
+          <button class="voice-ctl-btn" id="voice-fx-btn" onclick="openCallFilterTray()" data-tip="Filters" style="display:none">✨</button>
           <button class="voice-ctl-btn" id="voice-screen-btn" onclick="toggleVoiceScreenShare()" data-tip="Share screen">🖥️</button>
           <button class="voice-ctl-btn disconnect" onclick="leaveVoiceChannel()" data-tip="Disconnect">📵</button>
         </div>
@@ -12158,6 +12202,8 @@ window.ConnErr = (function(){
     <button id="btn-call-minimize" onclick="minimizeCall()" class="call-ctl-btn" title="Minimize call">⬇️</button>
     <button id="btn-call-mute" onclick="toggleCallMute()" class="call-ctl-btn" title="Mute">🎤</button>
     <button id="btn-call-cam" onclick="toggleCallCamera()" class="call-ctl-btn" title="Camera">📷</button>
+    <button id="btn-call-flip" onclick="flipCallCamera()" class="call-ctl-btn" title="Switch camera" style="display:none">🔄</button>
+    <button id="btn-call-fx" onclick="openCallFilterTray()" class="call-ctl-btn" title="Filters" style="display:none">✨</button>
     <button id="btn-call-screen" onclick="toggleScreenShare()" class="call-ctl-btn" title="Screen Share">🖥️</button>
     <button id="btn-call-speaker" onclick="toggleCallVolume()" class="call-ctl-btn" title="Volume">🔊</button>
     <input id="call-remote-volume" class="call-volume-slider" type="range" min="0" max="100" value="100"
@@ -12165,6 +12211,15 @@ window.ConnErr = (function(){
     <button id="btn-call-safety" onclick="showCallSafetyNumber()" class="call-ctl-btn" title="Safety Number">🔒</button>
     <button onclick="endCall()" class="call-ctl-btn call-ctl-end" title="End Call">📵</button>
   </div>
+</div>
+
+<!-- ═══════════ LIVE CAMERA-FILTER PICKER (shared: DM overlay + voice bar) ══════ -->
+<div id="camfx-tray" class="hidden" role="dialog" aria-label="Camera filters">
+  <div class="camfx-tray-head">
+    <span class="camfx-tray-title">✨ Filters</span>
+    <button class="camfx-tray-close" onclick="closeCallFilterTray()" title="Close" aria-label="Close filters">✕</button>
+  </div>
+  <div id="camfx-chips" class="camfx-chips"></div>
 </div>
 
 <!-- ═══════════ DRAGGABLE VIDEO POP-OUT (group call) ══════════════════════════ -->
@@ -12771,6 +12826,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoa
 <script src="/static/js/emoji.js?v=__APP_ASSET_VERSION__"></script>
 <script src="/static/js/friends.js?v=__APP_ASSET_VERSION__"></script>
 <script src="/static/js/dms.js?v=__APP_ASSET_VERSION__"></script>
+<script src="/static/js/camfx.js?v=__APP_ASSET_VERSION__"></script>
 <script src="/static/js/calls.js?v=__APP_ASSET_VERSION__"></script>
 <script src="/static/js/gifs.js?v=219"></script>
 <script src="/static/js/media-player.js?v=192"></script>

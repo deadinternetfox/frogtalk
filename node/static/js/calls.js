@@ -1037,14 +1037,11 @@ async function _startCallBody (type, nick, uid) {
 
   try {
     if (type === 'video') {
-      const lv = document.getElementById('local-video');
-      const la = document.getElementById('call-local-avatar');
-      if (lv) { lv.srcObject = _localStream; lv.style.display = ''; }
-      if (la) la.style.display = 'none';
+      _setLocalPreview();
     }
 
     _pc = await createPC();
-    _localStream.getTracks().forEach(t => _pc.addTrack(t, _localStream));
+    await _addLocalTracksToPc(_pc);
 
     const offer = await _applyLocalOffer(_pc);
 
@@ -1279,7 +1276,7 @@ async function acceptCall () {
 
   try {
     _pc = await createPC();
-    _localStream.getTracks().forEach(t => _pc.addTrack(t, _localStream));
+    await _addLocalTracksToPc(_pc);
 
     await _pc.setRemoteDescription({ type: 'offer', sdp: offer.sdp });
     _remoteDescApplied = true;
@@ -1314,10 +1311,7 @@ async function acceptCall () {
     } catch {}
 
     if (_callType === 'video') {
-      const lv = document.getElementById('local-video');
-      const la = document.getElementById('call-local-avatar');
-      if (lv) { lv.srcObject = _localStream; lv.style.display = ''; }
-      if (la) la.style.display = 'none';
+      _setLocalPreview();
     }
   } catch (e) {
     console.error('acceptCall setup failed', e);
@@ -1692,6 +1686,11 @@ function resetCall () {
       _pc = null;
     }
     if (_localStream) { try { _localStream.getTracks().forEach(t => t.stop()); } catch {} _localStream = null; }
+    // Tear down the camera-FX pipeline (stops the canvas capture + any held raw
+    // track + releases the MediaPipe face model) and reset facing for next call.
+    try { window.CamFX && CamFX.stop(); } catch {}
+    _camFacing = 'user';
+    try { closeCallFilterTray(); } catch {}
     // Tear down both directions of screen share: inbound _screenPc (peer→us),
     // our own desktop send PC, and any native capture.
     try { _teardownScreen(); } catch {}
@@ -1960,30 +1959,27 @@ async function toggleCallCamera () {
   }
   // Case 2: voice call — acquire camera on demand and add/replace track.
   try {
-    const camStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+    const camStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: _camFacing } }, audio: false });
     const camTrack = camStream.getVideoTracks()[0];
     if (!camTrack) { toast('No camera available', 'error'); return; }
     // Add to local stream so endCall cleanup stops it too.
     if (_localStream) _localStream.addTrack(camTrack); else _localStream = camStream;
-    // Attach to local preview.
-    const lv = document.getElementById('local-video');
-    if (lv) {
-      lv.srcObject = _localStream;
-      lv.style.display = '';
-      const la = document.getElementById('call-local-avatar');
-      if (la) la.style.display = 'none';
-    }
+    // Route through the camera-FX pipeline: returns the raw track when no filter
+    // is active, or the filtered canvas track when one is. Then show the preview.
+    const sendTrack = await _processedLocalVideoTrack();
+    _setLocalPreview();
     // Send to peer: replace existing sender or add new one.
     const videoSender = _pc.getSenders().find(s => s.track && s.track.kind === 'video');
     if (videoSender) {
-      await videoSender.replaceTrack(camTrack);
+      await videoSender.replaceTrack(sendTrack);
     } else {
-      _pc.addTrack(camTrack, _localStream);
+      _pc.addTrack(sendTrack, _localStream);
       await _renegotiate();
     }
     _callType = 'video';   // upgrade label
     _mutedVideo = false;
     _syncCamButton();
+    _updateFxButtons(true);
     toast('Camera on', 'info');
   } catch (e) {
     console.error('camera enable failed', e);
@@ -3638,6 +3634,8 @@ function _updateVoiceCamButton() {
     scr.classList.toggle('active', _voiceScreenOn);
     scr.title = _voiceScreenOn ? 'Stop sharing screen' : 'Share your screen';
   }
+  // Flip-camera + filters buttons are meaningful only while our camera is live.
+  try { _updateFxButtons(_voiceCamOn); } catch {}
 }
 
 /** Cosmetic broadcast so peers can badge cam/screen before the first frame and
@@ -3688,6 +3686,13 @@ async function _voiceAddOrReplaceVideoTrack(track) {
 
 /** Stop our local camera/screen video and drop it from every peer (m-line kept). */
 function _voiceStopLocalVideo() {
+  // A camera flip is swapping the source track — stopping the old track must not
+  // tear down local video. The flip re-attaches the new track itself.
+  if (_flipping) return;
+  // Tear down the FX pipeline (also stops the raw camera track it holds when a
+  // filter was active — that raw track lives in CamFX, not in _voiceStream).
+  try { window.CamFX && CamFX.stop(); } catch {}
+  try { _updateFxButtons(false); } catch {}
   try {
     _voiceStream?.getVideoTracks().forEach(t => { try { t.stop(); } catch {} try { _voiceStream.removeTrack(t); } catch {} });
   } catch {}
@@ -3735,7 +3740,11 @@ async function toggleVoiceCamera() {
   if (!track) { toast('No camera found', 'error'); return; }
   _voiceCamOn = true;
   track.onended = () => { if (_voiceCamOn) _voiceStopLocalVideo(); };
-  await _voiceAddOrReplaceVideoTrack(track);
+  // Route the camera through the FX pipeline (raw track if no filter is active,
+  // filtered canvas track otherwise) and fan that out to every mesh peer.
+  const sendTrack = (window.CamFX) ? await CamFX.process(track) : track;
+  await _voiceAddOrReplaceVideoTrack(sendTrack);
+  _updateFxButtons(true);
   _updateVoiceCamButton();
   _broadcastVoiceVideoState();
   _updateVoiceBarParticipants();
@@ -4790,3 +4799,256 @@ try {
     if (ev.persisted) resetStaleCallUiOnBoot();
   });
 } catch {}
+
+/* ═══════════════ Camera switch + live filters (camfx.js bridge) ═══════════════
+ * Thin glue between the call engine and window.CamFX (static/js/camfx.js). The
+ * heavy lifting (canvas pipeline, MediaPipe face masks) lives in CamFX; here we
+ * only decide which track to send and wire it onto the existing RTCPeerConnection
+ * senders via the same replaceTrack pattern used for device switching.
+ * ───────────────────────────────────────────────────────────────────────────── */
+var _camFacing = 'user';
+var _flipping = false;   // true while a camera flip is hot-swapping the track
+
+// If a filter can't render (e.g. captureStream black-frames on some WebViews),
+// CamFX gives up and calls this — revert every sender + the preview to the raw
+// camera so a call is never left blank/green.
+function _onCamFxFallback () {
+  try {
+    const raw = (window.CamFX && CamFX.outputTrack()) || null;
+    if (raw) {
+      if (_voiceRoom && _voiceStream && _voiceCamOn) { _voiceAddOrReplaceVideoTrack(raw).catch(() => {}); }
+      else if (_pc) { _replaceSentVideoTrack(raw); }
+    }
+    _setLocalPreview();
+    _renderFilterChips();
+    toast('Filter not supported here — showing your camera', 'info');
+  } catch (e) { console.warn('camfx fallback failed', e); }
+}
+try { if (window.CamFX) CamFX.onFallback(_onCamFxFallback); } catch {}
+
+// The video track to SEND for the current local camera — the filtered canvas
+// track when a filter is active, otherwise the raw camera track (zero overhead).
+async function _processedLocalVideoTrack () {
+  const raw = _localStream && _localStream.getVideoTracks()[0];
+  if (!raw) return null;
+  try { if (window.CamFX) return await CamFX.process(raw); }
+  catch (e) { console.warn('CamFX process failed', e); }
+  return raw;
+}
+
+// Add audio (raw) + the processed video track to a DM peer connection.
+async function _addLocalTracksToPc (pc) {
+  if (!_localStream) return;
+  _localStream.getAudioTracks().forEach(t => pc.addTrack(t, _localStream));
+  const v = await _processedLocalVideoTrack();
+  if (v) pc.addTrack(v, _localStream);
+}
+
+// Point #local-video at the filtered preview stream (or the raw stream) so you
+// see your own filter exactly as peers do.
+function _setLocalPreview () {
+  const lv = document.getElementById('local-video');
+  const la = document.getElementById('call-local-avatar');
+  if (!lv) return;
+  let stream = _localStream;
+  try {
+    if (window.CamFX && CamFX.isActive()) { const ps = CamFX.previewStream(); if (ps) stream = ps; }
+  } catch {}
+  if (stream) { lv.srcObject = stream; lv.style.display = ''; if (la) la.style.display = 'none'; }
+  _updateFxButtons(true);
+}
+
+// Replace the sent video track on whichever call is live — the DM _pc and/or
+// every group-voice mesh peer. replaceTrack never renegotiates.
+async function _replaceSentVideoTrack (track) {
+  if (_pc) {
+    try { const s = _pc.getSenders().find(x => x.track && x.track.kind === 'video'); if (s) await s.replaceTrack(track); }
+    catch (e) { console.warn('replaceTrack (dm) failed', e); }
+  }
+  if (_voicePeers && _voicePeers.size) {
+    for (const [, peer] of _voicePeers) {
+      try { if (peer.videoSender) await peer.videoSender.replaceTrack(track); } catch {}
+    }
+  }
+}
+
+// Apply a live filter without restarting the call. Only the none↔filter
+// transition changes the track identity (handled via replaceTrack).
+async function setCallFilter (id) {
+  if (!window.CamFX) return;
+  let res;
+  try { res = await CamFX.setFilter(id); }
+  catch (e) { console.warn('setCallFilter failed', e); toast('Could not apply filter', 'error'); return; }
+  _setLocalPreview();
+  if (res && res.trackChanged) {
+    const t = CamFX.outputTrack();
+    if (t) await _replaceSentVideoTrack(t);
+  }
+  _renderFilterChips();
+}
+
+function _isMobileLike () {
+  try {
+    if ((navigator.maxTouchPoints || 0) > 0) return true;
+    return /Android|iPhone|iPad|iPod|Mobile|FrogTalk/i.test(navigator.userAgent || '');
+  } catch { return false; }
+}
+
+// Try hard to open the camera on the requested facing. Android WebViews reject
+// `facingMode:{exact}` with OverconstrainedError on some devices and underreport
+// enumerateDevices, so we fall through several strategies.
+async function _openFlipCamera (facing) {
+  const attempts = [
+    { video: { facingMode: { exact: facing } }, audio: false },
+    { video: { facingMode: facing }, audio: false },
+  ];
+  for (const c of attempts) {
+    try {
+      const s = await navigator.mediaDevices.getUserMedia(c);
+      if (s && s.getVideoTracks()[0]) return s;
+      if (s) s.getTracks().forEach(t => { try { t.stop(); } catch {} });
+    } catch { /* next strategy */ }
+  }
+  try { return await _getNextCameraByDeviceId(); } catch {}
+  return null;
+}
+
+// Free the camera currently held by the call (raw track lives in _localStream /
+// _voiceStream when unfiltered, or inside CamFX when a filter is active) so a
+// single-camera-at-a-time phone can open the other lens.
+function _releaseCurrentCamera (inDM, inGroup) {
+  const filtering = !!(window.CamFX && CamFX.isActive());
+  try { if (window.CamFX) CamFX.releaseSource(); } catch {}
+  if (inDM && _localStream) {
+    const v = _localStream.getVideoTracks()[0];
+    if (v) { try { _localStream.removeTrack(v); } catch {} try { v.stop(); } catch {} }
+  }
+  // When filtering, _voiceStream holds the canvas track (not the raw camera) —
+  // leave it alone; CamFX.releaseSource() already freed the lens. Null onended
+  // first so stopping doesn't bounce through _voiceStopLocalVideo.
+  if (inGroup && _voiceStream && !filtering) {
+    _voiceStream.getVideoTracks().forEach(t => { try { t.onended = null; } catch {} try { t.stop(); } catch {} try { _voiceStream.removeTrack(t); } catch {} });
+  }
+}
+
+// Front ⇄ back camera, hot-swapped with no call drop. Works for DM and group.
+async function flipCallCamera () {
+  const btn = document.getElementById('btn-call-flip') || document.getElementById('voice-flip-btn');
+  const inGroup = !!(_voiceRoom && _voiceStream && _voiceCamOn);
+  const inDM = !!(_pc && _localStream && _localStream.getVideoTracks()[0]);
+  if (!inDM && !inGroup) { toast('Turn your camera on first', 'info'); return; }
+  if (btn) btn.disabled = true;
+  _flipping = true;
+  try {
+    const next = (_camFacing === 'environment') ? 'user' : 'environment';
+    // First try without releasing (desktop + phones that allow two open lenses).
+    let newStream = await _openFlipCamera(next);
+    if (!newStream) {
+      // Phone can't open a second camera while the first is held — free it, retry.
+      _releaseCurrentCamera(inDM, inGroup);
+      newStream = await _openFlipCamera(next);
+    }
+    const newRaw = newStream && newStream.getVideoTracks()[0];
+    if (!newRaw) { toast('Could not switch camera', 'error'); return; }
+    _camFacing = next;
+
+    if (inDM) {
+      const old = _localStream.getVideoTracks()[0]; // may be absent if released above
+      if (old) { try { _localStream.removeTrack(old); } catch {} }
+      _localStream.addTrack(newRaw);
+      if (window.CamFX && CamFX.isActive()) { CamFX.setSourceTrack(newRaw); }
+      else { await _replaceSentVideoTrack(newRaw); }
+      if (old) { try { old.stop(); } catch {} }
+      _setLocalPreview();
+      _syncCamButton();
+    }
+    if (inGroup) {
+      newRaw.onended = () => { if (_voiceCamOn) _voiceStopLocalVideo(); };
+      if (window.CamFX && CamFX.isActive()) { CamFX.setSourceTrack(newRaw); }
+      else { await _voiceAddOrReplaceVideoTrack(newRaw); }
+    }
+  } catch (e) {
+    console.error('flipCallCamera failed', e);
+    toast('Could not switch camera', 'error');
+  } finally {
+    _flipping = false;
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function _getNextCameraByDeviceId () {
+  const devs = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'videoinput');
+  if (devs.length < 2) throw new Error('single camera');
+  const cur = (_localStream && _localStream.getVideoTracks()[0]?.getSettings?.().deviceId)
+    || (_voiceStream && _voiceStream.getVideoTracks()[0]?.getSettings?.().deviceId) || '';
+  let idx = devs.findIndex(d => d.deviceId === cur);
+  if (idx < 0) idx = 0;
+  const nx = devs[(idx + 1) % devs.length];
+  return navigator.mediaDevices.getUserMedia({ video: { deviceId: { exact: nx.deviceId } }, audio: false });
+}
+
+// Reveal the flip button. Phones/tablets essentially always have a front + back
+// camera and WebView enumerateDevices commonly underreports, so always show it
+// there; on desktop, gate on actually exposing more than one camera.
+async function _updateFlipButtonVisibility () {
+  let show = _isMobileLike();
+  if (!show) {
+    try { show = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'videoinput').length > 1; } catch {}
+  }
+  for (const id of ['btn-call-flip', 'voice-flip-btn']) {
+    const b = document.getElementById(id);
+    if (b) b.style.display = show ? '' : 'none';
+  }
+}
+
+// Show/hide the filter (✨) + flip (🔄) buttons in both control bars.
+function _updateFxButtons (camOn) {
+  for (const id of ['btn-call-fx', 'voice-fx-btn']) {
+    const b = document.getElementById(id);
+    if (b) b.style.display = camOn ? '' : 'none';
+  }
+  if (camOn) {
+    _updateFlipButtonVisibility();
+  } else {
+    for (const id of ['btn-call-flip', 'voice-flip-btn']) { const b = document.getElementById(id); if (b) b.style.display = 'none'; }
+    closeCallFilterTray();
+  }
+  _syncFxButtonActive();
+}
+
+function _syncFxButtonActive () {
+  const active = !!(window.CamFX && CamFX.isActive());
+  for (const id of ['btn-call-fx', 'voice-fx-btn']) {
+    const b = document.getElementById(id);
+    if (b) b.classList.toggle('active', active);
+  }
+}
+
+// ── Filter picker tray (shared by DM overlay + group voice bar) ───────────────
+function openCallFilterTray () {
+  const tray = document.getElementById('camfx-tray');
+  if (!tray || !window.CamFX) return;
+  if (!tray.classList.contains('hidden')) { closeCallFilterTray(); return; }
+  _renderFilterChips();
+  tray.classList.remove('hidden');
+}
+function closeCallFilterTray () {
+  const tray = document.getElementById('camfx-tray');
+  if (tray) tray.classList.add('hidden');
+}
+function _renderFilterChips () {
+  const row = document.getElementById('camfx-chips');
+  if (!row || !window.CamFX) return;
+  const active = CamFX.activeFilter;
+  row.innerHTML = '';
+  CamFX.filters.forEach(f => {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'camfx-chip' + (f.id === active ? ' active' : '');
+    chip.onclick = () => setCallFilter(f.id);
+    chip.innerHTML = '<span class="camfx-chip-emoji">' + f.emoji + '</span>'
+                   + '<span class="camfx-chip-label">' + f.label + '</span>';
+    row.appendChild(chip);
+  });
+  _syncFxButtonActive();
+}
