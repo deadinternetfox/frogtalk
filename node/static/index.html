@@ -3939,7 +3939,7 @@ body.ft-incoming-call-active #incoming-call{z-index:20000}
 /* ── Live camera-filter picker (shared by DM overlay + group voice bar) ───── */
 #camfx-tray{
   position:fixed;left:50%;bottom:108px;transform:translateX(-50%);
-  z-index:960;width:min(94vw,520px);
+  z-index:1700;width:min(94vw,520px);
   background:color-mix(in srgb, var(--surface-color) 94%, #000);
   border:1px solid color-mix(in srgb, #fff 12%, transparent);
   border-radius:18px;padding:12px 12px 14px;
@@ -3978,11 +3978,12 @@ body.ft-incoming-call-active #incoming-call{z-index:20000}
 }
 @media(max-width:640px){
   #call-participants{gap:10px;padding:10px}
-  #call-controls{gap:8px;padding-top:10px}
+  #call-controls{gap:7px;padding-top:10px}
   .call-tile{width:min(42vw,150px);height:min(42vw,150px)}
   .call-tile-avatar{width:64px;height:64px;font-size:2rem}
-  .call-ctl-btn{width:44px;height:44px;font-size:1.1rem}
-  .call-ctl-btn.call-ctl-end{width:50px;height:50px;font-size:1.2rem}
+  .call-ctl-btn{width:42px;height:42px;font-size:1.05rem}
+  .call-ctl-btn.call-ctl-end{width:48px;height:48px;font-size:1.15rem}
+  .cpfx-btn{width:32px;height:32px;font-size:15px}
 }
 
 /* ─── Voice Channel Bar ─────────────────────────────────────── */
@@ -4101,6 +4102,21 @@ body.ft-incoming-call-active #incoming-call{z-index:20000}
    screen — keep it display:none when idle (openVideoPopout flips it on). */
 #call-popout-video{width:100%;flex:1 1 auto;min-height:0;display:none;background:#000;max-height:70vh;object-fit:contain}
 #call-popout-video.mirror{transform:scaleX(-1)}
+/* Subtle own-camera controls (flip + filters) overlaid at the top of the
+   pop-out; shown only when the popped stream is our own camera. */
+#call-popout-fx{position:absolute;top:calc(38px + 6px);right:8px;display:none;gap:6px;z-index:5}
+#call-popout-fx.show{display:flex}
+.cpfx-btn{
+  width:30px;height:30px;border-radius:50%;
+  background:rgba(0,0,0,.5);border:1px solid rgba(255,255,255,.2);color:#fff;
+  font-size:14px;line-height:1;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  -webkit-backdrop-filter:blur(4px);backdrop-filter:blur(4px);
+  transition:background .15s,transform .1s
+}
+.cpfx-btn:hover{background:rgba(0,0,0,.72)}
+.cpfx-btn:active{transform:scale(.92)}
+.cpfx-btn.active{background:var(--accent-color);color:#000;border-color:var(--accent-color)}
 #call-popout-resize{
   position:absolute;right:0;bottom:0;width:26px;height:26px;z-index:3;
   display:flex;align-items:flex-end;justify-content:flex-end;padding:2px 3px;
@@ -12234,6 +12250,10 @@ window.ConnErr = (function(){
     <button id="call-popout-close" onclick="closeVideoPopout()" title="Close" aria-label="Close">✕</button>
   </div>
   <video id="call-popout-video" autoplay playsinline webkit-playsinline></video>
+  <div id="call-popout-fx" aria-label="Camera controls">
+    <button id="call-popout-flip" class="cpfx-btn" type="button" onclick="flipCallCamera()" title="Switch camera" aria-label="Switch camera">🔄</button>
+    <button id="call-popout-filter" class="cpfx-btn" type="button" onclick="openCallFilterTray()" title="Filters" aria-label="Filters">✨</button>
+  </div>
   <div class="call-connecting" aria-hidden="true"><div class="cc-ring"><div class="cc-spinner"></div><span class="cc-emoji">🐸</span></div><div class="cc-label">Connecting…</div></div>
   <div id="call-popout-resize" title="Drag to resize" aria-hidden="true">◢</div>
 </div>

@@ -1687,9 +1687,11 @@ function resetCall () {
     }
     if (_localStream) { try { _localStream.getTracks().forEach(t => t.stop()); } catch {} _localStream = null; }
     // Tear down the camera-FX pipeline (stops the canvas capture + any held raw
-    // track + releases the MediaPipe face model) and reset facing for next call.
+    // track) and reset facing/flip state + hide the filter controls for next call.
     try { window.CamFX && CamFX.stop(); } catch {}
     _camFacing = 'user';
+    _flipping = false;
+    try { _updateFxButtons(false); } catch {}
     try { closeCallFilterTray(); } catch {}
     // Tear down both directions of screen share: inbound _screenPc (peer→us),
     // our own desktop send PC, and any native capture.
@@ -2913,6 +2915,9 @@ function _syncCamButton () {
     if (lv) lv.style.display = 'none';
     if (la) la.style.display = '';
   }
+  // Keep the flip + filter controls in lock-step with the DM camera: visible
+  // only while the camera is actually on (not muted/off), hidden otherwise.
+  try { if (!_voiceRoom) _updateFxButtons(camOn); } catch {}
 }
 
 // Reflect screen-share state on the pill screen button (and hide it where
@@ -3854,11 +3859,11 @@ function openVideoPopout(peerKey) {
     stream = _dmStreamOf('remote-video');
     name = _callPeerNick || 'Peer';
   } else if (peerKey === 'dm-local') {
-    stream = _localStream;
+    stream = _selfPreviewStream(_localStream);
     name = State.user?.nickname || 'You';
     mirror = true;
   } else if (peerKey === 'self') {
-    stream = _voiceStream;
+    stream = _voiceScreenOn ? _voiceStream : _selfPreviewStream(_voiceStream);
     name = (State.user?.nickname || 'You') + (_voiceScreenOn ? ' · screen' : '');
     mirror = _voiceCamOn && !_voiceScreenOn;
   } else {
@@ -3876,6 +3881,14 @@ function openVideoPopout(peerKey) {
   vid.classList.toggle('mirror', mirror);
   if (nameEl) nameEl.textContent = name;
   pop.classList.remove('hidden');
+  // Show subtle flip/filter controls only when the popout is our OWN camera
+  // (not a screen-share, not a remote peer).
+  const isOwnCam = (peerKey === 'self' && _voiceCamOn && !_voiceScreenOn) || peerKey === 'dm-local';
+  const fxBar = document.getElementById('call-popout-fx');
+  if (fxBar) {
+    fxBar.classList.toggle('show', !!isOwnCam);
+    if (isOwnCam) _updateFlipButtonVisibility();
+  }
   _syncPopoutVolume();
   try { vid.play?.().catch(() => {}); } catch {}
   // Spinner inside the pop-out until the popped stream paints its first frame.
@@ -3925,6 +3938,8 @@ function closeVideoPopout() {
   const pop = document.getElementById('call-popout');
   const vid = document.getElementById('call-popout-video');
   if (vid) { try { vid.srcObject = null; vid.style.display = 'none'; } catch {} }
+  const fxBar = document.getElementById('call-popout-fx');
+  if (fxBar) fxBar.classList.remove('show');
   if (pop) { pop.classList.add('hidden'); _setConnecting(pop, false); }
   _popoutPeerKey = null;
 }
@@ -4272,14 +4287,22 @@ function _updateVoiceBarParticipants() {
       v.autoplay = true; v.muted = true;
       v.setAttribute('playsinline', ''); v.setAttribute('webkit-playsinline', '');
       if (isSelf && _voiceCamOn && !_voiceScreenOn) v.classList.add('mirror');
-      v.srcObject = isSelf ? _voiceStream : (peerScreenLive ? peer.screenStream : peer.stream);
+      // Our own camera shows the filtered preview (so we see our filter); peers
+      // already arrive filtered over the wire.
+      v.srcObject = isSelf
+        ? (_voiceScreenOn ? _voiceStream : _selfPreviewStream(_voiceStream))
+        : (peerScreenLive ? peer.screenStream : peer.stream);
       btn.appendChild(v);
       try { v.play?.().catch(() => {}); } catch {}
-      const camBadge = document.createElement('span');
-      camBadge.className = 'voice-bar-cam-badge';
-      camBadge.setAttribute('aria-hidden', 'true');
-      camBadge.textContent = showingScreen ? '🖥️' : '📷';
-      btn.appendChild(camBadge);
+      // Only badge screen-shares — a camera tile already obviously shows video,
+      // so the extra 📷 emoji was just clutter.
+      if (showingScreen) {
+        const camBadge = document.createElement('span');
+        camBadge.className = 'voice-bar-cam-badge';
+        camBadge.setAttribute('aria-hidden', 'true');
+        camBadge.textContent = '🖥️';
+        btn.appendChild(camBadge);
+      }
     } else {
       _appendVoiceBarAvatar(btn, avatar, nickname);
       if (selfSharingScreen) {
@@ -4858,6 +4881,27 @@ function _setLocalPreview () {
   _updateFxButtons(true);
 }
 
+// The stream to show for OUR OWN camera (self tile / popout) — the filtered
+// canvas preview when a filter is active, else the given raw stream. So we see
+// our own filter exactly as peers do.
+function _selfPreviewStream (fallback) {
+  try {
+    if (window.CamFX && CamFX.isActive()) { const ps = CamFX.previewStream(); if (ps) return ps; }
+  } catch {}
+  return fallback;
+}
+
+// Re-point an open self/own-camera popout at the current preview stream after a
+// filter is toggled on/off (the canvas stream identity changes none↔filter).
+function _repointSelfPopout () {
+  if (_popoutPeerKey !== 'self' && _popoutPeerKey !== 'dm-local') return;
+  const vid = document.getElementById('call-popout-video');
+  if (!vid) return;
+  const fb = _popoutPeerKey === 'self' ? _voiceStream : _localStream;
+  const ps = _selfPreviewStream(fb);
+  if (ps && vid.srcObject !== ps) { vid.srcObject = ps; try { vid.play && vid.play().catch(() => {}); } catch {} }
+}
+
 // Replace the sent video track on whichever call is live — the DM _pc and/or
 // every group-voice mesh peer. replaceTrack never renegotiates.
 async function _replaceSentVideoTrack (track) {
@@ -4869,6 +4913,15 @@ async function _replaceSentVideoTrack (track) {
     for (const [, peer] of _voicePeers) {
       try { if (peer.videoSender) await peer.videoSender.replaceTrack(track); } catch {}
     }
+  }
+  // Keep _voiceStream pointing at the current sent track so the local self
+  // surfaces (tile/popout) never fall back to a dead track. Remove (don't stop)
+  // the previous one — the raw camera may still be CamFX's live source.
+  if (_voiceRoom && _voiceStream && track) {
+    try {
+      _voiceStream.getVideoTracks().forEach(t => { if (t !== track) { try { _voiceStream.removeTrack(t); } catch {} } });
+      if (!_voiceStream.getVideoTracks().includes(track)) _voiceStream.addTrack(track);
+    } catch {}
   }
 }
 
@@ -4883,6 +4936,10 @@ async function setCallFilter (id) {
   if (res && res.trackChanged) {
     const t = CamFX.outputTrack();
     if (t) await _replaceSentVideoTrack(t);
+    // The preview stream identity changed (none↔filter) — refresh the group
+    // self tile + any open self popout so our own view reflects the filter.
+    if (_voiceRoom) { try { _updateVoiceBarParticipants(); } catch {} }
+    _repointSelfPopout();
   }
   _renderFilterChips();
 }
@@ -4933,6 +4990,7 @@ function _releaseCurrentCamera (inDM, inGroup) {
 
 // Front ⇄ back camera, hot-swapped with no call drop. Works for DM and group.
 async function flipCallCamera () {
+  if (_flipping) return;   // ignore re-entrant taps (popout button isn't in the disable set)
   const btn = document.getElementById('btn-call-flip') || document.getElementById('voice-flip-btn');
   const inGroup = !!(_voiceRoom && _voiceStream && _voiceCamOn);
   const inDM = !!(_pc && _localStream && _localStream.getVideoTracks()[0]);
@@ -4995,7 +5053,7 @@ async function _updateFlipButtonVisibility () {
   if (!show) {
     try { show = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'videoinput').length > 1; } catch {}
   }
-  for (const id of ['btn-call-flip', 'voice-flip-btn']) {
+  for (const id of ['btn-call-flip', 'voice-flip-btn', 'call-popout-flip']) {
     const b = document.getElementById(id);
     if (b) b.style.display = show ? '' : 'none';
   }
@@ -5018,7 +5076,7 @@ function _updateFxButtons (camOn) {
 
 function _syncFxButtonActive () {
   const active = !!(window.CamFX && CamFX.isActive());
-  for (const id of ['btn-call-fx', 'voice-fx-btn']) {
+  for (const id of ['btn-call-fx', 'voice-fx-btn', 'call-popout-filter']) {
     const b = document.getElementById(id);
     if (b) b.classList.toggle('active', active);
   }
